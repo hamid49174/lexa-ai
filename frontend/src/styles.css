@@ -538,6 +538,62 @@ body {
   30% { opacity: 1; transform: translateY(-4px); }
 }
 
+/* ── STREAMING CURSOR ────────────────────────── */
+.streaming-text .streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: cursorBlink 0.7s step-end infinite;
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* ── SUGGESTION CHIPS ────────────────────────── */
+.suggestion-chips {
+  display: flex;
+  gap: 8px;
+  padding: 10px 0 0;
+  flex-wrap: wrap;
+}
+
+.suggestion-chips:empty { display: none; }
+
+.suggestion-chip {
+  background: var(--accent-soft);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 6px 16px;
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--accent2);
+  cursor: pointer;
+  transition: all 0.2s;
+  animation: chipIn 0.3s ease backwards;
+}
+
+.suggestion-chip:nth-child(2) { animation-delay: 0.05s; }
+.suggestion-chip:nth-child(3) { animation-delay: 0.1s; }
+.suggestion-chip:nth-child(4) { animation-delay: 0.15s; }
+
+.suggestion-chip:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px var(--accent-glow);
+}
+
+@keyframes chipIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 /* ── INPUT AREA ──────────────────────────────── */
 .chat-input-area {
   padding: 16px 24px 20px;

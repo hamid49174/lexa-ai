@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════
-   LEXA AI — Frontend Application Logic v0.7
-   Phase 8: Desktop Integration, Notifications,
-   Autostart, Routine Scheduler
+   LEXA AI — Frontend Application Logic v0.8
+   Phase 10: Streaming Chat, Smart Suggestions,
+   Dashboard Live-Updates
    ════════════════════════════════════════════════ */
 
 const chatMessages = document.getElementById("chat-messages");
@@ -22,6 +22,7 @@ let backendOnline = false;
 let reconnectAttempts = 0;
 let sidebarCollapsed = false;
 let notificationsEnabled = true;
+let dashboardInterval = null;
 
 const VIEW_KEYS = ["dashboard", "chat", "system", "commands", "browser", "files", "media", "memory", "settings"];
 
@@ -271,6 +272,12 @@ function setupSidebar() {
 function switchView(view) {
   currentView = view;
 
+  // Stop dashboard auto-refresh when leaving
+  if (dashboardInterval) {
+    clearInterval(dashboardInterval);
+    dashboardInterval = null;
+  }
+
   document.querySelectorAll(".sidebar-btn").forEach((b) => b.classList.remove("active"));
   document.querySelector(`[data-view="${view}"]`)?.classList.add("active");
 
@@ -282,6 +289,7 @@ function switchView(view) {
   if (view === "dashboard") {
     document.getElementById("dashboard-view").classList.add("active");
     refreshDashboard();
+    dashboardInterval = setInterval(refreshDashboard, 10000);
   } else if (view === "chat") {
     document.querySelector(".chat-container").style.display = "flex";
   } else if (view === "system") {
@@ -662,18 +670,124 @@ async function sendMessage() {
   chatInput.style.height = "auto";
   isLoading = true;
   sendBtn.disabled = true;
-  showTyping();
+  hideSuggestions();
+
+  // Create streaming message element
+  const msgEl = document.createElement("div");
+  msgEl.className = "message system-message";
+  const timeStr = new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  msgEl.innerHTML = `
+    <div class="msg-avatar system">&#9889;</div>
+    <div class="msg-body">
+      <div class="msg-header">
+        <span class="msg-name">Lexa</span>
+        <span class="msg-time">${timeStr}</span>
+        <button class="msg-copy-btn" onclick="copyMessage(this)" title="Kopieren">&#128203;</button>
+      </div>
+      <div class="msg-text streaming-text"><span class="streaming-cursor"></span></div>
+    </div>`;
+  chatMessages.appendChild(msgEl);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  const textEl = msgEl.querySelector(".msg-text");
+  let fullText = "";
+  let actionData = null;
+  let requiresConfirmation = false;
 
   try {
-    const res = await window.lexa.chat(text);
-    hideTyping();
-    handleChatResponse(res);
+    const response = await fetch("http://127.0.0.1:8000/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text }),
+    });
+
+    if (!response.ok) {
+      // Fallback to non-streaming
+      const errData = await response.json().catch(() => ({}));
+      textEl.classList.remove("streaming-text");
+      textEl.innerHTML = formatMessage(errData.detail || "Fehler beim Verbinden.");
+      isLoading = false;
+      sendBtn.disabled = false;
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const raw = line.slice(6).trim();
+        if (!raw) continue;
+
+        try {
+          const data = JSON.parse(raw);
+          if (data.c) {
+            fullText += data.c;
+            textEl.innerHTML = formatMessage(fullText) + '<span class="streaming-cursor"></span>';
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+          }
+          if (data.done) {
+            actionData = data.action;
+            requiresConfirmation = data.rc;
+          }
+        } catch {}
+      }
+    }
+
+    // Finalize: remove cursor, apply formatting
+    textEl.classList.remove("streaming-text");
+    textEl.innerHTML = formatMessage(fullText);
+
+    // Handle action
+    if (actionData) {
+      const actionHtml = `
+        <div class="msg-action">
+          <div class="action-label">AKTION</div>
+          <div class="action-cmd">${actionData.action}(${JSON.stringify(actionData.params || {})})</div>
+        </div>`;
+      const body = msgEl.querySelector(".msg-body");
+
+      if (requiresConfirmation) {
+        const actionStr = encodeURIComponent(JSON.stringify(actionData));
+        body.insertAdjacentHTML("beforeend", actionHtml + `
+          <button class="confirm-btn" onclick="confirmAction(this, '${actionStr}')">Best\u00e4tigen</button>
+          <button class="deny-btn" onclick="denyAction(this)">Abbrechen</button>`);
+      } else {
+        body.insertAdjacentHTML("beforeend", actionHtml);
+        try {
+          const execResult = await window.lexa.execute(actionData.action, actionData.params || {});
+          if (execResult.success && execResult.data) {
+            const summary = typeof execResult.data === "string" ? execResult.data : JSON.stringify(execResult.data).substring(0, 200);
+            addMessage("Ausgef\u00fchrt: " + summary, "system");
+            showToast(`${actionData.action} erledigt`, "success", 2500);
+            sendNotification("Lexa AI", `${actionData.action} erledigt`);
+          }
+        } catch {}
+      }
+    }
+
+    // TTS
+    playTTS(actionData?.message || fullText);
+
+    // Smart Suggestions
+    showSuggestions(fullText, actionData);
+
   } catch (err) {
-    hideTyping();
-    addMessage("Backend nicht erreichbar. Ist der Server gestartet?", "system");
+    textEl.classList.remove("streaming-text");
+    textEl.innerHTML = "Backend nicht erreichbar. Ist der Server gestartet?";
     showToast("Chat-Fehler: Backend offline", "error");
   }
 
+  saveChatHistory();
   isLoading = false;
   sendBtn.disabled = false;
 }
@@ -1102,6 +1216,60 @@ function renderPaletteResults(query) {
   if (filtered.length === 0) {
     container.innerHTML = '<div class="palette-empty">Nichts gefunden</div>';
   }
+}
+
+// ── SMART SUGGESTIONS ───────────────────────────
+const SUGGESTION_MAP = {
+  system_info: ["screenshot", "process_list", "disk_analysis", "battery_status"],
+  screenshot: ["system_info", "screen_record", "web_screenshot"],
+  app_open: ["window_list", "app_list", "window_focus"],
+  youtube_play: ["media_play_pause", "volume_set", "media_next"],
+  volume_set: ["volume_mute", "media_play_pause", "brightness_set"],
+  battery_status: ["system_info", "brightness_set", "wifi_status"],
+  process_list: ["process_kill", "system_info", "app_list"],
+  disk_analysis: ["clean_temp", "find_duplicates", "organize_downloads"],
+  organize_downloads: ["disk_analysis", "find_duplicates", "clean_temp"],
+  note_create: ["note_list", "memory_search", "note_read"],
+  email_read: ["email_send", "telegram_read"],
+  media_play_pause: ["media_next", "media_prev", "volume_set", "media_stop"],
+};
+
+const DEFAULT_SUGGESTIONS = [
+  { label: "\u{1F4BB} System Info", cmd: "system_info" },
+  { label: "\u{1F4F7} Screenshot", cmd: "screenshot" },
+  { label: "\u{1F3B5} YouTube", cmd: "youtube_play" },
+  { label: "\u{1F4C2} Downloads sortieren", cmd: "organize_downloads" },
+];
+
+function showSuggestions(responseText, action) {
+  const container = document.getElementById("suggestion-chips");
+  if (!container) return;
+
+  let chips = [];
+  if (action && SUGGESTION_MAP[action.action]) {
+    chips = SUGGESTION_MAP[action.action]
+      .map((cmd) => ALL_COMMANDS.find((c) => c.name === cmd))
+      .filter(Boolean)
+      .slice(0, 4)
+      .map((c) => ({ label: c.desc, cmd: c.name }));
+  }
+
+  if (chips.length === 0) chips = DEFAULT_SUGGESTIONS;
+
+  container.innerHTML = chips
+    .map((s) => `<button class="suggestion-chip" onclick="handleSuggestion('${s.cmd}')">${s.label}</button>`)
+    .join("");
+}
+
+function hideSuggestions() {
+  const container = document.getElementById("suggestion-chips");
+  if (container) container.innerHTML = "";
+}
+
+function handleSuggestion(command) {
+  chatInput.value = command.replace(/_/g, " ");
+  chatInput.focus();
+  hideSuggestions();
 }
 
 // ── START ────────────────────────────────────────

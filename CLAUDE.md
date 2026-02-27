@@ -45,8 +45,8 @@ lexa-ai/
 ├── requirements.txt
 ├── start.bat               # Ein-Klick-Start (mit Health-Check)
 ├── backend/
-│   ├── main.py             # FastAPI Server v0.8.0 + Router + Memory Endpoints
-│   ├── ai_engine.py        # Groq API + Ollama Fallback + Memory Context
+│   ├── main.py             # FastAPI Server v0.9.0 + SSE Streaming + Router + Memory
+│   ├── ai_engine.py        # Groq API + Ollama Fallback + Streaming + Memory Context
 │   ├── memory.py           # SQLite: Notes, Memories, Profil, Routinen
 │   ├── security.py         # Whitelist, Rate Limit, Sanitize, Path/URL/Param Validation, Audit
 │   ├── router_companion.py # /companion/* Endpoints + Param Validation
@@ -70,7 +70,7 @@ lexa-ai/
 │   └── src/
 │       ├── index.html      # NeoAI UI mit 9 Views + Dashboard + Voice Orb + Toast System
 │       ├── styles.css      # Purple/Violet Glassmorphism Theme + Voice Orb + Dashboard CSS
-│       └── app.js          # v0.8 Chat, Voice, Dashboard, Command Palette, Voice Orb
+│       └── app.js          # v0.9 Streaming Chat, Suggestions, Dashboard Live, Voice Orb
 └── tests/
 ```
 
@@ -110,6 +110,7 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 ## API Endpoints
 - GET  /health — Server-Status + Version
 - POST /chat — KI-Chat (Groq → Ollama)
+- POST /chat/stream — SSE Streaming Chat (Wort-für-Wort)
 - POST /companion/execute — PC-Befehle ausführen
 - GET  /companion/commands — Alle Befehle listen
 - POST /voice/stt — Audio → Text (faster-whisper)
@@ -130,6 +131,9 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - Animated Voice Orb: Pulsiert/leuchtet bei Spracheingabe, klickbar für Recording
 - Dashboard: 6 Widgets (System Stats, KI Status, Quick Actions, Routinen, Memory, Greeting)
 - Command Palette: Ctrl+P Overlay mit Fuzzy-Search über Views + Commands
+- Streaming Chat: Wort-für-Wort AI-Antworten via SSE mit Cursor-Animation
+- Smart Suggestion Chips: Kontextbasierte Vorschläge nach AI-Antwort
+- Dashboard Auto-Refresh: Live-Stats alle 10 Sekunden
 - Enhanced Chat: Code-Blocks, Inline-Code, Bold, Italic, Links, Timestamps, Copy-Button
 - Toast-Notification-System (success, error, warning, info)
 - Connection Banner bei Backend-Verlust + Auto-Reconnect
@@ -157,3 +161,4 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - [x] Phase 7: Quality of Life — Keyboard Shortcuts, Chat-Persistenz, Command-Suche, Sidebar-Toggle, LICENSE
 - [x] Phase 8: Desktop Integration — System Tray, Notifications, Autostart, Routine Scheduler
 - [x] Phase 9: Intelligence & Dashboard — Enhanced AI Prompt, Dashboard, Command Palette, NeoAI UI Overhaul, Voice Orb, Chat Upgrades
+- [x] Phase 10: Streaming & Smart UX — SSE Streaming Chat, Smart Suggestion Chips, Dashboard Live-Updates

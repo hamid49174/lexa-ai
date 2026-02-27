@@ -2,14 +2,15 @@
 Hauptserver auf localhost:8000
 """
 
+import asyncio
 import json
 import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from backend.ai_engine import chat, get_ai_status
+from backend.ai_engine import chat, chat_stream, get_ai_status
 from backend.router_companion import router as companion_router
 from backend.router_voice import router as voice_router
 from backend import memory
@@ -28,7 +29,7 @@ logger = logging.getLogger("lexa.server")
 app = FastAPI(
     title="Lexa AI",
     description="Lokaler KI-Assistent — nur localhost",
-    version="0.8.0",
+    version="0.9.0",
 )
 
 # CORS: Nur localhost erlauben
@@ -175,6 +176,73 @@ async def chat_endpoint(req: ChatRequest):
         reply=reply,
         action=action,
         requires_confirmation=requires_confirmation,
+    )
+
+
+@app.post("/chat/stream")
+async def chat_stream_endpoint(req: ChatRequest):
+    """Stream AI response via Server-Sent Events."""
+    if not check_rate_limit():
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Zu viele Anfragen. Bitte kurz warten."},
+        )
+
+    sanitized = sanitize_input(req.message)
+    audit_log("chat_stream", "received", f"MSG={sanitized[:100]}")
+
+    async def event_stream():
+        loop = asyncio.get_event_loop()
+        gen = chat_stream(sanitized, conversation_history)
+        full_text = ""
+        _sentinel = object()
+
+        while True:
+            chunk = await loop.run_in_executor(
+                None, lambda g=gen, s=_sentinel: next(g, s)
+            )
+            if chunk is _sentinel:
+                break
+            full_text += chunk
+            yield f"data: {json.dumps({'c': chunk})}\n\n"
+
+        # Update conversation history
+        conversation_history.append({"role": "user", "content": sanitized})
+        conversation_history.append({"role": "assistant", "content": full_text})
+        if len(conversation_history) > 40:
+            conversation_history[:] = conversation_history[-40:]
+
+        # Parse for actions
+        action = None
+        requires_confirmation = False
+        try:
+            parsed = json.loads(full_text)
+            if isinstance(parsed, dict) and "action" in parsed:
+                action_name = parsed["action"]
+                validate_command_output(action_name)
+                permission = is_command_allowed(action_name)
+                if permission == "blocked":
+                    audit_log(action_name, "blocked")
+                    action = None
+                elif permission == "confirmation_required":
+                    requires_confirmation = True
+                    action = parsed
+                    audit_log(action_name, "awaiting_confirmation")
+                elif permission in ("allowed", "unknown"):
+                    action = parsed
+                    audit_log(action_name, "allowed")
+                else:
+                    action = parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        audit_log("chat_stream", "done", f"LEN={len(full_text)}")
+        yield f"data: {json.dumps({'done': True, 'action': action, 'rc': requires_confirmation})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

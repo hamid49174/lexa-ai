@@ -1,10 +1,11 @@
 """Lexa AI — KI Engine
-Groq API (primary) + Ollama (local fallback) + Memory Context
+Groq API (primary) + Ollama (local fallback) + Memory Context + Streaming
 """
 
 import keyring
 import logging
 import requests
+from typing import Generator
 
 logger = logging.getLogger("lexa.ai")
 
@@ -226,16 +227,13 @@ def _chat_ollama(messages: list[dict]) -> str | None:
 
 
 # ══════════════════════════════════════════════════
-#  MAIN CHAT (with memory context)
+#  MESSAGE BUILDER (shared by chat + stream)
 # ══════════════════════════════════════════════════
 
-def chat(user_message: str, conversation_history: list | None = None) -> str:
-    """Send message through Groq → Ollama fallback chain, with memory context."""
-
-    # Build system prompt with memory context
+def _build_messages(user_message: str, conversation_history: list | None = None) -> list[dict]:
+    """Build message list with system prompt + memory context."""
     system_content = SYSTEM_PROMPT
 
-    # Inject relevant memory context if available
     try:
         from backend.memory import search_memory, get_user_profile
         memory_results = search_memory(user_message, limit=3)
@@ -256,13 +254,20 @@ def chat(user_message: str, conversation_history: list | None = None) -> str:
         logger.debug(f"Memory context skipped: {e}")
 
     messages = [{"role": "system", "content": system_content}]
-
     if conversation_history:
         messages.extend(conversation_history)
-
     messages.append({"role": "user", "content": user_message})
+    return messages
 
-    # Try Groq first, then Ollama
+
+# ══════════════════════════════════════════════════
+#  MAIN CHAT (non-streaming)
+# ══════════════════════════════════════════════════
+
+def chat(user_message: str, conversation_history: list | None = None) -> str:
+    """Send message through Groq → Ollama fallback chain, with memory context."""
+    messages = _build_messages(user_message, conversation_history)
+
     reply = _chat_groq(messages)
     if reply:
         _save_interaction(user_message, reply)
@@ -275,6 +280,52 @@ def chat(user_message: str, conversation_history: list | None = None) -> str:
         return reply
 
     return "Sowohl Groq als auch Ollama sind gerade nicht erreichbar. Bitte prüfe deine Internetverbindung oder starte Ollama."
+
+
+# ══════════════════════════════════════════════════
+#  STREAMING CHAT (SSE)
+# ══════════════════════════════════════════════════
+
+def chat_stream(user_message: str, conversation_history: list | None = None) -> Generator[str, None, None]:
+    """Yield text chunks from Groq streaming → Ollama fallback."""
+    messages = _build_messages(user_message, conversation_history)
+    full_text = ""
+    streamed = False
+
+    # Try Groq streaming first
+    try:
+        client = _get_groq_client()
+        if client:
+            stream = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                temperature=0.7,
+                max_tokens=1024,
+                stream=True,
+            )
+            for chunk in stream:
+                content = chunk.choices[0].delta.content
+                if content:
+                    full_text += content
+                    yield content
+            streamed = True
+            logger.info(f"Groq stream complete ({len(full_text)} chars)")
+            _save_interaction(user_message, full_text)
+    except Exception as e:
+        logger.warning(f"Groq stream failed: {e}")
+
+    if streamed:
+        return
+
+    # Fallback: Ollama (non-streaming, yield whole response)
+    logger.info("Groq stream unavailable, trying Ollama...")
+    reply = _chat_ollama(messages)
+    if reply:
+        _save_interaction(user_message, reply)
+        yield reply
+        return
+
+    yield "Sowohl Groq als auch Ollama sind gerade nicht erreichbar."
 
 
 def _save_interaction(user_msg: str, ai_reply: str):
