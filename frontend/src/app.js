@@ -627,6 +627,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
 
   chatMessages.appendChild(msg);
   chatMessages.scrollTop = chatMessages.scrollHeight;
+  trimChatMessages();
   if (!silent) saveChatHistory();
 }
 
@@ -1108,6 +1109,16 @@ async function refreshDashboard() {
 
   const greetEl = document.getElementById("dash-greeting");
   if (greetEl) greetEl.textContent = `${greeting}, Chef!`;
+
+  const subEl = document.getElementById("dash-greeting-sub");
+  if (subEl) {
+    try {
+      const models = await window.lexa.aiModels();
+      subEl.textContent = `Lexa AI v0.13.0 \u2014 ${models.current_name || "Dein lokaler KI-Assistent"}`;
+    } catch {
+      subEl.textContent = "Lexa AI v0.13.0 \u2014 Dein lokaler KI-Assistent";
+    }
+  }
 
   if (!backendOnline) {
     document.getElementById("dash-ai-status").innerHTML = '<span style="color:var(--error)">Backend offline</span>';
@@ -1937,6 +1948,37 @@ function handleSuggestion(command) {
   chatInput.focus();
   hideSuggestions();
 }
+
+// ── PERFORMANCE (Phase 18) ──────────────────────
+// Limit chat DOM to last N messages for performance
+const MAX_VISIBLE_MESSAGES = 100;
+
+function trimChatMessages() {
+  const msgs = chatMessages.querySelectorAll(".message");
+  if (msgs.length > MAX_VISIBLE_MESSAGES + 1) { // +1 for welcome
+    const toRemove = msgs.length - MAX_VISIBLE_MESSAGES - 1;
+    for (let i = 1; i <= toRemove; i++) {
+      msgs[i].remove();
+    }
+  }
+}
+
+// Debounce utility
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+
+// Lazy load views — only refresh when actually visible
+const viewRefreshMap = {
+  system: debounce(refreshSystemView, 200),
+  memory: debounce(refreshMemoryView, 200),
+  settings: debounce(refreshSettingsView, 200),
+  dashboard: debounce(refreshDashboard, 200),
+};
 
 // ── ONBOARDING WIZARD (Phase 17) ────────────────
 function showOnboarding() {

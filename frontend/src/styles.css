@@ -2004,6 +2004,21 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   border-radius: var(--radius-xs);
 }
 
+/* ── SMOOTH VIEW TRANSITIONS (Phase 18) ────────── */
+.tool-view.active, .system-view.active, .commands-view.active {
+  animation: viewFadeIn 0.2s ease-out;
+}
+
+@keyframes viewFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Loading pulse for cards */
+.dash-widget {
+  transition: opacity 0.3s, transform 0.3s;
+}
+
 @keyframes skeleton {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
