@@ -990,6 +990,22 @@ async function refreshMemoryView() {
       : '<div class="empty-state">Keine Notizen. Sag Lexa "Erstelle eine Notiz..."</div>';
   }
 
+  // Snippets
+  try {
+    const snippetsData = await window.lexa.snippets();
+    const snippetsList = document.getElementById("snippets-list");
+    if (snippetsList) {
+      snippetsList.innerHTML = (snippetsData.snippets?.length > 0)
+        ? snippetsData.snippets.map(s => `
+          <div class="note-card snippet-card" onclick="useSnippet('${escapeHtml(s.text).replace(/'/g, "\\'")}')">
+            <div class="note-title">${escapeHtml(s.name)}</div>
+            <div class="note-meta">${s.text.length > 50 ? escapeHtml(s.text.substring(0, 50)) + "\u2026" : escapeHtml(s.text)}</div>
+            <button class="snippet-delete" onclick="event.stopPropagation();deleteSnippet('${escapeHtml(s.name).replace(/'/g, "\\'")}')">\u00d7</button>
+          </div>`).join("")
+        : '<div class="empty-state">Keine Snippets. Erstelle wiederverwendbare Textbausteine.</div>';
+    }
+  } catch {}
+
   const aiStatus = await window.lexa.aiStatus();
   const aiPanel = document.getElementById("ai-status-panel");
   if (aiPanel) {
@@ -1779,6 +1795,37 @@ async function changeAiModel(modelId) {
   } catch {
     showToast("Modellwechsel fehlgeschlagen", "error");
   }
+}
+
+// ── CLIPBOARD HISTORY & SNIPPETS (Phase 16) ─────
+async function trackClipboard() {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text && text.trim()) {
+      await window.lexa.clipboardAdd(text.trim().substring(0, 1000));
+    }
+  } catch {}
+}
+
+async function createSnippet() {
+  const name = prompt("Snippet-Name:"); if (!name) return;
+  const text = prompt("Snippet-Text:"); if (!text) return;
+  await window.lexa.snippetCreate(name, text);
+  showToast("Snippet gespeichert", "success");
+  refreshMemoryView();
+}
+
+async function deleteSnippet(name) {
+  await window.lexa.snippetDelete(name);
+  showToast("Snippet gel\u00f6scht", "info");
+  refreshMemoryView();
+}
+
+async function useSnippet(text) {
+  chatInput.value = text;
+  chatInput.focus();
+  switchView("chat");
+  showToast("Snippet eingef\u00fcgt", "info", 1500);
 }
 
 // ── THEME & PERSONALIZATION (Phase 15) ──────────

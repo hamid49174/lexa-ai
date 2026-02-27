@@ -230,6 +230,54 @@ contextBridge.exposeInMainWorld("lexa", {
     return res.json();
   },
 
+  // Clipboard History (Phase 16)
+  clipboardHistory: async () => {
+    try {
+      const res = await fetch(`${API}/clipboard/history`);
+      return res.json();
+    } catch {
+      return { entries: [] };
+    }
+  },
+
+  clipboardAdd: async (text) => {
+    const res = await fetch(`${API}/clipboard/add`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    return res.json();
+  },
+
+  clipboardClear: async () => {
+    const res = await fetch(`${API}/clipboard/history`, { method: "DELETE" });
+    return res.json();
+  },
+
+  // Quick Text Snippets (Phase 16)
+  snippets: async () => {
+    try {
+      const res = await fetch(`${API}/snippets`);
+      return res.json();
+    } catch {
+      return { snippets: [] };
+    }
+  },
+
+  snippetCreate: async (name, text) => {
+    const res = await fetch(`${API}/snippets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, text }),
+    });
+    return res.json();
+  },
+
+  snippetDelete: async (name) => {
+    const res = await fetch(`${API}/snippets/${encodeURIComponent(name)}`, { method: "DELETE" });
+    return res.json();
+  },
+
   // Desktop Integration (Phase 8)
   notify: (title, body, silent = false) => {
     ipcRenderer.send("show-notification", { title, body, silent });

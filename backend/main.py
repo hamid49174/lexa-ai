@@ -516,6 +516,57 @@ async def confirm_action(req: ChatRequest):
     return {"status": "confirmed", "message": "Aktion wird ausgeführt."}
 
 
+# ── CLIPBOARD HISTORY ────────────────────────────
+clipboard_history: list[dict] = []
+MAX_CLIPBOARD_ENTRIES = 50
+
+@app.get("/clipboard/history")
+async def get_clipboard_history():
+    return {"entries": clipboard_history}
+
+@app.post("/clipboard/add")
+async def add_clipboard_entry(req: Request):
+    data = await req.json()
+    text = data.get("text", "").strip()
+    if not text:
+        return {"status": "empty"}
+    # Avoid duplicates (move to top)
+    clipboard_history[:] = [e for e in clipboard_history if e["text"] != text]
+    clipboard_history.insert(0, {
+        "text": text,
+        "timestamp": __import__("datetime").datetime.now().strftime("%H:%M:%S"),
+    })
+    if len(clipboard_history) > MAX_CLIPBOARD_ENTRIES:
+        clipboard_history[:] = clipboard_history[:MAX_CLIPBOARD_ENTRIES]
+    return {"status": "added", "count": len(clipboard_history)}
+
+@app.delete("/clipboard/history")
+async def clear_clipboard_history():
+    clipboard_history.clear()
+    return {"status": "cleared"}
+
+
+# ── QUICK TEXT SNIPPETS ──────────────────────────
+@app.get("/snippets")
+async def list_snippets():
+    return {"snippets": memory.snippet_list()}
+
+@app.post("/snippets")
+async def create_snippet(req: Request):
+    data = await req.json()
+    name = data.get("name", "").strip()
+    text = data.get("text", "").strip()
+    if not name or not text:
+        return JSONResponse(status_code=400, content={"detail": "Name und Text erforderlich"})
+    result = memory.snippet_create(name, text)
+    return {"status": result}
+
+@app.delete("/snippets/{name}")
+async def delete_snippet(name: str):
+    result = memory.snippet_delete(name)
+    return {"status": result}
+
+
 @app.get("/history")
 async def get_history():
     return {"history": conversation_history}

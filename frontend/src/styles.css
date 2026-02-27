@@ -2181,6 +2181,31 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   color: var(--text);
 }
 
+/* ── SNIPPET CARDS (Phase 16) ──────────────────── */
+.snippet-card {
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.snippet-card:hover {
+  background: var(--bg-hover);
+  border-color: var(--glass-border-hover);
+}
+.snippet-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.snippet-card:hover .snippet-delete { opacity: 1; }
+.snippet-delete:hover { color: var(--error); }
+
 /* ── ACCENT PICKER (Phase 15) ──────────────────── */
 .accent-picker {
   display: flex;

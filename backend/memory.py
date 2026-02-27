@@ -68,6 +68,13 @@ def _init_tables(db: sqlite3.Connection):
             created_at TEXT DEFAULT (datetime('now', 'localtime'))
         );
 
+        CREATE TABLE IF NOT EXISTS snippets (
+            name TEXT PRIMARY KEY,
+            text TEXT NOT NULL,
+            use_count INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now', 'localtime'))
+        );
+
         CREATE TABLE IF NOT EXISTS conversations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL DEFAULT 'Neuer Chat',
@@ -421,6 +428,57 @@ def conversation_delete(conv_id: int) -> str:
         if result.rowcount:
             return "deleted"
         return "not_found"
+    finally:
+        db.close()
+
+
+# ══════════════════════════════════════════════════
+#  QUICK TEXT SNIPPETS
+# ══════════════════════════════════════════════════
+
+def snippet_create(name: str, text: str) -> str:
+    db = _get_db()
+    try:
+        db.execute(
+            """INSERT INTO snippets (name, text)
+               VALUES (?, ?)
+               ON CONFLICT(name) DO UPDATE SET text=excluded.text""",
+            (name, text),
+        )
+        db.commit()
+        return f"Snippet '{name}' gespeichert."
+    finally:
+        db.close()
+
+
+def snippet_list() -> list[dict]:
+    db = _get_db()
+    try:
+        rows = db.execute(
+            "SELECT name, text, use_count, created_at FROM snippets ORDER BY use_count DESC, name"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        db.close()
+
+
+def snippet_delete(name: str) -> str:
+    db = _get_db()
+    try:
+        result = db.execute("DELETE FROM snippets WHERE name = ?", (name,))
+        db.commit()
+        return "deleted" if result.rowcount else "not_found"
+    finally:
+        db.close()
+
+
+def snippet_use(name: str) -> str | None:
+    db = _get_db()
+    try:
+        db.execute("UPDATE snippets SET use_count = use_count + 1 WHERE name = ?", (name,))
+        db.commit()
+        row = db.execute("SELECT text FROM snippets WHERE name = ?", (name,)).fetchone()
+        return row["text"] if row else None
     finally:
         db.close()
 
