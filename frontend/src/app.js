@@ -55,6 +55,7 @@ async function init() {
   setupKeyboardShortcuts();
   setupDesktopIntegration();
   setupDragDrop();
+  loadThemePreferences();
   loadSidebarState();
   updateSystemStats();
   await loadConversations();
@@ -1066,8 +1067,9 @@ async function refreshSettingsView() {
   const dbEl = document.getElementById("settings-db-path");
   if (dbEl && mem.db_path) dbEl.textContent = mem.db_path;
 
-  // Load model selection
+  // Load model selection + theme preferences
   loadModelSelection();
+  loadThemePreferences();
 }
 
 async function saveProfile() {
@@ -1776,6 +1778,58 @@ async function changeAiModel(modelId) {
     if (desc && result.current) desc.textContent = `Aktiv: ${result.current.current_name}`;
   } catch {
     showToast("Modellwechsel fehlgeschlagen", "error");
+  }
+}
+
+// ── THEME & PERSONALIZATION (Phase 15) ──────────
+function toggleTheme(isDark) {
+  document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
+  localStorage.setItem("lexa-theme", isDark ? "dark" : "light");
+  showToast(isDark ? "Dark Mode aktiviert" : "Light Mode aktiviert", "info", 2000);
+}
+
+function setAccentColor(color) {
+  // Remove old accent, set new
+  if (color === "purple") {
+    document.documentElement.removeAttribute("data-accent");
+  } else {
+    document.documentElement.setAttribute("data-accent", color);
+  }
+  localStorage.setItem("lexa-accent", color);
+
+  // Update picker UI
+  document.querySelectorAll(".accent-dot").forEach(d => {
+    d.classList.toggle("active", d.dataset.accent === color);
+  });
+}
+
+function setFontSize(size) {
+  document.documentElement.style.fontSize = size + "px";
+  localStorage.setItem("lexa-fontsize", size);
+}
+
+function loadThemePreferences() {
+  // Theme
+  const theme = localStorage.getItem("lexa-theme") || "dark";
+  document.documentElement.setAttribute("data-theme", theme);
+  const themeToggle = document.getElementById("theme-toggle");
+  if (themeToggle) themeToggle.checked = theme === "dark";
+
+  // Accent
+  const accent = localStorage.getItem("lexa-accent") || "purple";
+  if (accent !== "purple") {
+    document.documentElement.setAttribute("data-accent", accent);
+  }
+  document.querySelectorAll(".accent-dot").forEach(d => {
+    d.classList.toggle("active", d.dataset.accent === accent);
+  });
+
+  // Font size
+  const fontSize = localStorage.getItem("lexa-fontsize");
+  if (fontSize) {
+    document.documentElement.style.fontSize = fontSize + "px";
+    const fontSelect = document.getElementById("fontsize-select");
+    if (fontSelect) fontSelect.value = fontSize;
   }
 }
 

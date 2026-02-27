@@ -36,6 +36,63 @@
   --shadow-glow: 0 0 40px rgba(139, 92, 246, 0.1);
 }
 
+/* ── LIGHT THEME ──────────────────────────────── */
+[data-theme="light"] {
+  --bg: #f5f5f8;
+  --bg-surface: #ffffff;
+  --bg-surface2: #f0f0f5;
+  --bg-surface3: #e8e8f0;
+  --bg-hover: #e0e0ec;
+  --accent-soft: rgba(139, 92, 246, 0.08);
+  --accent-glow: rgba(139, 92, 246, 0.15);
+  --accent2-soft: rgba(192, 132, 252, 0.08);
+  --gradient-subtle: linear-gradient(135deg, rgba(124,58,237,0.08), rgba(236,72,153,0.05));
+  --glass: rgba(255, 255, 255, 0.8);
+  --glass-border: rgba(139, 92, 246, 0.12);
+  --glass-border-hover: rgba(139, 92, 246, 0.25);
+  --text: #1a1a2e;
+  --text-secondary: #4a4a6a;
+  --text-muted: #8888a0;
+  --border: #d8d8e8;
+  --border-light: #c8c8d8;
+  --shadow: 0 4px 16px rgba(0,0,0,0.08);
+  --shadow-glow: 0 0 20px rgba(139, 92, 246, 0.05);
+}
+
+/* ── ACCENT COLOR THEMES ─────────────────────── */
+[data-accent="blue"] {
+  --accent: #3b82f6; --accent2: #60a5fa;
+  --accent-soft: rgba(59,130,246,0.12); --accent-glow: rgba(59,130,246,0.3);
+  --accent2-soft: rgba(96,165,250,0.1);
+  --gradient: linear-gradient(135deg, #2563eb, #3b82f6, #06b6d4);
+  --glass-border: rgba(59,130,246,0.15); --glass-border-hover: rgba(59,130,246,0.35);
+  --shadow-glow: 0 0 40px rgba(59,130,246,0.1);
+}
+[data-accent="green"] {
+  --accent: #10b981; --accent2: #34d399;
+  --accent-soft: rgba(16,185,129,0.12); --accent-glow: rgba(16,185,129,0.3);
+  --accent2-soft: rgba(52,211,153,0.1);
+  --gradient: linear-gradient(135deg, #059669, #10b981, #06b6d4);
+  --glass-border: rgba(16,185,129,0.15); --glass-border-hover: rgba(16,185,129,0.35);
+  --shadow-glow: 0 0 40px rgba(16,185,129,0.1);
+}
+[data-accent="rose"] {
+  --accent: #f43f5e; --accent2: #fb7185;
+  --accent-soft: rgba(244,63,94,0.12); --accent-glow: rgba(244,63,94,0.3);
+  --accent2-soft: rgba(251,113,133,0.1);
+  --gradient: linear-gradient(135deg, #e11d48, #f43f5e, #f97316);
+  --glass-border: rgba(244,63,94,0.15); --glass-border-hover: rgba(244,63,94,0.35);
+  --shadow-glow: 0 0 40px rgba(244,63,94,0.1);
+}
+[data-accent="amber"] {
+  --accent: #f59e0b; --accent2: #fbbf24;
+  --accent-soft: rgba(245,158,11,0.12); --accent-glow: rgba(245,158,11,0.3);
+  --accent2-soft: rgba(251,191,36,0.1);
+  --gradient: linear-gradient(135deg, #d97706, #f59e0b, #ef4444);
+  --glass-border: rgba(245,158,11,0.15); --glass-border-hover: rgba(245,158,11,0.35);
+  --shadow-glow: 0 0 40px rgba(245,158,11,0.1);
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
@@ -2122,6 +2179,40 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .settings-select option {
   background: var(--bg-surface2);
   color: var(--text);
+}
+
+/* ── ACCENT PICKER (Phase 15) ──────────────────── */
+.accent-picker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.accent-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+.accent-dot:hover { transform: scale(1.15); }
+.accent-dot.active {
+  border-color: var(--text);
+  box-shadow: 0 0 8px rgba(255,255,255,0.2);
+}
+.accent-dot.active::after {
+  content: "\2713";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
 }
 
 .input-hint .kbd {

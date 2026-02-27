@@ -188,3 +188,4 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - [x] Phase 12: Drag & Drop + File Intelligence — Datei-Upload, Text-Extraktion, AI-Analyse, File Cards
 - [x] Phase 13: Search & Export — Globale Suche (Conversations+Notes+Memories), Chat-Export (MD/TXT), Suchoverlay
 - [x] Phase 14: AI Upgrade — AI-generierte Conversation-Titel, Multi-Model-Auswahl (4 Groq-Modelle), Dynamic Model Switching
+- [x] Phase 15: Theme & Personalisierung — Dark/Light Mode, 5 Akzentfarben, Font-Size Auswahl, localStorage-Persistenz

@@ -403,6 +403,45 @@
           </div>
 
           <div class="settings-group">
+            <div class="settings-group-title">ERSCHEINUNGSBILD</div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">Dark Mode</div>
+                <div class="setting-desc">Zwischen hellem und dunklem Design wechseln</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="theme-toggle" onchange="toggleTheme(this.checked)" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">Akzentfarbe</div>
+                <div class="setting-desc">Passe die Hauptfarbe der Oberfl&auml;che an</div>
+              </div>
+              <div class="accent-picker" id="accent-picker">
+                <button class="accent-dot active" data-accent="purple" onclick="setAccentColor('purple')" title="Lila" style="background:#8b5cf6"></button>
+                <button class="accent-dot" data-accent="blue" onclick="setAccentColor('blue')" title="Blau" style="background:#3b82f6"></button>
+                <button class="accent-dot" data-accent="green" onclick="setAccentColor('green')" title="Gr&uuml;n" style="background:#10b981"></button>
+                <button class="accent-dot" data-accent="rose" onclick="setAccentColor('rose')" title="Rosa" style="background:#f43f5e"></button>
+                <button class="accent-dot" data-accent="amber" onclick="setAccentColor('amber')" title="Gold" style="background:#f59e0b"></button>
+              </div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">Schriftgr&ouml;&szlig;e</div>
+                <div class="setting-desc">Text-Gr&ouml;&szlig;e anpassen</div>
+              </div>
+              <select id="fontsize-select" class="settings-select" onchange="setFontSize(this.value)">
+                <option value="13">Klein (13px)</option>
+                <option value="14" selected>Normal (14px)</option>
+                <option value="15">Gro&szlig; (15px)</option>
+                <option value="16">Sehr gro&szlig; (16px)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="settings-group">
             <div class="settings-group-title">SPRACHAUSGABE</div>
             <div class="setting-item">
               <div class="setting-info">
