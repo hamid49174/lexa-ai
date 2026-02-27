@@ -67,6 +67,14 @@
           </button>
         </div>
 
+        <div class="sidebar-section conversations-section">
+          <div class="sidebar-label">
+            CHATS
+            <button class="new-chat-btn" onclick="newConversation()" title="Neuer Chat">+</button>
+          </div>
+          <div class="conversation-list" id="conversation-list"></div>
+        </div>
+
         <div class="sidebar-section">
           <div class="sidebar-label">TOOLS</div>
           <button class="sidebar-btn" data-view="browser">
@@ -109,7 +117,7 @@
           </div>
         </div>
         <div class="sidebar-footer">
-          <span class="version-tag">v0.9.0</span>
+          <span class="version-tag">v0.10.0</span>
         </div>
       </aside>
 
@@ -179,7 +187,7 @@
             <!-- Greeting Widget -->
             <div class="dash-widget dash-widget-greeting">
               <div class="dash-greeting-text" id="dash-greeting">Guten Tag, Chef!</div>
-              <div class="dash-greeting-sub" id="dash-greeting-sub">Lexa AI v0.9.0 &mdash; Dein lokaler KI-Assistent</div>
+              <div class="dash-greeting-sub" id="dash-greeting-sub">Lexa AI v0.10.0 &mdash; Dein lokaler KI-Assistent</div>
               <button class="dash-chat-btn" onclick="switchView('chat')">&#9889; Chat &ouml;ffnen</button>
             </div>
           </div>
@@ -232,9 +240,9 @@
               <span class="divider">|</span>
               <span id="voice-status-hint">Ctrl+M Mikrofon</span>
               <span class="divider">|</span>
-              <span>Ctrl+P Palette</span>
+              <span>Ctrl+N Neuer Chat</span>
               <span class="divider">|</span>
-              <span>Ctrl+B Sidebar</span>
+              <span>Ctrl+P Palette</span>
             </div>
           </div>
         </div>
@@ -435,7 +443,7 @@
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name">Version</div>
-                <div class="setting-desc" id="settings-version">v0.9.0 Phase 9</div>
+                <div class="setting-desc" id="settings-version">v0.10.0 Phase 11</div>
               </div>
             </div>
             <div class="setting-item">

@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════
-   LEXA AI — Frontend Application Logic v0.8
-   Phase 10: Streaming Chat, Smart Suggestions,
-   Dashboard Live-Updates
+   LEXA AI — Frontend Application Logic v0.9
+   Phase 11: Smart Conversations, Streaming Chat,
+   Suggestions, Dashboard Live-Updates
    ════════════════════════════════════════════════ */
 
 const chatMessages = document.getElementById("chat-messages");
@@ -23,6 +23,8 @@ let reconnectAttempts = 0;
 let sidebarCollapsed = false;
 let notificationsEnabled = true;
 let dashboardInterval = null;
+let currentConversationId = null;
+let conversationsList = [];
 
 const VIEW_KEYS = ["dashboard", "chat", "system", "commands", "browser", "files", "media", "memory", "settings"];
 
@@ -52,9 +54,9 @@ async function init() {
   setupVoice();
   setupKeyboardShortcuts();
   setupDesktopIntegration();
-  loadChatHistory();
   loadSidebarState();
   updateSystemStats();
+  await loadConversations();
 }
 
 // ── DESKTOP INTEGRATION (Phase 8) ───────────────
@@ -140,6 +142,13 @@ function setupKeyboardShortcuts() {
       return;
     }
 
+    // Ctrl+N: New Conversation
+    if (e.ctrlKey && e.key === "n") {
+      e.preventDefault();
+      newConversation();
+      return;
+    }
+
     // Ctrl+P: Command Palette
     if (e.ctrlKey && e.key === "p") {
       e.preventDefault();
@@ -153,6 +162,11 @@ function clearChat() {
   const msgs = chatMessages.querySelectorAll(".message");
   msgs.forEach((m, i) => { if (i > 0) m.remove(); });
   localStorage.removeItem("lexa-chat-history");
+  hideSuggestions();
+  // Also clear conversation messages
+  if (currentConversationId) {
+    window.lexa.conversationUpdate(currentConversationId, { messages: [] }).catch(() => {});
+  }
   showToast("Chat gel\u00f6scht", "info", 2000);
 }
 
@@ -665,12 +679,29 @@ async function sendMessage() {
   if (!text || isLoading) return;
   if (!backendOnline) { showToast("Backend nicht verbunden", "error"); return; }
 
+  // Auto-create conversation if none active
+  if (!currentConversationId) {
+    try {
+      const result = await window.lexa.conversationCreate("Neuer Chat");
+      currentConversationId = result.id;
+      localStorage.setItem("lexa-active-conversation", result.id);
+      const data = await window.lexa.conversations();
+      conversationsList = data.conversations || [];
+      renderConversationList();
+    } catch {}
+  }
+
+  // Auto-title from first message
+  const isFirstMessage = chatMessages.querySelectorAll(".user-message").length === 0;
+
   addMessage(text, "user");
   chatInput.value = "";
   chatInput.style.height = "auto";
   isLoading = true;
   sendBtn.disabled = true;
   hideSuggestions();
+
+  if (isFirstMessage) autoTitleConversation(text);
 
   // Create streaming message element
   const msgEl = document.createElement("div");
@@ -788,6 +819,7 @@ async function sendMessage() {
   }
 
   saveChatHistory();
+  saveCurrentConversation();
   isLoading = false;
   sendBtn.disabled = false;
 }
@@ -1216,6 +1248,189 @@ function renderPaletteResults(query) {
   if (filtered.length === 0) {
     container.innerHTML = '<div class="palette-empty">Nichts gefunden</div>';
   }
+}
+
+// ── CONVERSATIONS ───────────────────────────────
+async function loadConversations() {
+  try {
+    const data = await window.lexa.conversations();
+    conversationsList = data.conversations || [];
+    renderConversationList();
+
+    // Load last active conversation or start fresh
+    const lastId = parseInt(localStorage.getItem("lexa-active-conversation"));
+    if (lastId && conversationsList.find(c => c.id === lastId)) {
+      await switchConversation(lastId, false);
+    } else if (conversationsList.length > 0) {
+      await switchConversation(conversationsList[0].id, false);
+    }
+  } catch {
+    // Fallback: load from localStorage (legacy)
+    loadChatHistory();
+  }
+}
+
+function renderConversationList() {
+  const container = document.getElementById("conversation-list");
+  if (!container) return;
+
+  if (conversationsList.length === 0) {
+    container.innerHTML = '<div class="conv-empty">Kein Chatverlauf</div>';
+    return;
+  }
+
+  container.innerHTML = conversationsList.map(c => {
+    const isActive = c.id === currentConversationId;
+    const title = c.title.length > 28 ? c.title.substring(0, 28) + "\u2026" : c.title;
+    const count = c.message_count || 0;
+    return `
+      <div class="conv-item ${isActive ? "active" : ""}" data-conv-id="${c.id}" onclick="switchConversation(${c.id})">
+        <div class="conv-item-content">
+          <div class="conv-title">${escapeHtml(title)}</div>
+          <div class="conv-meta">${count} Nachrichten</div>
+        </div>
+        <button class="conv-delete-btn" onclick="event.stopPropagation();deleteConversation(${c.id})" title="L\u00f6schen">\u00d7</button>
+      </div>`;
+  }).join("");
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+async function newConversation() {
+  try {
+    const result = await window.lexa.conversationCreate("Neuer Chat");
+    currentConversationId = result.id;
+    localStorage.setItem("lexa-active-conversation", result.id);
+
+    // Clear chat UI
+    const msgs = chatMessages.querySelectorAll(".message");
+    msgs.forEach((m, i) => { if (i > 0) m.remove(); });
+    hideSuggestions();
+
+    // Clear backend history
+    try { await fetch("http://127.0.0.1:8000/history", { method: "DELETE" }); } catch {}
+
+    // Refresh list
+    const data = await window.lexa.conversations();
+    conversationsList = data.conversations || [];
+    renderConversationList();
+
+    switchView("chat");
+    chatInput.focus();
+    showToast("Neuer Chat gestartet", "info", 2000);
+  } catch {
+    showToast("Fehler beim Erstellen", "error");
+  }
+}
+
+async function switchConversation(convId, notify = true) {
+  if (convId === currentConversationId && notify) return;
+
+  // Save current conversation before switching
+  await saveCurrentConversation();
+
+  currentConversationId = convId;
+  localStorage.setItem("lexa-active-conversation", convId);
+
+  try {
+    // Load conversation from backend
+    const conv = await window.lexa.conversationGet(convId);
+    if (!conv || conv.detail) {
+      if (notify) showToast("Conversation nicht gefunden", "error");
+      return;
+    }
+
+    // Load backend chat history
+    await window.lexa.conversationLoad(convId);
+
+    // Clear chat UI and load messages
+    const msgs = chatMessages.querySelectorAll(".message");
+    msgs.forEach((m, i) => { if (i > 0) m.remove(); });
+    hideSuggestions();
+
+    // Render messages
+    const messages = conv.messages || [];
+    for (const msg of messages) {
+      addMessage(msg.content, msg.role === "user" ? "user" : "system", null, false, true);
+    }
+
+    // Update sidebar highlight
+    renderConversationList();
+
+    if (notify) {
+      switchView("chat");
+      showToast(`Chat: ${conv.title}`, "info", 1500);
+    }
+  } catch {
+    if (notify) showToast("Fehler beim Laden", "error");
+  }
+}
+
+async function saveCurrentConversation() {
+  if (!currentConversationId) return;
+
+  // Collect messages from chat UI
+  const messages = [];
+  chatMessages.querySelectorAll(".message").forEach((msg, i) => {
+    if (i === 0) return; // Skip welcome message
+    const text = msg.querySelector(".msg-text")?.textContent || "";
+    const role = msg.classList.contains("user-message") ? "user" : "assistant";
+    if (text) messages.push({ role, content: text });
+  });
+
+  try {
+    await window.lexa.conversationUpdate(currentConversationId, { messages });
+  } catch {}
+}
+
+async function deleteConversation(convId) {
+  try {
+    await window.lexa.conversationDelete(convId);
+
+    // If deleting active conversation, switch to another or create new
+    if (convId === currentConversationId) {
+      currentConversationId = null;
+    }
+
+    // Refresh list
+    const data = await window.lexa.conversations();
+    conversationsList = data.conversations || [];
+    renderConversationList();
+
+    if (convId === parseInt(localStorage.getItem("lexa-active-conversation"))) {
+      if (conversationsList.length > 0) {
+        await switchConversation(conversationsList[0].id);
+      } else {
+        await newConversation();
+      }
+    }
+
+    showToast("Chat gel\u00f6scht", "info", 2000);
+  } catch {
+    showToast("Fehler beim L\u00f6schen", "error");
+  }
+}
+
+async function autoTitleConversation(userMessage) {
+  if (!currentConversationId) return;
+
+  // Generate title from first user message (truncate to 40 chars)
+  let title = userMessage.trim();
+  if (title.length > 40) title = title.substring(0, 40) + "\u2026";
+  if (!title) title = "Neuer Chat";
+
+  try {
+    await window.lexa.conversationUpdate(currentConversationId, { title });
+
+    // Update in local list
+    const conv = conversationsList.find(c => c.id === currentConversationId);
+    if (conv) conv.title = title;
+    renderConversationList();
+  } catch {}
 }
 
 // ── SMART SUGGESTIONS ───────────────────────────

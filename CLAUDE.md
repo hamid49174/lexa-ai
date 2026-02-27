@@ -45,9 +45,9 @@ lexa-ai/
 ├── requirements.txt
 ├── start.bat               # Ein-Klick-Start (mit Health-Check)
 ├── backend/
-│   ├── main.py             # FastAPI Server v0.9.0 + SSE Streaming + Router + Memory
+│   ├── main.py             # FastAPI Server v0.10.0 + SSE Streaming + Conversations + Router + Memory
 │   ├── ai_engine.py        # Groq API + Ollama Fallback + Streaming + Memory Context
-│   ├── memory.py           # SQLite: Notes, Memories, Profil, Routinen
+│   ├── memory.py           # SQLite: Notes, Memories, Profil, Routinen, Conversations
 │   ├── security.py         # Whitelist, Rate Limit, Sanitize, Path/URL/Param Validation, Audit
 │   ├── router_companion.py # /companion/* Endpoints + Param Validation
 │   ├── router_voice.py     # /voice/* Endpoints (STT/TTS)
@@ -66,11 +66,11 @@ lexa-ai/
 ├── frontend/
 │   ├── package.json
 │   ├── main.js             # Electron Main Process
-│   ├── preload.js          # Secure Bridge (chat, execute, tts, stt, memory, ai)
+│   ├── preload.js          # Secure Bridge (chat, execute, tts, stt, memory, ai, conversations)
 │   └── src/
-│       ├── index.html      # NeoAI UI mit 9 Views + Dashboard + Voice Orb + Toast System
+│       ├── index.html      # NeoAI UI mit 9 Views + Dashboard + Conversations + Voice Orb
 │       ├── styles.css      # Purple/Violet Glassmorphism Theme + Voice Orb + Dashboard CSS
-│       └── app.js          # v0.9 Streaming Chat, Suggestions, Dashboard Live, Voice Orb
+│       └── app.js          # v0.10 Conversations, Streaming Chat, Suggestions, Dashboard
 └── tests/
 ```
 
@@ -124,6 +124,12 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - POST /memory/profile — Profil setzen
 - GET  /memory/routines — Alle Routinen
 - GET  /scheduler/status — Scheduler-Status (running, active routines)
+- GET  /conversations — Alle Conversations listen
+- POST /conversations — Neue Conversation erstellen
+- GET  /conversations/{id} — Conversation mit Messages laden
+- PUT  /conversations/{id} — Conversation aktualisieren (Titel/Messages)
+- DELETE /conversations/{id} — Conversation löschen
+- POST /conversations/{id}/load — Conversation als aktiven Chat laden
 
 ## Frontend Features
 - 9 Views: Dashboard, Chat, System, Commands, Browser, Files, Media, Memory, Settings
@@ -140,8 +146,10 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - View-Transitions mit Fade-In Animation
 - Card-Hover-Glow-Effekt, Sidebar Active-Indicator
 - Error Handling: Offline-Checks vor API-Calls
-- Keyboard Shortcuts: Ctrl+1-9 Views, Ctrl+P Palette, Esc Chat, Ctrl+L Clear, Ctrl+B Sidebar, Ctrl+M Mic
-- Chat-History Persistenz via localStorage (letzte 50 Nachrichten)
+- Conversations: Mehrere Chat-Sessions erstellen, wechseln, löschen, Auto-Titel
+- Conversation List: Sidebar-Sektion mit Chatverlauf, aktiver Indikator, Lösch-Button
+- Keyboard Shortcuts: Ctrl+1-9 Views, Ctrl+N Neuer Chat, Ctrl+P Palette, Esc Chat, Ctrl+L Clear, Ctrl+M Mic
+- Chat-History Persistenz via SQLite Conversations (Backend) + localStorage (Legacy)
 - Command-Suche mit Live-Filter und Highlighting
 - Collapsible Sidebar mit State-Persistenz
 - System Tray: Minimize-to-Tray, Tray-Kontextmenü (Open, System, Commands, Autostart, Quit)
@@ -162,3 +170,4 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - [x] Phase 8: Desktop Integration — System Tray, Notifications, Autostart, Routine Scheduler
 - [x] Phase 9: Intelligence & Dashboard — Enhanced AI Prompt, Dashboard, Command Palette, NeoAI UI Overhaul, Voice Orb, Chat Upgrades
 - [x] Phase 10: Streaming & Smart UX — SSE Streaming Chat, Smart Suggestion Chips, Dashboard Live-Updates
+- [x] Phase 11: Smart Conversations — Mehrere Chat-Sessions, Auto-Titel, Conversation CRUD, SQLite Storage

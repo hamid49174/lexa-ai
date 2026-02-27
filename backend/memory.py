@@ -67,6 +67,15 @@ def _init_tables(db: sqlite3.Connection):
             last_run TEXT,
             created_at TEXT DEFAULT (datetime('now', 'localtime'))
         );
+
+        CREATE TABLE IF NOT EXISTS conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL DEFAULT 'Neuer Chat',
+            messages TEXT NOT NULL DEFAULT '[]',
+            message_count INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+        );
     """)
     db.commit()
 
@@ -337,6 +346,86 @@ def routine_toggle(name: str) -> str:
 
 
 # ══════════════════════════════════════════════════
+#  CONVERSATIONS
+# ══════════════════════════════════════════════════
+
+def conversation_create(title: str = "Neuer Chat") -> int:
+    """Create a new conversation, return its ID."""
+    db = _get_db()
+    try:
+        cursor = db.execute(
+            "INSERT INTO conversations (title) VALUES (?)", (title,)
+        )
+        db.commit()
+        return cursor.lastrowid
+    finally:
+        db.close()
+
+
+def conversation_list(limit: int = 50) -> list[dict]:
+    """List conversations ordered by last update."""
+    db = _get_db()
+    try:
+        rows = db.execute(
+            "SELECT id, title, message_count, created_at, updated_at "
+            "FROM conversations ORDER BY updated_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        db.close()
+
+
+def conversation_get(conv_id: int) -> dict | None:
+    """Get a conversation with its messages."""
+    db = _get_db()
+    try:
+        row = db.execute(
+            "SELECT * FROM conversations WHERE id = ?", (conv_id,)
+        ).fetchone()
+        if row:
+            d = dict(row)
+            d["messages"] = json.loads(d["messages"])
+            return d
+        return None
+    finally:
+        db.close()
+
+
+def conversation_update(conv_id: int, title: str | None = None, messages: list | None = None) -> str:
+    """Update conversation title and/or messages."""
+    db = _get_db()
+    try:
+        if title is not None:
+            db.execute(
+                "UPDATE conversations SET title = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+                (title, conv_id),
+            )
+        if messages is not None:
+            db.execute(
+                "UPDATE conversations SET messages = ?, message_count = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+                (json.dumps(messages, ensure_ascii=False), len(messages), conv_id),
+            )
+        db.commit()
+        return "ok"
+    finally:
+        db.close()
+
+
+def conversation_delete(conv_id: int) -> str:
+    """Delete a conversation."""
+    db = _get_db()
+    try:
+        result = db.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+        db.commit()
+        if result.rowcount:
+            return "deleted"
+        return "not_found"
+    finally:
+        db.close()
+
+
+# ══════════════════════════════════════════════════
 #  ZUSAMMENFASSUNG (Summary)
 # ══════════════════════════════════════════════════
 
@@ -366,11 +455,13 @@ def get_memory_stats() -> dict:
         memories = db.execute("SELECT COUNT(*) as c FROM memories").fetchone()["c"]
         interactions = db.execute("SELECT COUNT(*) as c FROM interactions").fetchone()["c"]
         routines = db.execute("SELECT COUNT(*) as c FROM routines").fetchone()["c"]
+        conversations = db.execute("SELECT COUNT(*) as c FROM conversations").fetchone()["c"]
         return {
             "notes": notes,
             "memories": memories,
             "interactions": interactions,
             "routines": routines,
+            "conversations": conversations,
             "db_path": str(DB_PATH),
         }
     finally:

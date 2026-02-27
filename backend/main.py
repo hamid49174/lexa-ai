@@ -29,7 +29,7 @@ logger = logging.getLogger("lexa.server")
 app = FastAPI(
     title="Lexa AI",
     description="Lokaler KI-Assistent — nur localhost",
-    version="0.9.0",
+    version="0.10.0",
 )
 
 # CORS: Nur localhost erlauben
@@ -37,7 +37,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "file://"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -72,7 +72,7 @@ async def startup_event():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "lexa-ai", "version": "0.8.0"}
+    return {"status": "ok", "service": "lexa-ai", "version": "0.10.0"}
 
 
 @app.get("/ai/status")
@@ -113,6 +113,59 @@ async def set_profile(req: Request):
 @app.get("/memory/routines")
 async def list_routines():
     return {"routines": memory.routine_list()}
+
+
+# ── CONVERSATIONS ────────────────────────────────
+
+@app.get("/conversations")
+async def list_conversations():
+    return {"conversations": memory.conversation_list()}
+
+
+@app.post("/conversations")
+async def create_conversation(req: Request):
+    data = await req.json()
+    title = data.get("title", "Neuer Chat")
+    conv_id = memory.conversation_create(title)
+    return {"id": conv_id, "title": title}
+
+
+@app.get("/conversations/{conv_id}")
+async def get_conversation(conv_id: int):
+    conv = memory.conversation_get(conv_id)
+    if not conv:
+        return JSONResponse(status_code=404, content={"detail": "Conversation not found"})
+    return conv
+
+
+@app.put("/conversations/{conv_id}")
+async def update_conversation(conv_id: int, req: Request):
+    data = await req.json()
+    title = data.get("title")
+    messages = data.get("messages")
+    result = memory.conversation_update(conv_id, title=title, messages=messages)
+    return {"status": result}
+
+
+@app.delete("/conversations/{conv_id}")
+async def delete_conversation(conv_id: int):
+    result = memory.conversation_delete(conv_id)
+    return {"status": result}
+
+
+@app.post("/conversations/{conv_id}/load")
+async def load_conversation(conv_id: int):
+    """Load a conversation's messages as the active chat history."""
+    conv = memory.conversation_get(conv_id)
+    if not conv:
+        return JSONResponse(status_code=404, content={"detail": "Conversation not found"})
+    conversation_history.clear()
+    for msg in conv.get("messages", []):
+        conversation_history.append(msg)
+    # Keep at most 40 entries
+    if len(conversation_history) > 40:
+        conversation_history[:] = conversation_history[-40:]
+    return {"status": "loaded", "message_count": len(conversation_history)}
 
 
 @app.post("/chat", response_model=ChatResponse)

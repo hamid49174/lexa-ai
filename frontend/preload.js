@@ -124,6 +124,49 @@ contextBridge.exposeInMainWorld("lexa", {
     return res.json();
   },
 
+  // Conversations (Phase 11)
+  conversations: async () => {
+    try {
+      const res = await fetch(`${API}/conversations`);
+      return res.json();
+    } catch {
+      return { conversations: [] };
+    }
+  },
+
+  conversationCreate: async (title = "Neuer Chat") => {
+    const res = await fetch(`${API}/conversations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    return res.json();
+  },
+
+  conversationGet: async (id) => {
+    const res = await fetch(`${API}/conversations/${id}`);
+    return res.json();
+  },
+
+  conversationUpdate: async (id, data) => {
+    const res = await fetch(`${API}/conversations/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    return res.json();
+  },
+
+  conversationDelete: async (id) => {
+    const res = await fetch(`${API}/conversations/${id}`, { method: "DELETE" });
+    return res.json();
+  },
+
+  conversationLoad: async (id) => {
+    const res = await fetch(`${API}/conversations/${id}/load`, { method: "POST" });
+    return res.json();
+  },
+
   // Desktop Integration (Phase 8)
   notify: (title, body, silent = false) => {
     ipcRenderer.send("show-notification", { title, body, silent });

@@ -299,6 +299,126 @@ body {
 .sidebar.collapsed .sidebar-btn svg { opacity: 1; }
 .sidebar.collapsed .sidebar-stats,
 .sidebar.collapsed .stat-value { display: none; }
+.sidebar.collapsed .conversations-section { display: none; }
+
+/* ── CONVERSATIONS LIST ──────────────────────── */
+.conversations-section .sidebar-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.new-chat-btn {
+  width: 20px;
+  height: 20px;
+  background: var(--accent-soft);
+  border: 1px solid var(--glass-border);
+  color: var(--accent2);
+  border-radius: 5px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: all 0.15s;
+}
+
+.new-chat-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.conv-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: all 0.15s;
+  gap: 4px;
+}
+
+.conv-item:hover {
+  background: var(--bg-hover);
+}
+
+.conv-item.active {
+  background: var(--accent-soft);
+  border-left: 2px solid var(--accent);
+}
+
+.conv-item-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.conv-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conv-item.active .conv-title {
+  color: var(--accent2);
+}
+
+.conv-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.conv-delete-btn {
+  width: 18px;
+  height: 18px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.conv-item:hover .conv-delete-btn {
+  opacity: 1;
+}
+
+.conv-delete-btn:hover {
+  background: var(--error);
+  color: #fff;
+}
+
+.conv-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 8px 10px;
+  font-style: italic;
+}
 
 /* ── CONTENT ─────────────────────────────────── */
 .content {
