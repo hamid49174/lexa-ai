@@ -1254,6 +1254,10 @@ function renderPaletteResults(query) {
   const viewItems = VIEW_KEYS.map(v => ({
     type: "view", name: v, desc: `Wechsle zu ${v}`, icon: "\u{1F4CB}"
   }));
+  viewItems.push(
+    { type: "action", name: "help", desc: "Hilfe anzeigen", icon: "\u2753", action: "showHelp()" },
+    { type: "action", name: "onboarding", desc: "Willkommen-Tour starten", icon: "\u{1F44B}", action: "showOnboarding()" },
+  );
   const cmdItems = ALL_COMMANDS.map(c => ({
     type: "cmd", name: c.name, desc: c.desc, icon: c.status === "confirm" ? "\u26A0" : "\u26A1", cat: c.cat
   }));
@@ -1264,7 +1268,7 @@ function renderPaletteResults(query) {
     : allItems.slice(0, 15);
 
   container.innerHTML = filtered.slice(0, 20).map((item, i) => `
-    <div class="palette-item ${i === 0 ? "selected" : ""}" onclick="${item.type === "view" ? `switchView('${item.name}');closePalette()` : `insertCommand('${item.name}');closePalette()`}">
+    <div class="palette-item ${i === 0 ? "selected" : ""}" onclick="${item.type === "view" ? `switchView('${item.name}');closePalette()` : item.type === "action" ? `${item.action};closePalette()` : `insertCommand('${item.name}');closePalette()`}">
       <span class="palette-icon">${item.icon}</span>
       <div class="palette-item-info">
         <span class="palette-name">${item.name}</span>
@@ -1934,5 +1938,111 @@ function handleSuggestion(command) {
   hideSuggestions();
 }
 
+// ── ONBOARDING WIZARD (Phase 17) ────────────────
+function showOnboarding() {
+  if (document.getElementById("onboarding-overlay")) return;
+
+  const overlay = document.createElement("div");
+  overlay.id = "onboarding-overlay";
+  overlay.className = "onboarding-overlay";
+
+  const steps = [
+    {
+      icon: "\u26A1",
+      title: "Willkommen bei Lexa AI!",
+      text: "Dein lokaler KI-Assistent f\u00fcr Windows. Alles l\u00e4uft auf deinem PC \u2014 keine Cloud, volle Kontrolle.",
+    },
+    {
+      icon: "\u{1F4AC}",
+      title: "Chat mit KI",
+      text: "Stelle Lexa Fragen, lass sie Apps \u00f6ffnen, Musik spielen, Dateien organisieren und vieles mehr. 60 Befehle stehen bereit.",
+    },
+    {
+      icon: "\u{1F3A4}",
+      title: "Sprachsteuerung",
+      text: "Klicke den Voice Orb oder dr\u00fccke Ctrl+M zum Sprechen. Lexa versteht dich und antwortet per Stimme.",
+    },
+    {
+      icon: "\u2328\uFE0F",
+      title: "Tastaturk\u00fcrzel",
+      text: "Ctrl+P: Palette \u00b7 Ctrl+F: Suche \u00b7 Ctrl+N: Neuer Chat \u00b7 Ctrl+1-9: Views \u00b7 Ctrl+M: Mikrofon",
+    },
+    {
+      icon: "\u{1F3A8}",
+      title: "Personalisierung",
+      text: "Gehe zu Settings f\u00fcr Dark/Light Mode, Akzentfarben, KI-Modellauswahl und mehr.",
+    },
+  ];
+
+  let currentStep = 0;
+
+  function renderStep() {
+    const s = steps[currentStep];
+    const isLast = currentStep === steps.length - 1;
+    const isFirst = currentStep === 0;
+    overlay.innerHTML = `
+      <div class="onboarding-card">
+        <div class="onboarding-icon">${s.icon}</div>
+        <div class="onboarding-title">${s.title}</div>
+        <div class="onboarding-text">${s.text}</div>
+        <div class="onboarding-dots">
+          ${steps.map((_, i) => `<span class="onboarding-dot ${i === currentStep ? "active" : ""}"></span>`).join("")}
+        </div>
+        <div class="onboarding-actions">
+          ${isFirst ? '<button class="onboarding-skip" onclick="closeOnboarding()">Überspringen</button>' : `<button class="onboarding-back" onclick="onboardingPrev()">Zurück</button>`}
+          <button class="onboarding-next" onclick="${isLast ? "closeOnboarding()" : "onboardingNext()"}">${isLast ? "Los geht\u2019s!" : "Weiter"}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  document.body.appendChild(overlay);
+  renderStep();
+
+  window.onboardingNext = () => { currentStep++; renderStep(); };
+  window.onboardingPrev = () => { currentStep--; renderStep(); };
+}
+
+function closeOnboarding() {
+  document.getElementById("onboarding-overlay")?.remove();
+  localStorage.setItem("lexa-onboarded", "1");
+  showToast("Viel Spa\u00df mit Lexa!", "success");
+}
+
+function checkOnboarding() {
+  if (!localStorage.getItem("lexa-onboarded")) {
+    setTimeout(showOnboarding, 1000);
+  }
+}
+
+// ── HELP COMMAND ────────────────────────────────
+function showHelp() {
+  const helpText = `**Lexa AI \u2014 Hilfe**
+
+**Chat:** Tippe eine Nachricht und dr\u00fccke Enter. Lexa versteht nat\u00fcrliche Sprache.
+
+**Befehle:** 60 PC-Befehle \u2014 Apps \u00f6ffnen, Dateien organisieren, Browser steuern, Musik spielen, E-Mails lesen, und mehr.
+
+**Sprache:** Klicke den Voice Orb (Ctrl+M) zum Sprechen. Lexa h\u00f6rt zu und antwortet per Stimme.
+
+**Tastaturk\u00fcrzel:**
+\u2022 Ctrl+1-9: Views wechseln
+\u2022 Ctrl+P: Command Palette
+\u2022 Ctrl+F: Globale Suche
+\u2022 Ctrl+N: Neuer Chat
+\u2022 Ctrl+M: Mikrofon
+\u2022 Ctrl+L: Chat l\u00f6schen
+\u2022 Ctrl+B: Sidebar toggle
+\u2022 Esc: Zur\u00fcck zum Chat
+
+**Drag & Drop:** Dateien in den Chat ziehen f\u00fcr AI-Analyse.
+
+**Settings:** KI-Modell, Theme, Akzentfarbe, Schriftgr\u00f6\u00dfe, Autostart.`;
+
+  addMessage(helpText, "system");
+  switchView("chat");
+}
+
 // ── START ────────────────────────────────────────
 init();
+checkOnboarding();

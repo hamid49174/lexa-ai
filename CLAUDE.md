@@ -190,3 +190,4 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - [x] Phase 14: AI Upgrade — AI-generierte Conversation-Titel, Multi-Model-Auswahl (4 Groq-Modelle), Dynamic Model Switching
 - [x] Phase 15: Theme & Personalisierung — Dark/Light Mode, 5 Akzentfarben, Font-Size Auswahl, localStorage-Persistenz
 - [x] Phase 16: Clipboard & Snippets — Clipboard-History API, Quick Text Snippets (SQLite), Snippet-UI in Memory View
+- [x] Phase 17: Onboarding & Help — 5-Step Welcome Wizard, In-App Help Command, Command Palette Integration
