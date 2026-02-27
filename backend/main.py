@@ -5,7 +5,11 @@ Hauptserver auf localhost:8000
 import asyncio
 import json
 import logging
-from fastapi import FastAPI, Request
+import mimetypes
+import os
+import tempfile
+from pathlib import Path
+from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -29,7 +33,7 @@ logger = logging.getLogger("lexa.server")
 app = FastAPI(
     title="Lexa AI",
     description="Lokaler KI-Assistent — nur localhost",
-    version="0.10.0",
+    version="0.11.0",
 )
 
 # CORS: Nur localhost erlauben
@@ -72,7 +76,7 @@ async def startup_event():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "lexa-ai", "version": "0.10.0"}
+    return {"status": "ok", "service": "lexa-ai", "version": "0.11.0"}
 
 
 @app.get("/ai/status")
@@ -166,6 +170,169 @@ async def load_conversation(conv_id: int):
     if len(conversation_history) > 40:
         conversation_history[:] = conversation_history[-40:]
     return {"status": "loaded", "message_count": len(conversation_history)}
+
+
+# ── FILE UPLOAD + ANALYSIS ───────────────────────
+
+TEXT_EXTENSIONS = {
+    ".txt", ".md", ".py", ".js", ".ts", ".jsx", ".tsx", ".css", ".html",
+    ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
+    ".csv", ".log", ".sh", ".bat", ".ps1", ".sql", ".env", ".gitignore",
+    ".c", ".cpp", ".h", ".java", ".go", ".rs", ".rb", ".php", ".swift",
+}
+MAX_FILE_SIZE = 2 * 1024 * 1024  # 2 MB
+MAX_TEXT_CHARS = 8000  # Limit text sent to AI
+
+
+def extract_file_content(filepath: Path, original_name: str) -> dict:
+    """Extract content and metadata from uploaded file."""
+    stat = filepath.stat()
+    size_kb = round(stat.st_size / 1024, 1)
+    ext = Path(original_name).suffix.lower()
+    mime = mimetypes.guess_type(original_name)[0] or "application/octet-stream"
+
+    result = {
+        "filename": original_name,
+        "size_kb": size_kb,
+        "extension": ext,
+        "mime": mime,
+        "content": None,
+        "type": "unknown",
+        "preview": None,
+    }
+
+    # Text files
+    if ext in TEXT_EXTENSIONS or mime.startswith("text/"):
+        result["type"] = "text"
+        try:
+            text = filepath.read_text(encoding="utf-8", errors="replace")
+            if len(text) > MAX_TEXT_CHARS:
+                result["content"] = text[:MAX_TEXT_CHARS]
+                result["preview"] = f"[Erste {MAX_TEXT_CHARS} Zeichen von {len(text)} gesamt]"
+            else:
+                result["content"] = text
+            result["line_count"] = text.count("\n") + 1
+        except Exception as e:
+            result["content"] = None
+            result["preview"] = f"Fehler beim Lesen: {e}"
+
+    # Images
+    elif mime and mime.startswith("image/"):
+        result["type"] = "image"
+        result["preview"] = f"Bild: {original_name} ({size_kb} KB)"
+
+    # PDF
+    elif ext == ".pdf":
+        result["type"] = "pdf"
+        result["preview"] = f"PDF: {original_name} ({size_kb} KB) — PDF-Textextraktion nicht verfügbar"
+
+    # Other
+    else:
+        result["type"] = "binary"
+        result["preview"] = f"Datei: {original_name} ({size_kb} KB, {mime})"
+
+    return result
+
+
+@app.post("/chat/file")
+async def chat_file_endpoint(
+    file: UploadFile = File(...),
+    message: str = Form(""),
+):
+    """Upload a file and analyze it with AI context."""
+    if not check_rate_limit():
+        return JSONResponse(status_code=429, content={"detail": "Zu viele Anfragen."})
+
+    # Size check
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        return JSONResponse(
+            status_code=413,
+            content={"detail": f"Datei zu groß (max {MAX_FILE_SIZE // 1024 // 1024} MB)."},
+        )
+
+    # Save to temp file
+    suffix = Path(file.filename or "upload").suffix
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+
+    try:
+        file_info = extract_file_content(tmp_path, file.filename or "upload")
+
+        # Build AI prompt with file context
+        user_msg = sanitize_input(message) if message else "Analysiere diese Datei."
+
+        if file_info["content"]:
+            file_context = (
+                f"[Datei: {file_info['filename']} | {file_info['size_kb']} KB | "
+                f"{file_info['line_count']} Zeilen | {file_info['extension']}]\n"
+                f"```\n{file_info['content']}\n```"
+            )
+            full_prompt = f"{user_msg}\n\n{file_context}"
+        elif file_info["type"] == "image":
+            full_prompt = (
+                f"{user_msg}\n\n[Bild hochgeladen: {file_info['filename']} "
+                f"({file_info['size_kb']} KB, {file_info['mime']})]"
+            )
+        else:
+            full_prompt = (
+                f"{user_msg}\n\n[Datei: {file_info['filename']} "
+                f"({file_info['size_kb']} KB, {file_info['mime']})]"
+            )
+
+        audit_log("chat_file", "received", f"FILE={file_info['filename']}")
+
+        # Get AI response
+        ai_response = chat(full_prompt, conversation_history)
+
+        # Update history
+        conversation_history.append({"role": "user", "content": full_prompt[:2000]})
+        conversation_history.append({"role": "assistant", "content": ai_response})
+        if len(conversation_history) > 40:
+            conversation_history[:] = conversation_history[-40:]
+
+        # Parse for actions
+        action = None
+        requires_confirmation = False
+        reply = ai_response
+        try:
+            parsed = json.loads(ai_response)
+            if isinstance(parsed, dict) and "action" in parsed:
+                action_name = parsed["action"]
+                validate_command_output(action_name)
+                permission = is_command_allowed(action_name)
+                if permission == "blocked":
+                    action = None
+                    reply = f"Befehl blockiert: {action_name}"
+                elif permission == "confirmation_required":
+                    requires_confirmation = True
+                    action = parsed
+                    reply = parsed.get("message", ai_response)
+                else:
+                    action = parsed
+                    reply = parsed.get("message", ai_response)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        return {
+            "reply": reply,
+            "action": action,
+            "requires_confirmation": requires_confirmation,
+            "file_info": {
+                "filename": file_info["filename"],
+                "size_kb": file_info["size_kb"],
+                "type": file_info["type"],
+                "extension": file_info["extension"],
+                "line_count": file_info.get("line_count"),
+                "preview": file_info["preview"],
+            },
+        }
+    finally:
+        try:
+            tmp_path.unlink()
+        except Exception:
+            pass
 
 
 @app.post("/chat", response_model=ChatResponse)

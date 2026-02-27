@@ -433,6 +433,7 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
 }
 
 .chat-messages {
@@ -712,6 +713,124 @@ body {
 @keyframes chipIn {
   from { opacity: 0; transform: translateY(6px) scale(0.95); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── DROP ZONE ───────────────────────────────── */
+.drop-zone-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 8, 26, 0.85);
+  backdrop-filter: blur(12px);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius);
+  margin: 12px;
+  transition: all 0.2s;
+}
+
+.drop-zone-overlay.visible {
+  display: flex;
+}
+
+.drop-zone-content {
+  text-align: center;
+  color: var(--accent2);
+  animation: dropPulse 1.5s ease infinite;
+}
+
+.drop-zone-content svg {
+  stroke: var(--accent);
+  margin-bottom: 12px;
+}
+
+.drop-zone-text {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.drop-zone-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+@keyframes dropPulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.02); opacity: 1; }
+}
+
+/* ── FILE CARDS ──────────────────────────────── */
+.file-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  margin-bottom: 6px;
+}
+
+.file-card-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.file-card-info {
+  min-width: 0;
+}
+
+.file-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 250px;
+}
+
+.file-card-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.file-info-badge {
+  display: inline-block;
+  background: var(--accent-soft);
+  border: 1px solid var(--glass-border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--accent2);
+  margin-bottom: 8px;
+}
+
+/* ── ATTACH BUTTON ───────────────────────────── */
+.attach-btn {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.attach-btn:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent2);
 }
 
 /* ── INPUT AREA ──────────────────────────────── */

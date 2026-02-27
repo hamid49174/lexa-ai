@@ -45,7 +45,7 @@ lexa-ai/
 ├── requirements.txt
 ├── start.bat               # Ein-Klick-Start (mit Health-Check)
 ├── backend/
-│   ├── main.py             # FastAPI Server v0.10.0 + SSE Streaming + Conversations + Router + Memory
+│   ├── main.py             # FastAPI Server v0.11.0 + SSE Streaming + File Upload + Conversations
 │   ├── ai_engine.py        # Groq API + Ollama Fallback + Streaming + Memory Context
 │   ├── memory.py           # SQLite: Notes, Memories, Profil, Routinen, Conversations
 │   ├── security.py         # Whitelist, Rate Limit, Sanitize, Path/URL/Param Validation, Audit
@@ -66,11 +66,11 @@ lexa-ai/
 ├── frontend/
 │   ├── package.json
 │   ├── main.js             # Electron Main Process
-│   ├── preload.js          # Secure Bridge (chat, execute, tts, stt, memory, ai, conversations)
+│   ├── preload.js          # Secure Bridge (chat, chatFile, execute, tts, stt, memory, conversations)
 │   └── src/
-│       ├── index.html      # NeoAI UI mit 9 Views + Dashboard + Conversations + Voice Orb
+│       ├── index.html      # NeoAI UI mit 9 Views + Drop Zone + File Attach + Conversations
 │       ├── styles.css      # Purple/Violet Glassmorphism Theme + Voice Orb + Dashboard CSS
-│       └── app.js          # v0.10 Conversations, Streaming Chat, Suggestions, Dashboard
+│       └── app.js          # v0.11 File Drop, Conversations, Streaming Chat, Suggestions
 └── tests/
 ```
 
@@ -111,6 +111,7 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - GET  /health — Server-Status + Version
 - POST /chat — KI-Chat (Groq → Ollama)
 - POST /chat/stream — SSE Streaming Chat (Wort-für-Wort)
+- POST /chat/file — Datei-Upload + AI-Analyse (Text, Code, Bilder, PDF)
 - POST /companion/execute — PC-Befehle ausführen
 - GET  /companion/commands — Alle Befehle listen
 - POST /voice/stt — Audio → Text (faster-whisper)
@@ -146,6 +147,10 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - View-Transitions mit Fade-In Animation
 - Card-Hover-Glow-Effekt, Sidebar Active-Indicator
 - Error Handling: Offline-Checks vor API-Calls
+- Drag & Drop: Dateien in Chat ziehen für AI-Analyse (Text, Code, Bilder, PDF)
+- File Attach: Büroklammer-Button + Datei-Auswahl-Dialog
+- File Cards: Datei-Preview-Karten mit Icon, Name, Größe, Extension
+- File Intelligence: Text-Extraktion (30+ Formate), AI-Kontext-Analyse, 2MB Limit
 - Conversations: Mehrere Chat-Sessions erstellen, wechseln, löschen, Auto-Titel
 - Conversation List: Sidebar-Sektion mit Chatverlauf, aktiver Indikator, Lösch-Button
 - Keyboard Shortcuts: Ctrl+1-9 Views, Ctrl+N Neuer Chat, Ctrl+P Palette, Esc Chat, Ctrl+L Clear, Ctrl+M Mic
@@ -171,3 +176,4 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - [x] Phase 9: Intelligence & Dashboard — Enhanced AI Prompt, Dashboard, Command Palette, NeoAI UI Overhaul, Voice Orb, Chat Upgrades
 - [x] Phase 10: Streaming & Smart UX — SSE Streaming Chat, Smart Suggestion Chips, Dashboard Live-Updates
 - [x] Phase 11: Smart Conversations — Mehrere Chat-Sessions, Auto-Titel, Conversation CRUD, SQLite Storage
+- [x] Phase 12: Drag & Drop + File Intelligence — Datei-Upload, Text-Extraktion, AI-Analyse, File Cards

@@ -117,7 +117,7 @@
           </div>
         </div>
         <div class="sidebar-footer">
-          <span class="version-tag">v0.10.0</span>
+          <span class="version-tag">v0.11.0</span>
         </div>
       </aside>
 
@@ -187,7 +187,7 @@
             <!-- Greeting Widget -->
             <div class="dash-widget dash-widget-greeting">
               <div class="dash-greeting-text" id="dash-greeting">Guten Tag, Chef!</div>
-              <div class="dash-greeting-sub" id="dash-greeting-sub">Lexa AI v0.10.0 &mdash; Dein lokaler KI-Assistent</div>
+              <div class="dash-greeting-sub" id="dash-greeting-sub">Lexa AI v0.11.0 &mdash; Dein lokaler KI-Assistent</div>
               <button class="dash-chat-btn" onclick="switchView('chat')">&#9889; Chat &ouml;ffnen</button>
             </div>
           </div>
@@ -195,6 +195,14 @@
 
         <!-- Chat View (default) -->
         <div class="chat-container" id="chat-container">
+          <!-- Drop Zone Overlay -->
+          <div class="drop-zone-overlay" id="drop-zone-overlay">
+            <div class="drop-zone-content">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <div class="drop-zone-text">Datei hier ablegen</div>
+              <div class="drop-zone-hint">Text, Code, Bilder, PDFs</div>
+            </div>
+          </div>
           <div class="chat-messages" id="chat-messages">
             <div class="message system-message">
               <div class="msg-avatar system">&#9889;</div>
@@ -216,6 +224,10 @@
           <!-- Input Area -->
           <div class="chat-input-area">
             <div class="input-wrapper">
+              <button class="attach-btn" id="attach-btn" aria-label="Datei anh&auml;ngen" title="Datei anh&auml;ngen" onclick="triggerFileUpload()">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+              </button>
+              <input type="file" id="file-input" style="display:none" onchange="handleFileSelect(event)">
               <button class="mic-btn" id="mic-btn" aria-label="Spracheingabe">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
               </button>
@@ -443,7 +455,7 @@
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name">Version</div>
-                <div class="setting-desc" id="settings-version">v0.10.0 Phase 11</div>
+                <div class="setting-desc" id="settings-version">v0.11.0 Phase 11</div>
               </div>
             </div>
             <div class="setting-item">

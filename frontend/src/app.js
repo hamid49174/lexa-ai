@@ -54,6 +54,7 @@ async function init() {
   setupVoice();
   setupKeyboardShortcuts();
   setupDesktopIntegration();
+  setupDragDrop();
   loadSidebarState();
   updateSystemStats();
   await loadConversations();
@@ -1431,6 +1432,146 @@ async function autoTitleConversation(userMessage) {
     if (conv) conv.title = title;
     renderConversationList();
   } catch {}
+}
+
+// ── DRAG & DROP + FILE UPLOAD ────────────────────
+let dragCounter = 0;
+
+function setupDragDrop() {
+  const chatContainer = document.getElementById("chat-container");
+  const overlay = document.getElementById("drop-zone-overlay");
+  if (!chatContainer || !overlay) return;
+
+  chatContainer.addEventListener("dragenter", (e) => {
+    e.preventDefault();
+    dragCounter++;
+    overlay.classList.add("visible");
+  });
+
+  chatContainer.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    dragCounter--;
+    if (dragCounter <= 0) {
+      dragCounter = 0;
+      overlay.classList.remove("visible");
+    }
+  });
+
+  chatContainer.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  });
+
+  chatContainer.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    overlay.classList.remove("visible");
+    const files = e.dataTransfer.files;
+    if (files.length > 0) handleFileUpload(files[0]);
+  });
+}
+
+function triggerFileUpload() {
+  document.getElementById("file-input")?.click();
+}
+
+function handleFileSelect(event) {
+  const file = event.target.files?.[0];
+  if (file) handleFileUpload(file);
+  event.target.value = ""; // Reset for re-upload
+}
+
+async function handleFileUpload(file) {
+  if (!backendOnline) { showToast("Backend nicht verbunden", "error"); return; }
+
+  const maxSize = 2 * 1024 * 1024;
+  if (file.size > maxSize) {
+    showToast("Datei zu gro\u00df (max 2 MB)", "error");
+    return;
+  }
+
+  // Auto-create conversation if needed
+  if (!currentConversationId) {
+    try {
+      const result = await window.lexa.conversationCreate("Neuer Chat");
+      currentConversationId = result.id;
+      localStorage.setItem("lexa-active-conversation", result.id);
+      const data = await window.lexa.conversations();
+      conversationsList = data.conversations || [];
+      renderConversationList();
+    } catch {}
+  }
+
+  // Show file card as user message
+  const sizeStr = file.size < 1024 ? file.size + " B"
+    : file.size < 1048576 ? (file.size / 1024).toFixed(1) + " KB"
+    : (file.size / 1048576).toFixed(1) + " MB";
+  const ext = file.name.includes(".") ? file.name.split(".").pop().toUpperCase() : "FILE";
+  const fileCardHtml = `<div class="file-card"><div class="file-card-icon">${getFileIcon(ext)}</div><div class="file-card-info"><div class="file-card-name">${escapeHtml(file.name)}</div><div class="file-card-meta">${ext} \u00b7 ${sizeStr}</div></div></div>`;
+
+  const userMsg = chatInput.value.trim();
+  addMessage(fileCardHtml + (userMsg ? `<br>${formatMessage(userMsg)}` : ""), "user");
+  chatInput.value = "";
+  chatInput.style.height = "auto";
+
+  // Auto-title
+  const isFirst = chatMessages.querySelectorAll(".user-message").length <= 1;
+  if (isFirst) autoTitleConversation(file.name);
+
+  isLoading = true;
+  sendBtn.disabled = true;
+  hideSuggestions();
+  showTyping();
+
+  try {
+    const res = await window.lexa.chatFile(file, userMsg || "");
+    hideTyping();
+
+    if (res.detail) {
+      addMessage(res.detail, "system");
+      showToast("Datei-Fehler", "error");
+    } else {
+      // Show file info + AI response
+      let infoHtml = "";
+      if (res.file_info) {
+        const fi = res.file_info;
+        infoHtml = `<div class="file-info-badge">${fi.type.toUpperCase()} \u00b7 ${fi.size_kb} KB${fi.line_count ? " \u00b7 " + fi.line_count + " Zeilen" : ""}</div>`;
+      }
+      addMessage(infoHtml + formatMessage(res.reply), "system", res.action, res.requires_confirmation);
+
+      if (res.action && !res.requires_confirmation) {
+        try {
+          const execResult = await window.lexa.execute(res.action.action, res.action.params || {});
+          if (execResult.success && execResult.data) {
+            const summary = typeof execResult.data === "string" ? execResult.data : JSON.stringify(execResult.data).substring(0, 200);
+            addMessage("Ausgef\u00fchrt: " + summary, "system");
+          }
+        } catch {}
+      }
+
+      playTTS(res.reply);
+      showSuggestions(res.reply, res.action);
+    }
+  } catch (err) {
+    hideTyping();
+    addMessage("Fehler beim Hochladen: " + err.message, "system");
+    showToast("Upload-Fehler", "error");
+  }
+
+  saveChatHistory();
+  saveCurrentConversation();
+  isLoading = false;
+  sendBtn.disabled = false;
+}
+
+function getFileIcon(ext) {
+  const icons = {
+    PY: "\u{1F40D}", JS: "\u{1F7E8}", TS: "\u{1F535}", HTML: "\u{1F310}", CSS: "\u{1F3A8}",
+    JSON: "\u{1F4CB}", MD: "\u{1F4DD}", TXT: "\u{1F4C4}", CSV: "\u{1F4CA}", LOG: "\u{1F4DC}",
+    PDF: "\u{1F4D5}", PNG: "\u{1F5BC}", JPG: "\u{1F5BC}", JPEG: "\u{1F5BC}", GIF: "\u{1F5BC}",
+    SVG: "\u{1F5BC}", SQL: "\u{1F5C3}", XML: "\u{1F4C3}", YAML: "\u2699", YML: "\u2699",
+  };
+  return icons[ext] || "\u{1F4CE}";
 }
 
 // ── SMART SUGGESTIONS ───────────────────────────

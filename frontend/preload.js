@@ -19,6 +19,18 @@ contextBridge.exposeInMainWorld("lexa", {
     return res.json();
   },
 
+  // Chat with File
+  chatFile: async (file, message = "") => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("message", message);
+    const res = await fetch(`${API}/chat/file`, {
+      method: "POST",
+      body: formData,
+    });
+    return res.json();
+  },
+
   // Companion API
   execute: async (command, params = {}, confirmed = false) => {
     const res = await fetch(`${API}/companion/execute`, {
