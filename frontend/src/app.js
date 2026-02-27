@@ -1,6 +1,7 @@
 /* ════════════════════════════════════════════════
-   LEXA AI — Frontend Application Logic v0.5
-   Phase 5: Polish, Error Handling, Toast System
+   LEXA AI — Frontend Application Logic v0.6
+   Phase 7: Keyboard Shortcuts, Chat Persistence,
+   Command Search, Sidebar Toggle
    ════════════════════════════════════════════════ */
 
 const chatMessages = document.getElementById("chat-messages");
@@ -19,11 +20,14 @@ let mediaRecorder = null;
 let audioChunks = [];
 let backendOnline = false;
 let reconnectAttempts = 0;
+let sidebarCollapsed = false;
+
+const VIEW_KEYS = ["chat", "system", "commands", "browser", "files", "media", "memory", "settings"];
 
 // ── TOAST SYSTEM ─────────────────────────────────
 function showToast(message, type = "info", duration = 3500) {
   const container = document.getElementById("toast-container");
-  const icons = { success: "✓", error: "✗", warning: "⚠", info: "ℹ" };
+  const icons = { success: "\u2713", error: "\u2717", warning: "\u26A0", info: "\u2139" };
   const toast = document.createElement("div");
   toast.className = `toast ${type}`;
   toast.innerHTML = `
@@ -44,7 +48,116 @@ async function init() {
   setInterval(updateSystemStats, 5000);
   setupSidebar();
   setupVoice();
+  setupKeyboardShortcuts();
+  loadChatHistory();
+  loadSidebarState();
   updateSystemStats();
+}
+
+// ── KEYBOARD SHORTCUTS ───────────────────────────
+function setupKeyboardShortcuts() {
+  document.addEventListener("keydown", (e) => {
+    // Ctrl+1-8: Switch views
+    if (e.ctrlKey && !e.shiftKey && !e.altKey) {
+      const num = parseInt(e.key);
+      if (num >= 1 && num <= 8) {
+        e.preventDefault();
+        switchView(VIEW_KEYS[num - 1]);
+        return;
+      }
+    }
+
+    // Escape: Back to chat + focus input
+    if (e.key === "Escape") {
+      if (currentView !== "chat") {
+        switchView("chat");
+      }
+      chatInput.focus();
+      return;
+    }
+
+    // Ctrl+L: Clear chat
+    if (e.ctrlKey && e.key === "l") {
+      e.preventDefault();
+      clearChat();
+      return;
+    }
+
+    // Ctrl+B: Toggle sidebar
+    if (e.ctrlKey && e.key === "b") {
+      e.preventDefault();
+      toggleSidebar();
+      return;
+    }
+
+    // Ctrl+K: Focus command search
+    if (e.ctrlKey && e.key === "k") {
+      e.preventDefault();
+      switchView("commands");
+      setTimeout(() => {
+        const searchInput = document.getElementById("cmd-search");
+        if (searchInput) searchInput.focus();
+      }, 100);
+      return;
+    }
+
+    // Ctrl+M: Toggle mic
+    if (e.ctrlKey && e.key === "m") {
+      e.preventDefault();
+      toggleRecording();
+      return;
+    }
+  });
+}
+
+function clearChat() {
+  const msgs = chatMessages.querySelectorAll(".message");
+  msgs.forEach((m, i) => { if (i > 0) m.remove(); });
+  localStorage.removeItem("lexa-chat-history");
+  showToast("Chat gel\u00f6scht", "info", 2000);
+}
+
+// ── CHAT PERSISTENCE ─────────────────────────────
+function saveChatHistory() {
+  const messages = [];
+  chatMessages.querySelectorAll(".message").forEach((msg, i) => {
+    if (i === 0) return;
+    const text = msg.querySelector(".msg-text")?.textContent || "";
+    const type = msg.classList.contains("user-message") ? "user" : "system";
+    if (text) messages.push({ text, type });
+  });
+  const toSave = messages.slice(-50);
+  try {
+    localStorage.setItem("lexa-chat-history", JSON.stringify(toSave));
+  } catch {}
+}
+
+function loadChatHistory() {
+  try {
+    const saved = localStorage.getItem("lexa-chat-history");
+    if (!saved) return;
+    const messages = JSON.parse(saved);
+    if (!Array.isArray(messages) || messages.length === 0) return;
+    messages.forEach((m) => {
+      addMessage(m.text, m.type, null, false, true);
+    });
+  } catch {}
+}
+
+// ── SIDEBAR TOGGLE ───────────────────────────────
+function toggleSidebar() {
+  sidebarCollapsed = !sidebarCollapsed;
+  const sidebar = document.querySelector(".sidebar");
+  sidebar.classList.toggle("collapsed", sidebarCollapsed);
+  localStorage.setItem("lexa-sidebar-collapsed", sidebarCollapsed ? "1" : "0");
+}
+
+function loadSidebarState() {
+  const saved = localStorage.getItem("lexa-sidebar-collapsed");
+  if (saved === "1") {
+    sidebarCollapsed = true;
+    document.querySelector(".sidebar").classList.add("collapsed");
+  }
 }
 
 // ── HEALTH CHECK + RECONNECT ─────────────────────
@@ -97,9 +210,7 @@ async function updateSystemStats() {
       colorStat("stat-ram", d.ram_percent);
       colorStat("stat-disk", d.disk_percent);
     }
-  } catch {
-    // Backend not running
-  }
+  } catch {}
 }
 
 function colorStat(id, value) {
@@ -121,17 +232,14 @@ function setupSidebar() {
 function switchView(view) {
   currentView = view;
 
-  // Update sidebar buttons
   document.querySelectorAll(".sidebar-btn").forEach((b) => b.classList.remove("active"));
   document.querySelector(`[data-view="${view}"]`)?.classList.add("active");
 
-  // Hide all views
   document.querySelector(".chat-container").style.display = "none";
   document.querySelectorAll(".system-view, .commands-view, .tool-view").forEach((v) => {
     v.classList.remove("active");
   });
 
-  // Show selected view
   if (view === "chat") {
     document.querySelector(".chat-container").style.display = "flex";
   } else if (view === "system") {
@@ -178,17 +286,14 @@ function createSystemView() {
 async function refreshSystemView() {
   const grid = document.getElementById("system-grid");
   if (!grid) return;
-
   if (!backendOnline) {
     grid.innerHTML = '<div class="info-card"><div class="info-card-value" style="font-size:16px;color:var(--error)">Backend nicht erreichbar</div></div>';
     return;
   }
-
   try {
     const res = await window.lexa.execute("system_info");
     if (!res.success) return;
     const d = res.data;
-
     grid.innerHTML = `
       <div class="info-card">
         <div class="info-card-label">CPU AUSLASTUNG</div>
@@ -216,107 +321,126 @@ async function refreshSystemView() {
   }
 }
 
-// ── COMMANDS VIEW ────────────────────────────────
+// ── COMMANDS VIEW (with search) ─────────────────
+const ALL_COMMANDS = [
+  { name: "app_open", desc: "App per Name starten", status: "allowed", cat: "BASIS" },
+  { name: "app_list", desc: "Laufende Apps auflisten", status: "allowed", cat: "BASIS" },
+  { name: "system_info", desc: "CPU, RAM, Disk Info", status: "allowed", cat: "BASIS" },
+  { name: "screenshot", desc: "Desktop-Screenshot", status: "allowed", cat: "BASIS" },
+  { name: "process_list", desc: "Prozesse anzeigen", status: "allowed", cat: "BASIS" },
+  { name: "process_kill", desc: "Prozess beenden", status: "confirm", cat: "BASIS" },
+  { name: "clipboard_read", desc: "Clipboard lesen", status: "allowed", cat: "BASIS" },
+  { name: "clipboard_write", desc: "In Clipboard schreiben", status: "allowed", cat: "BASIS" },
+  { name: "volume_set", desc: "Lautst\u00e4rke setzen", status: "allowed", cat: "BASIS" },
+  { name: "volume_mute", desc: "Stummschalten", status: "allowed", cat: "BASIS" },
+  { name: "file_search", desc: "Dateien suchen", status: "allowed", cat: "BASIS" },
+  { name: "window_list", desc: "Fenster auflisten", status: "allowed", cat: "BASIS" },
+  { name: "window_focus", desc: "Fenster fokussieren", status: "allowed", cat: "BASIS" },
+  { name: "brightness_set", desc: "Helligkeit setzen", status: "allowed", cat: "BASIS" },
+  { name: "wifi_status", desc: "WLAN-Status", status: "allowed", cat: "BASIS" },
+  { name: "battery_status", desc: "Akku-Info", status: "allowed", cat: "BASIS" },
+  { name: "timer_set", desc: "Timer stellen", status: "allowed", cat: "BASIS" },
+  { name: "browser_open", desc: "URL \u00f6ffnen", status: "allowed", cat: "BASIS" },
+  { name: "shutdown", desc: "PC herunterfahren", status: "confirm", cat: "BASIS" },
+  { name: "restart", desc: "PC neustarten", status: "confirm", cat: "BASIS" },
+  { name: "youtube_search", desc: "YouTube durchsuchen", status: "allowed", cat: "BROWSER" },
+  { name: "youtube_play", desc: "YouTube-Video abspielen", status: "allowed", cat: "BROWSER" },
+  { name: "web_open", desc: "URL im Browser \u00f6ffnen", status: "allowed", cat: "BROWSER" },
+  { name: "web_screenshot", desc: "Website-Screenshot", status: "allowed", cat: "BROWSER" },
+  { name: "web_pdf", desc: "Website als PDF", status: "allowed", cat: "BROWSER" },
+  { name: "web_scrape", desc: "Text extrahieren", status: "allowed", cat: "BROWSER" },
+  { name: "price_check", desc: "Preis pr\u00fcfen", status: "allowed", cat: "BROWSER" },
+  { name: "browser_close", desc: "Browser schlie\u00dfen", status: "allowed", cat: "BROWSER" },
+  { name: "find_duplicates", desc: "Doppelte Dateien finden", status: "confirm", cat: "DATEIEN" },
+  { name: "batch_rename", desc: "Dateien umbenennen", status: "confirm", cat: "DATEIEN" },
+  { name: "organize_downloads", desc: "Downloads sortieren", status: "confirm", cat: "DATEIEN" },
+  { name: "merge_pdfs", desc: "PDFs zusammenf\u00fcgen", status: "confirm", cat: "DATEIEN" },
+  { name: "split_pdf", desc: "PDF aufteilen", status: "confirm", cat: "DATEIEN" },
+  { name: "disk_analysis", desc: "Speicher-Analyse", status: "allowed", cat: "DATEIEN" },
+  { name: "clean_temp", desc: "Temp bereinigen", status: "confirm", cat: "DATEIEN" },
+  { name: "media_play_pause", desc: "Play/Pause", status: "allowed", cat: "MEDIA" },
+  { name: "media_next", desc: "N\u00e4chster Track", status: "allowed", cat: "MEDIA" },
+  { name: "media_prev", desc: "Vorheriger Track", status: "allowed", cat: "MEDIA" },
+  { name: "media_stop", desc: "Stoppen", status: "allowed", cat: "MEDIA" },
+  { name: "spotify_open", desc: "Spotify \u00f6ffnen", status: "allowed", cat: "MEDIA" },
+  { name: "convert_media", desc: "Format konvertieren", status: "allowed", cat: "MEDIA" },
+  { name: "extract_audio", desc: "Audio extrahieren", status: "allowed", cat: "MEDIA" },
+  { name: "screen_record", desc: "Bildschirmaufnahme", status: "allowed", cat: "MEDIA" },
+  { name: "email_read", desc: "E-Mails lesen", status: "allowed", cat: "KOMMUNIKATION" },
+  { name: "email_send", desc: "E-Mail senden", status: "confirm", cat: "KOMMUNIKATION" },
+  { name: "telegram_read", desc: "Telegram lesen", status: "allowed", cat: "KOMMUNIKATION" },
+  { name: "telegram_send", desc: "Telegram senden", status: "confirm", cat: "KOMMUNIKATION" },
+  { name: "discord_send", desc: "Discord senden", status: "confirm", cat: "KOMMUNIKATION" },
+  { name: "note_create", desc: "Notiz erstellen", status: "allowed", cat: "GED\u00c4CHTNIS" },
+  { name: "note_read", desc: "Notiz lesen", status: "allowed", cat: "GED\u00c4CHTNIS" },
+  { name: "note_list", desc: "Notizen auflisten", status: "allowed", cat: "GED\u00c4CHTNIS" },
+  { name: "note_delete", desc: "Notiz l\u00f6schen", status: "confirm", cat: "GED\u00c4CHTNIS" },
+  { name: "memory_search", desc: "Ged\u00e4chtnis durchsuchen", status: "allowed", cat: "GED\u00c4CHTNIS" },
+  { name: "memory_add", desc: "Erinnerung hinzuf\u00fcgen", status: "allowed", cat: "GED\u00c4CHTNIS" },
+  { name: "summarize", desc: "Text zusammenfassen", status: "allowed", cat: "GED\u00c4CHTNIS" },
+  { name: "routine_create", desc: "Routine erstellen", status: "confirm", cat: "GED\u00c4CHTNIS" },
+  { name: "routine_list", desc: "Routinen auflisten", status: "allowed", cat: "GED\u00c4CHTNIS" },
+  { name: "routine_delete", desc: "Routine l\u00f6schen", status: "confirm", cat: "GED\u00c4CHTNIS" },
+  { name: "routine_toggle", desc: "Routine an/aus", status: "confirm", cat: "GED\u00c4CHTNIS" },
+];
+
 function createCommandsView() {
   const div = document.createElement("div");
   div.className = "commands-view active";
+  div.innerHTML = `
+    <div class="view-title">Alle <span>Befehle</span></div>
+    <div class="cmd-search-bar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="cmd-search" class="cmd-search-input" placeholder="Befehl suchen... (Ctrl+K)" oninput="filterCommands(this.value)">
+      <span class="cmd-count" id="cmd-count-badge">${ALL_COMMANDS.length} Befehle</span>
+    </div>
+    <div id="cmd-results"></div>
+  `;
+  setTimeout(() => renderCommands(""), 0);
+  return div;
+}
 
-  const categories = {
-    "BASIS": [
-      { name: "app_open", desc: "App per Name starten", status: "allowed" },
-      { name: "app_list", desc: "Laufende Apps auflisten", status: "allowed" },
-      { name: "system_info", desc: "CPU, RAM, Disk Info", status: "allowed" },
-      { name: "screenshot", desc: "Desktop-Screenshot", status: "allowed" },
-      { name: "process_list", desc: "Prozesse anzeigen", status: "allowed" },
-      { name: "process_kill", desc: "Prozess beenden", status: "confirm" },
-      { name: "clipboard_read", desc: "Clipboard lesen", status: "allowed" },
-      { name: "clipboard_write", desc: "In Clipboard schreiben", status: "allowed" },
-      { name: "volume_set", desc: "Lautstärke setzen", status: "allowed" },
-      { name: "volume_mute", desc: "Stummschalten", status: "allowed" },
-      { name: "file_search", desc: "Dateien suchen", status: "allowed" },
-      { name: "window_list", desc: "Fenster auflisten", status: "allowed" },
-      { name: "window_focus", desc: "Fenster fokussieren", status: "allowed" },
-      { name: "brightness_set", desc: "Helligkeit setzen", status: "allowed" },
-      { name: "wifi_status", desc: "WLAN-Status", status: "allowed" },
-      { name: "battery_status", desc: "Akku-Info", status: "allowed" },
-      { name: "timer_set", desc: "Timer stellen", status: "allowed" },
-      { name: "browser_open", desc: "URL öffnen", status: "allowed" },
-      { name: "shutdown", desc: "PC herunterfahren", status: "confirm" },
-      { name: "restart", desc: "PC neustarten", status: "confirm" },
-    ],
-    "BROWSER-AUTOMATION": [
-      { name: "youtube_search", desc: "YouTube durchsuchen", status: "allowed" },
-      { name: "youtube_play", desc: "YouTube-Video abspielen", status: "allowed" },
-      { name: "web_open", desc: "URL im Browser öffnen", status: "allowed" },
-      { name: "web_screenshot", desc: "Website-Screenshot", status: "allowed" },
-      { name: "web_pdf", desc: "Website als PDF", status: "allowed" },
-      { name: "web_scrape", desc: "Text extrahieren", status: "allowed" },
-      { name: "price_check", desc: "Preis prüfen", status: "allowed" },
-      { name: "browser_close", desc: "Browser schließen", status: "allowed" },
-    ],
-    "DATEI-TOOLS": [
-      { name: "find_duplicates", desc: "Doppelte Dateien finden", status: "confirm" },
-      { name: "batch_rename", desc: "Dateien umbenennen", status: "confirm" },
-      { name: "organize_downloads", desc: "Downloads sortieren", status: "confirm" },
-      { name: "merge_pdfs", desc: "PDFs zusammenfügen", status: "confirm" },
-      { name: "split_pdf", desc: "PDF aufteilen", status: "confirm" },
-      { name: "disk_analysis", desc: "Speicher-Analyse", status: "allowed" },
-      { name: "clean_temp", desc: "Temp bereinigen", status: "confirm" },
-    ],
-    "MEDIA": [
-      { name: "media_play_pause", desc: "Play/Pause", status: "allowed" },
-      { name: "media_next", desc: "Nächster Track", status: "allowed" },
-      { name: "media_prev", desc: "Vorheriger Track", status: "allowed" },
-      { name: "media_stop", desc: "Stoppen", status: "allowed" },
-      { name: "spotify_open", desc: "Spotify öffnen", status: "allowed" },
-      { name: "convert_media", desc: "Format konvertieren", status: "allowed" },
-      { name: "extract_audio", desc: "Audio extrahieren", status: "allowed" },
-      { name: "screen_record", desc: "Bildschirmaufnahme", status: "allowed" },
-    ],
-    "KOMMUNIKATION": [
-      { name: "email_read", desc: "E-Mails lesen", status: "allowed" },
-      { name: "email_send", desc: "E-Mail senden", status: "confirm" },
-      { name: "telegram_read", desc: "Telegram lesen", status: "allowed" },
-      { name: "telegram_send", desc: "Telegram senden", status: "confirm" },
-      { name: "discord_send", desc: "Discord senden", status: "confirm" },
-    ],
-    "GEDÄCHTNIS & NOTIZEN": [
-      { name: "note_create", desc: "Notiz erstellen", status: "allowed" },
-      { name: "note_read", desc: "Notiz lesen", status: "allowed" },
-      { name: "note_list", desc: "Notizen auflisten", status: "allowed" },
-      { name: "note_delete", desc: "Notiz löschen", status: "confirm" },
-      { name: "memory_search", desc: "Gedächtnis durchsuchen", status: "allowed" },
-      { name: "memory_add", desc: "Erinnerung hinzufügen", status: "allowed" },
-      { name: "summarize", desc: "Text zusammenfassen", status: "allowed" },
-      { name: "routine_create", desc: "Routine erstellen", status: "confirm" },
-      { name: "routine_list", desc: "Routinen auflisten", status: "allowed" },
-      { name: "routine_delete", desc: "Routine löschen", status: "confirm" },
-      { name: "routine_toggle", desc: "Routine an/aus", status: "confirm" },
-    ],
-  };
+function filterCommands(query) {
+  renderCommands(query.toLowerCase().trim());
+}
 
-  const statusLabel = { allowed: "ERLAUBT", confirm: "BESTÄTIGUNG", blocked: "BLOCKIERT" };
+function renderCommands(query) {
+  const container = document.getElementById("cmd-results");
+  if (!container) return;
 
-  let html = `<div class="view-title">Alle <span>Befehle</span></div>`;
+  const statusLabel = { allowed: "ERLAUBT", confirm: "BEST\u00c4TIGUNG", blocked: "BLOCKIERT" };
+  const filtered = query
+    ? ALL_COMMANDS.filter(c => c.name.includes(query) || c.desc.toLowerCase().includes(query) || c.cat.toLowerCase().includes(query))
+    : ALL_COMMANDS;
 
-  for (const [cat, cmds] of Object.entries(categories)) {
-    html += `<div class="cmd-category">`;
-    html += `<div class="cmd-category-title">${cat}</div>`;
-    html += `<div class="cmd-list">`;
+  const badge = document.getElementById("cmd-count-badge");
+  if (badge) badge.textContent = `${filtered.length} Befehle`;
+
+  const grouped = {};
+  for (const c of filtered) {
+    if (!grouped[c.cat]) grouped[c.cat] = [];
+    grouped[c.cat].push(c);
+  }
+
+  let html = "";
+  for (const [cat, cmds] of Object.entries(grouped)) {
+    html += `<div class="cmd-category"><div class="cmd-category-title">${cat}</div><div class="cmd-list">`;
     for (const c of cmds) {
+      const highlight = query ? c.name.replace(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, "gi"), '<mark>$1</mark>') : c.name;
       html += `
         <div class="cmd-item" onclick="insertCommand('${c.name}')">
-          <div class="cmd-name">${c.name}</div>
+          <div class="cmd-name">${highlight}</div>
           <div class="cmd-desc">${c.desc}</div>
           <span class="cmd-badge ${c.status}">${statusLabel[c.status]}</span>
-        </div>
-      `;
+        </div>`;
     }
     html += `</div></div>`;
   }
 
-  div.innerHTML = html;
-  return div;
+  if (filtered.length === 0) {
+    html = '<div class="empty-state">Kein Befehl gefunden.</div>';
+  }
+  container.innerHTML = html;
 }
 
 function insertCommand(cmd) {
@@ -327,11 +451,7 @@ function insertCommand(cmd) {
 
 // ── TOOL QUICK ACTIONS ──────────────────────────
 async function quickAction(command, promptText, paramKey) {
-  if (!backendOnline) {
-    showToast("Backend nicht verbunden", "error");
-    return;
-  }
-
+  if (!backendOnline) { showToast("Backend nicht verbunden", "error"); return; }
   const value = prompt(promptText);
   if (!value && value !== "") return;
 
@@ -350,9 +470,7 @@ async function quickAction(command, promptText, paramKey) {
     const res = await window.lexa.execute(command, params, true);
     hideTyping();
     if (res.success) {
-      const summary = typeof res.data === "string"
-        ? res.data
-        : JSON.stringify(res.data, null, 2).substring(0, 500);
+      const summary = typeof res.data === "string" ? res.data : JSON.stringify(res.data, null, 2).substring(0, 500);
       addMessage(summary, "system");
       showToast(`${command} erfolgreich`, "success");
     } else {
@@ -367,11 +485,7 @@ async function quickAction(command, promptText, paramKey) {
 }
 
 async function runTool(command, params = {}) {
-  if (!backendOnline) {
-    showToast("Backend nicht verbunden", "error");
-    return;
-  }
-
+  if (!backendOnline) { showToast("Backend nicht verbunden", "error"); return; }
   switchView("chat");
   addMessage(`Starte ${command}...`, "user");
   showTyping();
@@ -380,9 +494,7 @@ async function runTool(command, params = {}) {
     const res = await window.lexa.execute(command, params, true);
     hideTyping();
     if (res.success) {
-      const summary = typeof res.data === "string"
-        ? res.data
-        : JSON.stringify(res.data, null, 2).substring(0, 500);
+      const summary = typeof res.data === "string" ? res.data : JSON.stringify(res.data, null, 2).substring(0, 500);
       addMessage(summary, "system");
       showToast(`${command} erledigt`, "success");
     } else {
@@ -397,7 +509,7 @@ async function runTool(command, params = {}) {
 }
 
 // ── CHAT ─────────────────────────────────────────
-function addMessage(text, type = "system", action = null, requiresConfirmation = false) {
+function addMessage(text, type = "system", action = null, requiresConfirmation = false, silent = false) {
   const msg = document.createElement("div");
   msg.className = `message ${type}-message`;
 
@@ -412,17 +524,15 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
       <div class="msg-action">
         <div class="action-label">AKTION</div>
         <div class="action-cmd">${action.action}(${JSON.stringify(action.params || {})})</div>
-      </div>
-    `;
+      </div>`;
   }
 
   let confirmHtml = "";
   if (requiresConfirmation && action) {
     const actionStr = encodeURIComponent(JSON.stringify(action));
     confirmHtml = `
-      <button class="confirm-btn" onclick="confirmAction(this, '${actionStr}')">Bestätigen</button>
-      <button class="deny-btn" onclick="denyAction(this)">Abbrechen</button>
-    `;
+      <button class="confirm-btn" onclick="confirmAction(this, '${actionStr}')">Best\u00e4tigen</button>
+      <button class="deny-btn" onclick="denyAction(this)">Abbrechen</button>`;
   }
 
   msg.innerHTML = `
@@ -432,11 +542,11 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
       <div class="msg-text">${formatMessage(text)}</div>
       ${actionHtml}
       ${confirmHtml}
-    </div>
-  `;
+    </div>`;
 
   chatMessages.appendChild(msg);
   chatMessages.scrollTop = chatMessages.scrollHeight;
+  if (!silent) saveChatHistory();
 }
 
 function denyAction(btn) {
@@ -463,8 +573,7 @@ function showTyping() {
     <div class="msg-avatar system">&#9889;</div>
     <div class="msg-body">
       <div class="typing-indicator"><span></span><span></span><span></span></div>
-    </div>
-  `;
+    </div>`;
   chatMessages.appendChild(div);
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
@@ -476,18 +585,13 @@ function hideTyping() {
 async function sendMessage() {
   const text = chatInput.value.trim();
   if (!text || isLoading) return;
-
-  if (!backendOnline) {
-    showToast("Backend nicht verbunden — bitte warten", "error");
-    return;
-  }
+  if (!backendOnline) { showToast("Backend nicht verbunden", "error"); return; }
 
   addMessage(text, "user");
   chatInput.value = "";
   chatInput.style.height = "auto";
   isLoading = true;
   sendBtn.disabled = true;
-
   showTyping();
 
   try {
@@ -506,37 +610,32 @@ async function sendMessage() {
 
 async function confirmAction(btn, actionStr) {
   const action = JSON.parse(decodeURIComponent(actionStr));
-  btn.textContent = "Wird ausgeführt...";
+  btn.textContent = "Wird ausgef\u00fchrt...";
   btn.disabled = true;
 
   try {
     const res = await window.lexa.execute(action.action, action.params || {}, true);
     if (res.success) {
-      addMessage(`Ausgeführt: ${JSON.stringify(res.data).substring(0, 200)}`, "system");
-      showToast(`${action.action} ausgeführt`, "success");
+      addMessage(`Ausgef\u00fchrt: ${JSON.stringify(res.data).substring(0, 200)}`, "system");
+      showToast(`${action.action} ausgef\u00fchrt`, "success");
     } else {
       addMessage(`Fehler: ${res.error}`, "system");
       showToast(`${action.action} fehlgeschlagen`, "error");
     }
   } catch {
-    addMessage("Fehler bei der Ausführung.", "system");
-    showToast("Ausführungsfehler", "error");
+    addMessage("Fehler bei der Ausf\u00fchrung.", "system");
+    showToast("Ausf\u00fchrungsfehler", "error");
   }
 }
 
 // ── EVENT LISTENERS ──────────────────────────────
 chatInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
-
 chatInput.addEventListener("input", () => {
   chatInput.style.height = "auto";
   chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + "px";
 });
-
 sendBtn.addEventListener("click", sendMessage);
 
 // ── VOICE ────────────────────────────────────────
@@ -551,11 +650,7 @@ function setupVoice() {
 }
 
 async function toggleRecording() {
-  if (isRecording) {
-    stopRecording();
-  } else {
-    startRecording();
-  }
+  if (isRecording) stopRecording(); else startRecording();
 }
 
 async function startRecording() {
@@ -563,21 +658,16 @@ async function startRecording() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
     audioChunks = [];
-
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) audioChunks.push(e.data);
-    };
-
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
     mediaRecorder.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop());
       const blob = new Blob(audioChunks, { type: "audio/webm" });
       await processVoiceInput(blob);
     };
-
     mediaRecorder.start();
     isRecording = true;
     micBtn.classList.add("recording");
-    document.getElementById("voice-status-hint").textContent = "Aufnahme läuft... Klicke zum Stoppen";
+    document.getElementById("voice-status-hint").textContent = "Aufnahme l\u00e4uft... Klicke zum Stoppen";
     showToast("Aufnahme gestartet", "info", 2000);
   } catch (err) {
     addMessage("Mikrofon-Zugriff verweigert. Bitte erlaube den Zugriff.", "system");
@@ -586,9 +676,7 @@ async function startRecording() {
 }
 
 function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== "inactive") {
-    mediaRecorder.stop();
-  }
+  if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
   isRecording = false;
   micBtn.classList.remove("recording");
   document.getElementById("voice-status-hint").textContent = "Mikrofon: klicken zum Sprechen";
@@ -601,9 +689,7 @@ async function processVoiceInput(audioBlob) {
     hideTyping();
     if (result.success && result.text) {
       addMessage(result.text, "user");
-      isLoading = true;
-      sendBtn.disabled = true;
-      showTyping();
+      isLoading = true; sendBtn.disabled = true; showTyping();
       const chatRes = await window.lexa.chat(result.text);
       hideTyping();
       handleChatResponse(chatRes);
@@ -613,47 +699,35 @@ async function processVoiceInput(audioBlob) {
     }
   } catch {
     hideTyping();
-    addMessage("Spracherkennung nicht verfügbar. Ist das Backend gestartet?", "system");
-    showToast("STT nicht verfügbar", "error");
+    addMessage("Spracherkennung nicht verf\u00fcgbar.", "system");
+    showToast("STT nicht verf\u00fcgbar", "error");
   }
-  isLoading = false;
-  sendBtn.disabled = false;
+  isLoading = false; sendBtn.disabled = false;
 }
 
 async function playTTS(text) {
   if (!ttsEnabled) return;
   try {
     const audioUrl = await window.lexa.tts(text);
-    if (audioUrl) {
-      const audio = new Audio(audioUrl);
-      audio.play();
-    }
-  } catch {
-    // TTS not available — silent fail
-  }
+    if (audioUrl) new Audio(audioUrl).play();
+  } catch {}
 }
 
 function handleChatResponse(res) {
   if (res.detail) {
     addMessage(res.detail, "system");
-    if (res.detail.includes("Zu viele")) {
-      showToast("Rate Limit erreicht", "warning");
-    }
+    if (res.detail.includes("Zu viele")) showToast("Rate Limit erreicht", "warning");
   } else {
     addMessage(res.reply, "system", res.action, res.requires_confirmation);
     playTTS(res.reply);
     if (res.action && !res.requires_confirmation) {
       window.lexa.execute(res.action.action, res.action.params || {}).then((execResult) => {
         if (execResult.success && execResult.data) {
-          const summary = typeof execResult.data === "string"
-            ? execResult.data
-            : JSON.stringify(execResult.data).substring(0, 200);
-          addMessage("Ausgeführt: " + summary, "system");
+          const summary = typeof execResult.data === "string" ? execResult.data : JSON.stringify(execResult.data).substring(0, 200);
+          addMessage("Ausgef\u00fchrt: " + summary, "system");
           showToast(`${res.action.action} erledigt`, "success", 2500);
         }
-      }).catch(() => {
-        showToast("Ausführungsfehler", "error");
-      });
+      }).catch(() => showToast("Ausf\u00fchrungsfehler", "error"));
     }
   }
 }
@@ -662,98 +736,47 @@ function handleChatResponse(res) {
 async function refreshMemoryView() {
   if (!backendOnline) return;
 
-  // Stats
   const stats = await window.lexa.memoryStats();
   const statsGrid = document.getElementById("memory-stats-grid");
   if (statsGrid) {
     statsGrid.innerHTML = `
-      <div class="info-card">
-        <div class="info-card-label">NOTIZEN</div>
-        <div class="info-card-value">${stats.notes || 0}</div>
-      </div>
-      <div class="info-card">
-        <div class="info-card-label">ERINNERUNGEN</div>
-        <div class="info-card-value">${stats.memories || 0}</div>
-      </div>
-      <div class="info-card">
-        <div class="info-card-label">INTERAKTIONEN</div>
-        <div class="info-card-value">${stats.interactions || 0}</div>
-      </div>
-      <div class="info-card">
-        <div class="info-card-label">ROUTINEN</div>
-        <div class="info-card-value">${stats.routines || 0}</div>
-      </div>
+      <div class="info-card"><div class="info-card-label">NOTIZEN</div><div class="info-card-value">${stats.notes || 0}</div></div>
+      <div class="info-card"><div class="info-card-label">ERINNERUNGEN</div><div class="info-card-value">${stats.memories || 0}</div></div>
+      <div class="info-card"><div class="info-card-label">INTERAKTIONEN</div><div class="info-card-value">${stats.interactions || 0}</div></div>
+      <div class="info-card"><div class="info-card-label">ROUTINEN</div><div class="info-card-value">${stats.routines || 0}</div></div>
     `;
   }
 
-  // Notes
   const notesData = await window.lexa.notes();
   const notesList = document.getElementById("notes-list");
   if (notesList) {
-    if (notesData.notes && notesData.notes.length > 0) {
-      notesList.innerHTML = notesData.notes.map(n => `
-        <div class="note-card">
-          <div class="note-title">${n.title}</div>
-          <div class="note-meta">${n.category} &middot; ${n.created_at || ""}</div>
-        </div>
-      `).join("");
-    } else {
-      notesList.innerHTML = '<div class="empty-state">Keine Notizen vorhanden. Sag Lexa "Erstelle eine Notiz..."</div>';
-    }
+    notesList.innerHTML = (notesData.notes?.length > 0)
+      ? notesData.notes.map(n => `<div class="note-card"><div class="note-title">${n.title}</div><div class="note-meta">${n.category} &middot; ${n.created_at || ""}</div></div>`).join("")
+      : '<div class="empty-state">Keine Notizen. Sag Lexa "Erstelle eine Notiz..."</div>';
   }
 
-  // AI Status
   const aiStatus = await window.lexa.aiStatus();
   const aiPanel = document.getElementById("ai-status-panel");
   if (aiPanel) {
-    const groqActive = aiStatus.groq?.available;
-    const ollamaActive = aiStatus.ollama?.available;
-    const models = aiStatus.ollama?.models || [];
-
+    const ga = aiStatus.groq?.available, oa = aiStatus.ollama?.available, models = aiStatus.ollama?.models || [];
     aiPanel.innerHTML = `
-      <div class="info-card provider-card">
-        <span class="provider-dot ${groqActive ? "active" : "inactive"}"></span>
-        <div>
-          <div style="font-weight:600;color:var(--text)">Groq API</div>
-          <div style="font-size:11px;color:var(--text-muted)">Llama 3.3 70B &middot; ${groqActive ? "Verbunden" : "Offline"}</div>
-        </div>
-      </div>
-      <div class="info-card provider-card">
-        <span class="provider-dot ${ollamaActive ? "active" : "inactive"}"></span>
-        <div>
-          <div style="font-weight:600;color:var(--text)">Ollama (Lokal)</div>
-          <div style="font-size:11px;color:var(--text-muted)">${ollamaActive ? models.join(", ") || "Bereit" : "Nicht gestartet"}</div>
-        </div>
-      </div>
+      <div class="info-card provider-card"><span class="provider-dot ${ga ? "active" : "inactive"}"></span><div><div style="font-weight:600;color:var(--text)">Groq API</div><div style="font-size:11px;color:var(--text-muted)">Llama 3.3 70B &middot; ${ga ? "Verbunden" : "Offline"}</div></div></div>
+      <div class="info-card provider-card"><span class="provider-dot ${oa ? "active" : "inactive"}"></span><div><div style="font-weight:600;color:var(--text)">Ollama (Lokal)</div><div style="font-size:11px;color:var(--text-muted)">${oa ? models.join(", ") || "Bereit" : "Nicht gestartet"}</div></div></div>
     `;
   }
 
-  // Routines
   const routinesData = await window.lexa.routines();
   const routinesList = document.getElementById("routines-list");
   if (routinesList) {
-    if (routinesData.routines && routinesData.routines.length > 0) {
-      routinesList.innerHTML = routinesData.routines.map(r => `
-        <div class="routine-card">
-          <div class="routine-info">
-            <div class="routine-name">${r.name}</div>
-            <div class="routine-schedule">${r.schedule} ${r.description ? "&middot; " + r.description : ""}</div>
-          </div>
-          <div class="routine-toggle ${r.enabled ? "enabled" : ""}" onclick="toggleRoutine('${r.name}')"></div>
-        </div>
-      `).join("");
-    } else {
-      routinesList.innerHTML = '<div class="empty-state">Keine Routinen. Sag Lexa "Erstelle eine Morgenroutine..."</div>';
-    }
+    routinesList.innerHTML = (routinesData.routines?.length > 0)
+      ? routinesData.routines.map(r => `<div class="routine-card"><div class="routine-info"><div class="routine-name">${r.name}</div><div class="routine-schedule">${r.schedule} ${r.description ? "&middot; " + r.description : ""}</div></div><div class="routine-toggle ${r.enabled ? "enabled" : ""}" onclick="toggleRoutine('${r.name}')"></div></div>`).join("")
+      : '<div class="empty-state">Keine Routinen. Sag Lexa "Erstelle eine Morgenroutine..."</div>';
   }
 }
 
 async function createNote() {
-  const title = prompt("Notiz-Titel:");
-  if (!title) return;
-  const content = prompt("Notiz-Inhalt:");
-  if (!content) return;
-
+  const title = prompt("Notiz-Titel:"); if (!title) return;
+  const content = prompt("Notiz-Inhalt:"); if (!content) return;
   await window.lexa.execute("note_create", { title, content }, true);
   showToast("Notiz erstellt", "success");
   refreshMemoryView();
@@ -761,7 +784,7 @@ async function createNote() {
 
 async function createRoutine() {
   switchView("chat");
-  chatInput.value = "Erstelle eine neue Routine für mich";
+  chatInput.value = "Erstelle eine neue Routine f\u00fcr mich";
   chatInput.focus();
 }
 
@@ -775,42 +798,21 @@ async function toggleRoutine(name) {
 async function refreshSettingsView() {
   if (!backendOnline) return;
 
-  // AI Status
   const ai = await window.lexa.aiStatus();
   const groqEl = document.getElementById("groq-status");
   const ollamaEl = document.getElementById("ollama-status");
+  if (groqEl) { groqEl.textContent = ai.groq?.available ? "Verbunden" : "Offline"; groqEl.className = "setting-status" + (ai.groq?.available ? "" : " offline"); }
+  if (ollamaEl) { ollamaEl.textContent = ai.ollama?.available ? "Bereit" : "Nicht gestartet"; ollamaEl.className = "setting-status" + (ai.ollama?.available ? "" : " offline"); }
 
-  if (groqEl) {
-    groqEl.textContent = ai.groq?.available ? "Verbunden" : "Offline";
-    groqEl.className = "setting-status" + (ai.groq?.available ? "" : " offline");
-  }
-  if (ollamaEl) {
-    ollamaEl.textContent = ai.ollama?.available ? "Bereit" : "Nicht gestartet";
-    ollamaEl.className = "setting-status" + (ai.ollama?.available ? "" : " offline");
-  }
-
-  // Voice Status
   const voice = await window.lexa.voiceStatus();
-  const ttsEl = document.getElementById("tts-status");
-  const sttEl = document.getElementById("stt-status");
+  const ttsEl = document.getElementById("tts-status"), sttEl = document.getElementById("stt-status");
+  if (ttsEl) { ttsEl.textContent = voice.tts?.ready ? "Bereit" : "Nicht verf\u00fcgbar"; ttsEl.className = "setting-status" + (voice.tts?.ready ? "" : " offline"); }
+  if (sttEl) { sttEl.textContent = voice.stt?.ready ? "Bereit" : "Nicht verf\u00fcgbar"; sttEl.className = "setting-status" + (voice.stt?.ready ? "" : " offline"); }
 
-  if (ttsEl) {
-    ttsEl.textContent = voice.tts?.ready ? "Bereit" : "Nicht verfügbar";
-    ttsEl.className = "setting-status" + (voice.tts?.ready ? "" : " offline");
-  }
-  if (sttEl) {
-    sttEl.textContent = voice.stt?.ready ? "Bereit" : "Nicht verfügbar";
-    sttEl.className = "setting-status" + (voice.stt?.ready ? "" : " offline");
-  }
-
-  // System info
   const health = await window.lexa.health();
   const versionEl = document.getElementById("settings-version");
-  if (versionEl && health.version) {
-    versionEl.textContent = `v${health.version}`;
-  }
+  if (versionEl && health.version) versionEl.textContent = `v${health.version}`;
 
-  // Command count
   try {
     const res = await fetch("http://127.0.0.1:8000/companion/commands");
     const data = await res.json();
@@ -818,21 +820,16 @@ async function refreshSettingsView() {
     if (countEl) countEl.textContent = `${data.total} registriert`;
   } catch {}
 
-  // Memory stats
   const mem = await window.lexa.memoryStats();
   const dbEl = document.getElementById("settings-db-path");
-  if (dbEl && mem.db_path) {
-    dbEl.textContent = mem.db_path;
-  }
+  if (dbEl && mem.db_path) dbEl.textContent = mem.db_path;
 }
 
 async function saveProfile() {
   const name = document.getElementById("profile-name").value.trim();
   const lang = document.getElementById("profile-language").value.trim();
-
   if (name) await window.lexa.setProfile("name", name);
   if (lang) await window.lexa.setProfile("language", lang);
-
   showToast("Profil gespeichert", "success");
 }
 

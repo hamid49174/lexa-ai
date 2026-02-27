@@ -1338,3 +1338,105 @@ button:focus-visible {
   0%, 100% { box-shadow: 0 0 6px var(--success); }
   50% { box-shadow: 0 0 12px var(--success), 0 0 4px var(--success); }
 }
+
+/* ── SIDEBAR COLLAPSE ────────────────────────── */
+.sidebar {
+  transition: width 0.25s ease, padding 0.25s ease;
+}
+
+.sidebar.collapsed {
+  width: 56px;
+  padding: 16px 6px;
+  overflow: hidden;
+}
+
+.sidebar.collapsed .sidebar-label,
+.sidebar.collapsed .sidebar-stats .stat-label,
+.sidebar.collapsed .sidebar-footer {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-btn {
+  justify-content: center;
+  padding: 10px 0;
+  font-size: 0;
+  gap: 0;
+}
+
+.sidebar.collapsed .sidebar-btn svg {
+  opacity: 1;
+}
+
+.sidebar.collapsed .sidebar-stats {
+  display: none;
+}
+
+.sidebar.collapsed .stat-value {
+  display: none;
+}
+
+/* ── COMMAND SEARCH BAR ──────────────────────── */
+.cmd-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  margin-bottom: 20px;
+  transition: border-color 0.2s;
+}
+
+.cmd-search-bar:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.cmd-search-bar svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.cmd-search-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+}
+
+.cmd-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.cmd-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  background: var(--bg-surface3);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+/* Search highlight */
+.cmd-name mark {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* ── KEYBOARD SHORTCUT HINTS ─────────────────── */
+.input-hint .kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--bg-surface3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: var(--text-muted);
+}
