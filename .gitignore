@@ -1,0 +1,45 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.env
+
+# Node
+node_modules/
+frontend/node_modules/
+package-lock.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Lexa specific
+audit.log
+lexa_memory.db
+screenshots/
+recordings/
+*.wav
+*.webm
+
+# Voice models (large binary files)
+voice/piper/piper.exe
+voice/piper/*.onnx
+voice/piper/*.onnx.json
+
+# Secrets — NEVER commit
+*.key
+*.pem
+*.p12
+credentials.*
+.env.local
