@@ -122,19 +122,17 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - POST /memory/profile — Profil setzen
 - GET  /memory/routines — Alle Routinen
 
-## Frontend Features (Phase 5)
+## Frontend Features
 - 8 Views: Chat, System, Commands, Browser, Files, Media, Memory, Settings
 - Toast-Notification-System (success, error, warning, info)
-- Connection Banner bei Backend-Verlust
-- Auto-Reconnect mit Status-Feedback
+- Connection Banner bei Backend-Verlust + Auto-Reconnect
 - View-Transitions mit Fade-In Animation
-- Card-Hover-Glow-Effekt
-- Sidebar Active-Indicator (orange bar)
-- Status-Dot Pulse-Animation
-- Global Scrollbar Styling
-- Focus-Visible Accessibility
-- Loading Skeleton Klassen
+- Card-Hover-Glow-Effekt, Sidebar Active-Indicator
 - Error Handling: Offline-Checks vor API-Calls
+- Keyboard Shortcuts: Ctrl+1-8 Views, Esc Chat, Ctrl+L Clear, Ctrl+B Sidebar, Ctrl+K Suche, Ctrl+M Mic
+- Chat-History Persistenz via localStorage (letzte 50 Nachrichten)
+- Command-Suche mit Live-Filter und Highlighting
+- Collapsible Sidebar mit State-Persistenz
 
 ## Aktueller Status
 - [x] Phase 0: Setup — Git Repo, CLAUDE.md, Projektstruktur
@@ -144,3 +142,4 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - [x] Phase 4: KI-Features — 60 Befehle, Ollama Fallback, SQLite Memory, Notes, Routinen, 7 Views
 - [x] Phase 5: Polish & Security — Toast System, Animationen, Error Handling, Security Hardening, Settings View, 8 Views
 - [x] Phase 6: Launch — Git Init, README.md, .gitignore, Dependency Cleanup, Initial Commit (29 files, 6032 LOC)
+- [x] Phase 7: Quality of Life — Keyboard Shortcuts, Chat-Persistenz, Command-Suche, Sidebar-Toggle, LICENSE
