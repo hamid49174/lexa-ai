@@ -28,7 +28,7 @@ logger = logging.getLogger("lexa.server")
 app = FastAPI(
     title="Lexa AI",
     description="Lokaler KI-Assistent — nur localhost",
-    version="0.7.0",
+    version="0.8.0",
 )
 
 # CORS: Nur localhost erlauben
@@ -71,7 +71,7 @@ async def startup_event():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "lexa-ai", "version": "0.7.0"}
+    return {"status": "ok", "service": "lexa-ai", "version": "0.8.0"}
 
 
 @app.get("/ai/status")

@@ -23,7 +23,7 @@ let reconnectAttempts = 0;
 let sidebarCollapsed = false;
 let notificationsEnabled = true;
 
-const VIEW_KEYS = ["chat", "system", "commands", "browser", "files", "media", "memory", "settings"];
+const VIEW_KEYS = ["dashboard", "chat", "system", "commands", "browser", "files", "media", "memory", "settings"];
 
 // ── TOAST SYSTEM ─────────────────────────────────
 function showToast(message, type = "info", duration = 3500) {
@@ -91,7 +91,7 @@ function setupKeyboardShortcuts() {
     // Ctrl+1-8: Switch views
     if (e.ctrlKey && !e.shiftKey && !e.altKey) {
       const num = parseInt(e.key);
-      if (num >= 1 && num <= 8) {
+      if (num >= 1 && num <= 9) {
         e.preventDefault();
         switchView(VIEW_KEYS[num - 1]);
         return;
@@ -136,6 +136,13 @@ function setupKeyboardShortcuts() {
     if (e.ctrlKey && e.key === "m") {
       e.preventDefault();
       toggleRecording();
+      return;
+    }
+
+    // Ctrl+P: Command Palette
+    if (e.ctrlKey && e.key === "p") {
+      e.preventDefault();
+      openPalette();
       return;
     }
   });
@@ -272,7 +279,10 @@ function switchView(view) {
     v.classList.remove("active");
   });
 
-  if (view === "chat") {
+  if (view === "dashboard") {
+    document.getElementById("dashboard-view").classList.add("active");
+    refreshDashboard();
+  } else if (view === "chat") {
     document.querySelector(".chat-container").style.display = "flex";
   } else if (view === "system") {
     let sv = document.querySelector(".system-view");
@@ -569,10 +579,16 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
       <button class="deny-btn" onclick="denyAction(this)">Abbrechen</button>`;
   }
 
+  const timeStr = new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+
   msg.innerHTML = `
     <div class="msg-avatar ${avatarClass}">${avatarIcon}</div>
     <div class="msg-body">
-      <div class="msg-name">${nameText}</div>
+      <div class="msg-header">
+        <span class="msg-name">${nameText}</span>
+        <span class="msg-time">${timeStr}</span>
+        <button class="msg-copy-btn" onclick="copyMessage(this)" title="Kopieren">&#128203;</button>
+      </div>
       <div class="msg-text">${formatMessage(text)}</div>
       ${actionHtml}
       ${confirmHtml}
@@ -581,6 +597,14 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   chatMessages.appendChild(msg);
   chatMessages.scrollTop = chatMessages.scrollHeight;
   if (!silent) saveChatHistory();
+}
+
+function copyMessage(btn) {
+  const text = btn.closest(".msg-body").querySelector(".msg-text")?.textContent || "";
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = "\u2713";
+    setTimeout(() => { btn.textContent = "\u{1F4CB}"; }, 1500);
+  });
 }
 
 function denyAction(btn) {
@@ -593,10 +617,22 @@ function denyAction(btn) {
 }
 
 function formatMessage(text) {
-  return text
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\n/g, "<br>");
+  // Code blocks (triple backticks)
+  text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const escaped = code.replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
+    return `<pre class="code-block"><code>${escaped}</code></pre>`;
+  });
+  // Inline code
+  text = text.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+  // Bold
+  text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  // Italic
+  text = text.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  // Links
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="chat-link" target="_blank">$1</a>');
+  // Newlines
+  text = text.replace(/\n/g, "<br>");
+  return text;
 }
 
 function showTyping() {
@@ -702,6 +738,11 @@ async function startRecording() {
     isRecording = true;
     micBtn.classList.add("recording");
     document.getElementById("voice-status-hint").textContent = "Aufnahme l\u00e4uft... Klicke zum Stoppen";
+    // Orb animation
+    const orb = document.getElementById("voice-orb");
+    const orbLabel = document.getElementById("voice-orb-label");
+    if (orb) orb.classList.add("listening");
+    if (orbLabel) orbLabel.textContent = "H\u00f6re zu...";
     showToast("Aufnahme gestartet", "info", 2000);
   } catch (err) {
     addMessage("Mikrofon-Zugriff verweigert. Bitte erlaube den Zugriff.", "system");
@@ -714,6 +755,11 @@ function stopRecording() {
   isRecording = false;
   micBtn.classList.remove("recording");
   document.getElementById("voice-status-hint").textContent = "Mikrofon: klicken zum Sprechen";
+  // Orb reset
+  const orb = document.getElementById("voice-orb");
+  const orbLabel = document.getElementById("voice-orb-label");
+  if (orb) orb.classList.remove("listening");
+  if (orbLabel) orbLabel.textContent = "Klicken zum Sprechen";
 }
 
 async function processVoiceInput(audioBlob) {
@@ -873,6 +919,189 @@ async function saveProfile() {
   if (name) await window.lexa.setProfile("name", name);
   if (lang) await window.lexa.setProfile("language", lang);
   showToast("Profil gespeichert", "success");
+}
+
+// ── DASHBOARD ───────────────────────────────────
+async function refreshDashboard() {
+  // Greeting based on time of day
+  const hour = new Date().getHours();
+  let greeting = "Guten Tag";
+  if (hour < 6) greeting = "Gute Nacht";
+  else if (hour < 12) greeting = "Guten Morgen";
+  else if (hour < 18) greeting = "Guten Tag";
+  else greeting = "Guten Abend";
+
+  const greetEl = document.getElementById("dash-greeting");
+  if (greetEl) greetEl.textContent = `${greeting}, Chef!`;
+
+  if (!backendOnline) {
+    document.getElementById("dash-ai-status").innerHTML = '<span style="color:var(--error)">Backend offline</span>';
+    return;
+  }
+
+  // System stats
+  try {
+    const res = await window.lexa.execute("system_info");
+    if (res.success && res.data) {
+      const d = res.data;
+      const setDash = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = val + "%"; el.style.color = val > 80 ? "var(--error)" : val > 60 ? "var(--warning)" : "var(--accent2)"; }
+      };
+      setDash("dash-cpu", d.cpu_percent);
+      setDash("dash-ram", d.ram_percent);
+      setDash("dash-disk", d.disk_percent);
+      const battEl = document.getElementById("dash-battery");
+      if (battEl) {
+        const bv = d.battery_percent !== null ? d.battery_percent : "--";
+        battEl.textContent = bv + "%";
+        if (bv !== "--") battEl.style.color = bv > 30 ? "var(--success)" : "var(--error)";
+      }
+    }
+  } catch {}
+
+  // AI status
+  try {
+    const ai = await window.lexa.aiStatus();
+    const aiEl = document.getElementById("dash-ai-status");
+    if (aiEl) {
+      const groqDot = ai.groq?.available ? '<span class="dash-dot active"></span>' : '<span class="dash-dot"></span>';
+      const ollamaDot = ai.ollama?.available ? '<span class="dash-dot active"></span>' : '<span class="dash-dot"></span>';
+      aiEl.innerHTML = `
+        <div class="dash-ai-row">${groqDot} Groq <span class="dash-ai-tag">${ai.groq?.available ? "Verbunden" : "Offline"}</span></div>
+        <div class="dash-ai-row">${ollamaDot} Ollama <span class="dash-ai-tag">${ai.ollama?.available ? "Bereit" : "Aus"}</span></div>
+        <div class="dash-ai-provider">Aktiv: <strong>${ai.active_provider}</strong></div>
+      `;
+    }
+  } catch {}
+
+  // Memory stats
+  try {
+    const mem = await window.lexa.memoryStats();
+    const memEl = document.getElementById("dash-memory-stats");
+    if (memEl) {
+      memEl.innerHTML = `
+        <div class="dash-mem-grid">
+          <div class="dash-mem-item"><span class="dash-mem-num">${mem.notes || 0}</span>Notizen</div>
+          <div class="dash-mem-item"><span class="dash-mem-num">${mem.memories || 0}</span>Erinnerungen</div>
+          <div class="dash-mem-item"><span class="dash-mem-num">${mem.interactions || 0}</span>Chats</div>
+          <div class="dash-mem-item"><span class="dash-mem-num">${mem.routines || 0}</span>Routinen</div>
+        </div>
+      `;
+    }
+  } catch {}
+
+  // Routines
+  try {
+    const routinesData = await window.lexa.routines();
+    const routEl = document.getElementById("dash-routines-list");
+    if (routEl) {
+      if (routinesData.routines?.length > 0) {
+        routEl.innerHTML = routinesData.routines.map(r => `
+          <div class="dash-routine-item">
+            <span class="dash-routine-dot ${r.enabled ? "active" : ""}"></span>
+            <span class="dash-routine-name">${r.name}</span>
+            <span class="dash-routine-time">${r.schedule}</span>
+          </div>
+        `).join("");
+      } else {
+        routEl.innerHTML = '<div class="dash-empty">Keine Routinen aktiv</div>';
+      }
+    }
+  } catch {}
+}
+
+// ── COMMAND PALETTE (Ctrl+P) ────────────────────
+function setupCommandPalette() {
+  let paletteEl = document.getElementById("command-palette");
+  if (!paletteEl) {
+    paletteEl = document.createElement("div");
+    paletteEl.id = "command-palette";
+    paletteEl.className = "cmd-palette-overlay";
+    paletteEl.innerHTML = `
+      <div class="cmd-palette">
+        <input type="text" id="palette-input" class="palette-input" placeholder="Befehl oder Aktion suchen..." autocomplete="off">
+        <div id="palette-results" class="palette-results"></div>
+      </div>
+    `;
+    document.body.appendChild(paletteEl);
+
+    paletteEl.addEventListener("click", (e) => {
+      if (e.target === paletteEl) closePalette();
+    });
+
+    document.getElementById("palette-input").addEventListener("input", (e) => {
+      renderPaletteResults(e.target.value.toLowerCase().trim());
+    });
+
+    document.getElementById("palette-input").addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closePalette();
+      if (e.key === "Enter") {
+        const first = document.querySelector(".palette-item.selected") || document.querySelector(".palette-item");
+        if (first) first.click();
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navigatePalette(e.key === "ArrowDown" ? 1 : -1);
+      }
+    });
+  }
+}
+
+function openPalette() {
+  setupCommandPalette();
+  const overlay = document.getElementById("command-palette");
+  overlay.classList.add("visible");
+  const input = document.getElementById("palette-input");
+  input.value = "";
+  input.focus();
+  renderPaletteResults("");
+}
+
+function closePalette() {
+  document.getElementById("command-palette")?.classList.remove("visible");
+}
+
+function navigatePalette(dir) {
+  const items = [...document.querySelectorAll(".palette-item")];
+  const current = items.findIndex(i => i.classList.contains("selected"));
+  items.forEach(i => i.classList.remove("selected"));
+  const next = Math.max(0, Math.min(items.length - 1, current + dir));
+  items[next]?.classList.add("selected");
+  items[next]?.scrollIntoView({ block: "nearest" });
+}
+
+function renderPaletteResults(query) {
+  const container = document.getElementById("palette-results");
+  if (!container) return;
+
+  // Combine views + commands
+  const viewItems = VIEW_KEYS.map(v => ({
+    type: "view", name: v, desc: `Wechsle zu ${v}`, icon: "\u{1F4CB}"
+  }));
+  const cmdItems = ALL_COMMANDS.map(c => ({
+    type: "cmd", name: c.name, desc: c.desc, icon: c.status === "confirm" ? "\u26A0" : "\u26A1", cat: c.cat
+  }));
+  const allItems = [...viewItems, ...cmdItems];
+
+  const filtered = query
+    ? allItems.filter(i => i.name.includes(query) || i.desc.toLowerCase().includes(query) || (i.cat || "").toLowerCase().includes(query))
+    : allItems.slice(0, 15);
+
+  container.innerHTML = filtered.slice(0, 20).map((item, i) => `
+    <div class="palette-item ${i === 0 ? "selected" : ""}" onclick="${item.type === "view" ? `switchView('${item.name}');closePalette()` : `insertCommand('${item.name}');closePalette()`}">
+      <span class="palette-icon">${item.icon}</span>
+      <div class="palette-item-info">
+        <span class="palette-name">${item.name}</span>
+        <span class="palette-desc">${item.desc}</span>
+      </div>
+      <span class="palette-type">${item.type === "view" ? "VIEW" : item.cat || "CMD"}</span>
+    </div>
+  `).join("");
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="palette-empty">Nichts gefunden</div>';
+  }
 }
 
 // ── START ────────────────────────────────────────

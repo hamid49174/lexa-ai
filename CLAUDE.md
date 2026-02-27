@@ -24,7 +24,7 @@ KI: Groq API (primary) + Ollama (local fallback). SQLite-Gedächtnis für Kontex
 - Dangerous Command Detection: 15 gefährliche Patterns in KI-Output erkannt
 
 ## Tech-Stack
-- Frontend: Electron + Vanilla JS + Custom CSS (Dark Theme)
+- Frontend: Electron + Vanilla JS + Custom CSS (Purple/Violet Glassmorphism Theme)
 - Backend: Python FastAPI (Port 8000, nur localhost)
 - KI: Groq API (Llama 3.3 70B) → Ollama Fallback (lokal)
 - STT: faster-whisper (lokal, base model, CPU int8)
@@ -45,7 +45,7 @@ lexa-ai/
 ├── requirements.txt
 ├── start.bat               # Ein-Klick-Start (mit Health-Check)
 ├── backend/
-│   ├── main.py             # FastAPI Server v0.5.0 + Router + Memory Endpoints
+│   ├── main.py             # FastAPI Server v0.8.0 + Router + Memory Endpoints
 │   ├── ai_engine.py        # Groq API + Ollama Fallback + Memory Context
 │   ├── memory.py           # SQLite: Notes, Memories, Profil, Routinen
 │   ├── security.py         # Whitelist, Rate Limit, Sanitize, Path/URL/Param Validation, Audit
@@ -68,9 +68,9 @@ lexa-ai/
 │   ├── main.js             # Electron Main Process
 │   ├── preload.js          # Secure Bridge (chat, execute, tts, stt, memory, ai)
 │   └── src/
-│       ├── index.html      # Dark UI mit 8 Views + Connection Banner + Toast System
-│       ├── styles.css      # Professional Dark Theme + Animationen + Toast CSS
-│       └── app.js          # v0.5 Chat, Voice, Tools, Memory, Toast, Error Handling
+│       ├── index.html      # NeoAI UI mit 9 Views + Dashboard + Voice Orb + Toast System
+│       ├── styles.css      # Purple/Violet Glassmorphism Theme + Voice Orb + Dashboard CSS
+│       └── app.js          # v0.8 Chat, Voice, Dashboard, Command Palette, Voice Orb
 └── tests/
 ```
 
@@ -125,13 +125,18 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - GET  /scheduler/status — Scheduler-Status (running, active routines)
 
 ## Frontend Features
-- 8 Views: Chat, System, Commands, Browser, Files, Media, Memory, Settings
+- 9 Views: Dashboard, Chat, System, Commands, Browser, Files, Media, Memory, Settings
+- NeoAI-inspiriertes Design: Purple/Violet (#8b5cf6) Glassmorphism mit Gradient Borders
+- Animated Voice Orb: Pulsiert/leuchtet bei Spracheingabe, klickbar für Recording
+- Dashboard: 6 Widgets (System Stats, KI Status, Quick Actions, Routinen, Memory, Greeting)
+- Command Palette: Ctrl+P Overlay mit Fuzzy-Search über Views + Commands
+- Enhanced Chat: Code-Blocks, Inline-Code, Bold, Italic, Links, Timestamps, Copy-Button
 - Toast-Notification-System (success, error, warning, info)
 - Connection Banner bei Backend-Verlust + Auto-Reconnect
 - View-Transitions mit Fade-In Animation
 - Card-Hover-Glow-Effekt, Sidebar Active-Indicator
 - Error Handling: Offline-Checks vor API-Calls
-- Keyboard Shortcuts: Ctrl+1-8 Views, Esc Chat, Ctrl+L Clear, Ctrl+B Sidebar, Ctrl+K Suche, Ctrl+M Mic
+- Keyboard Shortcuts: Ctrl+1-9 Views, Ctrl+P Palette, Esc Chat, Ctrl+L Clear, Ctrl+B Sidebar, Ctrl+M Mic
 - Chat-History Persistenz via localStorage (letzte 50 Nachrichten)
 - Command-Suche mit Live-Filter und Highlighting
 - Collapsible Sidebar mit State-Persistenz
@@ -151,3 +156,4 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - [x] Phase 6: Launch — Git Init, README.md, .gitignore, Dependency Cleanup, Initial Commit (29 files, 6032 LOC)
 - [x] Phase 7: Quality of Life — Keyboard Shortcuts, Chat-Persistenz, Command-Suche, Sidebar-Toggle, LICENSE
 - [x] Phase 8: Desktop Integration — System Tray, Notifications, Autostart, Routine Scheduler
+- [x] Phase 9: Intelligence & Dashboard — Enhanced AI Prompt, Dashboard, Command Palette, NeoAI UI Overhaul, Voice Orb, Chat Upgrades
