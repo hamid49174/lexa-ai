@@ -70,7 +70,12 @@
         <div class="sidebar-section conversations-section">
           <div class="sidebar-label">
             CHATS
-            <button class="new-chat-btn" onclick="newConversation()" title="Neuer Chat">+</button>
+            <div class="conv-header-actions">
+              <button class="new-chat-btn" onclick="openSearchOverlay()" title="Suche (Ctrl+F)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </button>
+              <button class="new-chat-btn" onclick="newConversation()" title="Neuer Chat">+</button>
+            </div>
           </div>
           <div class="conversation-list" id="conversation-list"></div>
         </div>
@@ -117,7 +122,7 @@
           </div>
         </div>
         <div class="sidebar-footer">
-          <span class="version-tag">v0.11.0</span>
+          <span class="version-tag">v0.13.0</span>
         </div>
       </aside>
 
@@ -187,7 +192,7 @@
             <!-- Greeting Widget -->
             <div class="dash-widget dash-widget-greeting">
               <div class="dash-greeting-text" id="dash-greeting">Guten Tag, Chef!</div>
-              <div class="dash-greeting-sub" id="dash-greeting-sub">Lexa AI v0.11.0 &mdash; Dein lokaler KI-Assistent</div>
+              <div class="dash-greeting-sub" id="dash-greeting-sub">Lexa AI v0.13.0 &mdash; Dein lokaler KI-Assistent</div>
               <button class="dash-chat-btn" onclick="switchView('chat')">&#9889; Chat &ouml;ffnen</button>
             </div>
           </div>
@@ -251,6 +256,8 @@
               <span>Shift+Enter f&uuml;r neue Zeile</span>
               <span class="divider">|</span>
               <span id="voice-status-hint">Ctrl+M Mikrofon</span>
+              <span class="divider">|</span>
+              <span>Ctrl+F Suche</span>
               <span class="divider">|</span>
               <span>Ctrl+N Neuer Chat</span>
               <span class="divider">|</span>
@@ -384,6 +391,15 @@
               </div>
               <div class="setting-status" id="ollama-status">Pr&uuml;fe...</div>
             </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">KI-Modell</div>
+                <div class="setting-desc" id="model-desc">Aktives Groq-Modell w&auml;hlen</div>
+              </div>
+              <select id="model-select" class="settings-select" onchange="changeAiModel(this.value)">
+                <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
+              </select>
+            </div>
           </div>
 
           <div class="settings-group">
@@ -455,7 +471,7 @@
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name">Version</div>
-                <div class="setting-desc" id="settings-version">v0.11.0 Phase 11</div>
+                <div class="setting-desc" id="settings-version">v0.13.0 Phase 11</div>
               </div>
             </div>
             <div class="setting-item">

@@ -162,7 +162,7 @@ def _chat_groq(messages: list[dict]) -> str | None:
         if not client:
             return None
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=_active_groq_model,
             messages=messages,
             temperature=0.7,
             max_tokens=1024,
@@ -297,7 +297,7 @@ def chat_stream(user_message: str, conversation_history: list | None = None) -> 
         client = _get_groq_client()
         if client:
             stream = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=_active_groq_model,
                 messages=messages,
                 temperature=0.7,
                 max_tokens=1024,
@@ -337,6 +337,55 @@ def _save_interaction(user_msg: str, ai_reply: str):
         pass
 
 
+def generate_title(user_message: str) -> str:
+    """Generate a short conversation title from the first user message."""
+    messages = [
+        {"role": "system", "content": "Generiere einen kurzen Titel (max 5 Wörter, Deutsch) für diese Chat-Nachricht. Antworte NUR mit dem Titel, kein Markdown, keine Anführungszeichen."},
+        {"role": "user", "content": user_message[:200]},
+    ]
+    title = _chat_groq(messages)
+    if not title:
+        title = _chat_ollama(messages)
+    if title:
+        title = title.strip().strip('"').strip("'").strip("*")
+        if len(title) > 50:
+            title = title[:50] + "…"
+        return title
+    # Fallback: truncate
+    t = user_message.strip()
+    return (t[:40] + "…") if len(t) > 40 else t
+
+
+# ── MODEL SELECTION ──────────────────────────────
+_active_groq_model = "llama-3.3-70b-versatile"
+
+AVAILABLE_MODELS = {
+    "llama-3.3-70b-versatile": "Llama 3.3 70B (Standard)",
+    "llama-3.1-8b-instant": "Llama 3.1 8B (Schnell)",
+    "mixtral-8x7b-32768": "Mixtral 8x7B",
+    "gemma2-9b-it": "Gemma 2 9B",
+}
+
+
+def set_groq_model(model_id: str) -> str:
+    """Set the active Groq model."""
+    global _active_groq_model
+    if model_id in AVAILABLE_MODELS:
+        _active_groq_model = model_id
+        logger.info(f"Groq model changed to: {model_id}")
+        return f"Modell gewechselt: {AVAILABLE_MODELS[model_id]}"
+    return f"Unbekanntes Modell: {model_id}"
+
+
+def get_groq_model() -> dict:
+    """Get current model and available models."""
+    return {
+        "current": _active_groq_model,
+        "current_name": AVAILABLE_MODELS.get(_active_groq_model, _active_groq_model),
+        "available": AVAILABLE_MODELS,
+    }
+
+
 def get_ai_status() -> dict:
     """Get status of all AI providers."""
     groq_ok = False
@@ -350,7 +399,7 @@ def get_ai_status() -> dict:
     ollama = check_ollama()
 
     return {
-        "groq": {"available": groq_ok},
+        "groq": {"available": groq_ok, "model": _active_groq_model, "model_name": AVAILABLE_MODELS.get(_active_groq_model, _active_groq_model)},
         "ollama": ollama,
         "active_provider": "groq" if groq_ok else ("ollama" if ollama["available"] else "none"),
     }

@@ -45,9 +45,9 @@ lexa-ai/
 ├── requirements.txt
 ├── start.bat               # Ein-Klick-Start (mit Health-Check)
 ├── backend/
-│   ├── main.py             # FastAPI Server v0.11.0 + SSE Streaming + File Upload + Conversations
-│   ├── ai_engine.py        # Groq API + Ollama Fallback + Streaming + Memory Context
-│   ├── memory.py           # SQLite: Notes, Memories, Profil, Routinen, Conversations
+│   ├── main.py             # FastAPI Server v0.13.0 + SSE Streaming + File Upload + Conversations + Search + Model Selection
+│   ├── ai_engine.py        # Groq API + Ollama Fallback + Streaming + Memory Context + AI Titles + Model Selection
+│   ├── memory.py           # SQLite: Notes, Memories, Profil, Routinen, Conversations + Global Search + Export
 │   ├── security.py         # Whitelist, Rate Limit, Sanitize, Path/URL/Param Validation, Audit
 │   ├── router_companion.py # /companion/* Endpoints + Param Validation
 │   ├── router_voice.py     # /voice/* Endpoints (STT/TTS)
@@ -66,11 +66,11 @@ lexa-ai/
 ├── frontend/
 │   ├── package.json
 │   ├── main.js             # Electron Main Process
-│   ├── preload.js          # Secure Bridge (chat, chatFile, execute, tts, stt, memory, conversations)
+│   ├── preload.js          # Secure Bridge (chat, chatFile, execute, tts, stt, memory, conversations, search, models)
 │   └── src/
-│       ├── index.html      # NeoAI UI mit 9 Views + Drop Zone + File Attach + Conversations
-│       ├── styles.css      # Purple/Violet Glassmorphism Theme + Voice Orb + Dashboard CSS
-│       └── app.js          # v0.11 File Drop, Conversations, Streaming Chat, Suggestions
+│       ├── index.html      # NeoAI UI mit 9 Views + Drop Zone + File Attach + Conversations + Model Select
+│       ├── styles.css      # Purple/Violet Glassmorphism Theme + Voice Orb + Dashboard + Search Overlay
+│       └── app.js          # v0.13 Search, Export, AI Titles, Model Selection, Conversations
 └── tests/
 ```
 
@@ -131,6 +131,11 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - PUT  /conversations/{id} — Conversation aktualisieren (Titel/Messages)
 - DELETE /conversations/{id} — Conversation löschen
 - POST /conversations/{id}/load — Conversation als aktiven Chat laden
+- GET  /conversations/{id}/export — Conversation als Markdown/Text exportieren
+- GET  /search?q= — Globale Suche über Conversations, Notes, Memories
+- POST /ai/title — AI-generierte Conversation-Titel
+- GET  /ai/models — Verfügbare Groq-Modelle + aktuelle Auswahl
+- POST /ai/models — Groq-Modell wechseln
 
 ## Frontend Features
 - 9 Views: Dashboard, Chat, System, Commands, Browser, Files, Media, Memory, Settings
@@ -153,7 +158,11 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - File Intelligence: Text-Extraktion (30+ Formate), AI-Kontext-Analyse, 2MB Limit
 - Conversations: Mehrere Chat-Sessions erstellen, wechseln, löschen, Auto-Titel
 - Conversation List: Sidebar-Sektion mit Chatverlauf, aktiver Indikator, Lösch-Button
-- Keyboard Shortcuts: Ctrl+1-9 Views, Ctrl+N Neuer Chat, Ctrl+P Palette, Esc Chat, Ctrl+L Clear, Ctrl+M Mic
+- Global Search: Ctrl+F Overlay sucht über Conversations, Notizen, Erinnerungen (Debounced, 300ms)
+- Conversation Export: Download als Markdown (.md) oder Text (.txt) via Download-Button
+- AI-generierte Titel: Groq generiert kurze Chat-Titel statt Truncation (async mit Fallback)
+- Model Selection: Groq-Modell in Settings wählbar (Llama 3.3 70B, Llama 3.1 8B, Mixtral, Gemma 2)
+- Keyboard Shortcuts: Ctrl+1-9 Views, Ctrl+F Suche, Ctrl+N Neuer Chat, Ctrl+P Palette, Esc Chat, Ctrl+L Clear, Ctrl+M Mic
 - Chat-History Persistenz via SQLite Conversations (Backend) + localStorage (Legacy)
 - Command-Suche mit Live-Filter und Highlighting
 - Collapsible Sidebar mit State-Persistenz
@@ -177,3 +186,5 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - [x] Phase 10: Streaming & Smart UX — SSE Streaming Chat, Smart Suggestion Chips, Dashboard Live-Updates
 - [x] Phase 11: Smart Conversations — Mehrere Chat-Sessions, Auto-Titel, Conversation CRUD, SQLite Storage
 - [x] Phase 12: Drag & Drop + File Intelligence — Datei-Upload, Text-Extraktion, AI-Analyse, File Cards
+- [x] Phase 13: Search & Export — Globale Suche (Conversations+Notes+Memories), Chat-Export (MD/TXT), Suchoverlay
+- [x] Phase 14: AI Upgrade — AI-generierte Conversation-Titel, Multi-Model-Auswahl (4 Groq-Modelle), Dynamic Model Switching

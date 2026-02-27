@@ -426,6 +426,95 @@ def conversation_delete(conv_id: int) -> str:
 
 
 # ══════════════════════════════════════════════════
+#  GLOBAL SEARCH
+# ══════════════════════════════════════════════════
+
+def global_search(query: str, limit: int = 30) -> dict:
+    """Search across conversations, notes, and memories."""
+    db = _get_db()
+    try:
+        words = query.lower().split()
+        if not words:
+            return {"conversations": [], "notes": [], "memories": []}
+
+        # Search conversations (title + messages content)
+        conv_conditions = " OR ".join(
+            ["LOWER(title) LIKE ? OR LOWER(messages) LIKE ?" for _ in words]
+        )
+        conv_params = []
+        for w in words:
+            conv_params.extend([f"%{w}%", f"%{w}%"])
+        convs = db.execute(
+            f"SELECT id, title, message_count, updated_at FROM conversations "
+            f"WHERE {conv_conditions} ORDER BY updated_at DESC LIMIT ?",
+            conv_params + [limit],
+        ).fetchall()
+
+        # Search notes (title + content)
+        note_conditions = " OR ".join(
+            ["LOWER(title) LIKE ? OR LOWER(content) LIKE ?" for _ in words]
+        )
+        note_params = []
+        for w in words:
+            note_params.extend([f"%{w}%", f"%{w}%"])
+        notes = db.execute(
+            f"SELECT id, title, category, created_at FROM notes "
+            f"WHERE {note_conditions} ORDER BY updated_at DESC LIMIT ?",
+            note_params + [limit],
+        ).fetchall()
+
+        # Search memories
+        mem_conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in words])
+        mem_params = [f"%{w}%" for w in words]
+        mems = db.execute(
+            f"SELECT id, content, category, importance, created_at FROM memories "
+            f"WHERE {mem_conditions} ORDER BY importance DESC LIMIT ?",
+            mem_params + [limit],
+        ).fetchall()
+
+        return {
+            "conversations": [dict(r) for r in convs],
+            "notes": [dict(r) for r in notes],
+            "memories": [dict(r) for r in mems],
+        }
+    finally:
+        db.close()
+
+
+def conversation_export(conv_id: int, fmt: str = "markdown") -> str | None:
+    """Export a conversation as markdown or plain text."""
+    db = _get_db()
+    try:
+        row = db.execute(
+            "SELECT * FROM conversations WHERE id = ?", (conv_id,)
+        ).fetchone()
+        if not row:
+            return None
+
+        conv = dict(row)
+        messages = json.loads(conv["messages"])
+        title = conv["title"]
+        created = conv["created_at"]
+
+        if fmt == "markdown":
+            lines = [f"# {title}", f"*Erstellt: {created}*", ""]
+            for msg in messages:
+                role = "**Du**" if msg.get("role") == "user" else "**Lexa**"
+                lines.append(f"{role}: {msg.get('content', '')}")
+                lines.append("")
+            return "\n".join(lines)
+        else:
+            lines = [f"{title}", f"Erstellt: {created}", "=" * 40, ""]
+            for msg in messages:
+                role = "Du" if msg.get("role") == "user" else "Lexa"
+                lines.append(f"[{role}] {msg.get('content', '')}")
+                lines.append("")
+            return "\n".join(lines)
+    finally:
+        db.close()
+
+
+# ══════════════════════════════════════════════════
 #  ZUSAMMENFASSUNG (Summary)
 # ══════════════════════════════════════════════════
 

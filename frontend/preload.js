@@ -179,6 +179,57 @@ contextBridge.exposeInMainWorld("lexa", {
     return res.json();
   },
 
+  // Global Search (Phase 13)
+  search: async (query) => {
+    try {
+      const res = await fetch(`${API}/search?q=${encodeURIComponent(query)}`);
+      return res.json();
+    } catch {
+      return { conversations: [], notes: [], memories: [] };
+    }
+  },
+
+  conversationExport: async (id, fmt = "markdown") => {
+    try {
+      const res = await fetch(`${API}/conversations/${id}/export?fmt=${fmt}`);
+      return res.json();
+    } catch {
+      return { text: null };
+    }
+  },
+
+  // AI Title & Model Selection (Phase 14)
+  generateTitle: async (message) => {
+    try {
+      const res = await fetch(`${API}/ai/title`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      return res.json();
+    } catch {
+      return { title: message.substring(0, 40) };
+    }
+  },
+
+  aiModels: async () => {
+    try {
+      const res = await fetch(`${API}/ai/models`);
+      return res.json();
+    } catch {
+      return { current: "llama-3.3-70b-versatile", available: {} };
+    }
+  },
+
+  setAiModel: async (model) => {
+    const res = await fetch(`${API}/ai/models`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    });
+    return res.json();
+  },
+
   // Desktop Integration (Phase 8)
   notify: (title, body, silent = false) => {
     ipcRenderer.send("show-notification", { title, body, silent });

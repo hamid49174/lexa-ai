@@ -1952,6 +1952,178 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   100% { background-position: -200% 0; }
 }
 
+/* ── GLOBAL SEARCH OVERLAY (Phase 13) ─────────── */
+.search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 80px;
+}
+.search-overlay.visible { display: flex; }
+
+.search-panel {
+  width: 520px;
+  max-height: 500px;
+  background: var(--bg-surface);
+  border: 1px solid var(--glass-border-hover);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow), var(--shadow-glow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: paletteIn 0.15s ease-out;
+}
+
+.search-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 15px;
+  font-family: var(--font);
+  outline: none;
+}
+.search-input::placeholder { color: var(--text-muted); }
+
+.search-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.search-close-btn:hover { color: var(--text); }
+
+.search-results {
+  overflow-y: auto;
+  max-height: 400px;
+  padding: 8px;
+}
+
+.search-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 10px 8px;
+  font-family: var(--font-mono);
+}
+
+.search-category {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 1px;
+  padding: 10px 10px 4px;
+  text-transform: uppercase;
+}
+
+.search-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.search-item:hover { background: var(--bg-hover); }
+
+.search-item-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  width: 28px;
+  text-align: center;
+}
+
+.search-item-info { flex: 1; min-width: 0; }
+
+.search-item-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-item-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 1px;
+}
+
+.search-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 30px;
+  font-size: 13px;
+}
+
+/* ── CONVERSATION ACTIONS (Export + Delete) ───── */
+.conv-header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.conv-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.conv-item:hover .conv-actions { opacity: 1; }
+
+.conv-action-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.conv-action-btn:hover {
+  color: var(--accent2);
+  background: var(--accent-soft);
+}
+
+/* ── MODEL SELECTOR (Phase 14) ────────────────── */
+.settings-select {
+  background: var(--bg-surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 6px 10px;
+  font-family: var(--font);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  min-width: 160px;
+}
+.settings-select:hover { border-color: var(--glass-border-hover); }
+.settings-select:focus { border-color: var(--accent); }
+.settings-select option {
+  background: var(--bg-surface2);
+  color: var(--text);
+}
+
 .input-hint .kbd {
   font-family: var(--font-mono);
   font-size: 10px;

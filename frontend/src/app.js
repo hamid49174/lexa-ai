@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════
-   LEXA AI — Frontend Application Logic v0.9
-   Phase 11: Smart Conversations, Streaming Chat,
-   Suggestions, Dashboard Live-Updates
+   LEXA AI — Frontend Application Logic v0.13
+   Phase 13+14: Search & Export, AI Titles,
+   Model Selection, Smart Conversations
    ════════════════════════════════════════════════ */
 
 const chatMessages = document.getElementById("chat-messages");
@@ -140,6 +140,13 @@ function setupKeyboardShortcuts() {
     if (e.ctrlKey && e.key === "m") {
       e.preventDefault();
       toggleRecording();
+      return;
+    }
+
+    // Ctrl+F: Global Search
+    if (e.ctrlKey && e.key === "f") {
+      e.preventDefault();
+      openSearchOverlay();
       return;
     }
 
@@ -1058,6 +1065,9 @@ async function refreshSettingsView() {
   const mem = await window.lexa.memoryStats();
   const dbEl = document.getElementById("settings-db-path");
   if (dbEl && mem.db_path) dbEl.textContent = mem.db_path;
+
+  // Load model selection
+  loadModelSelection();
 }
 
 async function saveProfile() {
@@ -1290,7 +1300,12 @@ function renderConversationList() {
           <div class="conv-title">${escapeHtml(title)}</div>
           <div class="conv-meta">${count} Nachrichten</div>
         </div>
-        <button class="conv-delete-btn" onclick="event.stopPropagation();deleteConversation(${c.id})" title="L\u00f6schen">\u00d7</button>
+        <div class="conv-actions">
+          <button class="conv-action-btn" onclick="event.stopPropagation();exportConversation(${c.id})" title="Exportieren">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
+          <button class="conv-delete-btn" onclick="event.stopPropagation();deleteConversation(${c.id})" title="L\u00f6schen">\u00d7</button>
+        </div>
       </div>`;
   }).join("");
 }
@@ -1419,18 +1434,29 @@ async function deleteConversation(convId) {
 async function autoTitleConversation(userMessage) {
   if (!currentConversationId) return;
 
-  // Generate title from first user message (truncate to 40 chars)
+  // Quick fallback title while AI generates
   let title = userMessage.trim();
   if (title.length > 40) title = title.substring(0, 40) + "\u2026";
   if (!title) title = "Neuer Chat";
 
+  // Set fallback immediately
   try {
     await window.lexa.conversationUpdate(currentConversationId, { title });
-
-    // Update in local list
     const conv = conversationsList.find(c => c.id === currentConversationId);
     if (conv) conv.title = title;
     renderConversationList();
+  } catch {}
+
+  // Then generate AI title asynchronously
+  try {
+    const result = await window.lexa.generateTitle(userMessage);
+    if (result.title && result.title !== title) {
+      title = result.title;
+      await window.lexa.conversationUpdate(currentConversationId, { title });
+      const conv = conversationsList.find(c => c.id === currentConversationId);
+      if (conv) conv.title = title;
+      renderConversationList();
+    }
   } catch {}
 }
 
@@ -1572,6 +1598,185 @@ function getFileIcon(ext) {
     SVG: "\u{1F5BC}", SQL: "\u{1F5C3}", XML: "\u{1F4C3}", YAML: "\u2699", YML: "\u2699",
   };
   return icons[ext] || "\u{1F4CE}";
+}
+
+// ── GLOBAL SEARCH OVERLAY (Phase 13) ────────────
+let searchDebounce = null;
+
+function openSearchOverlay() {
+  let overlay = document.getElementById("search-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "search-overlay";
+    overlay.className = "search-overlay";
+    overlay.innerHTML = `
+      <div class="search-panel">
+        <div class="search-header">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="search-input" class="search-input" placeholder="Chats, Notizen, Erinnerungen durchsuchen..." autocomplete="off">
+          <button class="search-close-btn" onclick="closeSearchOverlay()">\u00d7</button>
+        </div>
+        <div id="search-results" class="search-results">
+          <div class="search-empty">Suchbegriff eingeben...</div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeSearchOverlay();
+    });
+
+    document.getElementById("search-input").addEventListener("input", (e) => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => performSearch(e.target.value.trim()), 300);
+    });
+
+    document.getElementById("search-input").addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeSearchOverlay();
+    });
+  }
+
+  overlay.classList.add("visible");
+  const input = document.getElementById("search-input");
+  input.value = "";
+  input.focus();
+  document.getElementById("search-results").innerHTML = '<div class="search-empty">Suchbegriff eingeben...</div>';
+}
+
+function closeSearchOverlay() {
+  document.getElementById("search-overlay")?.classList.remove("visible");
+}
+
+async function performSearch(query) {
+  const container = document.getElementById("search-results");
+  if (!container) return;
+
+  if (!query) {
+    container.innerHTML = '<div class="search-empty">Suchbegriff eingeben...</div>';
+    return;
+  }
+
+  if (query.length < 2) {
+    container.innerHTML = '<div class="search-empty">Mindestens 2 Zeichen...</div>';
+    return;
+  }
+
+  try {
+    const data = await window.lexa.search(query);
+    let html = "";
+
+    // Conversations
+    if (data.conversations?.length > 0) {
+      html += '<div class="search-category">CHATS</div>';
+      for (const c of data.conversations) {
+        html += `
+          <div class="search-item" onclick="closeSearchOverlay();switchConversation(${c.id})">
+            <span class="search-item-icon">\u{1F4AC}</span>
+            <div class="search-item-info">
+              <div class="search-item-title">${escapeHtml(c.title)}</div>
+              <div class="search-item-meta">${c.message_count || 0} Nachrichten \u00b7 ${c.updated_at || ""}</div>
+            </div>
+          </div>`;
+      }
+    }
+
+    // Notes
+    if (data.notes?.length > 0) {
+      html += '<div class="search-category">NOTIZEN</div>';
+      for (const n of data.notes) {
+        html += `
+          <div class="search-item" onclick="closeSearchOverlay();switchView('memory')">
+            <span class="search-item-icon">\u{1F4DD}</span>
+            <div class="search-item-info">
+              <div class="search-item-title">${escapeHtml(n.title)}</div>
+              <div class="search-item-meta">${n.category} \u00b7 ${n.created_at || ""}</div>
+            </div>
+          </div>`;
+      }
+    }
+
+    // Memories
+    if (data.memories?.length > 0) {
+      html += '<div class="search-category">ERINNERUNGEN</div>';
+      for (const m of data.memories) {
+        const preview = m.content.length > 80 ? m.content.substring(0, 80) + "\u2026" : m.content;
+        html += `
+          <div class="search-item" onclick="closeSearchOverlay();switchView('memory')">
+            <span class="search-item-icon">\u{1F9E0}</span>
+            <div class="search-item-info">
+              <div class="search-item-title">${escapeHtml(preview)}</div>
+              <div class="search-item-meta">${m.category} \u00b7 Wichtigkeit ${m.importance}</div>
+            </div>
+          </div>`;
+      }
+    }
+
+    if (!html) {
+      html = '<div class="search-empty">Keine Ergebnisse gefunden</div>';
+    }
+
+    const total = (data.conversations?.length || 0) + (data.notes?.length || 0) + (data.memories?.length || 0);
+    container.innerHTML = `<div class="search-count">${total} Ergebnisse</div>` + html;
+  } catch {
+    container.innerHTML = '<div class="search-empty">Suchfehler</div>';
+  }
+}
+
+// ── CONVERSATION EXPORT (Phase 13) ──────────────
+async function exportConversation(convId, fmt = "markdown") {
+  try {
+    const data = await window.lexa.conversationExport(convId || currentConversationId, fmt);
+    if (!data.text) {
+      showToast("Export fehlgeschlagen", "error");
+      return;
+    }
+
+    // Create download
+    const ext = fmt === "markdown" ? "md" : "txt";
+    const blob = new Blob([data.text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `lexa-chat-${convId || currentConversationId}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Chat als ${ext.toUpperCase()} exportiert`, "success");
+  } catch {
+    showToast("Export-Fehler", "error");
+  }
+}
+
+// ── AI MODEL SELECTION (Phase 14) ───────────────
+async function loadModelSelection() {
+  try {
+    const data = await window.lexa.aiModels();
+    const select = document.getElementById("model-select");
+    if (!select || !data.available) return;
+
+    select.innerHTML = "";
+    for (const [id, name] of Object.entries(data.available)) {
+      const opt = document.createElement("option");
+      opt.value = id;
+      opt.textContent = name;
+      if (id === data.current) opt.selected = true;
+      select.appendChild(opt);
+    }
+
+    const desc = document.getElementById("model-desc");
+    if (desc) desc.textContent = `Aktiv: ${data.current_name}`;
+  } catch {}
+}
+
+async function changeAiModel(modelId) {
+  try {
+    const result = await window.lexa.setAiModel(modelId);
+    showToast(result.status || "Modell gewechselt", "success");
+    const desc = document.getElementById("model-desc");
+    if (desc && result.current) desc.textContent = `Aktiv: ${result.current.current_name}`;
+  } catch {
+    showToast("Modellwechsel fehlgeschlagen", "error");
+  }
 }
 
 // ── SMART SUGGESTIONS ───────────────────────────

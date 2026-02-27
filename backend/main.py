@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from backend.ai_engine import chat, chat_stream, get_ai_status
+from backend.ai_engine import chat, chat_stream, get_ai_status, generate_title, set_groq_model, get_groq_model
 from backend.router_companion import router as companion_router
 from backend.router_voice import router as voice_router
 from backend import memory
@@ -33,7 +33,7 @@ logger = logging.getLogger("lexa.server")
 app = FastAPI(
     title="Lexa AI",
     description="Lokaler KI-Assistent — nur localhost",
-    version="0.11.0",
+    version="0.13.0",
 )
 
 # CORS: Nur localhost erlauben
@@ -76,7 +76,7 @@ async def startup_event():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "lexa-ai", "version": "0.11.0"}
+    return {"status": "ok", "service": "lexa-ai", "version": "0.13.0"}
 
 
 @app.get("/ai/status")
@@ -170,6 +170,49 @@ async def load_conversation(conv_id: int):
     if len(conversation_history) > 40:
         conversation_history[:] = conversation_history[-40:]
     return {"status": "loaded", "message_count": len(conversation_history)}
+
+
+# ── SEARCH & EXPORT ─────────────────────────────
+
+@app.get("/search")
+async def global_search(q: str = ""):
+    """Search across conversations, notes, and memories."""
+    if not q.strip():
+        return {"conversations": [], "notes": [], "memories": []}
+    return memory.global_search(q.strip())
+
+
+@app.get("/conversations/{conv_id}/export")
+async def export_conversation(conv_id: int, fmt: str = "markdown"):
+    """Export a conversation as markdown or text."""
+    text = memory.conversation_export(conv_id, fmt)
+    if text is None:
+        return JSONResponse(status_code=404, content={"detail": "Conversation not found"})
+    return {"text": text, "format": fmt}
+
+
+# ── AI TITLE & MODEL SELECTION ──────────────────
+
+@app.post("/ai/title")
+async def ai_generate_title(req: ChatRequest):
+    """Generate an AI-powered conversation title."""
+    title = generate_title(req.message)
+    return {"title": title}
+
+
+@app.get("/ai/models")
+async def ai_models():
+    """Get available AI models and current selection."""
+    return get_groq_model()
+
+
+@app.post("/ai/models")
+async def set_ai_model(req: Request):
+    """Set the active Groq model."""
+    data = await req.json()
+    model_id = data.get("model", "")
+    result = set_groq_model(model_id)
+    return {"status": result, "current": get_groq_model()}
 
 
 # ── FILE UPLOAD + ANALYSIS ───────────────────────
