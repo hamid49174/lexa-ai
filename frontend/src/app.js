@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════
-   LEXA AI — Frontend Application Logic v0.6
-   Phase 7: Keyboard Shortcuts, Chat Persistence,
-   Command Search, Sidebar Toggle
+   LEXA AI — Frontend Application Logic v0.7
+   Phase 8: Desktop Integration, Notifications,
+   Autostart, Routine Scheduler
    ════════════════════════════════════════════════ */
 
 const chatMessages = document.getElementById("chat-messages");
@@ -21,6 +21,7 @@ let audioChunks = [];
 let backendOnline = false;
 let reconnectAttempts = 0;
 let sidebarCollapsed = false;
+let notificationsEnabled = true;
 
 const VIEW_KEYS = ["chat", "system", "commands", "browser", "files", "media", "memory", "settings"];
 
@@ -49,9 +50,39 @@ async function init() {
   setupSidebar();
   setupVoice();
   setupKeyboardShortcuts();
+  setupDesktopIntegration();
   loadChatHistory();
   loadSidebarState();
   updateSystemStats();
+}
+
+// ── DESKTOP INTEGRATION (Phase 8) ───────────────
+function setupDesktopIntegration() {
+  // Load notification preference
+  const savedNotif = localStorage.getItem("lexa-notifications");
+  notificationsEnabled = savedNotif !== "0";
+
+  // Listen for tray menu view switches
+  if (window.lexa.onSwitchView) {
+    window.lexa.onSwitchView((view) => switchView(view));
+  }
+}
+
+function sendNotification(title, body) {
+  if (!notificationsEnabled) return;
+  try { window.lexa.notify(title, body); } catch {}
+}
+
+function toggleAutostart(enabled) {
+  window.lexa.setAutostart(enabled);
+  showToast(enabled ? "Autostart aktiviert" : "Autostart deaktiviert", "info");
+  sendNotification("Lexa AI", enabled ? "Autostart aktiviert" : "Autostart deaktiviert");
+}
+
+function toggleNotifications(enabled) {
+  notificationsEnabled = enabled;
+  localStorage.setItem("lexa-notifications", enabled ? "1" : "0");
+  showToast(enabled ? "Benachrichtigungen aktiviert" : "Benachrichtigungen deaktiviert", "info");
 }
 
 // ── KEYBOARD SHORTCUTS ───────────────────────────
@@ -186,6 +217,7 @@ async function checkHealth() {
 function handleOffline() {
   if (backendOnline) {
     showToast("Backend-Verbindung verloren", "error");
+    sendNotification("Lexa AI", "Backend-Verbindung verloren!");
   }
   backendOnline = false;
   reconnectAttempts++;
@@ -473,6 +505,7 @@ async function quickAction(command, promptText, paramKey) {
       const summary = typeof res.data === "string" ? res.data : JSON.stringify(res.data, null, 2).substring(0, 500);
       addMessage(summary, "system");
       showToast(`${command} erfolgreich`, "success");
+      sendNotification("Lexa AI", `${command} erfolgreich ausgef\u00fchrt`);
     } else {
       addMessage("Fehler: " + (res.error || "Unbekannter Fehler"), "system");
       showToast(`${command} fehlgeschlagen`, "error");
@@ -497,6 +530,7 @@ async function runTool(command, params = {}) {
       const summary = typeof res.data === "string" ? res.data : JSON.stringify(res.data, null, 2).substring(0, 500);
       addMessage(summary, "system");
       showToast(`${command} erledigt`, "success");
+      sendNotification("Lexa AI", `${command} erledigt`);
     } else {
       addMessage("Fehler: " + (res.error || "Unbekannter Fehler"), "system");
       showToast(`${command} fehlgeschlagen`, "error");
@@ -796,6 +830,14 @@ async function toggleRoutine(name) {
 
 // ── SETTINGS VIEW ────────────────────────────────
 async function refreshSettingsView() {
+  // Desktop settings (work even when backend is offline)
+  try {
+    const autostartToggle = document.getElementById("autostart-toggle");
+    if (autostartToggle) autostartToggle.checked = window.lexa.getAutostart();
+  } catch {}
+  const notifToggle = document.getElementById("notifications-toggle");
+  if (notifToggle) notifToggle.checked = notificationsEnabled;
+
   if (!backendOnline) return;
 
   const ai = await window.lexa.aiStatus();

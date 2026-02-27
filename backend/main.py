@@ -20,6 +20,7 @@ from backend.security import (
     audit_log,
     validate_command_output,
 )
+from backend.scheduler import start_scheduler, get_scheduler_status
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 logger = logging.getLogger("lexa.server")
@@ -27,7 +28,7 @@ logger = logging.getLogger("lexa.server")
 app = FastAPI(
     title="Lexa AI",
     description="Lokaler KI-Assistent — nur localhost",
-    version="0.6.0",
+    version="0.7.0",
 )
 
 # CORS: Nur localhost erlauben
@@ -57,15 +58,32 @@ class ChatResponse(BaseModel):
     requires_confirmation: bool = False
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Start background services."""
+    try:
+        from companion.engine import companion
+        start_scheduler(companion.execute if hasattr(companion, "execute") else None)
+        logger.info("Routine-Scheduler gestartet")
+    except Exception as e:
+        logger.warning(f"Scheduler-Start fehlgeschlagen: {e}")
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "lexa-ai", "version": "0.6.0"}
+    return {"status": "ok", "service": "lexa-ai", "version": "0.7.0"}
 
 
 @app.get("/ai/status")
 async def ai_status():
     """Get AI provider status (Groq + Ollama)."""
     return get_ai_status()
+
+
+@app.get("/scheduler/status")
+async def scheduler_status():
+    """Get routine scheduler status."""
+    return get_scheduler_status()
 
 
 @app.get("/memory/stats")

@@ -123,4 +123,17 @@ contextBridge.exposeInMainWorld("lexa", {
     });
     return res.json();
   },
+
+  // Desktop Integration (Phase 8)
+  notify: (title, body, silent = false) => {
+    ipcRenderer.send("show-notification", { title, body, silent });
+  },
+
+  getAutostart: () => ipcRenderer.sendSync("get-autostart"),
+  setAutostart: (enabled) => ipcRenderer.send("set-autostart", enabled),
+
+  // Listen for tray view-switch events
+  onSwitchView: (callback) => {
+    ipcRenderer.on("switch-view", (_, view) => callback(view));
+  },
 });

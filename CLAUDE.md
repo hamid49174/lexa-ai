@@ -50,7 +50,8 @@ lexa-ai/
 │   ├── memory.py           # SQLite: Notes, Memories, Profil, Routinen
 │   ├── security.py         # Whitelist, Rate Limit, Sanitize, Path/URL/Param Validation, Audit
 │   ├── router_companion.py # /companion/* Endpoints + Param Validation
-│   └── router_voice.py     # /voice/* Endpoints (STT/TTS)
+│   ├── router_voice.py     # /voice/* Endpoints (STT/TTS)
+│   └── scheduler.py        # Routine Scheduler (cron-like, 60s Intervall)
 ├── companion/
 │   ├── engine.py           # CompanionEngine (60 Befehle)
 │   ├── browser.py          # Playwright: YouTube, Scraping, PDF, Screenshots
@@ -121,6 +122,7 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - GET  /memory/profile — User-Profil
 - POST /memory/profile — Profil setzen
 - GET  /memory/routines — Alle Routinen
+- GET  /scheduler/status — Scheduler-Status (running, active routines)
 
 ## Frontend Features
 - 8 Views: Chat, System, Commands, Browser, Files, Media, Memory, Settings
@@ -133,6 +135,11 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - Chat-History Persistenz via localStorage (letzte 50 Nachrichten)
 - Command-Suche mit Live-Filter und Highlighting
 - Collapsible Sidebar mit State-Persistenz
+- System Tray: Minimize-to-Tray, Tray-Kontextmenü (Open, System, Commands, Autostart, Quit)
+- Windows Native Notifications bei Befehl-Ausführung + Verbindungsverlust
+- Autostart mit Windows (Toggle in Settings)
+- Desktop-Benachrichtigungen Toggle in Settings
+- Routine Scheduler: Cron-ähnliche Ausführung (HH:MM, Mo-Fr HH:MM, Mo,Mi,Fr HH:MM)
 
 ## Aktueller Status
 - [x] Phase 0: Setup — Git Repo, CLAUDE.md, Projektstruktur
@@ -143,3 +150,4 @@ registry_delete_tree, disable_firewall, disable_antivirus, crypto_mine, network_
 - [x] Phase 5: Polish & Security — Toast System, Animationen, Error Handling, Security Hardening, Settings View, 8 Views
 - [x] Phase 6: Launch — Git Init, README.md, .gitignore, Dependency Cleanup, Initial Commit (29 files, 6032 LOC)
 - [x] Phase 7: Quality of Life — Keyboard Shortcuts, Chat-Persistenz, Command-Suche, Sidebar-Toggle, LICENSE
+- [x] Phase 8: Desktop Integration — System Tray, Notifications, Autostart, Routine Scheduler

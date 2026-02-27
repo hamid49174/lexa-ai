@@ -105,7 +105,7 @@
           </div>
         </div>
         <div class="sidebar-footer">
-          <span class="version-tag">v0.6.0</span>
+          <span class="version-tag">v0.7.0</span>
         </div>
       </aside>
 
@@ -317,11 +317,42 @@
           </div>
 
           <div class="settings-group">
+            <div class="settings-group-title">DESKTOP</div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">Autostart mit Windows</div>
+                <div class="setting-desc">Lexa beim PC-Start automatisch starten</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="autostart-toggle" onchange="toggleAutostart(this.checked)">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">Desktop-Benachrichtigungen</div>
+                <div class="setting-desc">Native Windows-Notifications bei Aktionen</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="notifications-toggle" onchange="toggleNotifications(this.checked)" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">In System Tray minimieren</div>
+                <div class="setting-desc">Beim Schlie&szlig;en in den Tray minimieren statt beenden</div>
+              </div>
+              <div class="setting-status" style="color:var(--accent2)">Aktiv</div>
+            </div>
+          </div>
+
+          <div class="settings-group">
             <div class="settings-group-title">SYSTEM</div>
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name">Version</div>
-                <div class="setting-desc" id="settings-version">v0.5.0 Phase 5</div>
+                <div class="setting-desc" id="settings-version">v0.7.0 Phase 8</div>
               </div>
             </div>
             <div class="setting-item">
