@@ -4,14 +4,22 @@ __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
+.coverage
+.pytest_cache/
+.pytest_tmp*/
+.test-tmp/
+.ruff_cache/
+tmp_py_*/
 dist/
 build/
 .env
+*.env
+.env.*
+!.env.example
 
 # Node
 node_modules/
 frontend/node_modules/
-package-lock.json
 
 # IDE
 .vscode/
@@ -27,15 +35,28 @@ desktop.ini
 # Lexa specific
 audit.log
 lexa_memory.db
+lexa_memory.db-shm
+lexa_memory.db-wal
+audio_cache/
+app_cache.json
 screenshots/
 recordings/
 *.wav
 *.webm
 
+# Build output
+backend-dist/
+frontend/dist/
+
 # Voice models (large binary files)
-voice/piper/piper.exe
-voice/piper/*.onnx
-voice/piper/*.onnx.json
+voice/piper/
+
+# Local tooling
+.claude/
+
+# Local Windows diagnostics
+App-Ausf*
+
 
 # Secrets — NEVER commit
 *.key

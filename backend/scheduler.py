@@ -11,6 +11,7 @@ from datetime import datetime
 
 from backend import memory
 from backend.security import is_command_allowed, audit_log
+from backend.i18n import t
 
 logger = logging.getLogger("lexa.scheduler")
 
@@ -52,17 +53,30 @@ def _parse_schedule(schedule: str) -> bool:
             return True
         return False
 
+    # Format: "interval:Xm" or "interval:Xs" — interval-based (approximated via minute check)
+    interval_match = re.match(r"^interval:(\d+)([ms])$", schedule.lower())
+    if interval_match:
+        value = int(interval_match.group(1))
+        unit = interval_match.group(2)
+        # Convert to minutes
+        interval_minutes = value if unit == "m" else max(1, value // 60)
+        # Fire if current minute is a multiple of interval
+        current_minute_of_day = now.hour * 60 + now.minute
+        return current_minute_of_day % interval_minutes == 0
+
     return False
 
 
 async def _run_routine(routine: dict):
     """Execute all actions in a routine sequentially."""
     name = routine["name"]
-    actions = routine.get("actions", [])
+    actions = routine.get("actions", [])[:20]  # Safety cap: max 20 actions per routine
     logger.info(f"Scheduler: Starte Routine '{name}' ({len(actions)} Aktionen)")
     audit_log("scheduler", "routine_start", f"ROUTINE={name}")
 
     for i, action in enumerate(actions):
+        if not isinstance(action, dict):
+            continue
         command = action.get("action") or action.get("command")
         params = action.get("params", {})
 
@@ -71,12 +85,12 @@ async def _run_routine(routine: dict):
 
         permission = is_command_allowed(command)
         if permission == "blocked":
-            logger.warning(f"Scheduler: Befehl '{command}' in Routine '{name}' blockiert")
+            logger.warning(t("scheduler.blocked", command=command, name=name))
             audit_log("scheduler", "blocked", f"CMD={command} ROUTINE={name}")
             continue
 
         if permission == "confirmation_required":
-            logger.info(f"Scheduler: Befehl '{command}' braucht Bestätigung — übersprungen")
+            logger.info(t("scheduler.needsConfirmation", command=command))
             audit_log("scheduler", "skipped_confirmation", f"CMD={command} ROUTINE={name}")
             continue
 
@@ -88,8 +102,8 @@ async def _run_routine(routine: dict):
             else:
                 logger.warning("Scheduler: CompanionEngine nicht verfügbar")
         except Exception as e:
-            logger.error(f"Scheduler: {command} fehlgeschlagen: {e}")
-            audit_log("scheduler", "error", f"CMD={command} ERR={str(e)[:100]}")
+            logger.error(f"Scheduler: {command} fehlgeschlagen: {e}", exc_info=True)
+            audit_log("scheduler", "error", f"CMD={command} ERR={str(e)[:200]}")
 
     # Update last_run
     db = memory._get_db()
@@ -107,11 +121,30 @@ async def _run_routine(routine: dict):
 
 
 async def _scheduler_loop():
-    """Main scheduler loop — checks every 60 seconds."""
+    """Main scheduler loop — checks every 60 seconds.
+    Also checks reminders every ~30 seconds.
+    """
     logger.info("Scheduler gestartet")
+    _tick = 0  # counts 30s ticks; routines run every 2nd tick (60s)
     while True:
         try:
-            await asyncio.sleep(60)
+            await asyncio.sleep(30)
+            _tick += 1
+
+            # ── Reminder check (every 30s) ──
+            try:
+                from backend import reminders
+                fired = await asyncio.get_event_loop().run_in_executor(
+                    None, reminders.reminder_check
+                )
+                if fired:
+                    logger.info(f"Scheduler: {len(fired)} Erinnerung(en) ausgelöst")
+            except Exception as e:
+                logger.debug(f"Reminder check failed: {e}")
+
+            # ── Routine check (every 60s — on even ticks) ──
+            if _tick % 2 != 0:
+                continue
 
             db = memory._get_db()
             try:
@@ -138,7 +171,8 @@ async def _scheduler_loop():
             logger.info("Scheduler gestoppt")
             break
         except Exception as e:
-            logger.error(f"Scheduler-Fehler: {e}")
+            logger.error(t("scheduler.error", error=str(e)), exc_info=True)
+            await asyncio.sleep(5)  # Brief pause after error to prevent tight loops
 
 
 def start_scheduler(companion_execute_fn=None):

@@ -1,0 +1,85 @@
+name: "System Shortcuts"
+version: "1.0.0"
+description: "Haeufig genutzte System-Shortcuts fuer Windows. Schnellzugriff auf System-Aktionen."
+author: "Lexa AI"
+
+tools:
+  - name: "shortcut_empty_recycle_bin"
+    description: "Leert den Windows-Papierkorb"
+    parameters: {}
+    action:
+      type: shell
+      argv:
+        - "PowerShell"
+        - "-NoProfile"
+        - "-Command"
+        - "Clear-RecycleBin -Force -ErrorAction SilentlyContinue; Write-Output 'Papierkorb geleert'"
+
+  - name: "shortcut_ip_info"
+    description: "Zeigt die aktuelle IP-Konfiguration (IPv4, Gateway, DNS)"
+    parameters: {}
+    action:
+      type: shell
+      argv:
+        - "ipconfig"
+        - "/all"
+
+  - name: "shortcut_disk_space"
+    description: "Zeigt den freien Speicherplatz aller Laufwerke"
+    parameters: {}
+    action:
+      type: shell
+      argv:
+        - "PowerShell"
+        - "-NoProfile"
+        - "-Command"
+        - "Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,2)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,2)}} | Format-Table -AutoSize"
+
+  - name: "shortcut_open_temp"
+    description: "Oeffnet den Windows Temp-Ordner im Explorer"
+    parameters: {}
+    action:
+      type: shell
+      argv:
+        - "explorer"
+        - "{{env.TEMP}}"
+
+  - name: "shortcut_system_uptime"
+    description: "Zeigt wie lange der PC seit dem letzten Neustart laeuft"
+    parameters: {}
+    action:
+      type: shell
+      argv:
+        - "PowerShell"
+        - "-NoProfile"
+        - "-Command"
+        - "$os = Get-CimInstance Win32_OperatingSystem; $uptime = (Get-Date) - $os.LastBootUpTime; Write-Output ('Uptime: {0} Tage, {1} Stunden, {2} Minuten' -f $uptime.Days, $uptime.Hours, $uptime.Minutes)"
+
+  - name: "shortcut_flush_dns"
+    description: "Leert den DNS-Cache des Systems"
+    parameters: {}
+    action:
+      type: shell
+      argv:
+        - "ipconfig"
+        - "/flushdns"
+
+  - name: "shortcut_wifi_profiles"
+    description: "Listet alle gespeicherten WLAN-Profile auf"
+    parameters: {}
+    action:
+      type: shell
+      argv:
+        - "netsh"
+        - "wlan"
+        - "show"
+        - "profiles"
+
+  - name: "shortcut_open_startup"
+    description: "Oeffnet den Windows Autostart-Ordner im Explorer"
+    parameters: {}
+    action:
+      type: shell
+      argv:
+        - "explorer"
+        - "shell:startup"

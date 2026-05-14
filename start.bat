@@ -1,68 +1,233 @@
 @echo off
+setlocal enabledelayedexpansion
 title Lexa AI Launcher
-color 0A
-echo.
-echo  ========================================
-echo       LEXA AI v0.5.0 — Starting...
-echo  ========================================
-echo.
-
-:: Check Python
-cd /d "%~dp0"
-if not exist "venv\Scripts\python.exe" (
-    echo  [ERROR] Python venv not found!
-    echo  Run: python -m venv venv
-    echo  Then: venv\Scripts\pip install -r requirements.txt
-    pause
-    exit /b 1
-)
-
-:: Check Node
-cd frontend
-if not exist "node_modules" (
-    echo  [WARN] node_modules not found, installing...
-    call npm install
-)
+color 0F
 cd /d "%~dp0"
 
-:: Kill old instances
-taskkill /f /im python.exe >nul 2>&1
+echo.
+echo  ========================================
+echo       LEXA AI v1.0.0 - Starting...
+echo  ========================================
+echo.
 
-:: Start Backend
-echo  [1/2] Starting Backend (FastAPI on port 8000)...
-start /min "Lexa Backend" cmd /c "venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload"
+set "ERRORS=0"
+set "WARNINGS=0"
 
-:: Wait for backend to be ready
-echo  Waiting for backend...
-timeout /t 4 /nobreak >nul
+:: ========================================
+::  0. Kill old Lexa processes
+:: ========================================
+echo  [0/6] Cleaning up old Lexa processes...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000" ^| findstr "LISTENING" 2^>nul') do (
+    taskkill /f /pid %%a >nul 2>&1
+)
+taskkill /f /im electron.exe >nul 2>&1
+timeout /t 1 /nobreak >nul 2>&1
+call :OK "Old processes cleaned up"
 
-:: Verify backend is running
-curl -s http://127.0.0.1:8000/health >nul 2>&1
+:: ========================================
+::  1. Check Python installation
+:: ========================================
+echo  [1/6] Checking Python...
+where python >nul 2>&1
 if errorlevel 1 (
-    echo  [WARN] Backend may still be loading...
-    timeout /t 3 /nobreak >nul
+    call :ERROR "Python not found in PATH! Install Python 3.11+ first."
+    goto :fatal
+)
+for /f "tokens=*" %%v in ('python --version 2^>^&1') do set "PY_VER=%%v"
+call :OK "Found %PY_VER%"
+
+:: ========================================
+::  2. Check / create Python venv
+:: ========================================
+echo  [2/6] Checking Python venv...
+if not exist "venv\Scripts\python.exe" (
+    call :WARN "venv not found - creating virtual environment..."
+    python -m venv venv
+    if errorlevel 1 (
+        call :ERROR "Failed to create venv!"
+        goto :fatal
+    )
+    call :OK "venv created successfully"
+) else (
+    call :OK "venv exists"
 )
 
-:: Start Frontend
-echo  [2/2] Starting Frontend (Electron)...
-cd frontend
-start "Lexa Frontend" cmd /c "npx electron ."
-cd /d "%~dp0"
+venv\Scripts\pip list --format=freeze 2>nul | findstr /i "fastapi" >nul 2>&1
+if errorlevel 1 (
+    call :WARN "Dependencies missing - installing from requirements.txt..."
+    venv\Scripts\pip install -r requirements.txt --quiet
+    if errorlevel 1 (
+        call :ERROR "pip install failed! Check requirements.txt."
+        goto :fatal
+    )
+    call :OK "Dependencies installed"
+) else (
+    call :OK "Dependencies OK (fastapi found)"
+)
 
+:: ========================================
+::  3. Check Node.js and npm
+:: ========================================
+echo  [3/6] Checking Node.js...
+where node >nul 2>&1
+if errorlevel 1 (
+    call :ERROR "Node.js not found in PATH! Install Node.js 18+ first."
+    goto :fatal
+)
+for /f "tokens=*" %%v in ('node --version 2^>^&1') do set "NODE_VER=%%v"
+call :OK "Found Node.js %NODE_VER%"
+
+where npm >nul 2>&1
+if errorlevel 1 (
+    call :ERROR "npm not found in PATH!"
+    goto :fatal
+)
+
+:: ========================================
+::  4. Check frontend node_modules
+:: ========================================
+echo  [4/6] Checking frontend dependencies...
+if not exist "frontend\node_modules" (
+    call :WARN "node_modules not found - running npm install..."
+    cd frontend
+    call npm install
+    if errorlevel 1 (
+        call :ERROR "npm install failed!"
+        cd /d "%~dp0"
+        goto :fatal
+    )
+    cd /d "%~dp0"
+    call :OK "Frontend dependencies installed"
+) else (
+    call :OK "Frontend node_modules exists"
+)
+
+:: ========================================
+::  5. Check API keys (keyring)
+:: ========================================
+echo  [5/6] Checking cloud API keys...
+
+venv\Scripts\python.exe -c "import keyring; exit(0 if keyring.get_password('lexa-ai','groq_api_key') else 1)" >nul 2>&1
+if errorlevel 1 (
+    call :WARN "Groq API key not found - cloud chat may use other providers or Ollama."
+    set /a WARNINGS+=1
+) else (
+    call :OK "Groq API key found"
+)
+
+venv\Scripts\python.exe -c "import keyring; exit(0 if keyring.get_password('lexa-ai','openai_api_key') else 1)" >nul 2>&1
+if errorlevel 1 (
+    call :WARN "OpenAI API key not found - optional provider unavailable."
+    set /a WARNINGS+=1
+) else (
+    call :OK "OpenAI API key found"
+)
+
+venv\Scripts\python.exe -c "import keyring; exit(0 if keyring.get_password('lexa-ai','deepgram_api_key') else 1)" >nul 2>&1
+if errorlevel 1 (
+    call :WARN "Deepgram API key not found - STT will fall back to Groq or local."
+    set /a WARNINGS+=1
+) else (
+    call :OK "Deepgram Nova-3 STT key found"
+)
+
+venv\Scripts\python.exe -c "import keyring; exit(0 if keyring.get_password('lexa-ai','cartesia_api_key') else 1)" >nul 2>&1
+if errorlevel 1 (
+    call :WARN "Cartesia API key not found - TTS may use ElevenLabs or SAPI."
+    set /a WARNINGS+=1
+) else (
+    call :OK "Cartesia Sonic TTS key found"
+)
+
+venv\Scripts\python.exe -c "import keyring; exit(0 if keyring.get_password('lexa-ai','elevenlabs_api_key') else 1)" >nul 2>&1
+if errorlevel 1 (
+    call :WARN "ElevenLabs API key not found - premium voices unavailable."
+    set /a WARNINGS+=1
+) else (
+    call :OK "ElevenLabs TTS key found"
+)
+
+:: ========================================
+::  6. Double-check port 8000
+:: ========================================
+echo  [6/6] Checking port 8000...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000" ^| findstr "LISTENING" 2^>nul') do (
+    call :WARN "Port 8000 still in use (PID %%a) - killing..."
+    taskkill /f /pid %%a >nul 2>&1
+    timeout /t 1 /nobreak >nul 2>&1
+)
+call :OK "Port 8000 is free"
+
+:: ========================================
+::  Start Electron (backend is managed by main.js)
+:: ========================================
+echo.
+echo  Starting Lexa AI (Electron + Backend)...
+set "ELECTRON_RUN_AS_NODE="
+pushd "%~dp0frontend"
+start "Lexa AI" npx electron .
+popd
+
+:: ========================================
+::  Summary
+:: ========================================
 echo.
 echo  ========================================
-echo   Lexa AI is running!
-echo   Backend:  http://127.0.0.1:8000
-echo   Commands: 60 registered
-echo   AI:       Groq + Ollama Fallback
-echo   Voice:    Piper TTS + Whisper STT
+if !WARNINGS! gtr 0 (
+    echo   Lexa AI started with !WARNINGS! warning(s)
+) else (
+    echo   Lexa AI is running!
+)
+echo  ========================================
+echo   App:      Electron + FastAPI (auto-managed)
+echo   Commands: 138+ registered
+echo   Views:    7 (Dashboard, Chat, System,
+echo             Commands, Productivity, Memory,
+echo             Settings)
+echo   AI:       Groq + OpenAI + Gemini + Ollama
+echo   STT:      Deepgram Nova-3 + Groq/Local fallback
+echo   TTS:      Cartesia + ElevenLabs + SAPI fallback
 echo  ========================================
 echo.
 echo  Press any key to stop Lexa AI...
 pause >nul
 
-:: Cleanup
+:: ========================================
+::  Cleanup on exit
+:: ========================================
+echo.
 echo  Stopping Lexa AI...
-taskkill /f /im python.exe >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000" ^| findstr "LISTENING" 2^>nul') do (
+    taskkill /f /pid %%a >nul 2>&1
+)
 taskkill /f /im electron.exe >nul 2>&1
-echo  Done.
+echo  Done. Goodbye!
+exit /b 0
+
+:: ========================================
+::  Helper functions
+:: ========================================
+
+:OK
+echo    [OK]   %~1
+exit /b 0
+
+:WARN
+echo    [WARN] %~1
+exit /b 0
+
+:ERROR
+echo    [FAIL] %~1
+set /a ERRORS+=1
+exit /b 0
+
+:fatal
+echo.
+echo  ========================================
+echo   FATAL: Lexa AI could not start.
+echo   Fix the errors above and try again.
+echo  ========================================
+echo.
+echo  Press any key to exit...
+pause >nul
+exit /b 1

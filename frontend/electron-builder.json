@@ -1,0 +1,47 @@
+{
+  "appId": "de.alexsprogis.lexa-ai",
+  "productName": "Lexa AI",
+  "copyright": "Copyright © 2026 alexsprogis",
+  "directories": {
+    "output": "../dist"
+  },
+  "files": [
+    "main.js",
+    "preload.js",
+    "src/**/*",
+    "package.json",
+    "!node_modules/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "../backend-dist/lexa-backend",
+      "to": "backend-dist",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "../command_whitelist.json",
+      "to": "command_whitelist.json"
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "src/icon.ico",
+    "forceCodeSigning": false,
+    "signAndEditExecutable": false
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "installerIcon": "src/icon.ico",
+    "uninstallerIcon": "src/icon.ico",
+    "installerHeaderIcon": "src/icon.ico",
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Lexa AI"
+  }
+}

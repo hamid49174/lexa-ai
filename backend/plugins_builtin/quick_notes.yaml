@@ -1,0 +1,39 @@
+name: "Quick Notes"
+version: "1.0.0"
+description: "Schnelle Notizen erstellen und lesen. Speichert Notizen als Markdown-Datei."
+author: "Lexa AI"
+
+tools:
+  - name: "quick_note_create"
+    description: "Erstellt eine schnelle Notiz und haengt sie an die Notiz-Datei an"
+    parameters:
+      title:
+        type: string
+        description: "Titel der Notiz"
+        required: true
+      content:
+        type: string
+        description: "Inhalt der Notiz"
+        required: true
+      tag:
+        type: string
+        description: "Optionaler Tag fuer die Notiz (z.B. 'arbeit', 'idee', 'privat')"
+    action:
+      type: file_append
+      path: "~/.lexa/quick_notes.md"
+      content: "\n## {{params.title}}\n**Tag:** {{params.tag}} | **Erstellt:** {{params.title}}\n\n{{params.content}}\n\n---\n"
+
+  - name: "quick_note_read"
+    description: "Liest alle gespeicherten schnellen Notizen"
+    parameters: {}
+    action:
+      type: file_read
+      path: "~/.lexa/quick_notes.md"
+
+  - name: "quick_note_clear"
+    description: "Loescht alle schnellen Notizen und startet eine neue leere Datei"
+    parameters: {}
+    action:
+      type: file_write
+      path: "~/.lexa/quick_notes.md"
+      content: "# Lexa Quick Notes\n\nNotizen erstellt mit dem Quick Notes Plugin.\n\n---\n"

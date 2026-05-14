@@ -1,585 +1,1094 @@
 <!DOCTYPE html>
 <html lang="de">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src http://127.0.0.1:8000; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; media-src blob:;">
+  <!-- CSP: Allow cdnjs.cloudflare.com for Three.js and SimplexNoise -->
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; connect-src 'self' http://127.0.0.1:8000 ws://127.0.0.1:8000; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; media-src blob:;">
   <title>Lexa AI</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet">
+  <!-- CSS Modules (split from monolithic styles.css) -->
+  <link rel="stylesheet" href="./css/theme.css">
+  <link rel="stylesheet" href="./css/layout.css">
+  <link rel="stylesheet" href="./css/chat.css">
+  <link rel="stylesheet" href="./css/voice.css">
+  <link rel="stylesheet" href="./css/views.css">
+  <link rel="stylesheet" href="./css/components.css">
+  <link rel="stylesheet" href="./css/overrides.css">
+
+  <!-- 3D Visualization Dependencies -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
+  <script src="./i18n/i18n.js"></script>
+  <script src="./app.js" defer></script>
 </head>
+
 <body>
   <div id="app">
     <!-- Title Bar -->
     <div class="titlebar" id="titlebar">
       <div class="titlebar-left">
         <div class="titlebar-logo">
-          <span class="logo-icon">&#9889;</span>
-          <span class="logo-text">LEXA<span class="logo-accent">AI</span></span>
+          <img src="./logo.png" class="logo-icon-img" alt="Lexa" width="24" height="24">
         </div>
         <div class="status-badge" id="status-badge">
           <span class="status-dot offline"></span>
-          <span class="status-text">Verbinde...</span>
+          <span class="status-text" data-i18n="status.connecting">Verbinde...</span>
+
         </div>
       </div>
       <div class="titlebar-controls">
-        <button class="tb-btn" onclick="window.lexa.minimize()" aria-label="Minimize">
-          <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="2" fill="currentColor"/></svg>
+        <button class="tb-btn" data-action="lexa-minimize" aria-label="Minimize">
+          <svg width="12" height="12" viewBox="0 0 12 12">
+            <rect y="5" width="12" height="2" fill="currentColor" />
+          </svg>
         </button>
-        <button class="tb-btn" onclick="window.lexa.maximize()" aria-label="Maximize">
-          <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+        <button class="tb-btn" data-action="lexa-maximize" aria-label="Maximize">
+          <svg width="12" height="12" viewBox="0 0 12 12">
+            <rect x="1" y="1" width="10" height="10" stroke="currentColor" stroke-width="1.5" fill="none" />
+          </svg>
         </button>
-        <button class="tb-btn tb-close" onclick="window.lexa.close()" aria-label="Close">
-          <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5"/></svg>
+        <button class="tb-btn tb-close" data-action="lexa-close" aria-label="Close">
+          <svg width="12" height="12" viewBox="0 0 12 12">
+            <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5" />
+          </svg>
         </button>
       </div>
     </div>
 
+    <!-- Voice Status Bar (hidden compat stub) -->
+    <div id="voice-status-bar" class="hidden">
+      <div id="voice-status-dot"></div><span id="voice-status-text"></span>
+      <canvas id="voice-level-meter" width="1" height="1"></canvas>
+      <span id="voice-live-transcript"></span><span id="voice-provider-badge"></span><span id="voice-latency"></span>
+    </div>
+
     <!-- Connection Banner -->
-    <div class="connection-banner" id="connection-banner">
-      &#9888; Backend nicht erreichbar &mdash; Verbindungsversuch l&auml;uft...
+    <div class="connection-banner" id="connection-banner" role="alert" aria-live="assertive">
+      &#9888; <span class="banner-text" data-i18n="status.backendUnreachable">Backend nicht erreichbar &mdash; Verbindungsversuch l&auml;uft...</span>
     </div>
 
     <!-- Toast Container -->
-    <div class="toast-container" id="toast-container"></div>
+    <div class="toast-container" id="toast-container" aria-live="polite" role="status"></div>
+
+    <!-- Notification Center Panel -->
+    <div class="notif-center hidden" id="notif-center" role="dialog" aria-modal="true" aria-label="Benachrichtigungen">
+      <div class="notif-center-header">
+        <span data-i18n="notifications.title">Benachrichtigungen</span>
+        <button class="notif-center-clear" data-action="clearNotifCenter" data-i18n="notifications.clearAll">Alle l&ouml;schen</button>
+        <button class="notif-center-close" data-action="toggleNotifCenter">&#x2715;</button>
+      </div>
+      <div class="notif-center-list" id="notif-center-list">
+        <div class="notif-center-empty" data-i18n="notifications.empty">Keine Benachrichtigungen</div>
+      </div>
+    </div>
 
     <!-- Main Layout -->
     <div class="main-layout">
+      <!-- Navigation Overlay (for slide-out menu) -->
+      <div class="nav-overlay" id="nav-overlay"></div>
       <!-- Sidebar -->
-      <aside class="sidebar">
-        <div class="sidebar-section">
-          <div class="sidebar-label">HAUPT</div>
-          <button class="sidebar-btn" data-view="dashboard">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-            Dashboard
+      <aside class="sidebar" role="navigation" aria-label="Hauptnavigation">
+        <div class="sidebar-section" role="tablist" aria-label="Ansichten">
+          <div class="sidebar-label" data-i18n="sidebar.main">HAUPT</div>
+          <button class="sidebar-btn" data-view="dashboard" role="tab" aria-label="Dashboard">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+            <span data-i18n="nav.dashboard">Dashboard</span>
           </button>
-          <button class="sidebar-btn active" data-view="chat">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
-            Chat
+          <button class="sidebar-btn active" data-view="chat" role="tab" aria-label="Chat" aria-selected="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+            </svg>
+            <span data-i18n="nav.chat">Chat</span>
           </button>
-          <button class="sidebar-btn" data-view="system">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-            System
+          <button class="sidebar-btn" data-view="system" role="tab" aria-label="System">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" />
+              <path d="M8 21h8M12 17v4" />
+            </svg>
+            <span data-i18n="nav.system">System</span>
           </button>
-          <button class="sidebar-btn" data-view="commands">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-            Befehle
+          <button class="sidebar-btn" data-view="commands" role="tab" aria-label="Befehle">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="4 17 10 11 4 5" />
+              <line x1="12" y1="19" x2="20" y2="19" />
+            </svg>
+            <span data-i18n="nav.commands">Befehle</span>
           </button>
         </div>
 
         <div class="sidebar-section conversations-section">
           <div class="sidebar-label">
-            CHATS
+            <span data-i18n="sidebar.chats">CHATS</span>
             <div class="conv-header-actions">
-              <button class="new-chat-btn" onclick="openSearchOverlay()" title="Suche (Ctrl+F)">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <button class="new-chat-btn" data-action="openSearchOverlay" title="Suche (Ctrl+F)" data-i18n-title="nav.searchTooltip" role="button" aria-label="Suche">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <circle cx="11" cy="11" r="7" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
               </button>
-              <button class="new-chat-btn" onclick="newConversation()" title="Neuer Chat">+</button>
+              <button class="new-chat-btn" data-action="newConversation" title="Neuer Chat" data-i18n-title="chat.newChat" role="button" aria-label="Neuer Chat">+</button>
             </div>
           </div>
           <div class="conversation-list" id="conversation-list"></div>
         </div>
 
-        <div class="sidebar-section">
-          <div class="sidebar-label">TOOLS</div>
-          <button class="sidebar-btn" data-view="browser">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-            Browser
+        <div class="sidebar-section" role="tablist" aria-label="Tools">
+          <div class="sidebar-label" data-i18n="sidebar.tools">TOOLS</div>
+          <button class="sidebar-btn" data-view="productivity" role="tab" aria-label="Produktivit&auml;t">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 11l3 3L22 4" />
+              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+            </svg>
+            <span data-i18n="nav.productivityShort">Produktiv</span>
+            <span class="sidebar-badge hidden" id="nav-todo-badge"></span>
           </button>
-          <button class="sidebar-btn" data-view="files">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-            Dateien
+          <button class="sidebar-btn" data-view="memory" role="tab" aria-label="Ged&auml;chtnis">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+              <path d="M12 6v6l4 2" />
+            </svg>
+            <span data-i18n="nav.memory">Ged&auml;chtnis</span>
           </button>
-          <button class="sidebar-btn" data-view="media">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
-            Media
-          </button>
-          <button class="sidebar-btn" data-view="memory">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M12 6v6l4 2"/></svg>
-            Ged&auml;chtnis
-          </button>
-          <button class="sidebar-btn" data-view="settings">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-            Settings
+          <button class="sidebar-btn" data-view="settings" role="tab" aria-label="Einstellungen">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3" />
+              <path
+                d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+            </svg>
+            <span data-i18n="nav.settings">Einstellungen</span>
           </button>
         </div>
 
-        <div class="sidebar-section">
-          <div class="sidebar-label">INFO</div>
-          <div class="sidebar-stats" id="sidebar-stats">
-            <div class="stat-item">
-              <span class="stat-label">CPU</span>
-              <span class="stat-value" id="stat-cpu">--%</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">RAM</span>
-              <span class="stat-value" id="stat-ram">--%</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">Disk</span>
-              <span class="stat-value" id="stat-disk">--%</span>
-            </div>
-          </div>
-        </div>
         <div class="sidebar-footer">
-          <span class="version-tag">v0.13.0</span>
+          <span class="version-tag" data-role="backend-version">v1.0.0</span>
         </div>
       </aside>
 
       <!-- Content -->
-      <main class="content">
+      <main class="content" role="main">
         <!-- Dashboard View -->
         <div class="tool-view" id="dashboard-view">
-          <div class="view-title">Dash<span>board</span></div>
+          <div class="view-title" role="heading" aria-level="2">Dash<span>board</span></div>
           <div class="dashboard-grid">
             <!-- System Stats Widget -->
             <div class="dash-widget dash-widget-stats">
               <div class="dash-widget-header">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-                SYSTEM
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2">
+                  <rect x="2" y="3" width="20" height="14" rx="2" />
+                  <path d="M8 21h8M12 17v4" />
+                </svg>
+                <span data-i18n="dashboard.system">SYSTEM</span>
               </div>
               <div class="dash-stats-grid" id="dash-system-stats">
-                <div class="dash-stat"><span class="dash-stat-value" id="dash-cpu">--%</span><span class="dash-stat-label">CPU</span></div>
-                <div class="dash-stat"><span class="dash-stat-value" id="dash-ram">--%</span><span class="dash-stat-label">RAM</span></div>
-                <div class="dash-stat"><span class="dash-stat-value" id="dash-disk">--%</span><span class="dash-stat-label">Disk</span></div>
-                <div class="dash-stat"><span class="dash-stat-value" id="dash-battery">--%</span><span class="dash-stat-label">Akku</span></div>
+                <div class="dash-stat">
+                  <div class="dash-stat-row"><span class="dash-stat-label" data-i18n="dashboard.cpu">CPU</span><span class="dash-stat-value" id="dash-cpu">--%</span></div>
+                  <div class="dash-stat-bar"><div class="dash-stat-bar-fill bar-initial" id="dash-cpu-bar"></div></div>
+                </div>
+                <div class="dash-stat">
+                  <div class="dash-stat-row"><span class="dash-stat-label" data-i18n="dashboard.ram">RAM</span><span class="dash-stat-value" id="dash-ram">--%</span></div>
+                  <div class="dash-stat-bar"><div class="dash-stat-bar-fill bar-initial" id="dash-ram-bar"></div></div>
+                </div>
+                <div class="dash-stat">
+                  <div class="dash-stat-row"><span class="dash-stat-label" data-i18n="dashboard.disk">Disk</span><span class="dash-stat-value" id="dash-disk">--%</span></div>
+                  <div class="dash-stat-bar"><div class="dash-stat-bar-fill bar-initial" id="dash-disk-bar"></div></div>
+                </div>
+                <div class="dash-stat">
+                  <div class="dash-stat-row"><span class="dash-stat-label" data-i18n="dashboard.battery">Akku</span><span class="dash-stat-value" id="dash-battery">--%</span></div>
+                  <div class="dash-stat-bar"><div class="dash-stat-bar-fill bar-initial" id="dash-battery-bar"></div></div>
+                </div>
               </div>
             </div>
 
             <!-- KI Status Widget -->
             <div class="dash-widget dash-widget-ai">
               <div class="dash-widget-header">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent2)" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-                KI-STATUS
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent2)" stroke-width="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 6v6l4 2" />
+                </svg>
+                <span data-i18n="dashboard.aiStatusHeader">KI-STATUS</span>
               </div>
-              <div id="dash-ai-status" class="dash-ai-info">Lade...</div>
-            </div>
-
-            <!-- Quick Actions Widget -->
-            <div class="dash-widget dash-widget-actions">
-              <div class="dash-widget-header">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                SCHNELLSTART
-              </div>
-              <div class="dash-quick-grid">
-                <button class="dash-quick-btn" onclick="quickAction('youtube_play', 'YouTube-Suche:', 'query')">&#9654; YouTube</button>
-                <button class="dash-quick-btn" onclick="runTool('system_info')">&#128187; System Info</button>
-                <button class="dash-quick-btn" onclick="runTool('screenshot')">&#128247; Screenshot</button>
-                <button class="dash-quick-btn" onclick="runTool('organize_downloads')">&#128193; Downloads</button>
-                <button class="dash-quick-btn" onclick="runTool('media_play_pause')">&#9199; Play/Pause</button>
-                <button class="dash-quick-btn" onclick="quickAction('web_scrape', 'URL zum Scrapen:', 'url')">&#127760; Scrape</button>
-              </div>
+              <div id="dash-ai-status" class="dash-ai-info" data-i18n="common.loading">Lade...</div>
             </div>
 
             <!-- Scheduler Widget -->
             <div class="dash-widget dash-widget-scheduler">
               <div class="dash-widget-header">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                ROUTINEN
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                <span data-i18n="dashboard.routinesHeader">ROUTINEN</span>
               </div>
-              <div id="dash-routines-list" class="dash-routines">Lade...</div>
+              <div id="dash-routines-list" class="dash-routines" data-i18n="common.loading">Lade...</div>
             </div>
 
             <!-- Memory Widget -->
             <div class="dash-widget dash-widget-memory">
               <div class="dash-widget-header">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M12 6v6l4 2"/></svg>
-                GED&Auml;CHTNIS
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+                  <path d="M12 6v6l4 2" />
+                </svg>
+                <span data-i18n="dashboard.memoryHeader">GED&Auml;CHTNIS</span>
               </div>
-              <div id="dash-memory-stats" class="dash-memory-info">Lade...</div>
+              <div id="dash-memory-stats" class="dash-memory-info" data-i18n="common.loading">Lade...</div>
+            </div>
+
+            <!-- Productivity Widget -->
+            <div class="dash-widget dash-widget-productivity">
+              <div class="dash-widget-header">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2">
+                  <polyline points="9 11 12 14 22 4" />
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                </svg>
+                <span data-i18n="dashboard.productivityHeader">PRODUKTIVIT&Auml;T</span>
+              </div>
+              <div id="dash-productivity-stats" class="dash-productivity-info" data-i18n="common.loading">Lade...</div>
+            </div>
+
+            <!-- Weekly Chart Widget -->
+            <div class="dash-widget dash-widget-weekly">
+              <div class="dash-widget-header">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+                </svg>
+                <span data-i18n="dashboard.weeklyOverview">7-TAGE &Uuml;BERSICHT</span>
+              </div>
+              <div id="dash-weekly-chart" class="dash-weekly-chart" data-i18n="common.loading">Lade...</div>
             </div>
 
             <!-- Greeting Widget -->
             <div class="dash-widget dash-widget-greeting">
-              <div class="dash-greeting-text" id="dash-greeting">Guten Tag, Chef!</div>
-              <div class="dash-greeting-sub" id="dash-greeting-sub">Lexa AI v0.13.0 &mdash; Dein lokaler KI-Assistent</div>
-              <button class="dash-chat-btn" onclick="switchView('chat')">&#9889; Chat &ouml;ffnen</button>
+              <div class="dash-clock" id="dash-clock">00:00:00</div>
+              <div class="dash-date" id="dash-date"></div>
+              <div class="dash-greeting-text" id="dash-greeting" data-i18n="dashboard.greetingDefault">Guten Tag, Chef!</div>
+              <div class="dash-greeting-sub" id="dash-greeting-sub" data-i18n="dashboard.subtitle">Lexa AI v1.0.0 &mdash; Dein lokaler KI-Assistent
+              </div>
+              <button class="dash-chat-btn" data-action="switchView" data-arg="chat" data-i18n="dashboard.openChat">&#9889; Chat &ouml;ffnen</button>
             </div>
           </div>
         </div>
 
-        <!-- Chat View (default) -->
-        <div class="chat-container" id="chat-container">
-          <!-- Drop Zone Overlay -->
-          <div class="drop-zone-overlay" id="drop-zone-overlay">
-            <div class="drop-zone-content">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              <div class="drop-zone-text">Datei hier ablegen</div>
-              <div class="drop-zone-hint">Text, Code, Bilder, PDFs</div>
-            </div>
-          </div>
-          <div class="chat-messages" id="chat-messages">
-            <div class="message system-message">
-              <div class="msg-avatar system">&#9889;</div>
-              <div class="msg-body">
-                <div class="msg-name">Lexa</div>
-                <div class="msg-text">Hey Chef! Ich bin Lexa, dein lokaler KI-Assistent. Ich steuere deinen PC, durchsuche das Web, verwalte Dateien, spiele Musik und vieles mehr. Was brauchst du?</div>
+        <!-- System View (Phase 21: erweitert) -->
+        <div class="tool-view" id="system-view-ext">
+          <div class="view-title" role="heading" aria-level="2">System-<span>Monitor</span></div>
+          <div class="info-grid" id="system-grid"></div>
+
+          <!-- Uptime & Quick System Info -->
+          <div class="prod-stats-bar" id="sys-quick-bar"></div>
+
+          <!-- Fenster-Steuerung -->
+          <div class="section-spacing">
+            <h3 class="section-title" data-i18n="system.windowControl">Fenster-Steuerung</h3>
+            <div class="tool-actions">
+              <div class="tool-card" data-action="windowLayoutAction" data-arg="left-half">
+                <div class="tool-icon">&#9664;</div>
+                <div class="tool-label" data-i18n="system.left">Links</div>
+                <div class="tool-desc" data-i18n="system.activeWindowLeft">Aktives Fenster links</div>
+              </div>
+              <div class="tool-card" data-action="windowLayoutAction" data-arg="right-half">
+                <div class="tool-icon">&#9654;</div>
+                <div class="tool-label" data-i18n="system.right">Rechts</div>
+                <div class="tool-desc" data-i18n="system.activeWindowRight">Aktives Fenster rechts</div>
+              </div>
+              <div class="tool-card" data-action="windowLayoutAction" data-arg="center">
+                <div class="tool-icon">&#9632;</div>
+                <div class="tool-label" data-i18n="system.centered">Zentriert</div>
+                <div class="tool-desc" data-i18n="system.centerWindow">Fenster zentrieren</div>
+              </div>
+              <div class="tool-card" data-action="windowMoveAction">
+                <div class="tool-icon">&#8596;</div>
+                <div class="tool-label" data-i18n="system.move">Verschieben</div>
+                <div class="tool-desc" data-i18n="system.moveWindow">Fenster an Position bewegen</div>
+              </div>
+              <div class="tool-card" data-action="windowResizeAction">
+                <div class="tool-icon">&#10530;</div>
+                <div class="tool-label" data-i18n="system.resize">Gr&ouml;&szlig;e &auml;ndern</div>
+                <div class="tool-desc" data-i18n="system.setDimensions">Fenster-Abmessungen setzen</div>
+              </div>
+              <div class="tool-card" data-action="runTool" data-cmd="window_list">
+                <div class="tool-icon">&#128466;</div>
+                <div class="tool-label" data-i18n="system.windowList">Fenster-Liste</div>
+                <div class="tool-desc" data-i18n="system.allVisibleWindows">Alle sichtbaren Fenster</div>
               </div>
             </div>
           </div>
 
-          <!-- Voice Orb -->
+          <!-- Netzwerk-Tools -->
+          <div class="section-spacing">
+            <h3 class="section-title" data-i18n="system.network">Netzwerk</h3>
+            <div class="tool-actions">
+              <div class="tool-card" data-action="quickAction" data-cmd="ping" data-prompt="Host zum Anpingen:" data-param="host">
+                <div class="tool-icon">&#128225;</div>
+                <div class="tool-label" data-i18n="system.ping">Ping</div>
+                <div class="tool-desc" data-i18n="system.checkHostReachability">Host-Erreichbarkeit pr&uuml;fen</div>
+              </div>
+              <div class="tool-card" data-action="quickAction" data-cmd="dns_lookup" data-prompt="Hostname f&uuml;r DNS-Lookup:" data-param="host">
+                <div class="tool-icon">&#127760;</div>
+                <div class="tool-label" data-i18n="system.dnsLookup">DNS Lookup</div>
+                <div class="tool-desc" data-i18n="system.resolveDomain">Domain zu IP aufl&ouml;sen</div>
+              </div>
+              <div class="tool-card" data-action="portCheckAction">
+                <div class="tool-icon">&#128274;</div>
+                <div class="tool-label" data-i18n="system.portCheck">Port-Check</div>
+                <div class="tool-desc" data-i18n="system.checkPortOpen">Pr&uuml;fen ob Port offen ist</div>
+              </div>
+              <div class="tool-card" data-action="runTool" data-cmd="network_info">
+                <div class="tool-icon">&#128279;</div>
+                <div class="tool-label" data-i18n="system.networkInfo">Netzwerk-Info</div>
+                <div class="tool-desc" data-i18n="system.adapterInfo">Adapter, IP, MAC, Speed</div>
+              </div>
+              <div class="tool-card" data-action="runTool" data-cmd="public_ip">
+                <div class="tool-icon">&#127758;</div>
+                <div class="tool-label" data-i18n="system.publicIp">&Ouml;ffentliche IP</div>
+                <div class="tool-desc" data-i18n="system.getExternalIp">Externe IP-Adresse abrufen</div>
+              </div>
+              <div class="tool-card" data-action="quickAction" data-cmd="traceroute" data-prompt="Host f&uuml;r Traceroute:" data-param="host">
+                <div class="tool-icon">&#128739;</div>
+                <div class="tool-label" data-i18n="system.traceroute">Traceroute</div>
+                <div class="tool-desc" data-i18n="system.traceRoute">Netzwerk-Route verfolgen</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Autostart & Dienste -->
+          <div class="section-spacing">
+            <h3 class="section-title" data-i18n="system.autostartServices">Autostart &amp; Dienste</h3>
+            <div class="tool-actions">
+              <div class="tool-card" data-action="viewAutostartList">
+                <div class="tool-icon">&#128640;</div>
+                <div class="tool-label" data-i18n="system.autostartList">Autostart-Liste</div>
+                <div class="tool-desc" data-i18n="system.programsInAutostart">Programme im Autostart</div>
+              </div>
+              <div class="tool-card" data-action="autostartAddAction">
+                <div class="tool-icon">&#10133;</div>
+                <div class="tool-label" data-i18n="system.autostartAddLabel">Autostart +</div>
+                <div class="tool-desc" data-i18n="system.addToAutostart">Programm zum Autostart hinzuf&uuml;gen</div>
+              </div>
+              <div class="tool-card" data-action="viewServiceList">
+                <div class="tool-icon">&#9881;</div>
+                <div class="tool-label" data-i18n="system.serviceList">Dienste-Liste</div>
+                <div class="tool-desc" data-i18n="system.showServices">Windows-Dienste anzeigen</div>
+              </div>
+              <div class="tool-card" data-action="quickAction" data-cmd="installed_apps" data-prompt="App suchen (leer = alle):" data-param="search">
+                <div class="tool-icon">&#128230;</div>
+                <div class="tool-label" data-i18n="system.installedApps">Installierte Apps</div>
+                <div class="tool-desc" data-i18n="system.listPrograms">Programme auf dem PC listen</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Umgebungsvariablen & System -->
+          <div class="section-spacing">
+            <h3 class="section-title" data-i18n="system.systemEnvironment">System &amp; Umgebung</h3>
+            <div class="tool-actions">
+              <div class="tool-card" data-action="runTool" data-cmd="system_uptime">
+                <div class="tool-icon">&#9200;</div>
+                <div class="tool-label" data-i18n="system.uptime">Uptime</div>
+                <div class="tool-desc" data-i18n="system.systemUptime">System-Betriebszeit</div>
+              </div>
+              <div class="tool-card" data-action="quickAction" data-cmd="env_get" data-prompt="Variablenname:" data-param="name">
+                <div class="tool-icon">&#128196;</div>
+                <div class="tool-label" data-i18n="system.envRead">ENV lesen</div>
+                <div class="tool-desc" data-i18n="system.readEnvVar">Umgebungsvariable lesen</div>
+              </div>
+              <div class="tool-card" data-action="runTool" data-cmd="env_list">
+                <div class="tool-icon">&#128203;</div>
+                <div class="tool-label" data-i18n="system.envList">ENV-Liste</div>
+                <div class="tool-desc" data-i18n="system.allEnvVars">Alle Umgebungsvariablen</div>
+              </div>
+              <div class="tool-card" data-action="runTool" data-cmd="flush_dns" data-confirm="true">
+                <div class="tool-icon">&#128259;</div>
+                <div class="tool-label" data-i18n="system.flushDns">DNS leeren</div>
+                <div class="tool-desc" data-i18n="system.flushDnsCache">DNS-Cache flushen</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-results" id="system-results"></div>
+        </div>
+
+        <!-- Top Nav Pill (outside chat-container so it's visible in all views) -->
+        <div class="top-nav-pill" id="top-nav-pill">
+            <button class="icon-btn mobile-menu-btn" id="nav-menu-btn" data-action="toggleNavMenu" title="Navigation" aria-label="Navigation" aria-expanded="false">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="4" y1="12" x2="20" y2="12"></line>
+                <line x1="4" y1="6" x2="20" y2="6"></line>
+                <line x1="4" y1="18" x2="20" y2="18"></line>
+              </svg>
+            </button>
+            <span class="nav-title">Lexa</span>
+            <span class="nav-dot"></span>
+            <span class="nav-time" id="nav-time">13:54:18</span>
+            <span class="nav-status" id="nav-status" data-i18n="status.local">LOKAL</span>
+            <button id="wakeword-indicator" class="icon-btn wakeword-btn" data-action="toggleWakeWord" title="Wake Word (immer zuh&ouml;ren)" data-i18n-title="nav.wakeWordTooltip">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="22"/>
+              </svg>
+            </button>
+            <button class="icon-btn notif-bell-btn" id="notif-bell-btn" data-action="toggleNotifCenter" title="Benachrichtigungen" data-i18n-title="notifications.title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+              <span class="notif-badge hidden" id="notif-badge">0</span>
+            </button>
+            <button class="icon-btn" data-action="switchView" data-arg="memory" title="Ged&auml;chtnis" data-i18n-title="nav.memory">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon
+                  points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+            </button>
+            <button class="icon-btn" data-action="switchView" data-arg="settings" title="Einstellungen" data-i18n-title="nav.settings">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3" />
+                <path
+                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.51-1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+          </div>
+
+        <!-- Chat View (default) -->
+        <div class="chat-container active" id="chat-container">
+          <!-- Drop Zone Overlay -->
+          <div class="drop-zone-overlay" id="drop-zone-overlay">
+            <div class="drop-zone-content">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              <div class="drop-zone-text" data-i18n="chat.dropFile">Datei hier ablegen</div>
+              <div class="drop-zone-hint" data-i18n="chat.fileTypes">Text, Code, Bilder, PDFs</div>
+            </div>
+          </div>
+          <!-- Orb (click to speak) -->
           <div class="voice-orb-container" id="voice-orb-container">
-            <div>
-              <div class="voice-orb" id="voice-orb" onclick="toggleRecording()" title="Klicken zum Sprechen"></div>
-              <div class="voice-orb-label" id="voice-orb-label">Klicken zum Sprechen</div>
+            <div id="voice-orb-canvas" data-action="startOrbConversation" title="Klicken zum Sprechen">
+              <!-- 3D Canvas injected by orb3d.js -->
             </div>
+            <div id="orb-transcript" class="orb-transcript hidden">
+              <div id="orb-user-text" class="orb-text orb-user-text"></div>
+              <div id="orb-lexa-text" class="orb-text orb-lexa-text"></div>
+            </div>
+            <div id="orb-listening-text" class="orb-listening-text hidden">Ich h&ouml;re zu&hellip;</div>
+            <div id="orb-conversation-status" class="orb-conversation-status hidden"></div>
           </div>
 
-          <!-- Input Area -->
-          <div class="chat-input-area">
-            <div class="input-wrapper">
-              <button class="attach-btn" id="attach-btn" aria-label="Datei anh&auml;ngen" title="Datei anh&auml;ngen" onclick="triggerFileUpload()">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
-              </button>
-              <input type="file" id="file-input" style="display:none" onchange="handleFileSelect(event)">
-              <button class="mic-btn" id="mic-btn" aria-label="Spracheingabe">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-              </button>
-              <textarea
-                id="chat-input"
-                placeholder="Nachricht an Lexa..."
-                rows="1"
-                autofocus
-              ></textarea>
-              <button class="tts-toggle" id="tts-toggle" aria-label="Sprachausgabe" title="Sprachausgabe an/aus">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
-              </button>
-              <button class="send-btn" id="send-btn" aria-label="Senden">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-              </button>
+          <!-- Greeting -->
+          <div class="sleek-greeting" id="sleek-greeting">
+            <h1 class="greeting-title" id="app-title">Ich bin Lexa.</h1>
+            <p class="greeting-subtitle">Dein lokaler KI-Assistent. Sprich mit mir oder tippe eine Nachricht.</p>
+            <div class="greeting-stats">
+              <span class="stat-pill" id="greeting-cmd-count">162 Befehle bereit</span>
+              <span class="stat-pill" id="greeting-conv-count">0 Chats gespeichert</span>
             </div>
-            <div class="suggestion-chips" id="suggestion-chips"></div>
-            <div class="input-hint">
-              <span>Enter zum Senden</span>
-              <span class="divider">|</span>
-              <span>Shift+Enter f&uuml;r neue Zeile</span>
-              <span class="divider">|</span>
-              <span id="voice-status-hint">Ctrl+M Mikrofon</span>
-              <span class="divider">|</span>
-              <span>Ctrl+F Suche</span>
-              <span class="divider">|</span>
-              <span>Ctrl+N Neuer Chat</span>
-              <span class="divider">|</span>
-              <span>Ctrl+P Palette</span>
+            <button class="talk-to-lexa-btn" id="talk-to-lexa-btn" aria-label="Mit Lexa sprechen (Ctrl+M)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="talk-btn-icon">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Zm0 14a5 5 0 0 1-5-5H5a7 7 0 0 0 14 0h-2a5 5 0 0 1-5 5Zm-2 4v3h4v-3h-4Z"/>
+              </svg>
+              <span>Mit Lexa sprechen</span>
+            </button>
+            <!-- Arrow to show chat messages -->
+            <button id="chat-view-arrow" class="chat-view-arrow" data-action="toggleChatView" aria-label="Chat anzeigen" title="Chat anzeigen">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Focus Mode Banner (hidden by default) -->
+          <div id="focus-mode-banner" class="focus-mode-banner hidden">
+            <span class="focus-mode-banner-icon">&#127919;</span>
+            <span class="focus-mode-banner-text">Fokus-Modus aktiv</span>
+            <button class="focus-mode-banner-off" data-action="toggleFocusMode">Beenden</button>
+          </div>
+
+          <!-- Conversation Starters -->
+          <div class="conversation-starters" id="conversation-starters">
+            <div class="starter-grid" id="starter-grid"></div>
+          </div>
+
+          <!-- Chat Messages -->
+          <div class="chat-messages hidden" id="chat-messages"></div>
+
+          <!-- Hidden compat elements -->
+          <div id="voice-transcript-panel" class="hidden"><div id="voice-transcript-list"></div></div>
+          <div id="floating-cards-container" class="hidden"><span id="nav-cpu-percent"></span><span id="nav-commands-count"></span></div>
+
+          <div class="chat-input-area sleek-input-area">
+            <div class="sleek-input-container">
+              <div class="input-wrapper sleek-pill">
+                <!-- Hidden file input for attachments -->
+                <input type="file" id="file-input" class="hidden">
+                <button id="attach-btn" class="hidden"></button>
+
+                <label for="chat-input" class="sr-only" data-i18n="chat.enterMessage">Nachricht eingeben</label>
+                <input type="text" id="chat-input" placeholder="Frag mich was... (Enter zum Senden)" data-i18n-placeholder="chat.inputPlaceholder" autofocus aria-label="Nachricht eingeben">
+                <span id="char-counter" class="char-counter hidden"></span>
+
+                <div class="sleek-actions-right">
+                  <button class="sleek-icon-btn tts-toggle-btn" id="tts-toggle" aria-label="TTS Ein/Aus" title="Sprachausgabe ein/aus">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                      <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                      <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                    </svg>
+                  </button>
+                  <button class="sleek-icon-btn mic-toggle-btn" id="mic-btn" aria-label="Mikrofon (Ctrl+M)" title="Sprachaufnahme starten (Ctrl+M)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                      <line x1="12" y1="19" x2="12" y2="22"/>
+                    </svg>
+                  </button>
+                  <button class="sleek-icon-btn vision-screenshot-btn" id="vision-screenshot-btn" aria-label="Screenshot analysieren" title="Screenshot analysieren (Ctrl+Shift+S)" data-action="visionScreenshot">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                      <circle cx="12" cy="13" r="4"/>
+                    </svg>
+                  </button>
+                  <button class="send-btn sleek-icon-btn" id="send-btn" aria-label="Senden">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="22" y1="2" x2="11" y2="13" />
+                      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Browser View -->
-        <div class="tool-view" id="browser-view">
-          <div class="view-title">Browser <span>Automation</span></div>
-          <div class="tool-actions">
-            <div class="tool-card" onclick="quickAction('youtube_play', 'Was soll auf YouTube gesucht werden?', 'query')">
-              <div class="tool-icon">&#9654;</div>
-              <div class="tool-label">YouTube Play</div>
-              <div class="tool-desc">Suche &amp; spiele ein Video</div>
-            </div>
-            <div class="tool-card" onclick="quickAction('youtube_search', 'YouTube-Suche:', 'query')">
-              <div class="tool-icon">&#128269;</div>
-              <div class="tool-label">YouTube Suche</div>
-              <div class="tool-desc">Videos suchen ohne abspielen</div>
-            </div>
-            <div class="tool-card" onclick="quickAction('web_screenshot', 'URL f&uuml;r Screenshot:', 'url')">
-              <div class="tool-icon">&#128247;</div>
-              <div class="tool-label">Web Screenshot</div>
-              <div class="tool-desc">Website als Bild speichern</div>
-            </div>
-            <div class="tool-card" onclick="quickAction('web_scrape', 'URL zum Scrapen:', 'url')">
-              <div class="tool-icon">&#128196;</div>
-              <div class="tool-label">Web Scrape</div>
-              <div class="tool-desc">Text von Webseite extrahieren</div>
-            </div>
-            <div class="tool-card" onclick="quickAction('price_check', 'Produkt-URL:', 'url')">
-              <div class="tool-icon">&#128176;</div>
-              <div class="tool-label">Preis-Check</div>
-              <div class="tool-desc">Preis auf Produktseite pr&uuml;fen</div>
-            </div>
-            <div class="tool-card" onclick="quickAction('web_pdf', 'URL als PDF:', 'url')">
-              <div class="tool-icon">&#128462;</div>
-              <div class="tool-label">Web to PDF</div>
-              <div class="tool-desc">Seite als PDF speichern</div>
-            </div>
-          </div>
-        </div>
+        <!-- Productivity View (Phase 19) -->
+        <div class="tool-view" id="productivity-view">
+          <div class="view-title" role="heading" aria-level="2">Produkti<span>vit&auml;t</span></div>
 
-        <!-- Files View -->
-        <div class="tool-view" id="files-view">
-          <div class="view-title">Datei <span>Tools</span></div>
-          <div class="tool-actions">
-            <div class="tool-card" onclick="runTool('organize_downloads')">
-              <div class="tool-icon">&#128193;</div>
-              <div class="tool-label">Downloads sortieren</div>
-              <div class="tool-desc">Downloads nach Typ organisieren</div>
+          <!-- Stats Bar -->
+          <div class="prod-stats-bar" id="prod-stats-bar"></div>
+
+          <!-- To-Do Section -->
+          <div class="prod-section">
+            <div class="section-header">
+              <h3 data-i18n="productivity.todoList">To-Do Liste</h3>
+              <div class="flex-row">
+                <input type="text" id="todo-search" class="settings-input compact-input" placeholder="Suchen..." data-i18n-placeholder="productivity.search" data-action="filterTodosLocal" aria-label="To-Do suchen">
+                <select id="todo-filter" class="settings-select compact-select"
+                  data-action="refreshTodos">
+                  <option value="" data-i18n="todo.all">Alle</option>
+                  <option value="open" data-i18n="todo.open">Offen</option>
+                  <option value="in_progress" data-i18n="todo.inProgress">In Arbeit</option>
+                  <option value="done" data-i18n="todo.done">Erledigt</option>
+                </select>
+                <button class="action-btn" data-action="createTodo" data-i18n="todo.newTodo">+ Neues To-Do</button>
+                <button class="action-btn bg-surface2" data-action="exportTodos" title="Todos exportieren" data-i18n-title="todo.exportTodos">&#8595; MD</button>
+              </div>
             </div>
-            <div class="tool-card" onclick="runTool('find_duplicates')">
-              <div class="tool-icon">&#128260;</div>
-              <div class="tool-label">Duplikate finden</div>
-              <div class="tool-desc">Doppelte Dateien aufsp&uuml;ren</div>
-            </div>
-            <div class="tool-card" onclick="runTool('disk_analysis')">
-              <div class="tool-icon">&#128200;</div>
-              <div class="tool-label">Speicher-Analyse</div>
-              <div class="tool-desc">Platzverbrauch nach Dateityp</div>
-            </div>
-            <div class="tool-card" onclick="runTool('clean_temp')">
-              <div class="tool-icon">&#128465;</div>
-              <div class="tool-label">Temp bereinigen</div>
-              <div class="tool-desc">Tempor&auml;re Dateien l&ouml;schen</div>
-            </div>
-            <div class="tool-card" onclick="quickAction('merge_pdfs', 'PDF-Pfade (kommagetrennt):', 'pdf_paths')">
-              <div class="tool-icon">&#128203;</div>
-              <div class="tool-label">PDFs zusammenf&uuml;gen</div>
-              <div class="tool-desc">Mehrere PDFs in eine Datei</div>
-            </div>
-            <div class="tool-card" onclick="quickAction('file_search', 'Dateiname suchen:', 'query')">
-              <div class="tool-icon">&#128270;</div>
-              <div class="tool-label">Datei suchen</div>
-              <div class="tool-desc">Dateien auf dem PC finden</div>
-            </div>
+            <div id="todo-list" class="todo-list"></div>
           </div>
-          <!-- Results area -->
-          <div class="tool-results" id="files-results"></div>
+
+          <!-- Pomodoro Section -->
+          <div class="prod-section section-spacing-sm">
+            <div class="section-header">
+              <h3 data-i18n="productivity.pomodoroTimer">Pomodoro Timer</h3>
+              <div id="pomodoro-controls"></div>
+            </div>
+            <div id="pomodoro-display" class="pomodoro-display"></div>
+          </div>
+
+          <!-- Habits Section -->
+          <div class="prod-section section-spacing-sm">
+            <div class="section-header">
+              <h3 data-i18n="productivity.habits">Gewohnheiten</h3>
+              <button class="action-btn" data-action="createHabit" data-i18n="habits.newHabit">+ Neue Gewohnheit</button>
+            </div>
+            <div id="habits-list" class="habits-list"></div>
+          </div>
+
+          <!-- Time Tracking & Focus Mode -->
+          <div class="prod-section section-spacing-sm">
+            <div class="section-header">
+              <h3 data-i18n="productivity.timeTrackingFocus">Zeiterfassung &amp; Fokus</h3>
+              <div class="flex-row-nowrap">
+                <button class="action-btn" id="time-tracking-btn" data-action="toggleTimeTracking" data-i18n="productivity.trackingStart">Tracking
+                  starten</button>
+                <button class="action-btn" id="focus-mode-btn" data-action="toggleFocusMode" data-i18n="focus.mode">Fokus-Modus</button>
+              </div>
+            </div>
+            <div id="time-tracking-live" class="time-tracking-live hidden"></div>
+            <div id="time-tracking-report" class="time-report"></div>
+          </div>
         </div>
 
         <!-- Memory View -->
         <div class="tool-view" id="memory-view">
-          <div class="view-title">Ged&auml;chtnis <span>&amp; Notizen</span></div>
+          <div class="view-title" role="heading" aria-level="2">Ged&auml;chtnis <span>&amp; Notizen</span></div>
           <div class="info-grid" id="memory-stats-grid"></div>
 
           <div class="memory-section">
             <div class="section-header">
-              <h3>Notizen</h3>
-              <button class="action-btn" onclick="createNote()">+ Neue Notiz</button>
+              <h3 data-i18n="memory.notes">Notizen</h3>
+              <div class="flex-row">
+                <input type="text" id="notes-filter" class="cmd-search-input compact-filter" placeholder="Filtern..." data-i18n-placeholder="memory.filter" data-action="filterNotes" aria-label="Notizen filtern">
+                <button class="action-btn" data-action="createNote" data-i18n="notes.newNote">+ Neue Notiz</button>
+              </div>
             </div>
             <div id="notes-list" class="notes-list"></div>
           </div>
 
-          <div class="memory-section" style="margin-top: 20px;">
+          <div class="memory-section section-spacing-sm">
             <div class="section-header">
-              <h3>Text-Snippets</h3>
-              <button class="action-btn" onclick="createSnippet()">+ Neues Snippet</button>
+              <h3 data-i18n="memory.textSnippets">Text-Snippets</h3>
+              <button class="action-btn" data-action="createSnippet" data-i18n="snippets.newSnippet">+ Neues Snippet</button>
             </div>
             <div id="snippets-list" class="notes-list"></div>
           </div>
 
-          <div class="memory-section" style="margin-top: 20px;">
+          <div class="memory-section section-spacing-sm">
             <div class="section-header">
-              <h3>KI-Provider</h3>
+              <h3 data-i18n="memory.aiProvider">KI-Provider</h3>
             </div>
             <div id="ai-status-panel" class="info-grid"></div>
           </div>
 
-          <div class="memory-section" style="margin-top: 20px;">
+          <div class="memory-section section-spacing-sm">
             <div class="section-header">
-              <h3>Routinen</h3>
-              <button class="action-btn" onclick="createRoutine()">+ Neue Routine</button>
+              <h3 data-i18n="memory.routines">Routinen</h3>
+              <button class="action-btn" data-action="createRoutine" data-i18n="memory.newRoutine">+ Neue Routine</button>
             </div>
             <div id="routines-list" class="notes-list"></div>
+          </div>
+
+          <div class="memory-section section-spacing-sm">
+            <div class="section-header">
+              <h3 data-i18n="memory.clipboardHistory">Zwischenablage-Verlauf</h3>
+              <button class="action-btn" data-action="clearClipboardHistory" title="Verlauf leeren" data-i18n="memory.clear">&times; Leeren</button>
+            </div>
+            <div id="clipboard-history-list" class="notes-list"></div>
+          </div>
+
+          <div class="memory-section section-spacing-sm">
+            <div class="section-header">
+              <h3 data-i18n="memory.maintenance">Wartung</h3>
+            </div>
+            <div id="memory-cleanup-info">
+              <button class="action-btn" data-action="runMemoryCleanup" data-i18n="memory.cleanupOld">&#129529; Alte Erinnerungen aufr&auml;umen</button>
+              <button class="action-btn ml-8" data-action="showDiagnostics" data-i18n="memory.diagnosticsBtn">&#128202; Diagnostics</button>
+            </div>
           </div>
         </div>
 
         <!-- Settings View -->
         <div class="tool-view" id="settings-view">
-          <div class="view-title">Ein<span>stellungen</span></div>
+          <div class="view-title" role="heading" aria-level="2">Ein<span>stellungen</span></div>
 
           <div class="settings-group">
-            <div class="settings-group-title">KI-PROVIDER</div>
+            <div class="settings-group-title" data-i18n="settings.ai">KI-PROVIDER</div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">Groq API Key</div>
-                <div class="setting-desc">Wird sicher im Windows Credential Manager gespeichert</div>
+                <div class="setting-name" data-i18n="settings.groqApiKey">Groq API Key</div>
+                <div class="setting-desc" data-i18n="settings.credentialManagerDesc">Wird sicher im Windows Credential Manager gespeichert</div>
               </div>
-              <div class="setting-status" id="groq-status">Gespeichert</div>
+              <div class="setting-status" id="groq-status" data-i18n="settings.checkingStatus">Pr&uuml;fe...</div>
             </div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">Ollama (Lokal)</div>
-                <div class="setting-desc">Fallback wenn Groq nicht erreichbar &mdash; localhost:11434</div>
+                <div class="setting-name" data-i18n="settings.openaiApiKey">OpenAI API Key</div>
+                <div class="setting-desc" data-i18n="settings.openaiDesc">F&uuml;r GPT-4o, GPT-4.1 + Whisper STT (Primary)</div>
               </div>
-              <div class="setting-status" id="ollama-status">Pr&uuml;fe...</div>
+              <div class="setting-status" id="openai-status" data-i18n="settings.checkingStatus">Pr&uuml;fe...</div>
             </div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">KI-Modell</div>
-                <div class="setting-desc" id="model-desc">Aktives Groq-Modell w&auml;hlen</div>
+                <div class="setting-name" data-i18n="settings.geminiApiKey">Gemini API Key</div>
+                <div class="setting-desc" data-i18n="settings.geminiDesc">F&uuml;r Gemini 2.5 Flash, Flash-Lite und Pro</div>
               </div>
-              <select id="model-select" class="settings-select" onchange="changeAiModel(this.value)">
-                <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
-              </select>
+              <div class="setting-status" id="gemini-status" data-i18n="settings.checkingStatus">Pr&uuml;fe...</div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.aiModel">KI-Modell</div>
+                <div class="setting-desc" id="model-desc" data-i18n="settings.aiModelDesc">Aktiven Provider und Modell w&auml;hlen</div>
+              </div>
+              <select id="model-select" class="settings-select" data-action="changeAiModel"></select>
             </div>
           </div>
 
           <div class="settings-group">
-            <div class="settings-group-title">ERSCHEINUNGSBILD</div>
+            <div class="settings-group-title" data-i18n="settings.appearance">ERSCHEINUNGSBILD</div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">Dark Mode</div>
-                <div class="setting-desc">Zwischen hellem und dunklem Design wechseln</div>
+                <div class="setting-name" data-i18n="settings.darkMode">Dark Mode</div>
+                <div class="setting-desc" data-i18n="settings.darkModeDesc">Zwischen hellem und dunklem Design wechseln</div>
               </div>
               <label class="toggle-switch">
-                <input type="checkbox" id="theme-toggle" onchange="toggleTheme(this.checked)" checked>
+                <input type="checkbox" id="theme-toggle" data-action="toggleTheme" checked>
                 <span class="toggle-slider"></span>
               </label>
             </div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">Akzentfarbe</div>
-                <div class="setting-desc">Passe die Hauptfarbe der Oberfl&auml;che an</div>
+                <div class="setting-name" data-i18n="settings.accent">Akzentfarbe</div>
+                <div class="setting-desc" data-i18n="settings.accentDesc">Passe die Hauptfarbe der Oberfl&auml;che an</div>
               </div>
               <div class="accent-picker" id="accent-picker">
-                <button class="accent-dot active" data-accent="purple" onclick="setAccentColor('purple')" title="Lila" style="background:#8b5cf6"></button>
-                <button class="accent-dot" data-accent="blue" onclick="setAccentColor('blue')" title="Blau" style="background:#3b82f6"></button>
-                <button class="accent-dot" data-accent="green" onclick="setAccentColor('green')" title="Gr&uuml;n" style="background:#10b981"></button>
-                <button class="accent-dot" data-accent="rose" onclick="setAccentColor('rose')" title="Rosa" style="background:#f43f5e"></button>
-                <button class="accent-dot" data-accent="amber" onclick="setAccentColor('amber')" title="Gold" style="background:#f59e0b"></button>
+                <button class="accent-dot active color-swatch-purple" data-accent="purple" data-action="setAccentColor" data-arg="purple" title="Lila" data-i18n-title="settings.purple"></button>
+                <button class="accent-dot color-swatch-blue" data-accent="blue" data-action="setAccentColor" data-arg="blue" title="Blau" data-i18n-title="settings.blue"></button>
+                <button class="accent-dot color-swatch-green" data-accent="green" data-action="setAccentColor" data-arg="green" title="Gr&uuml;n" data-i18n-title="settings.green"></button>
+                <button class="accent-dot color-swatch-red" data-accent="rose" data-action="setAccentColor" data-arg="rose" title="Rosa" data-i18n-title="settings.rose"></button>
+                <button class="accent-dot color-swatch-amber" data-accent="amber" data-action="setAccentColor" data-arg="amber" title="Gold" data-i18n-title="settings.gold"></button>
               </div>
             </div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">Schriftgr&ouml;&szlig;e</div>
-                <div class="setting-desc">Text-Gr&ouml;&szlig;e anpassen</div>
+                <div class="setting-name" data-i18n="settings.fontSize">Schriftgr&ouml;&szlig;e</div>
+                <div class="setting-desc" data-i18n="settings.fontSizeDesc">Text-Gr&ouml;&szlig;e anpassen</div>
               </div>
-              <select id="fontsize-select" class="settings-select" onchange="setFontSize(this.value)">
-                <option value="13">Klein (13px)</option>
-                <option value="14" selected>Normal (14px)</option>
-                <option value="15">Gro&szlig; (15px)</option>
-                <option value="16">Sehr gro&szlig; (16px)</option>
+              <select id="fontsize-select" class="settings-select" data-action="setFontSize">
+                <option value="13" data-i18n="settings.fontSmall">Klein (13px)</option>
+                <option value="14" selected data-i18n="settings.fontNormal">Normal (14px)</option>
+                <option value="15" data-i18n="settings.fontLarge">Gro&szlig; (15px)</option>
+                <option value="16" data-i18n="settings.fontXLarge">Sehr gro&szlig; (16px)</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.language">Sprache</div>
+                <div class="setting-desc" data-i18n="settings.languageDesc">Language / Sprache</div>
+              </div>
+              <select id="language-select" class="settings-select" data-action="changeLanguage">
+                <option value="de" selected>Deutsch</option>
+                <option value="en">English</option>
               </select>
             </div>
           </div>
 
           <div class="settings-group">
-            <div class="settings-group-title">SPRACHAUSGABE</div>
+            <div class="settings-group-title" data-i18n="settings.chatGroup">CHAT</div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">Piper TTS</div>
-                <div class="setting-desc">Lokale Text-to-Speech mit deutscher Stimme</div>
+                <div class="setting-name" data-i18n="settings.ctrlEnterSend">Ctrl+Enter zum Senden</div>
+                <div class="setting-desc" id="chat-send-hint" data-i18n="settings.enterSendDefault">Enter zum Senden (Standard)</div>
               </div>
-              <div class="setting-status" id="tts-status">Pr&uuml;fe...</div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="ctrl-enter-toggle" data-action="applySendModeToggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-group-title">CARTESIA SONIC (Primary TTS)</div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">Cartesia Status</div>
+                <div class="setting-desc">Sonic 2 &mdash; schnellstes TTS, ~90ms Latenz</div>
+              </div>
+              <div class="setting-status" id="cartesia-status">Pr&uuml;fe...</div>
             </div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">faster-whisper STT</div>
-                <div class="setting-desc">Lokale Spracherkennung (base model, CPU)</div>
+                <div class="setting-name">API Key</div>
+                <div class="setting-desc" id="cartesia-key-desc">Gespeichert in Windows Keyring</div>
+              </div>
+              <div class="setting-actions">
+                <button class="action-btn action-btn-sm" data-action="setCartesiaKey">Key setzen</button>
+                <button class="action-btn action-btn-sm action-btn-danger" data-action="deleteCartesiaKey">Entfernen</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-group elevenlabs-group">
+            <div class="settings-group-title" data-i18n="settings.elevenlabsGroup">ELEVENLABS (Fallback TTS)</div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.elStatusLabel">ElevenLabs Status</div>
+                <div class="setting-desc" data-i18n="settings.elStatusDesc">Premium-Stimmen mit ~300ms Latenz</div>
+              </div>
+              <div class="setting-status" id="el-status" data-i18n="settings.checkingStatus">Pr&uuml;fe...</div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.apiKey">API Key</div>
+                <div class="setting-desc" id="el-key-desc" data-i18n="settings.savedInKeyring">Gespeichert in Windows Keyring</div>
+              </div>
+              <button class="btn-small" id="el-key-btn" data-action="elevenlabsKeyAction" data-i18n="settings.setKey">Key setzen</button>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.enabled">Aktiviert</div>
+                <div class="setting-desc" data-i18n="settings.elUsePrimary">ElevenLabs als prim&auml;re TTS Engine nutzen</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="el-enabled-toggle" data-action="elevenlabsToggleAction" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.voice">Stimme</div>
+                <div class="setting-desc" id="el-voice-desc" data-i18n="settings.elVoiceDesc">W&auml;hle eine ElevenLabs Stimme</div>
+              </div>
+              <select id="el-voice-select" class="settings-select" data-action="elevenlabsVoiceChange">
+                <option value="" data-i18n="common.loading">Laden...</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.model">Modell</div>
+                <div class="setting-desc" data-i18n="settings.elModelDesc">Multilingual v2 = beste Qualit&auml;t, Turbo = schneller</div>
+              </div>
+              <select id="el-model-select" class="settings-select" data-action="elevenlabsModelChange">
+                <option value="eleven_multilingual_v2" data-i18n="settings.elModelMultiV2">Multilingual v2 (Beste Qualit&auml;t)</option>
+                <option value="eleven_turbo_v2_5" data-i18n="settings.elModelTurboV25">Turbo v2.5 (Schneller)</option>
+                <option value="eleven_turbo_v2">Turbo v2</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.stability">Stabilit&auml;t</div>
+                <div class="setting-desc">Stimmkonsistenz (<span id="el-stability-label">0.50</span>)</div>
+              </div>
+              <input type="range" id="el-stability-slider" class="settings-range" min="0" max="1" step="0.05" value="0.5" data-action="elevenlabsSettingsChange">
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.similarity">&Auml;hnlichkeit</div>
+                <div class="setting-desc">Stimm-Treue (<span id="el-similarity-label">0.75</span>)</div>
+              </div>
+              <input type="range" id="el-similarity-slider" class="settings-range" min="0" max="1" step="0.05" value="0.75" data-action="elevenlabsSettingsChange">
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-group-title">STIMME TESTEN</div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">Sprachausgabe testen</div>
+                <div class="setting-desc">Testet TTS (Cartesia/ElevenLabs/SAPI)</div>
+              </div>
+              <button class="action-btn action-btn-sm" data-action="testVoice">TTS testen</button>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">Mikrofon testen</div>
+                <div class="setting-desc">3 Sekunden aufnehmen + STT transkribieren</div>
+              </div>
+              <button class="action-btn action-btn-sm" data-action="testMicrophone">Mikrofon testen</button>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-group-title">SPRACHERKENNUNG (STT)</div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">STT Engine</div>
+                <div class="setting-desc">Deepgram Nova-3 (Primary) | Groq Whisper (Fallback) | Lokal</div>
+              </div>
+              <select id="stt-engine-select" class="settings-select" data-action="changeSttEngine">
+                <option value="deepgram">Deepgram Nova-3 (Bestes Deutsch)</option>
+                <option value="groq">Groq Whisper (Schnellstes, Gratis)</option>
+                <option value="local">Lokal (Offline)</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">STT Status</div>
+                <div class="setting-desc" id="stt-model-desc">Engine-Status wird geladen...</div>
               </div>
               <div class="setting-status" id="stt-status">Pr&uuml;fe...</div>
             </div>
+            <div class="setting-item" id="deepgram-key-group">
+              <div class="setting-info">
+                <div class="setting-name">Deepgram API Key</div>
+                <div class="setting-desc">Kostenlos auf deepgram.com registrieren</div>
+              </div>
+              <div class="setting-actions">
+                <button class="action-btn action-btn-sm" data-action="setDeepgramKey">Key setzen</button>
+                <button class="action-btn action-btn-sm action-btn-danger" data-action="deleteDeepgramKey">Entfernen</button>
+              </div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">STT Modell (Lokal)</div>
+                <div class="setting-desc">Fallback-Modell fuer Offline-Nutzung</div>
+              </div>
+              <select id="stt-model-select" class="settings-select" data-action="changeSttModel">
+                <option value="" data-i18n="common.loading">Laden...</option>
+              </select>
+            </div>
           </div>
 
           <div class="settings-group">
-            <div class="settings-group-title">USER-PROFIL</div>
+            <div class="settings-group-title" data-i18n="settings.userProfile">USER-PROFIL</div>
             <div class="profile-form">
               <div class="profile-field">
-                <label>Name</label>
-                <input type="text" id="profile-name" placeholder="Dein Name" class="settings-input">
+                <label for="profile-name" data-i18n="settings.name">Name</label>
+                <input type="text" id="profile-name" placeholder="Dein Name" data-i18n-placeholder="settings.yourName" class="settings-input">
               </div>
               <div class="profile-field">
-                <label>Sprache</label>
+                <label for="profile-language" data-i18n="settings.profileLanguage">Sprache</label>
                 <input type="text" id="profile-language" placeholder="Deutsch" class="settings-input" value="Deutsch">
               </div>
-              <button class="action-btn" onclick="saveProfile()">Profil speichern</button>
+              <button class="action-btn" data-action="saveProfile" data-i18n="settings.saveProfile">Profil speichern</button>
             </div>
           </div>
 
           <div class="settings-group">
-            <div class="settings-group-title">DESKTOP</div>
+            <div class="settings-group-title" data-i18n="settings.desktop">DESKTOP</div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">Autostart mit Windows</div>
-                <div class="setting-desc">Lexa beim PC-Start automatisch starten</div>
+                <div class="setting-name" data-i18n="settings.autostartWindows">Autostart mit Windows</div>
+                <div class="setting-desc" data-i18n="settings.autostartDesc">Lexa beim PC-Start automatisch starten</div>
               </div>
               <label class="toggle-switch">
-                <input type="checkbox" id="autostart-toggle" onchange="toggleAutostart(this.checked)">
+                <input type="checkbox" id="autostart-toggle" data-action="toggleAutostart">
                 <span class="toggle-slider"></span>
               </label>
             </div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">Desktop-Benachrichtigungen</div>
-                <div class="setting-desc">Native Windows-Notifications bei Aktionen</div>
+                <div class="setting-name" data-i18n="settings.desktopNotifications">Desktop-Benachrichtigungen</div>
+                <div class="setting-desc" data-i18n="settings.notificationsDesc">Native Windows-Notifications bei Aktionen</div>
               </div>
               <label class="toggle-switch">
-                <input type="checkbox" id="notifications-toggle" onchange="toggleNotifications(this.checked)" checked>
+                <input type="checkbox" id="notifications-toggle" data-action="toggleNotifications" checked>
                 <span class="toggle-slider"></span>
               </label>
             </div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">In System Tray minimieren</div>
-                <div class="setting-desc">Beim Schlie&szlig;en in den Tray minimieren statt beenden</div>
+                <div class="setting-name" data-i18n="settings.wakeWord">Wake Word ("Lexa")</div>
+                <div class="setting-desc" data-i18n="settings.wakeWordDesc">Immer zuh&ouml;ren &mdash; sag &laquo;Lexa&raquo; zum Aktivieren</div>
               </div>
-              <div class="setting-status" style="color:var(--accent2)">Aktiv</div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="wakeword-toggle" data-action="toggleWakeWord">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.minimizeToTray">In System Tray minimieren</div>
+                <div class="setting-desc" data-i18n="settings.minimizeToTrayDesc">Beim Schlie&szlig;en in den Tray minimieren statt beenden</div>
+              </div>
+              <div class="setting-status text-accent2" data-i18n="settings.active">Aktiv</div>
             </div>
           </div>
 
           <div class="settings-group">
-            <div class="settings-group-title">SYSTEM</div>
+            <div class="settings-group-title" data-i18n="license.title">LIZENZ</div>
+            <div id="trial-status-bar" class="trial-status-bar hidden"></div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">Version</div>
-                <div class="setting-desc" id="settings-version">v0.13.0 Phase 11</div>
+                <div class="setting-name" data-i18n="license.plan">Aktueller Plan</div>
+                <div class="setting-desc" id="license-plan" data-i18n="license.free">Free</div>
+              </div>
+              <div class="setting-status" id="license-status" data-i18n="license.notActivated">Nicht aktiviert</div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="license.key">Lizenzschl&uuml;ssel</div>
+                <div class="setting-desc" id="license-key-display" data-i18n="license.noKey">Kein Schl&uuml;ssel hinterlegt</div>
+              </div>
+              <button class="action-btn" data-action="activateLicense" data-i18n="license.activate">Aktivieren</button>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="license.validUntil">G&uuml;ltig bis</div>
+                <div class="setting-desc" id="license-expires">&mdash;</div>
+              </div>
+              <button class="action-btn" data-action="removeLicense" data-i18n="license.remove">Entfernen</button>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-group-title" data-i18n="settings.systemGroup">SYSTEM</div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="system.version">Version</div>
+                <div class="setting-desc" id="settings-version" data-role="backend-version">v1.0.0</div>
               </div>
             </div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">Befehle</div>
+                <div class="setting-name" data-i18n="system.commands">Befehle</div>
                 <div class="setting-desc" id="settings-cmd-count">60 registriert</div>
               </div>
             </div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">Speicher-DB</div>
+                <div class="setting-name" data-i18n="settings.storageDb">Speicher-DB</div>
                 <div class="setting-desc" id="settings-db-path">lexa_memory.db</div>
               </div>
             </div>
           </div>
+
+          <div class="settings-group">
+            <div class="settings-group-title" data-i18n="settings.systemTools">SYSTEM-TOOLS</div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.memoryCleanup">Memory Cleanup</div>
+                <div class="setting-desc" data-i18n="settings.cleanupDesc">Alte unwichtige Erinnerungen l&ouml;schen (&gt;90 Tage, Wichtigkeit &le;3)</div>
+              </div>
+              <button class="action-btn" data-action="runMemoryCleanup" data-i18n="settings.cleanup">Cleanup</button>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.diagnosticsLabel">Diagnostics</div>
+                <div class="setting-desc" data-i18n="settings.diagnosticsDesc">System-Status und DB-Statistiken anzeigen</div>
+              </div>
+              <button class="action-btn" data-action="showDiagnostics" data-i18n="settings.show">Anzeigen</button>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-group-title" data-i18n="settings.databaseBackup">DATENBANK-BACKUP</div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.backupRestore">Backup &amp; Wiederherstellung</div>
+                <div class="setting-desc" data-i18n="settings.backupDesc">SQLite-Datenbank sichern, wiederherstellen oder Suchindex neu aufbauen</div>
+              </div>
+            </div>
+            <div id="backup-controls" class="backup-controls">
+              <button class="action-btn" id="btn-backup-create" data-i18n="settings.createBackup">Backup erstellen</button>
+              <button class="action-btn" id="btn-backup-list" data-i18n="settings.showBackups">Backups anzeigen</button>
+              <button class="action-btn" id="btn-fts-rebuild" data-i18n="settings.rebuildIndex">Suchindex neu aufbauen</button>
+            </div>
+            <div id="backup-list-container"></div>
+          </div>
         </div>
 
-        <!-- Media View -->
-        <div class="tool-view" id="media-view">
-          <div class="view-title">Media <span>Control</span></div>
-          <div class="media-controls">
-            <button class="media-btn" onclick="runTool('media_prev')" title="Vorheriger Track">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
-            </button>
-            <button class="media-btn media-btn-main" onclick="runTool('media_play_pause')" title="Play/Pause">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-            </button>
-            <button class="media-btn" onclick="runTool('media_next')" title="N&auml;chster Track">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
-            </button>
-            <button class="media-btn" onclick="runTool('media_stop')" title="Stop">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
-            </button>
-          </div>
-          <div class="tool-actions" style="margin-top: 24px;">
-            <div class="tool-card" onclick="quickAction('spotify_open', 'Spotify-Suche (leer = nur &ouml;ffnen):', 'search')">
-              <div class="tool-icon" style="color:#1DB954">&#9835;</div>
-              <div class="tool-label">Spotify</div>
-              <div class="tool-desc">&Ouml;ffnen &amp; durchsuchen</div>
-            </div>
-            <div class="tool-card" onclick="quickAction('convert_media', 'Pfad zur Mediendatei:', 'input_path')">
-              <div class="tool-icon">&#128260;</div>
-              <div class="tool-label">Konvertieren</div>
-              <div class="tool-desc">Medien-Format umwandeln</div>
-            </div>
-            <div class="tool-card" onclick="quickAction('extract_audio', 'Pfad zum Video:', 'video_path')">
-              <div class="tool-icon">&#127925;</div>
-              <div class="tool-label">Audio extrahieren</div>
-              <div class="tool-desc">Tonspur aus Video ziehen</div>
-            </div>
-            <div class="tool-card" onclick="runTool('screen_record', {duration: 10})">
-              <div class="tool-icon" style="color:var(--error)">&#9679;</div>
-              <div class="tool-label">Aufnahme (10s)</div>
-              <div class="tool-desc">Bildschirm aufzeichnen</div>
-            </div>
-          </div>
-        </div>
       </main>
     </div>
   </div>
 
-  <script src="./app.js"></script>
+
+  <!-- Module scripts (loaded before app.js — all share global scope) -->
+  <script src="./config.js"></script>
+  <script src="./state.js"></script>
+  <script src="./orb3d.js"></script>
+  <script src="./modals.js"></script>
+  <script src="./chat.js"></script>
+  <script src="./productivity.js"></script>
+  <script src="./dashboard.js"></script>
+  <script src="./system.js"></script>
+  <script src="./commands.js"></script>
+  <script src="./memory.js"></script>
+  <script src="./settings.js"></script>
+  <script src="./devtools.js"></script>
+  <!-- Main orchestrator (must load last) -->
 </body>
+
 </html>

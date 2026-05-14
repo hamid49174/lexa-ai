@@ -1,0 +1,573 @@
+/* ════════════════════════════════════════════════
+   LEXA AI — Voice: Orb, Animations
+   ════════════════════════════════════════════════ */
+
+/* ── VOICE ORB (Sleek Cieden Style) ────────────── */
+/* Base voice-orb — overridden by sleek theme section below (~line 5100+) */
+.voice-orb-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 0 16px;
+  perspective: 1000px;
+  width: 100%;
+  flex-shrink: 0;
+  transition: padding 0.4s ease;
+}
+
+.voice-orb {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 35%, rgba(232, 64, 160, 0.15) 0%, transparent 50%),
+    radial-gradient(circle at 65% 65%, rgba(59, 130, 246, 0.12) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, #0a0a14 30%, rgba(168, 85, 247, 0.3) 70%, rgba(232, 64, 160, 0.45) 90%, rgba(59, 130, 246, 0.4) 100%);
+  box-shadow:
+    0 0 60px rgba(168, 85, 247, 0.2),
+    0 0 120px rgba(232, 64, 160, 0.08),
+    inset 0 0 40px rgba(168, 85, 247, 0.08);
+  animation: orbRestFloat 6s ease-in-out infinite;
+  cursor: pointer;
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-style: preserve-3d;
+}
+
+.voice-orb::before {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(168, 85, 247, 0.15);
+  transform: rotateX(60deg);
+  animation: orbMeshSpin 12s linear infinite;
+}
+
+.voice-orb::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: 0 0 40px rgba(168, 85, 247, 0.3), 0 0 80px rgba(232, 64, 160, 0.15);
+  animation: orbRestPulse 4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.voice-orb:hover {
+  transform: scale(1.08);
+  box-shadow:
+    0 0 80px rgba(168, 85, 247, 0.35),
+    0 0 140px rgba(232, 64, 160, 0.15),
+    inset 0 0 50px rgba(168, 85, 247, 0.15);
+}
+
+@keyframes orbMeshSpin {
+  0% { transform: rotateX(60deg) rotateZ(0deg); }
+  100% { transform: rotateX(60deg) rotateZ(360deg); }
+}
+
+/* 3D Waves / Rings (Visible only when listening) */
+.orb-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  transform-style: preserve-3d;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+.ring1 {
+  border-left: 3px solid rgba(168, 85, 247, 0.8);
+  border-right: 1px solid rgba(168, 85, 247, 0.2);
+  filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.6));
+}
+
+.ring2 {
+  inset: -10px;
+  border-top: 3px solid rgba(232, 64, 160, 0.7);
+  border-bottom: 2px solid rgba(232, 64, 160, 0.2);
+  filter: drop-shadow(0 0 12px rgba(232, 64, 160, 0.5));
+}
+
+.ring3 {
+  inset: 10px;
+  border-right: 3px solid rgba(59, 130, 246, 0.7);
+  border-left: 2px solid rgba(59, 130, 246, 0.2);
+  filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.5));
+}
+
+.ring4 {
+  inset: -20px;
+  border: 1px dashed rgba(168, 85, 247, 0.25);
+}
+
+/* LISTENING STATE */
+.voice-orb.listening {
+  background:
+    radial-gradient(circle at 40% 40%, rgba(168, 85, 247, 0.3) 0%, transparent 50%),
+    radial-gradient(circle at 60% 60%, rgba(232, 64, 160, 0.2) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(20, 10, 40, 0.8) 20%, rgba(168, 85, 247, 0.4) 60%, rgba(232, 64, 160, 0.6) 85%, rgba(59, 130, 246, 0.5) 100%);
+  animation: orbListeningFloat 3s ease-in-out infinite;
+  box-shadow:
+    0 0 80px rgba(168, 85, 247, 0.3),
+    0 0 140px rgba(232, 64, 160, 0.15),
+    inset 0 0 50px rgba(168, 85, 247, 0.2);
+}
+
+.voice-orb.listening .orb-ring {
+  opacity: 1;
+}
+
+.voice-orb.listening .ring1 {
+  animation: spin1 2s linear infinite;
+}
+
+.voice-orb.listening .ring2 {
+  animation: spin2 2.5s linear infinite;
+}
+
+.voice-orb.listening .ring3 {
+  animation: spin3 1.8s linear infinite;
+}
+
+.voice-orb.listening .ring4 {
+  animation: spin4 10s linear infinite;
+}
+
+/* SPEAKING STATE — Lexa is talking (TTS playing) */
+.voice-orb.speaking {
+  background:
+    radial-gradient(circle at 45% 45%, rgba(100, 200, 255, 0.3) 0%, transparent 50%),
+    radial-gradient(circle at 55% 55%, rgba(100, 255, 200, 0.2) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(20, 10, 40, 0.8) 20%, rgba(100, 200, 246, 0.4) 60%, rgba(72, 200, 153, 0.6) 85%, rgba(100, 200, 255, 0.5) 100%);
+  animation: orbSpeakingPulse 1.5s ease-in-out infinite;
+  box-shadow:
+    0 0 80px rgba(100, 200, 255, 0.3),
+    0 0 140px rgba(72, 200, 153, 0.15),
+    inset 0 0 50px rgba(100, 200, 255, 0.2);
+}
+
+.voice-orb.speaking .orb-ring {
+  opacity: 0.8;
+}
+
+.voice-orb.speaking .ring1 {
+  animation: spin1 3s linear infinite;
+}
+
+.voice-orb.speaking .ring2 {
+  animation: spin2 4s linear infinite;
+}
+
+@keyframes orbSpeakingPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+/* CONVERSATION MODE — persistent glow while in active conversation */
+.voice-orb.conversation-mode {
+  box-shadow:
+    0 0 60px rgba(168, 85, 247, 0.4),
+    0 0 120px rgba(168, 85, 247, 0.2),
+    inset 0 0 40px rgba(168, 85, 247, 0.15);
+}
+
+.voice-orb.conversation-mode .ring4 {
+  opacity: 1;
+  border-color: rgba(168, 85, 247, 0.4);
+  animation: spin4 8s linear infinite;
+}
+
+@keyframes spin1 {
+  0% {
+    transform: rotateX(60deg) rotateY(20deg) rotateZ(0deg);
+  }
+
+  100% {
+    transform: rotateX(60deg) rotateY(20deg) rotateZ(360deg);
+  }
+}
+
+@keyframes spin2 {
+  0% {
+    transform: rotateX(40deg) rotateY(-30deg) rotateZ(0deg);
+  }
+
+  100% {
+    transform: rotateX(40deg) rotateY(-30deg) rotateZ(360deg);
+  }
+}
+
+@keyframes spin3 {
+  0% {
+    transform: rotateX(-50deg) rotateY(40deg) rotateZ(0deg);
+  }
+
+  100% {
+    transform: rotateX(-50deg) rotateY(40deg) rotateZ(-360deg);
+  }
+}
+
+@keyframes spin4 {
+  0% {
+    transform: rotateZ(0deg) scale(1);
+  }
+
+  50% {
+    transform: rotateZ(180deg) scale(0.9);
+  }
+
+  100% {
+    transform: rotateZ(360deg) scale(1);
+  }
+}
+
+@keyframes orbRestPulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+
+  50% {
+    transform: scale(1.05);
+    opacity: 0.8;
+  }
+}
+
+@keyframes orbRestFloat {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes orbListeningFloat {
+
+  0%,
+  100% {
+    transform: scale(1) translateY(0);
+  }
+
+  50% {
+    transform: scale(1.08) translateY(-4px);
+  }
+}
+
+.voice-orb-label {
+  text-align: center;
+  font-size: 14px;
+  color: #fff;
+  margin-top: 24px;
+  font-family: var(--font);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+/* ═══ VOICE STATUS BAR ═══ */
+.voice-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  background: rgba(15, 10, 30, 0.95);
+  border-bottom: 1px solid rgba(168, 85, 247, 0.2);
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  gap: 12px;
+  z-index: 100;
+  transition: all 0.3s ease;
+  min-height: 36px;
+}
+.voice-status-bar.hidden {
+  display: none;
+}
+.voice-status-bar.active {
+  border-bottom-color: rgba(168, 85, 247, 0.5);
+  background: rgba(20, 12, 40, 0.98);
+}
+
+.voice-status-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 140px;
+}
+
+.voice-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #555;
+  transition: all 0.3s ease;
+}
+.voice-dot.idle { background: #555; }
+.voice-dot.listening {
+  background: #a855f7;
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
+  animation: dotPulseVoice 1s infinite;
+}
+.voice-dot.processing {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+  animation: dotPulseVoice 0.5s infinite;
+}
+.voice-dot.speaking {
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+  animation: dotPulseVoice 1.2s infinite;
+}
+.voice-dot.error {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
+@keyframes dotPulseVoice {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.7; }
+}
+
+.voice-status-center {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  justify-content: center;
+}
+
+#voice-level-meter {
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  height: 24px;
+}
+
+.voice-live-transcript {
+  font-style: italic;
+  color: rgba(168, 85, 247, 0.9);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  min-height: 18px;
+}
+
+.voice-status-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 120px;
+  justify-content: flex-end;
+}
+
+.voice-provider-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(168, 85, 247, 0.15);
+  color: rgba(168, 85, 247, 0.8);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.voice-latency {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ═══ VOICE TRANSCRIPT PANEL ═══ */
+/* Shows live conversation — what user said and Lexa's response */
+.voice-transcript-panel {
+  width: 100%;
+  max-width: 500px;
+  margin: 16px auto 0;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 0 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(168, 85, 247, 0.3) transparent;
+}
+.voice-transcript-panel.hidden { display: none; }
+
+.voice-transcript-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vt-bubble {
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 85%;
+  animation: vtFadeIn 0.3s ease;
+  word-break: break-word;
+}
+
+.vt-bubble.vt-user {
+  align-self: flex-end;
+  background: rgba(168, 85, 247, 0.2);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  color: rgba(255, 255, 255, 0.9);
+  border-bottom-right-radius: 4px;
+}
+
+.vt-bubble.vt-lexa {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
+  border-bottom-left-radius: 4px;
+}
+
+.vt-bubble.vt-lexa .vt-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(168, 85, 247, 0.7);
+  margin-bottom: 2px;
+}
+
+.vt-bubble.vt-user .vt-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(168, 85, 247, 0.5);
+  margin-bottom: 2px;
+  text-align: right;
+}
+
+@keyframes vtFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ═══ MIC & TTS BUTTONS (Sleek Input Bar) ═══ */
+.mic-toggle-btn,
+.tts-toggle-btn {
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+}
+
+.mic-toggle-btn:hover,
+.tts-toggle-btn:hover {
+  background: rgba(168, 85, 247, 0.1);
+  color: var(--text);
+}
+
+/* TTS active state */
+.tts-toggle-btn.active {
+  color: var(--accent);
+  background: rgba(168, 85, 247, 0.12);
+}
+.tts-toggle-btn.active::after {
+  content: "";
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Mic recording state */
+.mic-toggle-btn.recording {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+  animation: micBtnPulse 1.2s ease-in-out infinite;
+}
+.mic-toggle-btn.recording::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 14px;
+  border: 2px solid rgba(239, 68, 68, 0.3);
+  animation: micRingPulse 1.5s ease-in-out infinite;
+}
+
+/* Mic processing state */
+.mic-toggle-btn.processing {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.15);
+  animation: micBtnSpin 1s linear infinite;
+}
+
+/* Mic done state */
+.mic-toggle-btn.done {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.15);
+}
+
+@keyframes micBtnPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+@keyframes micRingPulse {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.1); }
+}
+
+@keyframes micBtnSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* ═══ MIC WAVEFORM (Enhanced) ═══ */
+.mic-waveform-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 0;
+  animation: waveformSlideIn 0.3s ease;
+}
+
+.mic-state-indicator {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 80px;
+  text-align: right;
+}
+.mic-state-recording { color: #ef4444; }
+.mic-state-processing { color: #f59e0b; }
+.mic-state-done { color: #10b981; }
+
+@keyframes waveformSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ═══ VOICE BARGEIN DOT ═══ */
+.voice-dot.bargein {
+  background: #ef4444;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
+  animation: dotPulseVoice 0.5s infinite;
+}
+

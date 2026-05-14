@@ -1,168 +1,135 @@
-# LEXA AI
+# LEXA AI v1.0.0
 
-**Dein lokaler KI-Desktop-Assistent für Windows.**
+**Dein lokaler KI-Desktop-Assistent fuer Windows.**
 
-Lexa steuert deinen PC per Sprache und Chat — komplett lokal, kostenlos, privat. Kein Cloud-Zwang, keine Abos, keine Datensammlung.
+Lexa steuert deinen PC per Sprache und Chat - lokal-first, privat und mit optionalen Cloud-Providern.
+
+---
+
+## Quick Start
+
+```bash
+# 1. Repo klonen und Dependencies installieren
+git clone https://github.com/alexsprogis/lexa-ai.git
+cd lexa-ai
+python -m venv venv
+venv\Scripts\pip install -r requirements.txt
+
+# 2. Frontend installieren
+cd frontend && npm install && cd ..
+
+# 3. Optional: AI-Provider hinterlegen
+venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'groq_api_key', 'DEIN_GROQ_KEY')"
+venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'openai_api_key', 'DEIN_OPENAI_KEY')"
+venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'gemini_api_key', 'DEIN_GEMINI_KEY')"
+
+# 4. Starten
+start.bat
+```
 
 ---
 
 ## Features
 
-### 60+ PC-Befehle
-- Apps starten, Fenster steuern, Prozesse verwalten
-- Lautstärke, Helligkeit, Clipboard, Timer, Screenshot
-- Herunterfahren, Neustarten (mit Bestätigung)
-
-### Browser-Automation
-- YouTube suchen & abspielen
-- Websites scrapen, als PDF speichern, Screenshots
-- Preise prüfen auf Produktseiten
-- Playwright-basiert (Chromium)
-
-### Datei-Tools
-- Doppelte Dateien finden (MD5)
-- Downloads automatisch nach Typ sortieren
-- PDFs zusammenfügen & aufteilen
-- Speicher-Analyse, Temp-Bereinigung
-- Batch-Umbenennung
-
-### Media-Steuerung
-- Play/Pause, Nächster/Vorheriger Track, Stop
-- Spotify öffnen & durchsuchen
-- Medien konvertieren (ffmpeg)
-- Audio aus Videos extrahieren
-- Bildschirmaufnahme
-
-### Kommunikation
-- E-Mail lesen & senden (Gmail SMTP/IMAP)
-- Telegram Nachrichten lesen & senden (Bot API)
-- Discord Nachrichten senden (Webhooks)
-
-### KI-Chat
-- **Groq API** (Llama 3.3 70B) — schnelle Cloud-KI
-- **Ollama Fallback** — komplett lokal wenn Groq offline
-- Versteht natürliche Sprache und führt Aktionen aus
-- Kontext-Injektion aus Gedächtnis
-
-### Gedächtnis-System
-- SQLite-Datenbank für Notizen, Erinnerungen, Profil
-- Auto-Learning: Lexa merkt sich Vorlieben aus Gesprächen
-- Routinen erstellen und verwalten
-- Alle Daten bleiben lokal
-
-### Sprache
-- **faster-whisper** STT — Sprache zu Text (lokal, CPU)
-- **Piper TTS** — Text zu Sprache (deutsche Stimme, lokal)
-- Mikrofon-Button im Chat
-
-### Sicherheit
-- 3-Tier Command Whitelist (erlaubt / Bestätigung / blockiert)
-- Prompt-Injection-Defense (17 Patterns)
-- Path/URL/Param Validation
-- Rate Limiting (30/min)
-- Audit Logging
-- API nur auf localhost — kein externer Zugriff
-- Credentials im Windows Credential Manager (keyring)
-
-### UI
-- Electron Desktop-App
-- Dark Professional Theme (#0a0a0f + #ff3b00 Accent)
-- 8 Views: Chat, System, Commands, Browser, Files, Media, Memory, Settings
-- Toast-Notifications
-- Live System-Monitor (CPU, RAM, Disk)
-- Connection Banner + Auto-Reconnect
+- **138+ PC-Befehle** - Apps, Fenster, Prozesse, Netzwerk, Dienste, Autostart, Umgebungsvariablen
+- **KI-Chat** - Groq, OpenAI, Gemini oder lokales Ollama
+- **Sprache** - Deepgram Nova-3 STT + Groq/local fallback, Cartesia/ElevenLabs/SAPI TTS
+- **Browser-Automation** - YouTube, Web-Scraping, PDFs, Screenshots (Playwright)
+- **Produktivitaet** - Todos, Pomodoro-Timer, Gewohnheiten, Zeiterfassung, Fokus-Modus
+- **Datei-Tools** - Archive, Backups, PDF merge/split, Bild-Konvertierung, Duplikat-Finder
+- **Developer-Tools** - Git, Docker, API-Tester, Log-Analyse, JSON/Regex/Base64-Utilities
+- **Kommunikation** - E-Mail (Gmail), Telegram, Discord
+- **Gedaechtnis** - SQLite mit FTS5, Notizen, Routinen, Profil
+- **Sicherheit** - 3-Tier Whitelist, Prompt-Injection-Defense, Rate Limiting, Audit Log
+- **7 Views** - Dashboard, Chat, System, Commands, Productivity, Memory, Settings
+- **Responsive UI** - Mobile-Breakpoints, ARIA Accessibility, Keyboard Shortcuts
 
 ---
 
 ## Voraussetzungen
 
 - **Windows 10/11**
-- **Python 3.11+** (getestet mit 3.14)
-- **Node.js 18+** (getestet mit 24.x)
+- **Python 3.11+**
+- **Node.js 18+**
 - **Git**
 
-Optional:
-- **Ollama** — für lokale KI ohne Internet
-- **ffmpeg** — für Media-Konvertierung und Screen Recording
-- **Piper TTS** Binary + deutsches Modell
+Optional: Ollama (lokale KI), ffmpeg (Media-Konvertierung)
 
 ---
 
 ## Installation
 
 ```bash
-# 1. Repository klonen
-git clone https://github.com/yourusername/lexa-ai.git
+# Repository klonen
+git clone https://github.com/alexsprogis/lexa-ai.git
 cd lexa-ai
 
-# 2. Python Virtual Environment
+# Python Virtual Environment
 python -m venv venv
 venv\Scripts\pip install -r requirements.txt
 
-# 3. Playwright Browser installieren
+# Playwright Browser
 venv\Scripts\playwright install chromium
 
-# 4. Frontend Dependencies
-cd frontend
-npm install
-cd ..
-
-# 5. Groq API Key setzen (einmalig)
-venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'groq-api-key', 'DEIN_KEY_HIER')"
+# Frontend Dependencies
+cd frontend && npm install && cd ..
 ```
+
+### Cloud API Keys
+
+Du kannst einen oder mehrere AI-Provider parallel hinterlegen:
+
+```bash
+venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'groq_api_key', 'DEIN_GROQ_KEY')"
+venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'openai_api_key', 'DEIN_OPENAI_KEY')"
+venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'gemini_api_key', 'DEIN_GEMINI_KEY')"
+```
+
+Groq-Key: [console.groq.com](https://console.groq.com)  
+OpenAI-Key: [platform.openai.com](https://platform.openai.com)  
+Gemini-Key: [aistudio.google.com](https://aistudio.google.com)
+
+Alternativ: kopiere `.env.example` nach `.env` und trage den Key dort ein.
+
+### Voice Setup
+
+Voice nutzt den Windows Credential Manager fuer optionale Cloud-Provider.
+
+- **STT** - Deepgram Nova-3 (primaer), Groq Whisper (Fallback), lokales faster-whisper (offline)
+- **TTS** - Cartesia Sonic (Cloud), ElevenLabs (optionale Premium-Stimmen), Windows SAPI (offline Fallback)
+
+Beispiel fuer API-Keys:
+
+```python
+import keyring
+keyring.set_password("lexa-ai", "deepgram_api_key", "DEIN_DEEPGRAM_KEY")
+keyring.set_password("lexa-ai", "cartesia_api_key", "DEIN_CARTESIA_KEY")
+keyring.set_password("lexa-ai", "elevenlabs_api_key", "DEIN_ELEVENLABS_KEY")
+keyring.set_password("lexa-ai", "groq_api_key", "DEIN_GROQ_KEY")  # optionaler STT-Fallback
+```
+
+Deepgram Key: [deepgram.com](https://deepgram.com)  
+Cartesia Key: [cartesia.ai](https://cartesia.ai)  
+ElevenLabs Key: [elevenlabs.io](https://elevenlabs.io)
 
 ---
 
 ## Starten
 
 **Ein-Klick-Start:**
-```
+
+```bash
 start.bat
 ```
 
 Oder manuell:
+
 ```bash
-# Backend
+# Backend (Terminal 1)
 venv\Scripts\python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 
-# Frontend (neues Terminal)
+# Frontend (Terminal 2)
 cd frontend && npx electron .
-```
-
----
-
-## Projektstruktur
-
-```
-lexa-ai/
-├── CLAUDE.md               # Projektdokumentation
-├── command_whitelist.json   # Sicherheits-Whitelist
-├── requirements.txt         # Python Dependencies
-├── start.bat               # Ein-Klick-Launcher
-├── backend/
-│   ├── main.py             # FastAPI Server
-│   ├── ai_engine.py        # Groq + Ollama KI
-│   ├── memory.py           # SQLite Gedächtnis
-│   ├── security.py         # Security Module
-│   ├── router_companion.py # Companion API
-│   └── router_voice.py     # Voice API
-├── companion/
-│   ├── engine.py           # 60 PC-Befehle
-│   ├── browser.py          # Playwright Automation
-│   ├── file_tools.py       # Datei-Werkzeuge
-│   ├── media.py            # Media-Steuerung
-│   └── communication.py    # E-Mail, Telegram, Discord
-├── voice/
-│   ├── stt.py              # Spracherkennung
-│   ├── tts.py              # Sprachausgabe
-│   └── piper/              # TTS Engine + Modell
-└── frontend/
-    ├── main.js             # Electron
-    ├── preload.js          # Secure Bridge
-    └── src/
-        ├── index.html      # 8-View UI
-        ├── styles.css      # Dark Theme
-        └── app.js          # Frontend Logic
 ```
 
 ---
@@ -171,52 +138,67 @@ lexa-ai/
 
 | Komponente | Technologie |
 |------------|-------------|
-| Frontend | Electron + Vanilla JS |
-| Backend | Python FastAPI |
-| KI | Groq API + Ollama |
-| STT | faster-whisper |
-| TTS | Piper |
-| Browser | Playwright |
-| Datenbank | SQLite |
-| Security | keyring + Whitelist |
+| Frontend | Electron + Vanilla JS (modular) |
+| Backend | Python FastAPI (Port 8000, localhost) |
+| KI | Groq + OpenAI + Gemini + Ollama |
+| STT | Deepgram Nova-3 + Groq Whisper + faster-whisper |
+| TTS | Cartesia Sonic + ElevenLabs + Windows SAPI |
+| Browser | Playwright + yt-dlp |
+| Datenbank | SQLite mit FTS5 Volltextsuche |
+| Security | keyring + 3-Tier Whitelist + Rate Limiting |
 
 ---
 
-## API Endpoints
+## Building from Source
 
-| Method | Endpoint | Beschreibung |
-|--------|----------|-------------|
-| GET | /health | Server Status |
-| POST | /chat | KI-Chat |
-| POST | /companion/execute | Befehl ausführen |
-| GET | /companion/commands | Alle Befehle |
-| POST | /voice/stt | Sprache → Text |
-| POST | /voice/tts | Text → Sprache |
-| GET | /ai/status | KI-Provider Status |
-| GET | /memory/stats | Gedächtnis-Stats |
-| GET | /memory/notes | Notizen |
-| POST | /memory/profile | Profil setzen |
+Lexa nutzt `electron-builder` zum Erstellen des Windows-Installers:
+
+```bash
+cd frontend
+npm run build
+```
+
+Das erzeugt einen NSIS-Installer unter `frontend/dist/`. Die Konfiguration liegt in `electron-builder.json`.
+
+---
+
+## Testing
+
+```bash
+# Optional: install local development/build tooling
+venv\Scripts\pip install -r requirements-dev.txt
+
+# Backend-Tests
+venv\Scripts\python -m pytest -q
+
+# Einzelne Test-Module
+venv\Scripts\python -m pytest tests/test_memory.py -v
+venv\Scripts\python -m pytest tests/test_security.py -v
+
+# Frontend-Rendering-Checks
+node tests/test_chat_rendering.js
+
+# Python-Lint wie in CI
+# Hinweis: derzeit Report-Gate bis zum Lint-Baseline-Cleanup
+venv\Scripts\python -m flake8 backend companion voice --max-line-length=120 --ignore=E501,W503,E402
+```
+
+Aktuell laufen 317 Backend-Tests (pytest) plus 13 Frontend-Rendering-Checks.
 
 ---
 
 ## Sicherheit
 
-Lexa nimmt Sicherheit ernst:
-
-- **Kein externer Zugriff** — API nur auf 127.0.0.1
-- **3-Tier Whitelist** — gefährliche Befehle blockiert oder brauchen Bestätigung
-- **Prompt Injection Defense** — KI-Input wird auf 17 Patterns gefiltert
-- **Path Traversal Schutz** — System-Verzeichnisse blockiert
-- **Rate Limiting** — max 30 Befehle pro Minute
-- **Audit Log** — jeder Befehl wird protokolliert
-- **Keine Secrets im Code** — alles via Windows Credential Manager
+- **Kein externer Zugriff** - API nur auf `127.0.0.1`
+- **3-Tier Whitelist** - gefaehrliche Befehle blockiert oder brauchen Bestaetigung
+- **Prompt Injection Defense** - Pattern-Matching plus Unicode-Normalisierung
+- **Path/URL/Param Validation** - System-Verzeichnisse blockiert, SSRF-Schutz
+- **Rate Limiting** - pro Endpoint
+- **Audit Log** - jeder Befehl wird protokolliert
+- **Keine Secrets im Code** - alles ueber Windows Credential Manager (`keyring`)
 
 ---
 
 ## Lizenz
 
 MIT
-
----
-
-*Built with Claude Code*

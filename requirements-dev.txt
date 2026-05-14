@@ -1,0 +1,7 @@
+# Lexa AI development and build tooling only.
+#
+# Install on Windows for local CI parity:
+#   venv\Scripts\pip install -r requirements-dev.txt
+
+flake8>=7,<8
+pyinstaller>=6,<7
