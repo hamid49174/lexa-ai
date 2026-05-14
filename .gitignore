@@ -56,6 +56,7 @@ voice/piper/
 
 # Local Windows diagnostics
 App-Ausf*
+test_*.mp3
 
 
 # Secrets — NEVER commit
