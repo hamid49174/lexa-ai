@@ -35,7 +35,7 @@ Lexa soll sich nicht wie ein schnell zusammengestecktes Demo-Projekt anfuehlen, 
 - Frontend hat weiterhin viele `innerHTML`-Zuweisungen. Das bleibt der wichtigste DOM-Sicherheitsblock nach der CSP-Haertung.
 - CSP ist ohne `unsafe-inline`; ein pytest-Regressionscheck schuetzt den Stand.
 - Electron-UI hat wenig echte Unit-/Integrationstests.
-- Es gibt keinen automatisierten Electron-Smoke-Test fuer Start, Backend-Verbindung und Chat.
+- Ein manueller packaged Electron Health-Smoke ist bestanden; automatisierte UI-Smoke-Coverage fuer Start, Backend-Verbindung und Chat fehlt noch.
 - Der aktuelle `shell=True`-Scan fuer Backend, Companion, Voice und Tests ist leer; Plugin- und Command-Ausfuehrung muss trotzdem weiter gehaertet werden.
 - Voice ist feature-reich, aber Diagnose-/Fallback-UX muss professioneller werden.
 - Release-Prozess ist dokumentiert, aber nicht als reproduzierbare Checkliste mit automatischen Gates umgesetzt.

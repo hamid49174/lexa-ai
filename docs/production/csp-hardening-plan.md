@@ -47,13 +47,13 @@ Future frontend work should keep dynamic presentation in CSS classes, `data-*` a
 - [x] Run static CSP/style scan.
 - [x] Run chat rendering tests.
 - [x] Run backend health smoke test.
-- [ ] Run Electron smoke test.
+- [x] Run packaged Electron health smoke test.
 - [ ] Manually verify Dashboard, Chat, Commands, Productivity, Memory, Settings, and Voice UI.
 
 ## Priority Order
 
-1. Electron smoke test with the hardened CSP.
-2. Manual UI pass across Dashboard, Chat, Commands, Productivity, Memory, Settings, and Voice.
+1. Manual UI pass across Dashboard, Chat, Commands, Productivity, Memory, Settings, and Voice.
+2. Add fuller automated Electron UI smoke coverage beyond backend health.
 3. Keep `tests/test_csp_static.py` green to prevent inline style and `unsafe-inline` regressions.
 
 ## Acceptance
