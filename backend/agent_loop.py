@@ -95,8 +95,8 @@ class AgentRun:
 #  TOOL EXECUTION (sync, runs in thread pool)
 # ══════════════════════════════════════════════════
 
-def _execute_tool(action_name: str, params: dict) -> dict:
-    """Execute a single tool call via CompanionEngine.
+async def _execute_tool(action_name: str, params: dict) -> dict:
+    """Execute a single tool call via CompanionEngine or a safe async bridge.
 
     Returns: {"success": bool, "data": ..., "error": ...}
     """
@@ -131,10 +131,20 @@ def _execute_tool(action_name: str, params: dict) -> dict:
 
     safe_params = _sanitize_params(safe_params)
 
+    if action_name.startswith("personal_os_"):
+        try:
+            from backend.personal_os_actions import execute_personal_os_action, is_personal_os_action
+            if not is_personal_os_action(action_name):
+                return {"success": False, "error": f"Unbekannte Personal OS Aktion: {action_name}"}
+            return await execute_personal_os_action(action_name, safe_params)
+        except Exception as e:
+            logger.error(f"Personal OS tool execution failed: {action_name} - {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
     # Execute (lazy import to avoid loading companion at module level)
     try:
         from companion.engine import companion
-        result = companion.execute(action_name, safe_params)
+        result = await asyncio.to_thread(companion.execute, action_name, safe_params)
         if not isinstance(result, dict):
             return {"success": False, "error": f"Unerwartetes Ergebnis: {type(result).__name__}"}
         return result
@@ -299,7 +309,7 @@ async def run_agent(
                 # Execute the tool
                 try:
                     exec_result = await asyncio.wait_for(
-                        asyncio.to_thread(_execute_tool, action_name, params),
+                        _execute_tool(action_name, params),
                         timeout=AGENT_STEP_TIMEOUT,
                     )
                 except asyncio.TimeoutError:

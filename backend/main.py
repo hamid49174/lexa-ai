@@ -123,6 +123,10 @@ try:
     from backend.router_mcp import router as mcp_router
 except ImportError:
     mcp_router = None
+try:
+    from backend.router_personal_os import router as personal_os_router
+except ImportError:
+    personal_os_router = None
 from backend.voice_ws import init_ws_loop
 from backend.shared import parse_json_body
 
@@ -226,7 +230,7 @@ app.include_router(embeddings_router)
 app.include_router(calendar_router)
 
 # Phase 39+ Feature Routers (graceful — nur wenn verfügbar)
-for _r in (vision_router, plugins_router, workflows_router, smart_router, context_router, mcp_router):
+for _r in (vision_router, plugins_router, workflows_router, smart_router, context_router, mcp_router, personal_os_router):
     if _r is not None:
         app.include_router(_r)
 
@@ -251,6 +255,8 @@ _v1_router.include_router(voice_router)
 _v1_router.include_router(productivity_router)
 _v1_router.include_router(stripe_router)
 _v1_router.include_router(agent_router)
+if personal_os_router is not None:
+    _v1_router.include_router(personal_os_router)
 
 # Mount v1 on main app
 app.include_router(_v1_router)

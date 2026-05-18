@@ -10,7 +10,7 @@ import threading
 import time as _time
 import uuid as _uuid
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, UploadFile, File, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -20,6 +20,18 @@ from backend.voice_ws import (
     push_event, push_volume, push_state, push_command,
     push_response, push_response_chunk, push_error,
     pop_fallback_events, register_ws_client, unregister_ws_client,
+)
+from voice.config import (
+    WAKE_ENGINE,
+    WAKE_FALLBACK_STT_BACKOFF_STEP_S,
+    WAKE_FALLBACK_STT_MAX_INTERVAL_S,
+    WAKE_FALLBACK_STT_MIN_INTERVAL_S,
+    WAKE_OPENWAKEWORD_AUTO_DOWNLOAD,
+    WAKE_OPENWAKEWORD_MODELS,
+    WAKE_OPENWAKEWORD_PATIENCE,
+    WAKE_OPENWAKEWORD_THRESHOLD,
+    WAKE_OPENWAKEWORD_VAD_THRESHOLD,
+    WAKE_PHRASES,
 )
 
 # ═══════════════════════════════════════════════════
@@ -78,6 +90,258 @@ _MAX_AUDIO_SIZE = 25 * 1024 * 1024
 _UPLOAD_CHUNK_SIZE = 64 * 1024
 
 
+def _normalize_stt_result(result):
+    """Return stable STT text plus optional engine metadata."""
+    if isinstance(result, dict):
+        text = str(result.get("text") or result.get("transcript") or result.get("result") or "").strip()
+        metadata = {
+            key: value
+            for key, value in result.items()
+            if key not in {"text", "transcript", "result", "success"}
+        }
+        return text, metadata
+    return str(result or "").strip(), {}
+
+
+def _device_summary(device) -> dict | None:
+    if not isinstance(device, dict):
+        return None
+    index = device.get("index")
+    return {
+        "name": str(device.get("name") or ""),
+        "index": int(index) if index is not None else None,
+        "max_input_channels": int(device.get("max_input_channels") or 0),
+        "max_output_channels": int(device.get("max_output_channels") or 0),
+        "default_samplerate": float(device.get("default_samplerate") or 0),
+    }
+
+
+def _default_device_summary(default_device):
+    if default_device is None:
+        return None
+    if isinstance(default_device, (str, bytes)):
+        return [str(default_device)]
+    try:
+        values = list(default_device)
+    except TypeError:
+        values = [default_device]
+    payload = []
+    for value in values:
+        if value is None:
+            payload.append(None)
+            continue
+        try:
+            payload.append(int(value))
+        except Exception:
+            payload.append(str(value))
+    return payload
+
+
+def _voice_audio_status(probe_audio: bool = False) -> dict:
+    try:
+        import sounddevice as sd
+    except Exception as e:
+        return {
+            "available": False,
+            "input": None,
+            "output": None,
+            "default_device": None,
+            "probe": {"ok": False, "skipped": True},
+            "error": f"sounddevice unavailable: {e}",
+        }
+
+    try:
+        input_device = _device_summary(sd.query_devices(kind="input"))
+    except Exception as e:
+        input_device = None
+        input_error = str(e)
+    else:
+        input_error = ""
+
+    try:
+        output_device = _device_summary(sd.query_devices(kind="output"))
+    except Exception as e:
+        output_device = None
+        output_error = str(e)
+    else:
+        output_error = ""
+
+    payload = {
+        "available": bool(input_device),
+        "input": input_device,
+        "output": output_device,
+        "default_device": _default_device_summary(getattr(getattr(sd, "default", None), "device", None)),
+        "probe": {"ok": False, "skipped": not probe_audio},
+        "error": input_error or output_error,
+    }
+
+    if not probe_audio or not input_device:
+        return payload
+
+    try:
+        import numpy as np
+        from voice.config import SAMPLE_RATE
+
+        start = _time.time()
+        audio = sd.rec(int(SAMPLE_RATE * 0.2), samplerate=SAMPLE_RATE, channels=1, dtype="float32")
+        sd.wait()
+        flat = audio.flatten()
+        rms = float(np.sqrt(np.mean(flat ** 2))) if len(flat) else 0.0
+        payload["probe"] = {
+            "ok": True,
+            "skipped": False,
+            "elapsed_ms": int((_time.time() - start) * 1000),
+            "rms": round(rms, 6),
+        }
+    except Exception as e:
+        payload["probe"] = {"ok": False, "skipped": False, "error": str(e)}
+        payload["error"] = str(e)
+    return payload
+
+
+def _ready_from_status(status: dict, *keys: str) -> bool:
+    if not isinstance(status, dict):
+        return False
+    for key in keys:
+        if key in status:
+            return bool(status.get(key))
+    return False
+
+
+async def _build_voice_diagnostics(probe_audio: bool = False) -> dict:
+    try:
+        from voice.stt import get_stt_status
+        stt = await asyncio.to_thread(get_stt_status)
+    except Exception as e:
+        stt = {"ready": False, "available": False, "error": str(e)}
+
+    try:
+        from voice.tts import get_tts_status
+        tts_raw = await asyncio.to_thread(get_tts_status)
+        tts = {"tts": tts_raw, **tts_raw}
+    except Exception as e:
+        tts = {"ready": False, "available": False, "error": str(e)}
+
+    wake = _wakeword_status_payload(_wake_detector)
+    audio = await asyncio.to_thread(_voice_audio_status, probe_audio)
+    try:
+        from voice.realtime import get_realtime_session_preflight
+        realtime_preflight = await asyncio.to_thread(get_realtime_session_preflight)
+        realtime = realtime_preflight.get("status") if isinstance(realtime_preflight, dict) else {}
+        if not isinstance(realtime, dict):
+            realtime = {}
+    except Exception as e:
+        realtime = {"ready": False, "error": str(e)}
+        realtime_preflight = {
+            "ok": False,
+            "can_start": False,
+            "blockers": [str(e)],
+            "warnings": [],
+            "next_action": "Realtime preflight failed.",
+        }
+
+    audio_ok = bool(audio.get("available") and audio.get("input"))
+    stt_ok = _ready_from_status(stt, "ready", "available", "deepgram_available", "groq_available", "local_available")
+    tts_ok = _ready_from_status(tts, "ready", "available", "elevenlabs_available", "cartesia_available", "sapi_available")
+    wake_error = bool(wake.get("error"))
+    wake_active = bool(wake.get("active") and wake.get("ready") and wake.get("thread_alive"))
+    wake_engine = wake.get("wake_engine") if isinstance(wake.get("wake_engine"), dict) else {}
+    wake_engine_name = wake_engine.get("name") or "unknown"
+    realtime_blockers = realtime_preflight.get("blockers") if isinstance(realtime_preflight, dict) else []
+    realtime_warnings = realtime_preflight.get("warnings") if isinstance(realtime_preflight, dict) else []
+    realtime_reason = ""
+    if realtime_blockers:
+        realtime_reason = f" Blocker: {realtime_blockers[0]}"
+    elif realtime_warnings:
+        realtime_reason = f" Warning: {realtime_warnings[0]}"
+
+    checks = [
+        {
+            "id": "audio-input",
+            "label": "Audio input",
+            "state": "ok" if audio_ok else "blocked",
+            "detail": audio.get("input", {}).get("name") if audio_ok else (audio.get("error") or "No input device available."),
+        },
+        {
+            "id": "stt",
+            "label": "Speech-to-text",
+            "state": "ok" if stt_ok else "blocked",
+            "detail": f"Engine: {stt.get('engine', 'unknown')}" if stt_ok else (stt.get("error") or "STT unavailable."),
+        },
+        {
+            "id": "tts",
+            "label": "Text-to-speech",
+            "state": "ok" if tts_ok else "blocked",
+            "detail": f"Engine: {tts.get('engine', 'unknown')}" if tts_ok else (tts.get("error") or "TTS unavailable."),
+        },
+        {
+            "id": "wakeword",
+            "label": "Wake word",
+            "state": "blocked" if wake_error else ("ok" if wake_active else "warn"),
+            "detail": wake.get("error") if wake_error else (
+                f"Active via {wake_engine_name}." if wake_active else f"Inactive. Engine: {wake_engine_name}."
+            ),
+        },
+        {
+            "id": "realtime-voice",
+            "label": "Realtime voice",
+            "state": "ok",
+            "detail": (
+                f"{realtime.get('active_path')} active."
+                if realtime.get("ready")
+                else (
+                    f"{realtime.get('preferred')} configured; cascaded fallback is active.{realtime_reason}"
+                    if realtime.get("configured")
+                    else f"Realtime provider not configured; cascaded fallback is active.{realtime_reason}"
+                )
+            ),
+        },
+    ]
+
+    if probe_audio:
+        probe = audio.get("probe") or {}
+        checks.append({
+            "id": "audio-probe",
+            "label": "Audio probe",
+            "state": "ok" if probe.get("ok") else "blocked",
+            "detail": f"{probe.get('elapsed_ms')}ms, rms={probe.get('rms')}" if probe.get("ok") else (probe.get("error") or "Probe failed."),
+        })
+
+    if any(check["state"] == "blocked" for check in checks):
+        state = "blocked"
+    elif any(check["state"] == "warn" for check in checks):
+        state = "attention"
+    else:
+        state = "ready"
+
+    if state == "ready":
+        next_action = "Voice stack is ready."
+    elif state == "attention" and not wake_active and not wake_error:
+        next_action = "Enable Wake Word for hands-free listening."
+    elif state == "attention":
+        next_action = "Review voice diagnostics warnings."
+    else:
+        next_action = "Fix blocked voice diagnostics before using voice mode."
+
+    return {
+        "ok": state != "blocked",
+        "state": state,
+        "summary": {
+            "ready": "Voice stack is ready.",
+            "attention": "Voice stack is usable but needs attention.",
+            "blocked": "Voice stack has a blocking issue.",
+        }[state],
+        "checks": checks,
+        "audio": audio,
+        "stt": stt,
+        "tts": tts,
+        "wakeword": wake,
+        "realtime": realtime,
+        "realtime_preflight": realtime_preflight,
+        "nextAction": next_action,
+    }
+
+
 # ═══════════════════════════════════════════════════
 #  WEBSOCKET — Real-time voice events
 # ═══════════════════════════════════════════════════
@@ -112,6 +376,80 @@ async def voice_websocket(websocket: WebSocket):
 #  STT ENDPOINTS
 # ═══════════════════════════════════════════════════
 
+@router.get("/diagnostics")
+async def voice_diagnostics(probeAudio: bool = Query(default=False)):
+    return await _build_voice_diagnostics(probe_audio=probeAudio)
+
+
+@router.get("/status")
+async def voice_status(probeAudio: bool = Query(default=False)):
+    return await _build_voice_diagnostics(probe_audio=probeAudio)
+
+
+@router.get("/architecture")
+async def voice_architecture():
+    from voice.realtime import get_realtime_voice_status
+    from voice.wakeword_engines import get_wakeword_engine_capabilities
+
+    return {
+        "version": "voice-stack-v3",
+        "wakeword": await asyncio.to_thread(get_wakeword_engine_capabilities),
+        "realtime": await asyncio.to_thread(get_realtime_voice_status),
+        "active_wakeword": _wakeword_status_payload(_wake_detector).get("wake_engine"),
+    }
+
+
+@router.get("/realtime/preflight")
+async def voice_realtime_preflight():
+    from voice.realtime import get_realtime_session_preflight
+
+    return await asyncio.to_thread(get_realtime_session_preflight)
+
+
+@router.post("/realtime/start")
+async def voice_realtime_start():
+    from voice.realtime import get_realtime_session_preflight
+
+    preflight = await asyncio.to_thread(get_realtime_session_preflight)
+    payload = dict(preflight) if isinstance(preflight, dict) else {
+        "ok": False,
+        "can_start": False,
+        "blockers": ["Realtime preflight returned an invalid payload."],
+        "warnings": [],
+    }
+
+    if not payload.get("can_start"):
+        payload["ok"] = False
+        payload["session_state"] = "blocked"
+        return JSONResponse(payload, status_code=409)
+
+    blockers = list(payload.get("blockers") or [])
+    blockers.append("Realtime session manager is not wired to the API endpoint yet.")
+    payload.update({
+        "ok": False,
+        "can_start": False,
+        "session_state": "not_started",
+        "blockers": blockers,
+        "next_action": "Wire the realtime session manager before starting realtime sessions.",
+    })
+    return JSONResponse(payload, status_code=501)
+
+
+@router.post("/realtime/stop")
+async def voice_realtime_stop():
+    from voice.realtime import get_realtime_voice_status
+
+    status = await asyncio.to_thread(get_realtime_voice_status)
+    return {
+        "ok": True,
+        "session_state": "stopped",
+        "active": False,
+        "provider": status.get("preferred") if isinstance(status, dict) else None,
+        "active_path": status.get("active_path") if isinstance(status, dict) else "cascaded_stt_llm_tts",
+        "runtime_active": bool(status.get("runtime_active")) if isinstance(status, dict) else False,
+    }
+
+
 @router.post("/stt")
 async def speech_to_text(audio: UploadFile = File(...)):
     """Convert uploaded audio to text."""
@@ -140,9 +478,13 @@ async def speech_to_text(audio: UploadFile = File(...)):
                 f.write(chunk)
 
         from voice.stt import transcribe_file
-        text = await asyncio.to_thread(transcribe_file, str(audio_path))
+        raw_result = await asyncio.to_thread(transcribe_file, str(audio_path))
+        text, metadata = _normalize_stt_result(raw_result)
         audit_log("stt", "transcribed", f"text={text[:80]}")
-        return {"text": text, "success": True}
+        payload = {"text": text, "success": bool(text), **metadata}
+        if not text and "error" not in payload:
+            payload["error"] = "Keine Sprache erkannt."
+        return payload
     except Exception as e:
         logger.error(f"STT error: {e}", exc_info=True)
         return JSONResponse({"text": "", "success": False, "error": "STT fehlgeschlagen."}, status_code=500)
@@ -352,6 +694,73 @@ _STOP_TIMEOUT = 5.0
 _last_poll_times: dict[str, float] = {}
 _MAX_POLL_CLIENTS = 100
 _POLL_MIN_INTERVAL = 0.1
+_WAKEWORD_STARTUP_TIMEOUT = 6.0
+
+
+def _wakeword_default_status() -> dict:
+    configured_engine = WAKE_ENGINE or "openwakeword"
+    return {
+        "active": False,
+        "ready": False,
+        "in_conversation": False,
+        "phrases": list(WAKE_PHRASES),
+        "sensitivity": 0.015,
+        "thread_alive": False,
+        "error": "",
+        "last_transcript": "",
+        "last_detected_text": "",
+        "last_command": "",
+        "last_command_source": "",
+        "last_window_rms": 0.0,
+        "wake_checks": 0,
+        "stt_checks": 0,
+        "skipped_stt_checks": 0,
+        "fallback_stt_min_interval_s": float(WAKE_FALLBACK_STT_MIN_INTERVAL_S),
+        "fallback_stt_max_interval_s": float(WAKE_FALLBACK_STT_MAX_INTERVAL_S),
+        "fallback_stt_backoff_step_s": float(WAKE_FALLBACK_STT_BACKOFF_STEP_S),
+        "fallback_stt_interval_s": float(WAKE_FALLBACK_STT_MIN_INTERVAL_S),
+        "non_wake_transcripts": 0,
+        "last_heard_at": 0.0,
+        "last_detected_at": 0.0,
+        "wake_engine": {
+            "name": configured_engine,
+            "ready": False,
+            "local": configured_engine in {"openwakeword", "local", "auto", "porcupine"},
+            "uses_stt": False,
+            "legacy": False,
+            "configured_mode": configured_engine,
+            "model_refs": [part.strip() for part in str(WAKE_OPENWAKEWORD_MODELS or "").split(",") if part.strip()],
+            "threshold": float(WAKE_OPENWAKEWORD_THRESHOLD),
+            "patience": int(WAKE_OPENWAKEWORD_PATIENCE),
+            "vad_threshold": float(WAKE_OPENWAKEWORD_VAD_THRESHOLD),
+            "auto_download": bool(WAKE_OPENWAKEWORD_AUTO_DOWNLOAD),
+            "detail": "Local wake-word engine is configured but not running.",
+        },
+    }
+
+
+def _wakeword_status_payload(detector) -> dict:
+    if not detector:
+        return _wakeword_default_status()
+    status = getattr(detector, "status", None)
+    if callable(status):
+        status = status()
+    if not isinstance(status, dict):
+        status = {}
+    payload = {**_wakeword_default_status(), **status}
+    for key in ("sensitivity", "last_window_rms", "last_heard_at", "last_detected_at",
+                "fallback_stt_min_interval_s", "fallback_stt_max_interval_s",
+                "fallback_stt_backoff_step_s", "fallback_stt_interval_s"):
+        try:
+            payload[key] = float(payload.get(key) or 0.0)
+        except Exception:
+            payload[key] = 0.0
+    for key in ("wake_checks", "stt_checks", "skipped_stt_checks", "non_wake_transcripts"):
+        try:
+            payload[key] = int(payload.get(key) or 0)
+        except Exception:
+            payload[key] = 0
+    return payload
 
 
 def _on_wake():
@@ -407,13 +816,26 @@ async def wakeword_start():
     global _wake_detector
     with _detector_lock:
         if _wake_detector and _wake_detector.is_listening:
-            return {"status": "already_running"}
+            return {"status": "already_running", **_wakeword_status_payload(_wake_detector)}
         try:
             _wake_detector = _create_detector(streaming=True)
-            _wake_detector.start()
-            return {"status": "started", "conversation_mode": True, "streaming": True}
+            _wake_detector.start(wait_ready_s=_WAKEWORD_STARTUP_TIMEOUT)
+            status = _wakeword_status_payload(_wake_detector)
+            if not status.get("active") or not status.get("ready"):
+                error = status.get("error") or "Wake-Word-Detektor ist nicht bereit."
+                try:
+                    _wake_detector.stop()
+                except Exception:
+                    pass
+                _wake_detector = None
+                return JSONResponse(
+                    {"status": "failed", "active": False, "ready": False, "error": error},
+                    status_code=503,
+                )
+            return {"status": "started", "conversation_mode": True, "streaming": True, **status}
         except Exception as e:
             logger.error(f"Wake word start failed: {e}", exc_info=True)
+            _wake_detector = None
             return JSONResponse({"error": "Wake-Word-Detektor konnte nicht gestartet werden."}, status_code=500)
 
 
@@ -428,9 +850,7 @@ async def wakeword_stop():
 
 @router.get("/wakeword/status")
 async def wakeword_status():
-    if _wake_detector:
-        return _wake_detector.status
-    return {"active": False, "in_conversation": False, "phrases": ["lexa"], "sensitivity": 0.015}
+    return _wakeword_status_payload(_wake_detector)
 
 
 @router.get("/wakeword/events")
@@ -478,10 +898,23 @@ async def conversation_start():
             _wake_detector = None
         try:
             _wake_detector = _create_detector(streaming=True)
-            _wake_detector.start_direct()
-            return {"status": "started", "mode": "direct_conversation", "streaming": True}
+            _wake_detector.start_direct(wait_ready_s=_WAKEWORD_STARTUP_TIMEOUT)
+            status = _wakeword_status_payload(_wake_detector)
+            if not status.get("active") or not status.get("ready"):
+                error = status.get("error") or "Konversationsmodus ist nicht bereit."
+                try:
+                    _wake_detector.stop()
+                except Exception:
+                    pass
+                _wake_detector = None
+                return JSONResponse(
+                    {"status": "failed", "active": False, "ready": False, "error": error},
+                    status_code=503,
+                )
+            return {"status": "started", "mode": "direct_conversation", "streaming": True, **status}
         except Exception as e:
             logger.error(f"Conversation start failed: {e}", exc_info=True)
+            _wake_detector = None
             return JSONResponse({"error": "Konversationsmodus konnte nicht gestartet werden."}, status_code=500)
 
 

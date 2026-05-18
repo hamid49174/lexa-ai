@@ -6,6 +6,18 @@
 
 // ── PRODUCTIVITY VIEW ────────────────────────────
 
+function productivityLocale() {
+  try {
+    if (typeof t === "function" && t._locale) return t._locale;
+    if (typeof LexaI18n !== "undefined" && LexaI18n.getCurrentLanguage?.() === "en") return "en-US";
+  } catch (_) { }
+  return "de-DE";
+}
+
+function productivityFormatDate(value = new Date()) {
+  return new Date(value).toLocaleDateString(productivityLocale());
+}
+
 async function refreshProductivityView() {
   if (!LexaState.get("backendOnline")) return;
   // All sub-refreshes run in parallel for faster view loading
@@ -85,8 +97,10 @@ async function refreshTodos() {
 
       // Check/complete button
       const checkBtn = document.createElement("button");
+      checkBtn.type = "button";
       checkBtn.className = "todo-check";
       checkBtn.title = t("productivity.complete");
+      checkBtn.setAttribute("aria-label", t("productivity.completeTodoLabel", { title: td.title || "" }));
       checkBtn.textContent = statusIcon;
       checkBtn.addEventListener("click", () => completeTodo(td.id));
       item.appendChild(checkBtn);
@@ -99,7 +113,16 @@ async function refreshTodos() {
       titleEl.className = "todo-title";
       titleEl.textContent = td.title || "";
       titleEl.title = t("productivity.dblClickEdit");
+      titleEl.setAttribute("role", "button");
+      titleEl.setAttribute("tabindex", "0");
+      titleEl.setAttribute("aria-label", t("productivity.editTodoLabel", { title: td.title || "" }));
       titleEl.addEventListener("dblclick", () => startTodoInlineEdit(td.id, titleEl, td.title));
+      titleEl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          startTodoInlineEdit(td.id, titleEl, td.title);
+        }
+      });
       content.appendChild(titleEl);
 
       if (td.description) {
@@ -135,15 +158,19 @@ async function refreshTodos() {
       actions.className = "todo-actions";
       if (td.status !== "done") {
         const progressBtn = document.createElement("button");
+        progressBtn.type = "button";
         progressBtn.className = "todo-action-btn";
         progressBtn.title = t("productivity.inProgress");
+        progressBtn.setAttribute("aria-label", t("productivity.markTodoInProgressLabel", { title: td.title || "" }));
         progressBtn.textContent = "\u25b6";
         progressBtn.addEventListener("click", () => setTodoStatus(td.id, "in_progress"));
         actions.appendChild(progressBtn);
       }
       const delBtn = document.createElement("button");
+      delBtn.type = "button";
       delBtn.className = "todo-action-btn todo-delete";
       delBtn.title = t("productivity.deleteBtn");
+      delBtn.setAttribute("aria-label", t("productivity.deleteTodoLabel", { title: td.title || "" }));
       delBtn.textContent = "\u2715";
       delBtn.addEventListener("click", () => deleteTodo(td.id));
       actions.appendChild(delBtn);
@@ -197,6 +224,9 @@ function createTodo(prefillTitle = "") {
 
   const panel = document.createElement("div");
   panel.className = "note-modal-panel note-modal-panel-narrow";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-label", t("productivity.newTodoTitle"));
 
   const header = document.createElement("div");
   header.className = "note-modal-header";
@@ -205,7 +235,9 @@ function createTodo(prefillTitle = "") {
   hTitle.textContent = t("productivity.newTodoTitle");
   header.appendChild(hTitle);
   const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
   closeBtn.className = "note-modal-close";
+  closeBtn.setAttribute("aria-label", t("common.close"));
   closeBtn.textContent = "\u00d7";
   closeBtn.addEventListener("click", () => { overlay.remove(); document.removeEventListener("keydown", escHandler); });
   header.appendChild(closeBtn);
@@ -256,6 +288,7 @@ function createTodo(prefillTitle = "") {
   const footer = document.createElement("div");
   footer.className = "note-modal-footer";
   const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
   saveBtn.className = "action-btn";
   saveBtn.textContent = t("productivity.createBtn");
   saveBtn.addEventListener("click", async () => {
@@ -284,6 +317,7 @@ function createTodo(prefillTitle = "") {
   });
   footer.appendChild(saveBtn);
   const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
   cancelBtn.className = "action-btn action-btn-secondary";
   cancelBtn.textContent = t("common.cancel");
   cancelBtn.addEventListener("click", () => { overlay.remove(); document.removeEventListener("keydown", escHandler); });
@@ -324,7 +358,7 @@ async function exportTodos() {
     const statusIcon = s => s === "done" ? "[x]" : s === "in_progress" ? "[~]" : "[ ]";
     const lines = [
       `# ${t("productivity.todoExportTitle")}`,
-      t("productivity.exportDate", {date: new Date().toLocaleDateString("de-DE")}),
+      t("productivity.exportDate", {date: productivityFormatDate()}),
       "",
     ];
     const byPriority = { urgent: [], high: [], normal: [], low: [] };
@@ -388,8 +422,11 @@ function _renderPomodoroDisplay(remaining, total, task) {
   `;
   controls.innerHTML = "";
   const stopBtn = document.createElement("button");
+  stopBtn.type = "button";
   stopBtn.className = "action-btn action-btn-danger";
-  stopBtn.textContent = "Stop";
+  stopBtn.textContent = t("productivity.stopBtn");
+  stopBtn.title = t("productivity.stopBtn");
+  stopBtn.setAttribute("aria-label", t("productivity.stopBtn"));
   stopBtn.addEventListener("click", stopPomodoro);
   controls.appendChild(stopBtn);
 }
@@ -438,8 +475,11 @@ async function refreshPomodoro() {
       `;
       controls.innerHTML = "";
       const startBtn = document.createElement("button");
+      startBtn.type = "button";
       startBtn.className = "action-btn";
-      startBtn.textContent = "Start";
+      startBtn.textContent = t("productivity.startBtn");
+      startBtn.title = t("productivity.startBtn");
+      startBtn.setAttribute("aria-label", t("productivity.startBtn"));
       startBtn.addEventListener("click", startPomodoro);
       controls.appendChild(startBtn);
     }
@@ -454,6 +494,9 @@ function startPomodoro() {
 
   const panel = document.createElement("div");
   panel.className = "note-modal-panel note-modal-panel-compact";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-label", t("productivity.startPomodoroTitle"));
 
   const header = document.createElement("div");
   header.className = "note-modal-header";
@@ -462,7 +505,9 @@ function startPomodoro() {
   hTitle.textContent = "\u23F3 " + t("productivity.startPomodoroTitle");
   header.appendChild(hTitle);
   const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
   closeBtn.className = "note-modal-close";
+  closeBtn.setAttribute("aria-label", t("common.close"));
   closeBtn.textContent = "\u00d7";
   closeBtn.addEventListener("click", () => { overlay.remove(); document.removeEventListener("keydown", escHandler); });
   header.appendChild(closeBtn);
@@ -482,6 +527,7 @@ function startPomodoro() {
   const presets = [15, 25, 45, 60];
   presets.forEach(min => {
     const btn = document.createElement("button");
+    btn.type = "button";
     btn.className = "action-btn action-btn-secondary note-modal-preset-btn";
     btn.textContent = min + " " + t("productivity.minutesSuffix");
     btn.dataset.min = min;
@@ -509,6 +555,7 @@ function startPomodoro() {
   const footer = document.createElement("div");
   footer.className = "note-modal-footer";
   const startBtn = document.createElement("button");
+  startBtn.type = "button";
   startBtn.className = "action-btn";
   startBtn.textContent = t("productivity.startBtn");
   startBtn.addEventListener("click", async () => {
@@ -523,6 +570,7 @@ function startPomodoro() {
   });
   footer.appendChild(startBtn);
   const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
   cancelBtn.className = "action-btn action-btn-secondary";
   cancelBtn.textContent = t("common.cancel");
   cancelBtn.addEventListener("click", () => { overlay.remove(); document.removeEventListener("keydown", escHandler); });
@@ -585,15 +633,27 @@ async function refreshHabits() {
           <div class="habit-progress-fill habit-progress-${Math.max(0, Math.min(100, Math.round(progress / 5) * 5))}"></div>
         </div>
         <div class="habit-actions">
-          <button class="action-btn habit-log-btn ${h.today_done ? 'disabled-half' : ''}"${h.today_done ? ' disabled' : ""}>
+          <button type="button" class="action-btn habit-log-btn ${h.today_done ? 'disabled-half' : ''}"${h.today_done ? ' disabled' : ""}>
             ${h.today_done ? "&#10003;" : "+1"}
           </button>
-          <button class="todo-action-btn todo-delete habit-del-btn" title="${t("productivity.deleteBtn")}">&#10005;</button>
+          <button type="button" class="todo-action-btn todo-delete habit-del-btn" title="${t("productivity.deleteBtn")}" aria-label="${t("productivity.deleteBtn")}">&#10005;</button>
         </div>
       `;
       // Attach events with real name (no inline injection risk)
-      item.querySelector(".habit-log-btn").addEventListener("click", () => logHabit(h.name));
-      item.querySelector(".habit-del-btn").addEventListener("click", () => deleteHabit(h.name));
+      const logBtn = item.querySelector(".habit-log-btn");
+      if (logBtn) {
+        logBtn.type = "button";
+        logBtn.title = t("productivity.logHabitLabel", { name: h.name || "" });
+        logBtn.setAttribute("aria-label", t("productivity.logHabitLabel", { name: h.name || "" }));
+        logBtn.addEventListener("click", () => logHabit(h.name));
+      }
+      const deleteBtn = item.querySelector(".habit-del-btn");
+      if (deleteBtn) {
+        deleteBtn.type = "button";
+        deleteBtn.title = t("productivity.deleteHabitLabel", { name: h.name || "" });
+        deleteBtn.setAttribute("aria-label", t("productivity.deleteHabitLabel", { name: h.name || "" }));
+        deleteBtn.addEventListener("click", () => deleteHabit(h.name));
+      }
       list.appendChild(item);
     });
   } catch (e) { console.warn("[Productivity] Failed to refresh habits:", e.message || e); }
@@ -607,6 +667,9 @@ function createHabit() {
 
   const panel = document.createElement("div");
   panel.className = "note-modal-panel note-modal-panel-medium";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-label", t("productivity.newHabitTitle"));
 
   const header = document.createElement("div");
   header.className = "note-modal-header";
@@ -615,7 +678,9 @@ function createHabit() {
   titleEl.textContent = t("productivity.newHabitTitle");
   header.appendChild(titleEl);
   const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
   closeBtn.className = "note-modal-close";
+  closeBtn.setAttribute("aria-label", t("common.close"));
   closeBtn.textContent = "\u00d7";
   closeBtn.addEventListener("click", () => { overlay.remove(); document.removeEventListener("keydown", escHandler); });
   header.appendChild(closeBtn);
@@ -655,6 +720,7 @@ function createHabit() {
   const footer = document.createElement("div");
   footer.className = "note-modal-footer";
   const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
   saveBtn.className = "action-btn";
   saveBtn.textContent = t("productivity.createBtn");
   saveBtn.addEventListener("click", async () => {
@@ -670,6 +736,7 @@ function createHabit() {
   });
   footer.appendChild(saveBtn);
   const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
   cancelBtn.className = "action-btn action-btn-secondary";
   cancelBtn.textContent = t("common.cancel");
   cancelBtn.addEventListener("click", () => { overlay.remove(); document.removeEventListener("keydown", escHandler); });

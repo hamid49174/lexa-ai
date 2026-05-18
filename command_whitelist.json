@@ -124,7 +124,18 @@
         "folder_create",
         "screen_analyze",
         "screen_read_text",
-        "screen_ocr"
+        "screen_ocr",
+        "personal_os_diagnostics",
+        "personal_os_raw_inbox_status",
+        "personal_os_query",
+        "personal_os_read_file",
+        "personal_os_graph",
+        "personal_os_context_pack",
+        "personal_os_lexa_code_loop",
+        "personal_os_list_drafts",
+        "personal_os_view_draft",
+        "personal_os_review_draft",
+        "personal_os_draft_history"
       ]
     },
     "confirmation_required": {

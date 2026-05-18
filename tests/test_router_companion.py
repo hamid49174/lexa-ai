@@ -130,6 +130,31 @@ class TestExecuteCommand:
         assert res.status_code == 200
         mock_comp.execute.assert_called_once_with("app_open", {"name": "notepad"})
 
+    def test_execute_personal_os_action_routes_without_companion(self, client, monkeypatch):
+        tc, mock_comp, _ = client
+        calls = []
+
+        async def fake_personal_os_action(command, params):
+            calls.append((command, params))
+            return {"success": True, "data": "Personal OS result"}
+
+        monkeypatch.setattr(
+            "backend.router_companion.execute_personal_os_action",
+            fake_personal_os_action,
+        )
+
+        res = tc.post("/companion/execute", json={
+            "command": "personal_os_query",
+            "params": {"areaPath": "00_System"},
+        })
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is True
+        assert data["data"] == "Personal OS result"
+        assert calls == [("personal_os_query", {"areaPath": "00_System"})]
+        mock_comp.execute.assert_not_called()
+
     def test_execute_exception_handling(self, client):
         tc, mock_comp, _ = client
         mock_comp.execute.side_effect = RuntimeError("Kaboom")
@@ -158,6 +183,63 @@ class TestCommandsList:
 # ══════════════════════════════════════════════════
 #  PLUGINS
 # ══════════════════════════════════════════════════
+
+class TestAuditRecent:
+    def test_recent_audit_endpoint_is_read_only(self, client, monkeypatch):
+        tc, mock_comp, _ = client
+        calls = []
+        rate_buckets = []
+
+        def fake_read(limit, hide_noise=False):
+            calls.append((limit, hide_noise))
+            return {
+                "ok": True,
+                "source": "audit.log",
+                "limit": limit,
+                "count": 1,
+                "entries": [{
+                    "timestamp": "2026-05-17T07:02:00",
+                    "command": "system_info",
+                    "status": "executed",
+                    "details": "params=[]",
+                }],
+            }
+
+        def fake_check_rate_limit(bucket):
+            rate_buckets.append(bucket)
+            return True
+
+        monkeypatch.setattr("backend.router_companion.read_recent_audit_entries", fake_read)
+        monkeypatch.setattr("backend.router_companion.check_rate_limit", fake_check_rate_limit)
+
+        res = tc.get("/companion/audit/recent?limit=12&hideNoise=true")
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["ok"] is True
+        assert data["count"] == 1
+        assert data["entries"][0]["command"] == "system_info"
+        assert calls == [(12, True)]
+        assert rate_buckets == ["audit_read"]
+        mock_comp.execute.assert_not_called()
+
+    def test_recent_audit_endpoint_rate_limits_without_reading_log(self, client, monkeypatch):
+        tc, mock_comp, _ = client
+        read_calls = []
+
+        def fake_read(limit, hide_noise=False):
+            read_calls.append((limit, hide_noise))
+            return {"ok": True, "entries": []}
+
+        monkeypatch.setattr("backend.router_companion.read_recent_audit_entries", fake_read)
+        monkeypatch.setattr("backend.router_companion.check_rate_limit", lambda bucket: False)
+
+        res = tc.get("/companion/audit/recent?limit=12&hideNoise=true")
+
+        assert res.status_code == 429
+        assert read_calls == []
+        mock_comp.execute.assert_not_called()
+
 
 class TestPlugins:
     def test_list_plugins(self, client):

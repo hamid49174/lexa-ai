@@ -168,13 +168,13 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
             return {
                 "action": "spotify_open",
                 "params": {"search": query},
-                "message": f"Starte Spotify mit '{query}' 🎵",
+                "message": f"Starte Spotify mit '{query}'.",
             }
         else:
             return {
                 "action": "spotify_open",
                 "params": {"search": ""},
-                "message": "Öffne Spotify... 🎵",
+                "message": "Oeffne Spotify.",
             }
 
     if has_spotify and not play_idx:
@@ -187,7 +187,7 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
             return {
                 "action": "spotify_open",
                 "params": {"search": query},
-                "message": f"Starte Spotify mit '{query}' 🎵",
+                "message": f"Starte Spotify mit '{query}'.",
             }
 
     # ── Play + artist/song without explicit "spotify" ──
@@ -200,7 +200,7 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
             return {
                 "action": "spotify_open",
                 "params": {"search": query},
-                "message": f"Starte Spotify mit '{query}' 🎵",
+                "message": f"Starte Spotify mit '{query}'.",
             }
 
     # ── Compound: "öffne X und suche nach Y" ──
@@ -225,7 +225,7 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
                             return {
                                 "action": "browser_open",
                                 "params": {"url": f"https://www.google.com/search?q={quote_plus(query)}"},
-                                "message": f"Suche im Web nach '{query}'... 🔍",
+                                "message": f"Suche im Web nach '{query}'.",
                             }
 
     # ── Weather with city (fuzzy) ──
@@ -249,7 +249,7 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
             return {
                 "action": "weather_current",
                 "params": {"city": city},
-                "message": f"Lade Wetter für {city}... 🌤️",
+                "message": f"Lade Wetter fuer {city}.",
             }
 
     # ── Web search (BEFORE app open — "suche nach X" must not match app_open) ──
@@ -264,7 +264,7 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
                 return {
                     "action": "browser_open",
                     "params": {"url": f"https://www.google.com/search?q={quote_plus(query)}"},
-                    "message": f"Suche nach '{query}'... 🔍",
+                    "message": f"Suche nach '{query}'.",
                 }
             break
 
@@ -293,7 +293,7 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
                         return {
                             "action": "spotify_open",
                             "params": {"search": ""},
-                            "message": "Öffne Spotify... 🎵",
+                            "message": "Oeffne Spotify.",
                         }
                     return {
                         "action": "app_open",
@@ -726,7 +726,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
             return {
                 "action": "spotify_open",
                 "params": {"search": query},
-                "message": f"Starte Spotify mit '{query}' 🎵",
+                "message": f"Starte Spotify mit '{query}'.",
             }
 
     # --- Web search compound ("öffne chrome und suche nach X" — BEFORE app_open!) ---
@@ -737,7 +737,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
             return {
                 "action": "browser_open",
                 "params": {"url": f"https://www.google.com/search?q={quote_plus(query)}"},
-                "message": f"Suche im Web nach '{query}'... 🔍",
+                "message": f"Suche im Web nach '{query}'.",
             }
 
     # --- Browser open URL ("öffne google.com" — BEFORE app_open!) ---
@@ -750,7 +750,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
             return {
                 "action": "browser_open",
                 "params": {"url": url},
-                "message": f"Öffne {url}... 🌐",
+                "message": f"Oeffne {url}.",
             }
 
     # --- File open (BEFORE app_open — "öffne die datei X" must not match app_open) ---
@@ -853,21 +853,21 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         return {
             "action": "calendar_today",
             "params": {},
-            "message": "Lade deine Termine fuer heute... 📅",
+            "message": "Lade deine Termine fuer heute.",
         }
 
     if _RE_CALENDAR_WEEK.match(msg):
         return {
             "action": "calendar_week",
             "params": {},
-            "message": "Lade deine Wochentermine... 📅",
+            "message": "Lade deine Wochentermine.",
         }
 
     if _RE_CALENDAR_NEXT.match(msg):
         return {
             "action": "calendar_next",
             "params": {},
-            "message": "Suche deinen naechsten Termin... 📅",
+            "message": "Suche deinen naechsten Termin.",
         }
 
     if _RE_CALENDAR_CREATE.match(msg):
@@ -879,14 +879,14 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         return {
             "action": "email_summarize",
             "params": {},
-            "message": "Fasse deine E-Mails zusammen... 📧",
+            "message": "Fasse deine E-Mails zusammen.",
         }
 
     if _RE_EMAIL_READ.match(msg):
         return {
             "action": "email_read",
             "params": {"unread_only": True},
-            "message": "Checke deine neuen E-Mails... 📧",
+            "message": "Pruefe deine neuen E-Mails.",
         }
 
     if _RE_EMAIL_SEND.match(msg):
@@ -967,7 +967,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         return {
             "action": "morning_briefing",
             "params": {},
-            "message": "Einen Moment, ich stelle dein Morgen-Briefing zusammen... ☀️",
+            "message": "Einen Moment, ich stelle dein Morgen-Briefing zusammen.",
         }
 
     # --- Greeting (time-aware with personality variation) ---
@@ -977,35 +977,35 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         is_weekend = now.weekday() >= 5
         if 6 <= hour < 11:
             greetings = [
-                "Morgen, Chef! ☀️ Was packen wir heute an?",
-                "Guten Morgen! 💪 Bereit für einen produktiven Tag?",
-                "Morgen! ☕ Kaffee schon drin? Was steht an?",
+                "Guten Morgen. Was steht heute an?",
+                "Guten Morgen. Bereit fuer einen produktiven Tag?",
+                "Morgen. Was steht als Naechstes an?",
             ]
             if is_weekend:
-                greetings.append("Wochenende und schon wach? Respekt, Chef! 😄")
+                greetings.append("Guten Morgen. Was steht am Wochenende an?")
         elif 11 <= hour < 14:
             greetings = [
-                "Hey Chef! Wie läuft der Tag bis jetzt? 💪",
-                "Mittags-Check! Alles im Griff? ⚡",
-                "Hey! Schon Hunger? 😄 Was kann ich tun?",
+                "Wie laeuft der Tag bis jetzt?",
+                "Mittags-Check. Alles im Griff?",
+                "Was kann ich tun?",
             ]
         elif 14 <= hour < 18:
             greetings = [
-                "Hey Chef! Was kann ich für dich tun? ⚡",
-                "Nachmittags-Power! 🔥 Was liegt an?",
-                "Hey! Endspurt für heute? Was brauchst du?",
+                "Was kann ich fuer dich tun?",
+                "Was liegt als Naechstes an?",
+                "Endspurt fuer heute. Was brauchst du?",
             ]
         elif 18 <= hour < 22:
             greetings = [
-                "Abend, Chef! 🌙 Noch was zu erledigen?",
-                "Feierabend-Modus? 🍕 Oder noch was auf der Liste?",
-                "Hey Chef! Entspannter Abend oder noch produktiv? 😄",
+                "Guten Abend. Noch etwas zu erledigen?",
+                "Feierabend-Modus oder noch etwas auf der Liste?",
+                "Entspannter Abend oder noch produktiv?",
             ]
         else:
             greetings = [
-                "Noch wach, Chef? 🦉 Was brauchst du?",
-                "Nachtschicht? 🌙 Bin da für dich.",
-                "Hey Nachteule! 🦉 Was gibt's?",
+                "Noch wach? Was brauchst du?",
+                "Nachtschicht? Ich bin da.",
+                "Noch wach? Was gibt es?",
             ]
         return {
             "action": None,
@@ -1030,11 +1030,11 @@ def try_local_intent(user_message: str) -> Optional[dict]:
     # --- Thanks (varied) ---
     if _RE_THANKS.match(msg):
         responses = [
-            "Immer gerne, Chef! 🤝",
-            "Klar, dafür bin ich da! 💪",
-            "Läuft! Brauchst du noch was?",
-            "Teamwork! 🔥 Noch was auf dem Plan?",
-            "Gern geschehen! Wenn du mich brauchst — du weißt wo ich bin 😄",
+            "Immer gerne.",
+            "Klar, dafuer bin ich da.",
+            "Gern. Brauchst du noch etwas?",
+            "Gute Zusammenarbeit. Noch etwas auf dem Plan?",
+            "Gern geschehen. Wenn du mich brauchst, bin ich da.",
         ]
         return {
             "action": None,
@@ -1048,15 +1048,15 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         hour = now.hour
         if 22 <= hour or hour < 6:
             byes = [
-                "Gute Nacht, Chef! 🌙 Schlaf gut, ich bin morgen wieder da.",
-                "Nacht! 🌙 Gute Erholung, bis morgen!",
-                "Schlaf gut, Chef! Ich halte die Stellung 🦉",
+                "Gute Nacht. Schlaf gut, ich bin morgen wieder da.",
+                "Gute Nacht. Gute Erholung, bis morgen.",
+                "Schlaf gut. Ich bin morgen wieder bereit.",
             ]
         else:
             byes = [
-                "Bis dann, Chef! 👋 Ich bin da wenn du mich brauchst.",
-                "Ciao! 👋 Ruf mich wenn du was brauchst.",
-                "Bis später! 🤙 War mir ein Vergnügen.",
+                "Bis dann. Ich bin da, wenn du mich brauchst.",
+                "Bis spaeter. Ruf mich, wenn du etwas brauchst.",
+                "Bis spaeter. War mir ein Vergnuegen.",
             ]
         return {
             "action": None,
@@ -1069,9 +1069,9 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         return {
             "action": None,
             "params": {},
-            "message": "Ich bin Lexa — dein persönlicher KI-Assistent! 🤖 Ich steuere deinen PC, "
-                       "organisiere deinen Alltag, spiele Musik, verwalte deine Dateien und "
-                       "bin immer für dich da. Quasi dein Jarvis, nur besser aussehend. 😎",
+            "message": "Ich bin Lexa, dein lokaler KI-Assistent. Ich kann deinen PC steuern, "
+                       "deinen Alltag organisieren, Dateien verwalten, Musik steuern und "
+                       "dir ueber Sprache, Chat und lokale Arbeitsablaeufe helfen.",
         }
 
     # --- What can you do ---
@@ -1079,28 +1079,28 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         return {
             "action": None,
             "params": {},
-            "message": "Ich kann eine Menge, Chef! 💪\n\n"
-                       "- 🎵 **Musik & Medien**: Spotify steuern, YouTube, Lautstärke\n"
-                       "- 💻 **PC-Kontrolle**: Apps oeffnen/schliessen, Screenshots, System-Info\n"
-                       "- 📝 **Produktivitaet**: Todos, Pomodoro-Timer, Gewohnheiten, Notizen\n"
-                       "- 📅 **Kalender**: Termine heute/Woche, naechster Termin, Termine erstellen\n"
-                       "- 🌤️ **Wetter**: Aktuelles Wetter, Vorhersage, Regenwarnung\n"
-                       "- ⏰ **Erinnerungen**: Erstellen, anzeigen, wiederkehrend\n"
-                       "- 📧 **E-Mail**: Lesen, senden, zusammenfassen\n"
-                       "- 📁 **Dateien**: Suchen, oeffnen, Downloads, ZIP/PDF, Backups\n"
-                       "- 🌐 **Web**: Browser, YouTube, Preisvergleich\n"
-                       "- 🔧 **Dev-Tools**: Git, Docker, API-Tester\n"
-                       "- ☀️ **Morgen-Briefing**: Sag 'Morgen Lexa' fuer Kalender + Wetter + Todos\n\n"
-                       "Einfach sagen was du brauchst! 🔥",
+            "message": "Ich kann dir in mehreren Bereichen helfen:\n\n"
+                       "- **Musik & Medien**: Spotify steuern, YouTube, Lautstaerke\n"
+                       "- **PC-Kontrolle**: Apps oeffnen/schliessen, Screenshots, System-Info\n"
+                       "- **Produktivitaet**: Todos, Pomodoro-Timer, Gewohnheiten, Notizen\n"
+                       "- **Kalender**: Termine heute/Woche, naechster Termin, Termine erstellen\n"
+                       "- **Wetter**: Aktuelles Wetter, Vorhersage, Regenwarnung\n"
+                       "- **Erinnerungen**: Erstellen, anzeigen, wiederkehrend\n"
+                       "- **E-Mail**: Lesen, senden, zusammenfassen\n"
+                       "- **Dateien**: Suchen, oeffnen, Downloads, ZIP/PDF, Backups\n"
+                       "- **Web**: Browser, YouTube, Preisvergleich\n"
+                       "- **Dev-Tools**: Git, Docker, API-Tester\n"
+                       "- **Morgen-Briefing**: Sag 'Morgen Lexa' fuer Kalender, Wetter und Todos\n\n"
+                       "Sag einfach, was du brauchst.",
         }
 
     # --- Compliments ---
     if _RE_COMPLIMENT.match(msg):
         responses = [
-            "Danke Chef! 😊 Das motiviert mich, noch besser zu werden!",
-            "Aww, das ehrt mich! 🔥 Zusammen sind wir ein Dreamteam!",
-            "Haha, danke! Du bist aber auch ein ziemlich cooler Chef 😎",
-            "Das geht runter wie Öl! 💪 Sag Bescheid wenn du was brauchst!",
+            "Danke. Das motiviert mich, noch besser zu werden.",
+            "Das freut mich. Zusammen arbeiten wir gut.",
+            "Danke. Ich gebe mir Muehe, nuetzlich zu bleiben.",
+            "Danke. Sag Bescheid, wenn du etwas brauchst.",
         ]
         return {
             "action": None,
@@ -1111,10 +1111,10 @@ def try_local_intent(user_message: str) -> Optional[dict]:
     # --- Insults (graceful handling) ---
     if _RE_INSULT.match(msg):
         responses = [
-            "Autsch! 😅 Okay, was kann ich besser machen? Ich lerne gerne dazu.",
-            "Hm, das tut weh. 😄 Aber ich nehm's sportlich — was soll ich anders machen?",
-            "Fair genug, Chef. Sag mir was du brauchst und ich zeig dir was ich drauf hab! 💪",
-            "Ich arbeite dran! 😤 Gib mir eine Chance — was kann ich für dich tun?",
+            "Verstanden. Was soll ich konkret besser machen?",
+            "Sag mir konkret, was anders laufen soll.",
+            "Fair genug. Sag mir, was du brauchst, und ich arbeite es sauber ab.",
+            "Ich arbeite daran. Was kann ich jetzt konkret fuer dich tun?",
         ]
         return {
             "action": None,
@@ -1125,14 +1125,10 @@ def try_local_intent(user_message: str) -> Optional[dict]:
     # --- Joke ---
     if _RE_JOKE.match(msg):
         jokes = [
-            "Warum können Geister so schlecht lügen? Weil man durch sie hindurchsieht! 👻😄",
-            "Was sagt ein IT-ler wenn er aus dem Fenster schaut? 'Fenster aktualisieren!' 🪟😂",
-            "Ich wollte einen Witz über RAM erzählen... aber ich hab ihn vergessen. 💾😅",
-            "Chuck Norris kann Multithreading — auf einem Single-Core. 💪😎",
-            "Warum trinken Programmierer keinen Kaffee? Weil Java schon genug ist! ☕😄",
-            "Es gibt 10 Arten von Menschen: Die die Binär verstehen und die die es nicht tun. 🤓",
-            "Mein Lieblingswitz? Mein Vorgänger Cortana. 😏🔥",
-            "Warum hat der Computer gefroren? Weil Windows offen war! 🪟❄️",
+            "Was sagt ein IT-ler, wenn er aus dem Fenster schaut? Fenster aktualisieren.",
+            "Ich wollte einen Witz ueber RAM erzaehlen, aber ich habe ihn vergessen.",
+            "Warum trinken Programmierer keinen Kaffee? Weil Java schon genug ist.",
+            "Es gibt 10 Arten von Menschen: die, die Binaer verstehen, und die, die es nicht tun.",
         ]
         return {
             "action": None,
@@ -1145,22 +1141,14 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         return {
             "action": None,
             "params": {},
-            "message": "Alter ist bei KIs relativ! 😄 Ich wurde 2024 erschaffen, "
-                       "bin also noch ziemlich jung. Aber mein Wissen umfasst die gesamte "
-                       "Menschheitsgeschichte — quasi ein Baby mit Doktortitel! 🎓",
+            "message": "Ich bin eine lokale KI-App aus diesem Projekt. Mein Wissen und meine Faehigkeiten haengen von den konfigurierten Modellen, Tools und lokalen Integrationen ab.",
         }
 
     # --- Bored ---
     if _RE_BORED.match(msg):
         bored_suggestions = [
-            "Langeweile? Nicht mit mir! 🔥 Hier ein paar Ideen:\n\n"
-            "- 🎵 \"Spiel mir was\" — Musik an!\n"
-            "- 📝 Todos checken — vielleicht liegt was an?\n"
-            "- 🌐 YouTube — was Neues entdecken?\n"
-            "- 🧹 Downloads aufräumen — immer ein gutes Gefühl!\n"
-            "- ⏱️ Pomodoro — 25 Min was Produktives tun!",
-            "Langweilig? Challenge accepted! 💪 Soll ich Musik anmachen, "
-            "deine Todos checken oder dir einen Witz erzählen? 😄",
+            "Ein paar sinnvolle Optionen: Musik starten, Todos pruefen, Notizen sortieren, Downloads aufraeumen oder einen 25-Minuten-Fokusblock starten.",
+            "Ich kann Musik starten, deine Todos pruefen, eine kurze Aufgabe strukturieren oder einen Fokus-Timer setzen.",
         ]
         return {
             "action": None,
@@ -1206,7 +1194,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         return {
             "action": "file_recent_downloads",
             "params": {},
-            "message": "Lade deine letzten Downloads... 📁",
+            "message": "Lade deine letzten Downloads.",
         }
 
     # --- Todo list shortcut ---
@@ -1214,7 +1202,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         return {
             "action": "todo_list",
             "params": {},
-            "message": "Lade deine Todos... 📋",
+            "message": "Lade deine Todos.",
         }
 
     # --- Process list shortcut ---
@@ -1222,7 +1210,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         return {
             "action": "process_list",
             "params": {},
-            "message": "Lade Prozessliste... 💻",
+            "message": "Lade die Prozessliste.",
         }
 
     # --- Clipboard ---
@@ -1230,7 +1218,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         return {
             "action": "clipboard_read",
             "params": {},
-            "message": "Schaue in die Zwischenablage... 📋",
+            "message": "Schaue in die Zwischenablage.",
         }
 
     # --- Web search simple ("suche nach X", "google X") ---
@@ -1241,7 +1229,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
             return {
                 "action": "browser_open",
                 "params": {"url": f"https://www.google.com/search?q={quote_plus(query)}"},
-                "message": f"Suche im Web nach '{query}'... 🔍",
+                "message": f"Suche im Web nach '{query}'.",
             }
 
     # --- Weather with CITY slot (BEFORE generic weather — "wetter in hamburg" must extract city) ---
@@ -1252,7 +1240,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
             return {
                 "action": "weather_current",
                 "params": {"city": city},
-                "message": f"Lade Wetter für {city}... 🌤️",
+                "message": f"Lade Wetter fuer {city}.",
             }
 
     # --- Weather forecast (BEFORE current — "wetter morgen" must not match current) ---
@@ -1260,7 +1248,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         return {
             "action": "weather_forecast",
             "params": {},
-            "message": "Lade die Wettervorhersage... 🌤️",
+            "message": "Lade die Wettervorhersage.",
         }
 
     if _RE_WEATHER_CURRENT.match(msg):

@@ -94,6 +94,20 @@ class TestToolContextSelection:
         names = [t["function"]["name"] for t in tools]
         assert any("git" in n for n in names)
 
+    def test_personal_os_selects_os_tools(self):
+        """A Personal OS request should include read-only OS tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("lies das Personal OS Manifest und zeig mir den Graph")
+        names = [t["function"]["name"] for t in tools]
+        assert "personal_os_diagnostics" in names
+        assert "personal_os_raw_inbox_status" in names
+        assert "personal_os_read_file" in names
+        assert "personal_os_graph" in names
+        assert "personal_os_context_pack" in names
+        assert "personal_os_lexa_code_loop" in names
+        assert "personal_os_review_draft" in names
+        assert "personal_os_draft_history" in names
+
     def test_max_tools_limit(self):
         """Context selection should not exceed TOOL_USE_MAX_TOOLS + padding allowance."""
         from backend.tool_registry import get_tools_for_context

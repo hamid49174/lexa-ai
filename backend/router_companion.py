@@ -4,13 +4,14 @@ API Endpoints für PC-Kontrolle (async-safe via to_thread)
 
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from companion.engine import companion
-from backend.security import is_command_allowed, check_rate_limit, audit_log, validate_params
+from backend.security import is_command_allowed, check_rate_limit, audit_log, validate_params, read_recent_audit_entries
 from backend.i18n import t
+from backend.personal_os_actions import execute_personal_os_action, is_personal_os_action
 
 logger = logging.getLogger("lexa.companion")
 router = APIRouter(prefix="/companion", tags=["companion"])
@@ -94,6 +95,11 @@ async def execute_command(req: CommandRequest):
             data=t("command.valid", command=req.command),
         )
 
+    if is_personal_os_action(req.command):
+        result = await execute_personal_os_action(req.command, safe_params)
+        validated = _validate_result(result)
+        return CommandResponse(**validated, dry_run=False)
+
     # Execute in thread pool to avoid blocking the event loop
     try:
         result = await asyncio.to_thread(companion.execute, req.command, safe_params)
@@ -112,6 +118,17 @@ async def list_commands():
         "commands": list(companion.commands.keys()),
         "total": len(companion.commands),
     }
+
+
+@router.get("/audit/recent")
+async def recent_audit_entries(
+    limit: int = Query(30, ge=1, le=100),
+    hideNoise: bool = Query(False),
+):
+    """Read-only recent tool/action audit summary for UI trust surfaces."""
+    if not check_rate_limit("audit_read"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    return read_recent_audit_entries(limit, hide_noise=hideNoise)
 
 
 @router.get("/plugins")

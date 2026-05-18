@@ -1,5 +1,12 @@
 {
   "servers": {
+    "personal_os": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\admin\\OneDrive\\Desktop\\OS\\11_Integrations\\MCP\\os-mcp-server\\dist\\index.js"
+      ],
+      "enabled": true
+    },
     "filesystem": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/documents"],

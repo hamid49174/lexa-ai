@@ -6,12 +6,24 @@
    ════════════════════════════════════════════════ */
 
 // ── SYSTEM VIEW ──────────────────────────────────
+let systemAuditRefreshSeq = 0;
+
 function createSystemView() {
   const div = document.createElement("div");
   div.className = "system-view active";
   div.innerHTML = `
     <div class="view-title">System <span>Monitor</span></div>
     <div class="info-grid" id="system-grid"></div>
+    <div class="system-audit-panel">
+      <div class="system-audit-header">
+        <div>
+          <div class="system-audit-kicker">${escapeHtml(t("system.trust"))}</div>
+          <h3 class="section-title">${escapeHtml(t("system.recentToolActivity"))}</h3>
+        </div>
+        <button type="button" class="action-btn action-btn-sm" data-action="refreshSystemAuditActivity">${escapeHtml(t("system.refresh"))}</button>
+      </div>
+      <div class="system-audit-list" id="system-audit-list" role="list" aria-live="polite" aria-busy="false"></div>
+    </div>
   `;
   return div;
 }
@@ -21,6 +33,7 @@ async function refreshSystemView() {
   if (!grid) return;
   if (!LexaState.get("backendOnline")) {
     grid.innerHTML = '<div class="info-card"><div class="info-card-value text-error fs-16">' + escapeHtml(t("system.backendUnreachable")) + '</div></div>';
+    setSystemAuditMessage(t("common.backendOffline"), "bad");
     return;
   }
   try {
@@ -58,9 +71,142 @@ async function refreshSystemView() {
         ${d.battery_percent !== null ? `<div class="info-card-bar-track">${infoBar(d.battery_percent, "success")}</div>` : ""}
       </div>
     `;
+    refreshSystemAuditActivity();
   } catch (e) {
     console.warn("[System] Failed to refresh system view:", e.message || e);
     grid.innerHTML = ""; const errCard = document.createElement("div"); errCard.className = "info-card"; const errVal = document.createElement("div"); errVal.className = "info-card-value text-error fs-16"; errVal.textContent = t("toast.loadError"); errCard.appendChild(errVal); grid.appendChild(errCard);
+    setSystemAuditMessage(t("toast.loadError"), "bad");
+  }
+}
+
+function systemAuditStatusClass(status) {
+  const value = String(status || "").toLowerCase();
+  if (value.includes("blocked") || value.includes("error") || value.includes("failed")) return "bad";
+  if (value.includes("await") || value.includes("confirm") || value.includes("warn")) return "warn";
+  if (value.includes("dry_run") || value.includes("read") || value.includes("lexa_code_loop")) return "info";
+  return "good";
+}
+
+function systemAuditTime(timestamp) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return String(timestamp || "");
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function setSystemAuditMessage(message, tone = "muted", busy = false) {
+  const list = document.getElementById("system-audit-list");
+  if (!list) return;
+  list.setAttribute("aria-busy", busy ? "true" : "false");
+  const row = document.createElement("div");
+  row.className = `system-audit-empty system-audit-${tone}`;
+  row.textContent = message;
+  list.replaceChildren(row);
+}
+
+function renderSystemAuditEntries(payload) {
+  const list = document.getElementById("system-audit-list");
+  if (!list) return;
+  if (!payload || payload.ok === false) {
+    setSystemAuditMessage(payload?.error || t("system.auditUnavailable"), "bad");
+    return;
+  }
+  const entries = Array.isArray(payload.entries) ? payload.entries : [];
+  if (entries.length === 0) {
+    const skipped = Number(payload.skipped_noise || 0);
+    const message = skipped > 0 ? t("system.auditNoiseOnly", {count: skipped}) : t("system.auditEmpty");
+    setSystemAuditMessage(message, "muted");
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  entries.slice(0, 12).forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = "system-audit-row";
+    row.setAttribute("role", "listitem");
+
+    const tone = systemAuditStatusClass(entry.status);
+    const dot = document.createElement("span");
+    dot.className = `system-audit-dot system-audit-${tone}`;
+    dot.setAttribute("aria-hidden", "true");
+
+    const main = document.createElement("div");
+    main.className = "system-audit-main";
+
+    const top = document.createElement("div");
+    top.className = "system-audit-top";
+
+    const command = document.createElement("span");
+    command.className = "system-audit-command";
+    command.textContent = entry.command || "unknown";
+    command.title = command.textContent;
+
+    const status = document.createElement("span");
+    status.className = `system-audit-status system-audit-${tone}`;
+    status.textContent = entry.status || "unknown";
+    status.title = status.textContent;
+
+    const time = document.createElement("span");
+    time.className = "system-audit-time";
+    time.textContent = systemAuditTime(entry.timestamp);
+    time.title = entry.timestamp || time.textContent;
+    row.setAttribute(
+      "aria-label",
+      [command.textContent, status.textContent, time.textContent, entry.redacted ? t("system.auditDetailsRedacted") : ""]
+        .filter(Boolean)
+        .join(" - ")
+    );
+
+    top.append(command, status, time);
+    main.appendChild(top);
+
+    if (entry.details || entry.redacted) {
+      const details = document.createElement("div");
+      details.className = "system-audit-details";
+      if (entry.redacted) {
+        const privacy = document.createElement("span");
+        privacy.className = "system-audit-redacted";
+        privacy.textContent = t("system.auditDetailsRedacted");
+        privacy.title = privacy.textContent;
+        details.appendChild(privacy);
+      }
+      if (entry.details) {
+        const text = document.createElement("span");
+        text.className = "system-audit-details-text";
+        text.textContent = entry.details;
+        text.title = entry.details;
+        details.appendChild(text);
+      }
+      main.appendChild(details);
+    }
+
+    row.append(dot, main);
+    fragment.appendChild(row);
+  });
+  list.setAttribute("aria-busy", "false");
+  list.replaceChildren(fragment);
+}
+
+async function refreshSystemAuditActivity() {
+  const list = document.getElementById("system-audit-list");
+  if (!list) return;
+  const requestId = ++systemAuditRefreshSeq;
+  if (!LexaState.get("backendOnline")) {
+    setSystemAuditMessage(t("common.backendOffline"), "bad");
+    return;
+  }
+  if (!window.lexa?.companionAuditRecent) {
+    setSystemAuditMessage(t("system.auditUnavailable"), "bad");
+    return;
+  }
+  setSystemAuditMessage(t("common.loading"), "muted", true);
+  try {
+    const payload = await window.lexa.companionAuditRecent(12, true);
+    if (requestId !== systemAuditRefreshSeq) return;
+    renderSystemAuditEntries(payload);
+  } catch (e) {
+    if (requestId !== systemAuditRefreshSeq) return;
+    console.warn("[System] Failed to refresh tool activity:", e.message || e);
+    setSystemAuditMessage(e.message || t("system.auditUnavailable"), "bad");
   }
 }
 

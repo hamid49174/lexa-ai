@@ -157,7 +157,7 @@ async def chat_endpoint(req: ChatRequest):
         logger.info(f"User confirmed pending action: {action_name}")
         audit_log("chat", "auto_confirm", f"ACTION={action_name}")
         clear_pending_confirmation()
-        reply = f"Alles klar, Chef! Führe {action_name} aus."
+        reply = f"Alles klar. Ich fuehre {action_name} aus."
         async with _history_lock:
             update_history(conversation_history, sanitized, reply, MAX_HISTORY)
         return ChatResponse(reply=reply, action=pending, requires_confirmation=False)
@@ -376,7 +376,7 @@ async def chat_stream_endpoint(req: ChatRequest):
         logger.info(f"User confirmed pending action (stream): {action_name}")
         audit_log("chat_stream", "auto_confirm", f"ACTION={action_name}")
         clear_pending_confirmation()
-        reply = f"Alles klar, Chef! Führe {action_name} aus."
+        reply = f"Alles klar. Ich fuehre {action_name} aus."
         async with _history_lock:
             update_history(conversation_history, sanitized, reply, MAX_HISTORY)
 

@@ -366,6 +366,69 @@ def _register_memory_tools() -> list[dict]:
     ]
 
 
+def _register_personal_os_tools() -> list[dict]:
+    """Personal OS read tools routed through the MCP/SDK boundary."""
+    return [
+        _tool("personal_os_diagnostics", "Prueft read-only den Personal OS MCP/SDK-Zustand, Capabilities und Draft-Queue-Counts.", [
+            _param("hideSmoke", "boolean", "Smoke-Test-Drafts ausblenden, Standard: true"),
+            _param("maxDrafts", "integer", "Maximale Draft-Anzahl fuer Diagnose-Counts, Standard: 200"),
+        ]),
+        _tool("personal_os_raw_inbox_status", "Prueft read-only den lokalen Personal OS Raw-Inbox-Worker, verfuegbare Prozessoren und Failure-State."),
+        _tool("personal_os_query", "Liest einen Personal OS Area-Index oder sucht Dateien nach exakt passendem Frontmatter-Tag. Read-only.", [
+            _param("areaPath", "string", "OS-relativer Bereich, z.B. '00_System' oder '.', Standard: '.'"),
+            _param("tag", "string", "Optionaler exakter Tag-Filter, z.B. 'lexa', '#lexa' oder 'tag:lexa'"),
+            _param("maxMatches", "integer", "Maximale Trefferanzahl fuer Tag-Suche, Standard: 50"),
+        ]),
+        _tool("personal_os_read_file", "Liest eine einzelne Personal OS Markdown-Datei ueber MCP und gibt Frontmatter plus Body zurueck. Read-only.", [
+            _param("filepath", "string", "OS-relativer Markdown-Pfad, z.B. 'OS_MANIFEST.md'", required=True),
+        ]),
+        _tool("personal_os_graph", "Erzeugt eine read-only Personal OS Context Map aus Frontmatter, related Links und Tags.", [
+            _param("areaPath", "string", "OS-relativer Bereich fuer die Context Map, Standard: '.'"),
+            _param("maxFiles", "integer", "Maximale Markdown-Dateien in der Context Map, Standard: 80"),
+            _param("includeTags", "boolean", "Tags als Context-Map-Knoten einbeziehen, Standard: true"),
+            _param("hideSmoke", "boolean", "Smoke-Test-Artefakte ausblenden, Standard: true"),
+        ]),
+        _tool("personal_os_context_pack", "Baut ein kompaktes read-only Personal OS Kontextpaket aus Query, begrenzten Datei-Previews und optionaler Context-Map-Summary.", [
+            _param("areaPath", "string", "OS-relativer Bereich, z.B. '00_System' oder '.', Standard: '.'"),
+            _param("tag", "string", "Optionaler exakter Tag-Filter, z.B. 'lexa'; '#lexa' und 'tag:lexa' werden normalisiert"),
+            _param("maxFiles", "integer", "Maximale Dateien im Kontextpaket, Standard: 5"),
+            _param("bodyChars", "integer", "Maximale Body-Zeichen pro Datei, Standard: 700"),
+            _param("includeGraph", "boolean", "Context-Map-Summary einbeziehen, Standard: true"),
+            _param("hideSmoke", "boolean", "Smoke-Test-Artefakte ausblenden, Standard: true"),
+        ]),
+        _tool("personal_os_lexa_code_loop", "Baut einen read-only Personal-OS-Briefing-Prompt fuer den naechsten kleinen Lexa-Code-Verbesserungsschritt.", [
+            _param("areaPath", "string", "OS-relativer Bereich fuer Lexa-Kontext, Standard: '00_System'"),
+            _param("tag", "string", "Optionaler exakter Tag-Filter, Standard: 'lexa'; '#lexa' und 'tag:lexa' werden normalisiert"),
+            _param("maxFiles", "integer", "Maximale Kontextdateien, Standard: 5"),
+            _param("bodyChars", "integer", "Maximale Body-Zeichen pro Datei, Standard: 650"),
+            _param("includeGraph", "boolean", "Context-Map-Summary einbeziehen, Standard: true"),
+            _param("hideSmoke", "boolean", "Smoke-Test-Artefakte ausblenden, Standard: true"),
+        ]),
+        _tool("personal_os_list_drafts", "Listet Personal OS Review-Drafts ohne volle Bodies. Read-only.", [
+            _param("approval", "string", "Filter: pending, approved, rejected, conflict, missing oder all"),
+            _param("query", "string", "Optionaler lokaler Filter ueber Titel, Pfad, Approval, Tags, Source und Memory-Level"),
+            _param("hideSmoke", "boolean", "Smoke-Test-Drafts ausblenden, Standard: true"),
+            _param("maxDrafts", "integer", "Maximale Draft-Anzahl, Standard: 20"),
+        ]),
+        _tool("personal_os_view_draft", "Liest einen einzelnen Personal OS Draft mit Frontmatter und Body. Read-only. Akzeptiert exakten Draft-Pfad oder eindeutigen Titel-/Pfad-Suchbegriff.", [
+            _param("draftPath", "string", "OS-relativer Draft-Pfad unter 06_Inbox/Drafts"),
+            _param("query", "string", "Optionaler eindeutiger Draft-Titel oder Pfad-Teil, falls draftPath nicht bekannt ist"),
+            _param("hideSmoke", "boolean", "Smoke-Test-Drafts beim Query-Resolve ausblenden, Standard: true"),
+        ]),
+        _tool("personal_os_review_draft", "Baut ein read-only Review-Packet fuer einen Personal OS Draft mit deterministic Review Assist, Related Context, Audit History und Apply-Hinweis. Akzeptiert exakten Draft-Pfad oder eindeutigen Titel-/Pfad-Suchbegriff.", [
+            _param("draftPath", "string", "OS-relativer Draft-Pfad unter 06_Inbox/Drafts"),
+            _param("query", "string", "Optionaler eindeutiger Draft-Titel oder Pfad-Teil, falls draftPath nicht bekannt ist"),
+            _param("hideSmoke", "boolean", "Smoke-Test-Drafts beim Query-Resolve ausblenden, Standard: true"),
+        ]),
+        _tool("personal_os_draft_history", "Liest die Audit-History fuer einen einzelnen Personal OS Draft aus dem Event-Log. Read-only. Akzeptiert exakten Draft-Pfad oder eindeutigen Titel-/Pfad-Suchbegriff.", [
+            _param("draftPath", "string", "OS-relativer Draft-Pfad unter 06_Inbox/Drafts"),
+            _param("query", "string", "Optionaler eindeutiger Draft-Titel oder Pfad-Teil, falls draftPath nicht bekannt ist"),
+            _param("hideSmoke", "boolean", "Smoke-Test-Drafts beim Query-Resolve ausblenden, Standard: true"),
+            _param("maxEvents", "integer", "Maximale Event-Anzahl, Standard: 50"),
+        ]),
+    ]
+
+
 def _register_productivity_tools() -> list[dict]:
     """Produktivität (17): Todos, Pomodoro, Habits, Time Tracking, Focus."""
     return [
@@ -661,6 +724,7 @@ def register_all_tools() -> None:
     tools.extend(_register_media_tools())         # 8
     tools.extend(_register_communication_tools()) # 5
     tools.extend(_register_memory_tools())        # 11
+    tools.extend(_register_personal_os_tools())   # 11
     tools.extend(_register_productivity_tools())  # 17
     tools.extend(_register_pc_control_tools())    # 24
     tools.extend(_register_dev_tools())           # 25
@@ -737,6 +801,9 @@ _CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "gedaechtnis": ["notiz", "note", "erinner", "merke", "gedächtnis",
                     "memory", "vergiss", "routine", "zusammenfass",
                     "reminder", "erinnerung", "weck"],
+    "personal_os": ["personal", "os", "markdown", "frontmatter", "graph",
+                    "draft", "drafts", "index", "lexa", "kontext",
+                    "context", "tag", "tags", "manifest"],
     "produktivitaet": ["todo", "aufgabe", "task", "pomodoro", "gewohnheit",
                        "habit", "fokus", "focus", "zeiterfassung", "tracking",
                        "produktiv", "erledigt"],
@@ -772,6 +839,7 @@ _CATEGORY_TOOL_PREFIXES: dict[str, list[str]] = {
     "media": ["media_", "spotify_", "convert_media", "extract_audio", "screen_record"],
     "kommunikation": ["email_", "telegram_", "discord_"],
     "gedaechtnis": ["note_", "memory_", "summarize", "routine_", "reminder_"],
+    "personal_os": ["personal_os_"],
     "produktivitaet": ["todo_", "pomodoro_", "habit_", "time_tracking_", "focus_mode_"],
     "pc_kontrolle": ["window_move", "window_resize", "window_min", "window_max",
                      "window_layout", "autostart_", "service_", "env_",

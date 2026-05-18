@@ -19,8 +19,17 @@ from backend.mcp_client import MCPClient, MCPError
 logger = logging.getLogger("lexa.mcp_registry")
 
 # Config file location — project root or LEXA_DATA_DIR
-_DATA_DIR = Path(os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent)))
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_DATA_DIR = Path(os.environ.get("LEXA_DATA_DIR", str(_PROJECT_ROOT)))
 MCP_CONFIG_PATH = _DATA_DIR / "mcp_servers.json"
+PROJECT_MCP_CONFIG_PATH = _PROJECT_ROOT / "mcp_servers.json"
+
+
+def _mcp_config_candidates() -> list[Path]:
+    paths = [MCP_CONFIG_PATH]
+    if PROJECT_MCP_CONFIG_PATH != MCP_CONFIG_PATH:
+        paths.append(PROJECT_MCP_CONFIG_PATH)
+    return paths
 
 
 class MCPRegistry:
@@ -45,14 +54,15 @@ class MCPRegistry:
 
         Returns the loaded configs dict. Creates empty config if missing.
         """
-        if not MCP_CONFIG_PATH.exists():
+        config_path = next((path for path in _mcp_config_candidates() if path.exists()), None)
+        if config_path is None:
             logger.info("MCP config not found — no external servers configured")
             self._configs = {}
             self._loaded = True
             return self._configs
 
         try:
-            raw = MCP_CONFIG_PATH.read_text(encoding="utf-8")
+            raw = config_path.read_text(encoding="utf-8")
             data = json.loads(raw)
             servers = data.get("servers", {})
 
@@ -73,7 +83,7 @@ class MCPRegistry:
 
             self._configs = valid
             self._loaded = True
-            logger.info(f"MCP config loaded: {len(valid)} servers from {MCP_CONFIG_PATH}")
+            logger.info(f"MCP config loaded: {len(valid)} servers from {config_path}")
             return self._configs
 
         except json.JSONDecodeError as e:

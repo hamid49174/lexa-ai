@@ -41,14 +41,14 @@ class LexaOrb3D {
       { color: new THREE.Color(0xd946ef), dir: new THREE.Vector3(0.5, 0.6, 0.55).normalize() },     // Fuchsia
       { color: new THREE.Color(0xf59e0b), dir: new THREE.Vector3(0.55, -0.5, 0.6).normalize() }     // Amber
     ];
-    // Base dot color (dim purple)
-    this.baseColor = new THREE.Color(0x2a1845);
+    // Base dot color: visible enough to read on the dark app background.
+    this.baseColor = new THREE.Color(0x4c2a78);
 
     // Store base light values for audio modulation
     this._baseLights = {
-      violet: { intensity: 10, distance: 7 },
-      fuchsia: { intensity: 8, distance: 6 },
-      amber: { intensity: 9, distance: 6 }
+      violet: { intensity: 12, distance: 8 },
+      fuchsia: { intensity: 10, distance: 7 },
+      amber: { intensity: 10, distance: 7 }
     };
 
     this.initScene();
@@ -83,11 +83,11 @@ class LexaOrb3D {
       ));
     }
     const coreMat = new THREE.MeshPhongMaterial({
-      color: 0x0a0018,
+      color: 0x120326,
       specular: 0xccaaff,
       shininess: 140,
       transparent: true,
-      opacity: 0.95
+      opacity: 0.9
     });
     this.core = new THREE.Mesh(coreGeo, coreMat);
     this.group.add(this.core);
@@ -112,10 +112,10 @@ class LexaOrb3D {
     this._computeVertexColors(colors, 0, 0);
 
     const dotsMat = new THREE.PointsMaterial({
-      size: 0.055,
+      size: 0.07,
       sizeAttenuation: true,
       transparent: true,
-      opacity: 0.9,
+      opacity: 1,
       vertexColors: true
     });
     this.dots = new THREE.Points(shellGeo, dotsMat);
@@ -135,7 +135,7 @@ class LexaOrb3D {
     this.group.add(this.lightAmber);
 
     // Dim ambient
-    this.scene.add(new THREE.AmbientLight(0x1a0a30, 0.25));
+    this.scene.add(new THREE.AmbientLight(0x2a0a45, 0.42));
 
     // Resize handler
     this.onResize = () => {
@@ -202,6 +202,7 @@ class LexaOrb3D {
     this.animationFrameId = requestAnimationFrame(this.animate);
     if (!this.dots || !this.core) return;
 
+    const now = performance.now();
     const vol = this.volume;
     const convState = this._convState || null;
 
@@ -213,19 +214,23 @@ class LexaOrb3D {
     let stateBrightBoost = 0;
     let stateScaleBase = 1.0;
     let stateWobbleExtra = 0;
+    let stateSyntheticVolume = 0;
 
     if (convState === "processing") {
       // Thinking mode: faster rotation, gentle pulse
       stateRotBoost = 3.0;
-      stateBrightBoost = 0.3 + Math.sin(performance.now() * 0.006) * 0.15;
-      stateScaleBase = 1.0 + Math.sin(performance.now() * 0.004) * 0.03;
+      stateBrightBoost = 0.3 + Math.sin(now * 0.006) * 0.15;
+      stateScaleBase = 1.0 + Math.sin(now * 0.004) * 0.03;
       stateWobbleExtra = 0.08;
     } else if (convState === "speaking") {
-      // Speaking mode: smooth, bright, medium activity
-      stateRotBoost = 1.5;
-      stateBrightBoost = 0.4;
-      stateScaleBase = 1.05;
-      stateWobbleExtra = 0.04;
+      // Speaking mode uses a synthetic cadence because TTS audio is played by HTMLAudio.
+      const speechPulse = (Math.sin(now * 0.010) + 1) * 0.5;
+      const speechFlutter = (Math.sin(now * 0.018 + 1.4) + 1) * 0.5;
+      stateRotBoost = 2.25;
+      stateBrightBoost = 0.34 + speechPulse * 0.18;
+      stateScaleBase = 1.08 + speechPulse * 0.045;
+      stateWobbleExtra = 0.10 + speechFlutter * 0.05;
+      stateSyntheticVolume = 0.18 + speechPulse * 0.16;
     } else if (convState === "listening") {
       // Listening mode: calm, receptive, volume-reactive
       stateRotBoost = 0.8;
@@ -249,7 +254,7 @@ class LexaOrb3D {
     }
     if (this.peakVolume < 0.001) this.peakVolume = 0;
 
-    const sv = this.smoothVolume;
+    const sv = Math.max(this.smoothVolume, stateSyntheticVolume);
     // Effective visual intensity: combine volume + state boost
     const ev = Math.min(1.0, sv + stateBrightBoost);
 
@@ -257,12 +262,13 @@ class LexaOrb3D {
     const rotMul = stateRotBoost * (1.0 + sv * 2.0);
     this.group.rotation.y += this.options.rotationSpeedY * rotMul;
     this.group.rotation.x += this.options.rotationSpeedX * rotMul;
+    this.group.rotation.z = convState === "speaking" ? Math.sin(now * 0.004) * 0.055 : this.group.rotation.z * 0.92;
 
     // ── Scale pulse: state base + volume ──
     const scalePulse = stateScaleBase + sv * 0.15;
     this.group.scale.setScalar(scalePulse);
 
-    const time = performance.now() * this.options.wobbleSpeed;
+    const time = now * this.options.wobbleSpeed;
     const wobbleStrength = this.options.baseWobble + stateWobbleExtra + sv * this.options.audioImpactMultiplier;
 
     // ── Breathing value for idle detection ──
@@ -271,7 +277,7 @@ class LexaOrb3D {
     this._lastBreathVal = breathVal;
 
     // ── Performance: skip geometry updates when idle and no breathing change ──
-    const needsGeometryUpdate = ev >= 0.005 || breathChanged || convState === "processing";
+    const needsGeometryUpdate = ev >= 0.005 || breathChanged || convState === "processing" || convState === "speaking";
 
     if (needsGeometryUpdate) {
       // Deform dot shell
@@ -305,13 +311,13 @@ class LexaOrb3D {
     colorAttr.needsUpdate = true;
 
     // ── Audio-reactive dot size ──
-    this.dots.material.size = 0.055 + ev * 0.03;
+    this.dots.material.size = 0.07 + ev * 0.035;
 
     // ── Audio-reactive core specular boost ──
     this.core.material.shininess = 140 + ev * 100;
 
     // ── Audio-reactive lights: intensity and range boost ──
-    const breathe = Math.sin(performance.now() * 0.001) * 0.2 + 1;
+    const breathe = Math.sin(now * 0.001) * 0.2 + 1;
     const intensityMul = breathe * (1.0 + ev * 2.0);
     const rangeMul = 1.0 + ev * 1.0;
 

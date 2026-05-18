@@ -14,7 +14,114 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
   }
 }
 
+function personalOsErrorText(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => {
+      if (!entry || typeof entry !== "object") return entry ? String(entry) : "";
+      const loc = Array.isArray(entry.loc) ? entry.loc.join(".") : (entry.loc || "");
+      const msg = entry.msg || entry.message || entry.error || "";
+      if (loc && msg) return `${loc}: ${msg}`;
+      return msg || JSON.stringify(entry);
+    }).filter(Boolean).join("; ");
+  }
+  if (typeof value === "object") {
+    return value.message || value.error || JSON.stringify(value);
+  }
+  return String(value);
+}
+
+async function personalOsJson(res, fallback = "Personal OS request failed") {
+  let data = null;
+  let jsonError = null;
+  const requestId = typeof res?.headers?.get === "function"
+    ? (res.headers.get("x-request-id") || res.headers.get("X-Request-ID") || "")
+    : "";
+  try {
+    data = await res.json();
+  } catch (e) {
+    jsonError = e;
+    data = null;
+  }
+
+  if (res.ok) {
+    if (jsonError) {
+      return {
+        ok: false,
+        httpStatus: res.status,
+        requestId,
+        error: `${fallback}: invalid JSON response`,
+      };
+    }
+    return data || {};
+  }
+
+  const objectData = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  const message = personalOsErrorText(objectData.detail)
+    || personalOsErrorText(objectData.error)
+    || personalOsErrorText(objectData.message)
+    || `${fallback} (HTTP ${res.status})`;
+
+  return {
+    ...objectData,
+    ok: false,
+    httpStatus: res.status,
+    requestId: objectData.requestId || objectData.request_id || requestId,
+    error: message,
+  };
+}
+
+function personalOsRetryDelayMs(res, fallbackMs = 1200) {
+  const rawHeader = typeof res?.headers?.get === "function" ? (res.headers.get("retry-after") || "") : "";
+  const numericSeconds = Number(rawHeader);
+  if (Number.isFinite(numericSeconds) && numericSeconds > 0) {
+    return Math.max(250, Math.min(5000, Math.round(numericSeconds * 1000)));
+  }
+  const retryDate = Date.parse(rawHeader);
+  if (Number.isFinite(retryDate)) {
+    return Math.max(250, Math.min(5000, retryDate - Date.now()));
+  }
+  return fallbackMs;
+}
+
+function personalOsDelay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function personalOsFetchJsonWithRetry(url, fallback, options, timeoutMs = 30000, retryOptions) {
+  const requestOptions = options || {};
+  const retryConfig = retryOptions || {};
+  const attempts = Math.max(1, Math.floor(Number(retryConfig.attempts) || 1));
+  const retryStatuses = Array.isArray(retryConfig.statuses) && retryConfig.statuses.length
+    ? retryConfig.statuses.map((status) => Number(status))
+    : [429];
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const res = await fetchWithTimeout(url, requestOptions, timeoutMs);
+    const payload = await personalOsJson(res, fallback);
+    const shouldRetry = retryStatuses.includes(Number(payload.httpStatus)) && attempt < attempts;
+    if (!shouldRetry) return payload;
+    await personalOsDelay(personalOsRetryDelayMs(res, retryConfig.delayMs || 1200));
+  }
+  return { ok: false, error: fallback };
+}
+
 // Secure Bridge — nur erlaubte APIs exposen
+function voiceMimeFilename(mimeType) {
+  const normalizedType = String(mimeType || "").split(";")[0].trim().toLowerCase();
+  const mimeToExt = {
+    "audio/webm": "recording.webm",
+    "audio/ogg": "recording.ogg",
+    "audio/mp4": "recording.m4a",
+    "audio/mpeg": "recording.mp3",
+    "audio/wav": "recording.wav",
+    "audio/x-wav": "recording.wav",
+    "audio/flac": "recording.flac",
+  };
+  return mimeToExt[normalizedType] || "recording.webm";
+}
+
 contextBridge.exposeInMainWorld("lexa", {
   // API base URL (centralized — avoids hardcoding in chat.js etc.)
   API_BASE: API,
@@ -57,6 +164,19 @@ contextBridge.exposeInMainWorld("lexa", {
     });
     return res.json();
   },
+  companionAuditRecent: async (limit = 20, hideNoise = true) => {
+    try {
+      const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 100));
+      const params = new URLSearchParams();
+        params.set("limit", String(safeLimit));
+        params.set("hideNoise", hideNoise ? "true" : "false");
+        const res = await fetchWithTimeout(`${API}/companion/audit/recent?${params.toString()}`);
+        return personalOsJson(res, "Audit request failed");
+      } catch (e) {
+        console.warn("[Preload] companionAuditRecent failed:", e.message || e);
+        return { ok: false, entries: [], count: 0, error: e.message || String(e) };
+      }
+  },
 
   // Voice: Text-to-Speech
   tts: async (text) => {
@@ -75,16 +195,7 @@ contextBridge.exposeInMainWorld("lexa", {
   // Voice: Speech-to-Text
   stt: async (audioBlob) => {
     // Determine correct filename from blob MIME type (MediaRecorder produces webm, not wav)
-    const mimeToExt = {
-      "audio/webm": "recording.webm",
-      "audio/ogg": "recording.ogg",
-      "audio/mp4": "recording.m4a",
-      "audio/mpeg": "recording.mp3",
-      "audio/wav": "recording.wav",
-      "audio/x-wav": "recording.wav",
-      "audio/flac": "recording.flac",
-    };
-    const filename = mimeToExt[audioBlob.type] || "recording.webm";
+    const filename = voiceMimeFilename(audioBlob.type);
     const formData = new FormData();
     formData.append("audio", audioBlob, filename);
     const res = await fetchWithTimeout(`${API}/voice/stt`, {
@@ -97,14 +208,89 @@ contextBridge.exposeInMainWorld("lexa", {
   // Voice status
   voiceStatus: async () => {
     try {
-      const [tts, stt] = await Promise.all([
-        fetchWithTimeout(`${API}/voice/tts/status`).then((r) => r.json()),
-        fetchWithTimeout(`${API}/voice/stt/status`).then((r) => r.json()),
-      ]);
-      return { tts, stt };
+      const r = await fetchWithTimeout(`${API}/voice/diagnostics`);
+      return r.json();
     } catch (e) {
       console.warn("[Preload] voiceStatus failed:", e.message || e);
-      return { tts: { ready: false }, stt: { ready: false } };
+      return {
+        ok: false,
+        state: "blocked",
+        tts: { ready: false },
+        stt: { ready: false },
+        wakeword: { active: false, ready: false },
+        audio: { available: false },
+      };
+    }
+  },
+  voiceDiagnostics: async (probeAudio = false) => {
+    try {
+      const params = new URLSearchParams();
+      if (probeAudio) params.set("probeAudio", "true");
+      const r = await fetchWithTimeout(`${API}/voice/diagnostics?${params.toString()}`);
+      return r.json();
+    } catch (e) {
+      console.warn("[Preload] voiceDiagnostics failed:", e.message || e);
+      return { ok: false, state: "blocked", error: e.message || String(e) };
+    }
+  },
+  voiceArchitecture: async () => {
+    try {
+      const r = await fetchWithTimeout(`${API}/voice/architecture`);
+      return r.json();
+    } catch (e) {
+      console.warn("[Preload] voiceArchitecture failed:", e.message || e);
+      return {
+        version: "unknown",
+        realtime: { configured: false, runtime_active: false, active_path: "unknown" },
+        wakeword: { target: "unknown" },
+        error: e.message || String(e),
+      };
+    }
+  },
+  voiceRealtimePreflight: async () => {
+    try {
+      const r = await fetchWithTimeout(`${API}/voice/realtime/preflight`);
+      return r.json();
+    } catch (e) {
+      console.warn("[Preload] voiceRealtimePreflight failed:", e.message || e);
+      return {
+        ok: false,
+        can_start: false,
+        blockers: [e.message || String(e)],
+        warnings: [],
+        active_path: "unknown",
+      };
+    }
+  },
+  voiceRealtimeStart: async () => {
+    try {
+      const r = await fetchWithTimeout(`${API}/voice/realtime/start`, { method: "POST" });
+      const payload = await r.json();
+      return { httpStatus: r.status, ...payload };
+    } catch (e) {
+      console.warn("[Preload] voiceRealtimeStart failed:", e.message || e);
+      return {
+        ok: false,
+        can_start: false,
+        session_state: "blocked",
+        blockers: [e.message || String(e)],
+        active_path: "unknown",
+      };
+    }
+  },
+  voiceRealtimeStop: async () => {
+    try {
+      const r = await fetchWithTimeout(`${API}/voice/realtime/stop`, { method: "POST" });
+      const payload = await r.json();
+      return { httpStatus: r.status, ...payload };
+    } catch (e) {
+      console.warn("[Preload] voiceRealtimeStop failed:", e.message || e);
+      return {
+        ok: false,
+        session_state: "unknown",
+        active: false,
+        error: e.message || String(e),
+      };
     }
   },
 
@@ -712,6 +898,15 @@ contextBridge.exposeInMainWorld("lexa", {
     const res = await fetchWithTimeout(`${API}/diagnostics`);
     return res.json();
   },
+  healthTools: async () => {
+    try {
+      const res = await fetchWithTimeout(`${API}/health/tools`);
+      return res.json();
+    } catch (e) {
+      console.warn("[Preload] healthTools failed:", e.message || e);
+      return { tools: {}, available_count: 0, total_count: 0, health_pct: 0 };
+    }
+  },
 
   // Memory cleanup
   memoryCleanup: async (daysOld = 90, maxImportance = 3) => {
@@ -889,6 +1084,155 @@ contextBridge.exposeInMainWorld("lexa", {
     return r.json();
   },
 
+  // Personal OS cockpit
+  personalOsStatus: async () => {
+    try {
+      return personalOsFetchJsonWithRetry(
+        `${API}/personal-os/status`,
+        "Personal OS status failed",
+        {},
+        30000,
+        { attempts: 2, statuses: [429], delayMs: 800 },
+      );
+    } catch (e) {
+      console.warn("[Preload] personalOsStatus failed:", e.message || e);
+      return { ok: false, status: "offline", tools: [], tools_count: 0, draft_review: false, error: "Personal OS nicht erreichbar" };
+    }
+  },
+  personalOsDiagnostics: async () => {
+    try {
+      return personalOsFetchJsonWithRetry(
+        `${API}/personal-os/diagnostics`,
+        "Personal OS diagnostics failed",
+        {},
+        30000,
+        { attempts: 2, statuses: [429], delayMs: 1200 },
+      );
+    } catch (e) {
+      console.warn("[Preload] personalOsDiagnostics failed:", e.message || e);
+      return {
+        ok: false,
+        state: "blocked",
+        summary: "Personal OS nicht erreichbar",
+        counts: {},
+        status: { status: "offline", tools: [], tools_count: 0, draft_review: false },
+        checks: [],
+      };
+    }
+  },
+  personalOsDrafts: async (approval = "pending", hideSmoke = true) => {
+    try {
+      const params = new URLSearchParams();
+      params.set("approval", approval);
+      params.set("hideSmoke", hideSmoke ? "true" : "false");
+      return personalOsFetchJsonWithRetry(
+        `${API}/personal-os/drafts?${params.toString()}`,
+        "Personal OS draft queue failed",
+        {},
+        30000,
+        { attempts: 2, statuses: [429], delayMs: 1000 },
+      );
+    } catch (e) {
+      console.warn("[Preload] personalOsDrafts failed:", e.message || e);
+      return { ok: false, counts: {}, drafts: [], error: "Personal OS nicht erreichbar", errors: [{ error: "Personal OS nicht erreichbar" }] };
+    }
+  },
+  personalOsDraftView: async (draftPath) => {
+    const params = new URLSearchParams();
+    params.set("draftPath", draftPath);
+    const r = await fetchWithTimeout(`${API}/personal-os/drafts/view?${params.toString()}`);
+    return personalOsJson(r, "Personal OS draft view failed");
+  },
+  personalOsDraftReview: async (draftPath) => {
+    const params = new URLSearchParams();
+    params.set("draftPath", draftPath);
+    const r = await fetchWithTimeout(`${API}/personal-os/drafts/review?${params.toString()}`);
+    return personalOsJson(r, "Personal OS draft review failed");
+  },
+  personalOsDraftDecision: async (draftPath, decision, reason = "", force = false) => {
+    const r = await fetchWithTimeout(`${API}/personal-os/drafts/decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        draftPath,
+        decision,
+        reason: reason || `Reviewed in Lexa: ${decision}`,
+        agentName: "LexaHumanReview",
+        force: !!force,
+      }),
+    });
+    return personalOsJson(r, "Personal OS draft decision failed");
+  },
+  personalOsDraftApply: async (draftPath, reason = "") => {
+    const r = await fetchWithTimeout(`${API}/personal-os/drafts/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        draftPath,
+        reason: reason || "Apply approved draft in Lexa.",
+        agentName: "LexaHumanReview",
+      }),
+    });
+    return personalOsJson(r, "Personal OS draft apply failed");
+  },
+  personalOsQuery: async ({ areaPath = ".", tag = "", maxMatches = 50 } = {}) => {
+    const params = new URLSearchParams();
+    params.set("areaPath", areaPath || ".");
+    if (tag) params.set("tag", tag);
+    params.set("maxMatches", String(maxMatches || 50));
+    const r = await fetchWithTimeout(`${API}/personal-os/query?${params.toString()}`);
+    return personalOsJson(r, "Personal OS query failed");
+  },
+  personalOsReadFile: async (filepath) => {
+    const params = new URLSearchParams();
+    params.set("filepath", filepath);
+    const r = await fetchWithTimeout(`${API}/personal-os/files/read?${params.toString()}`);
+    return personalOsJson(r, "Personal OS file read failed");
+  },
+  personalOsGraph: async ({ areaPath = ".", maxFiles = 120, includeTags = true, hideSmoke = true } = {}) => {
+    const params = new URLSearchParams();
+    params.set("areaPath", areaPath || ".");
+    params.set("maxFiles", String(maxFiles || 120));
+    params.set("includeTags", includeTags ? "true" : "false");
+    params.set("hideSmoke", hideSmoke ? "true" : "false");
+    const r = await fetchWithTimeout(`${API}/personal-os/graph?${params.toString()}`);
+    return personalOsJson(r, "Personal OS context map failed");
+  },
+  personalOsContextPack: async ({ areaPath = ".", tag = "", maxFiles = 5, bodyChars = 700, includeGraph = true, hideSmoke = true } = {}) => {
+    const params = new URLSearchParams();
+    params.set("areaPath", areaPath || ".");
+    if (tag) params.set("tag", tag);
+    params.set("maxFiles", String(maxFiles || 5));
+    params.set("bodyChars", String(bodyChars || 700));
+    params.set("includeGraph", includeGraph ? "true" : "false");
+    params.set("hideSmoke", hideSmoke ? "true" : "false");
+    const r = await fetchWithTimeout(`${API}/personal-os/context-pack?${params.toString()}`);
+    return personalOsJson(r, "Personal OS context pack failed");
+  },
+  personalOsCodeLoop: async ({ areaPath = "00_System", tag = "lexa", maxFiles = 5, bodyChars = 650, includeGraph = true, hideSmoke = true } = {}) => {
+    const params = new URLSearchParams();
+    params.set("areaPath", areaPath || "00_System");
+    if (tag) params.set("tag", tag);
+    params.set("maxFiles", String(maxFiles || 5));
+    params.set("bodyChars", String(bodyChars || 650));
+    params.set("includeGraph", includeGraph ? "true" : "false");
+    params.set("hideSmoke", hideSmoke ? "true" : "false");
+    const r = await fetchWithTimeout(`${API}/personal-os/lexa-code-loop?${params.toString()}`);
+    return personalOsJson(r, "Personal OS code loop failed");
+  },
+  personalOsRawSubmit: async ({ title = "", body = "", processor = "deterministic" } = {}) => {
+    const r = await fetchWithTimeout(`${API}/personal-os/raw-inbox/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, body, processor }),
+    }, 60000);
+    return personalOsJson(r, "Personal OS raw inbox submit failed");
+  },
+  personalOsRawStatus: async () => {
+    const r = await fetchWithTimeout(`${API}/personal-os/raw-inbox/status`);
+    return personalOsJson(r, "Personal OS raw inbox status failed");
+  },
+
   // ── WebSocket Voice Events (ChatGPT-style instant delivery) ──────
   // Returns a controller object: { close(), onEvent(callback) }
   // ── Vision/OCR (Upgrade 6) ──────────────────
@@ -934,11 +1278,11 @@ contextBridge.exposeInMainWorld("lexa", {
   agentRun: async (message) => {
     // Returns a ReadableStream of SSE events for the agent loop.
     // The caller should use the EventSource-like pattern or fetch+reader.
-    const res = await fetch(`${API}/agent/run`, {
+    const res = await fetchWithTimeout(`${API}/agent/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),
-    });
+    }, 15000);
     return res;
   },
   agentChat: async (message) => {

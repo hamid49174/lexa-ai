@@ -35,6 +35,7 @@ _RATE_LIMITS: dict[str, dict] = {
     "vision":       {"max": 15,  "timestamps": deque()},  # Vision-API (Screenshot + Analyse)
     "workflows":    {"max": 30,  "timestamps": deque()},  # Workflow-Operationen
     "stripe_read":  {"max": 10,  "timestamps": deque()},  # Stripe read endpoints (no auth)
+    "audit_read":   {"max": 120, "timestamps": deque()},  # Read-only UI trust/history surfaces
     "default":      {"max": 30,  "timestamps": deque()},
 }
 # Legacy alias (backward-compat)
@@ -106,7 +107,7 @@ def check_rate_limit(endpoint_type: str = "default") -> bool:
     Thread-safe: all deque operations are protected by a lock to prevent
     race conditions under concurrent FastAPI requests.
 
-    endpoint_type: 'chat', 'execute', 'voice', or 'default'
+    endpoint_type: 'chat', 'execute', 'voice', 'audit_read', or 'default'
     """
     bucket = _RATE_LIMITS.get(endpoint_type, _RATE_LIMITS["default"])
     now = time.time()
@@ -385,7 +386,66 @@ def _validate_param_list(command: str, key: str, items: list, depth: int) -> lis
 # ══════════════════════════════════════════════════
 
 _AUDIT_LOG_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MB max
+_AUDIT_READ_MAX_BYTES: int = 2 * 1024 * 1024  # Bounded read window for UI summaries
 _audit_lock = threading.Lock()
+_AUDIT_ENTRY_RE = re.compile(
+    r"^\[(?P<timestamp>[^\]]+)\]\s+CMD=(?P<command>\S+)\s+STATUS=(?P<status>\S+)(?:\s+(?P<details>.*))?$"
+)
+_AUDIT_NOISE_COMMANDS: frozenset[str] = frozenset({"system_info", "system_uptime"})
+_AUDIT_DETAIL_PAIR_RE = re.compile(
+    r"(?P<prefix>(?:^|\s)(?P<key>[A-Za-z_][\w.-]{0,40})=)(?P<value>.*?)(?=(?:\s+[A-Za-z_][\w.-]{0,40}=)|$)"
+)
+_AUDIT_SENSITIVE_DETAIL_KEYS: frozenset[str] = frozenset({
+    "api_key",
+    "apikey",
+    "auth",
+    "authorization",
+    "content",
+    "credential",
+    "credentials",
+    "directory",
+    "email",
+    "err",
+    "error",
+    "exception",
+    "file",
+    "file_path",
+    "filepath",
+    "filename",
+    "folder",
+    "input",
+    "message",
+    "msg",
+    "output",
+    "password",
+    "path",
+    "prompt",
+    "query",
+    "repo_path",
+    "reply",
+    "response",
+    "secret",
+    "source",
+    "target",
+    "text",
+    "token",
+    "traceback",
+    "transcript",
+    "url",
+    "user_id",
+})
+_AUDIT_KEYLESS_REDACT_COMMANDS: frozenset[str] = frozenset({
+    "stripe_checkout",
+    "stripe_portal",
+    "stripe_webhook",
+})
+_AUDIT_KEYLESS_REDACT_STATUS_MARKERS: tuple[str, ...] = (
+    "dangerous",
+    "error",
+    "invalid",
+    "param",
+    "signature",
+)
 
 
 def _rotate_audit_log() -> None:
@@ -422,6 +482,176 @@ def audit_log(command: str, status: str, details: str = "") -> None:
         # Don't swallow errors — log to stderr as fallback
         print(f"[AUDIT FALLBACK] {entry.strip()} (write failed: {e})", file=sys.stderr)
     logger.info(entry.strip())
+
+
+def _clip_audit_field(value: str, max_chars: int = 500) -> str:
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 12].rstrip() + " [truncated]"
+
+
+def _is_sensitive_audit_key(key: str) -> bool:
+    normalized = _normalize_audit_key(key)
+    return (
+        normalized in _AUDIT_SENSITIVE_DETAIL_KEYS
+        or normalized.endswith("_token")
+        or normalized.endswith("_secret")
+        or normalized.endswith("_password")
+        or normalized.endswith("_api_key")
+    )
+
+
+def _normalize_audit_key(key: str) -> str:
+    return str(key or "").strip().lower().replace("-", "_")
+
+
+def _redact_audit_details(details: str) -> tuple[str, list[str]]:
+    """Redact user content, paths, and secrets from UI-facing audit summaries."""
+    text = _clip_audit_field(details, 2000)
+    if not text:
+        return "", []
+
+    redacted_fields: list[str] = []
+    seen_fields: set[str] = set()
+
+    def replace(match: re.Match) -> str:
+        key = match.group("key")
+        if not _is_sensitive_audit_key(key):
+            return match.group(0)
+        normalized = _normalize_audit_key(key)
+        if normalized not in seen_fields:
+            seen_fields.add(normalized)
+            redacted_fields.append(normalized)
+        return f"{match.group('prefix')}[redacted]"
+
+    return _AUDIT_DETAIL_PAIR_RE.sub(replace, text), redacted_fields
+
+
+def _should_redact_keyless_audit_details(command: str, status: str, details: str) -> bool:
+    if not str(details or "").strip():
+        return False
+    normalized_command = _normalize_audit_key(command)
+    normalized_status = _normalize_audit_key(status)
+    return (
+        normalized_command in _AUDIT_KEYLESS_REDACT_COMMANDS
+        or any(marker in normalized_status for marker in _AUDIT_KEYLESS_REDACT_STATUS_MARKERS)
+    )
+
+
+def _parse_audit_entry(line: str) -> dict | None:
+    match = _AUDIT_ENTRY_RE.match(line.strip())
+    if not match:
+        return None
+    command = match.group("command")
+    status = match.group("status")
+    details, redacted_fields = _redact_audit_details(match.group("details") or "")
+    if not redacted_fields and _should_redact_keyless_audit_details(command, status, details):
+        details = "[redacted]"
+        redacted_fields = ["details"]
+    return {
+        "timestamp": _clip_audit_field(match.group("timestamp"), 80),
+        "command": _clip_audit_field(command, 120),
+        "status": _clip_audit_field(status, 80),
+        "details": _clip_audit_field(details, 500),
+        "redacted": bool(redacted_fields),
+        "redacted_fields": redacted_fields,
+    }
+
+
+def _is_low_signal_audit_entry(entry: dict) -> bool:
+    command = str(entry.get("command") or "").lower()
+    status = str(entry.get("status") or "").lower()
+    details = str(entry.get("details") or "").strip()
+    return command in _AUDIT_NOISE_COMMANDS and status == "executed" and details in ("", "params=[]")
+
+
+def _read_audit_log_tail_lines() -> tuple[list[str], dict]:
+    """Read a bounded tail window from audit.log for UI summaries."""
+    size = AUDIT_LOG_PATH.stat().st_size
+    start = max(0, size - _AUDIT_READ_MAX_BYTES)
+    metadata = {
+        "log_size_bytes": size,
+        "read_window_bytes": size - start,
+        "tail_limited": start > 0,
+    }
+    with open(AUDIT_LOG_PATH, "rb") as f:
+        if start > 0:
+            f.seek(start)
+            f.readline()  # discard the partial line at the byte cut boundary
+        return f.read().decode("utf-8", errors="replace").splitlines(), metadata
+
+
+def read_recent_audit_entries(limit: int = 50, hide_noise: bool = False) -> dict:
+    """Return recent audit-log entries in reverse chronological order.
+
+    This is read-only and intentionally exposes the parsed command/status summary,
+    not raw log lines, so UI surfaces stay bounded and easy to scan.
+    """
+    try:
+        safe_limit = int(limit)
+    except (TypeError, ValueError):
+        safe_limit = 50
+    safe_limit = max(1, min(safe_limit, 200))
+    entries: deque[dict] = deque(maxlen=safe_limit)
+    skipped_noise = 0
+    tail_metadata = {
+        "log_size_bytes": 0,
+        "read_window_bytes": 0,
+        "tail_limited": False,
+    }
+
+    try:
+        with _audit_lock:
+            if not AUDIT_LOG_PATH.exists():
+                return {
+                    "ok": True,
+                    "source": "audit.log",
+                    "limit": safe_limit,
+                    "count": 0,
+                    "entries": [],
+                    "hide_noise": bool(hide_noise),
+                    "skipped_noise": 0,
+                    **tail_metadata,
+                }
+
+            lines, tail_metadata = _read_audit_log_tail_lines()
+
+        for line in lines:
+            entry = _parse_audit_entry(line)
+            if not entry:
+                continue
+            if hide_noise and _is_low_signal_audit_entry(entry):
+                skipped_noise += 1
+                continue
+            entries.append(entry)
+
+        recent = list(entries)
+        recent.reverse()
+        return {
+            "ok": True,
+            "source": "audit.log",
+            "limit": safe_limit,
+            "count": len(recent),
+            "entries": recent,
+            "hide_noise": bool(hide_noise),
+            "skipped_noise": skipped_noise,
+            **tail_metadata,
+        }
+    except Exception as e:
+        logger.warning(f"Audit-Log konnte nicht gelesen werden: {e}")
+        return {
+            "ok": False,
+            "source": "audit.log",
+            "limit": safe_limit,
+            "count": 0,
+            "entries": [],
+            "hide_noise": bool(hide_noise),
+            "skipped_noise": skipped_noise,
+            **tail_metadata,
+            "error": "Audit log unavailable",
+            "error_type": type(e).__name__,
+        }
 
 
 def get_rate_limit_info(endpoint_type: str = "default") -> dict:

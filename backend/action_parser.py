@@ -360,7 +360,7 @@ def process_tool_call(
     action = {
         "action": action_name,
         "params": params,
-        "message": ai_message or f"Führe '{action_name}' aus, Chef.",
+        "message": ai_message or f"Fuehre '{action_name}' aus.",
     }
 
     # Validate output safety

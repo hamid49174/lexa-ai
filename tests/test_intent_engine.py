@@ -3,6 +3,30 @@
 import pytest
 from backend.intent_engine import try_local_intent
 
+DEMO_TONE_MARKERS = (
+    "Chef",
+    "Boss",
+    "Jarvis",
+    "Challenge accepted",
+    "Doktortitel",
+    "\U0001f3b5",
+    "\U0001f4bb",
+    "\U0001f4dd",
+    "\U0001f4c5",
+    "\U0001f4e7",
+    "\U0001f4c1",
+    "\U0001f310",
+    "\U0001f525",
+    "\U0001f4aa",
+    "\U0001f604",
+    "\U0001f60e",
+)
+
+
+def assert_professional_reply(reply: str) -> None:
+    for marker in DEMO_TONE_MARKERS:
+        assert marker not in reply
+
 
 # ---------------------------------------------------------------------------
 #  Priority: Productivity BEFORE app_open
@@ -73,6 +97,51 @@ class TestIntentPriority:
         result = try_local_intent("Wie war dein Tag?")
         assert result is not None
         assert result["action"] is None
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "hallo",
+            "danke",
+            "tschüss",
+            "wer bist du",
+            "was kannst du",
+            "du bist gut",
+            "du bist doof",
+        ],
+    )
+    def test_core_smalltalk_uses_professional_tone(self, monkeypatch, message):
+        """Built-in local replies should not sound like demo/buddy copy."""
+        monkeypatch.setattr("backend.intent_engine.random.choice", lambda seq: seq[0])
+        result = try_local_intent(message)
+        assert result is not None
+        reply = result["message"]
+        assert_professional_reply(reply)
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "spiel daft punk",
+            "wetter berlin",
+            "termine heute",
+            "termine diese woche",
+            "naechster termin",
+            "neue emails",
+            "todos",
+            "prozesse",
+            "suche nach openai",
+            "witz",
+            "mir ist langweilig",
+            "wie alt bist du",
+            "was kannst du",
+        ],
+    )
+    def test_local_status_and_help_copy_uses_professional_tone(self, monkeypatch, message):
+        """Fast-path status/help replies should not use cheap demo markers."""
+        monkeypatch.setattr("backend.intent_engine.random.choice", lambda seq: seq[0])
+        result = try_local_intent(message)
+        assert result is not None
+        assert_professional_reply(result["message"])
 
 
 # ---------------------------------------------------------------------------

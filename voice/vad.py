@@ -68,28 +68,32 @@ def calibrate_noise_floor(sd, duration_s: float = 1.0) -> tuple[float, float]:
     """
     sr = SAMPLE_RATE
     chunk_samples = VAD_CHUNK_SAMPLES
-    cal_chunks = int(sr * duration_s) // chunk_samples
 
     rms_values = []
-    for _ in range(cal_chunks):
-        try:
-            chunk = sd.rec(chunk_samples, samplerate=sr, channels=1, dtype="float32")
-            sd.wait()
-            rms = np.sqrt(np.mean(chunk.flatten() ** 2))
-            rms_values.append(rms)
-        except Exception:
-            break
+    try:
+        sample_count = max(chunk_samples, int(sr * duration_s))
+        audio = sd.rec(sample_count, samplerate=sr, channels=1, dtype="float32")
+        sd.wait()
+        flat = audio.flatten()
+        for start in range(0, len(flat), chunk_samples):
+            chunk = flat[start:start + chunk_samples]
+            if len(chunk) == 0:
+                continue
+            rms_values.append(np.sqrt(np.mean(chunk ** 2)))
+    except Exception as e:
+        logger.warning(f"[VAD] Calibration recording failed: {e}")
 
     if rms_values:
         sorted_rms = sorted(rms_values)
-        median_rms = sorted_rms[len(sorted_rms) // 2]
-        # Wake word energy gate = 1.5x noise (just skips dead silence)
-        sensitivity = max(median_rms * 1.5, 0.0003)
+        median_rms = float(sorted_rms[len(sorted_rms) // 2])
+        # Wake word energy gate = 1.5x noise (just skips dead silence).
+        # Keep the floor low enough for quiet laptop mics.
+        sensitivity = float(max(median_rms * 1.5, 0.00012))
         logger.info(f"[VAD] Calibrated: noise={median_rms:.6f}, gate={sensitivity:.5f}")
         return median_rms, sensitivity
 
     logger.warning("[VAD] Calibration failed, using defaults")
-    return 0.0001, 0.0003
+    return 0.0001, 0.00012
 
 
 def reset():

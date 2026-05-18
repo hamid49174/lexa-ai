@@ -26,6 +26,7 @@ function createErrorState(message, retryFn) {
   div.appendChild(msg);
   if (retryFn) {
     const btn = document.createElement("button");
+    btn.type = "button";
     btn.className = "error-retry-btn";
     btn.textContent = t("common.retry");
     btn.addEventListener("click", retryFn);
@@ -53,6 +54,7 @@ function createEmptyState(icon, title, description, actionLabel, actionFn) {
   }
   if (actionLabel && actionFn) {
     const btn = document.createElement("button");
+    btn.type = "button";
     btn.className = "empty-action-btn";
     btn.textContent = actionLabel;
     btn.addEventListener("click", actionFn);
@@ -75,22 +77,63 @@ function createSkeletonCards(count = 3) {
 const _notifHistory = [];
 let _notifCenterOpen = false;
 let _unreadNotifs = 0;
+let _notifCenterRestoreFocusEl = null;
 
-function toggleNotifCenter() {
+function ensureNotifCenterA11y(panel) {
+  if (!panel || panel.dataset.a11yBound === "true") return;
+  panel.dataset.a11yBound = "true";
+  panel.setAttribute("tabindex", "-1");
+  panel.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setNotifCenterOpen(false);
+    }
+    if (event.key === "Tab") trapFocusIn(panel, event);
+  });
+}
+
+function setNotifCenterOpen(open, options = {}) {
   const panel = document.getElementById("notif-center");
   if (!panel) return;
-  _notifCenterOpen = !_notifCenterOpen;
-  _notifCenterOpen ? panel.classList.remove("hidden") : panel.classList.add("hidden");
+  const btn = document.getElementById("notif-bell-btn");
+  ensureNotifCenterA11y(panel);
+  _notifCenterOpen = Boolean(open);
   if (_notifCenterOpen) {
+    const active = document.activeElement;
+    if (active && active !== document.body && !panel.contains(active)) {
+      _notifCenterRestoreFocusEl = active;
+    }
+    panel.classList.remove("hidden");
+    panel.setAttribute("aria-hidden", "false");
     _unreadNotifs = 0;
     const badge = document.getElementById("notif-badge");
     if (badge) badge.classList.add("hidden");
-    const btn = document.getElementById("notif-bell-btn");
-    if (btn) btn.classList.add("notif-bell-active");
+    if (btn) {
+      btn.classList.add("notif-bell-active");
+      btn.setAttribute("aria-expanded", "true");
+      btn.setAttribute("aria-controls", "notif-center");
+    }
+    setTimeout(() => {
+      if (!_notifCenterOpen || panel.classList.contains("hidden")) return;
+      const firstControl = panel.querySelector(".notif-center-close, .notif-center-clear");
+      if (firstControl && typeof firstControl.focus === "function") firstControl.focus();
+      else panel.focus();
+    }, 0);
   } else {
-    const btn = document.getElementById("notif-bell-btn");
-    if (btn) btn.classList.remove("notif-bell-active");
+    panel.classList.add("hidden");
+    panel.setAttribute("aria-hidden", "true");
+    if (btn) {
+      btn.classList.remove("notif-bell-active");
+      btn.setAttribute("aria-expanded", "false");
+      btn.setAttribute("aria-controls", "notif-center");
+    }
+    if (options.restoreFocus !== false) restoreFocus(_notifCenterRestoreFocusEl);
+    _notifCenterRestoreFocusEl = null;
   }
+}
+
+function toggleNotifCenter() {
+  setNotifCenterOpen(!_notifCenterOpen);
 }
 
 function clearNotifCenter() {
@@ -174,20 +217,31 @@ function showToast(message, type = "info", duration = 3500) {
  */
 function showInputModal(title, fields, submitLabel = "OK") {
   return new Promise((resolve) => {
+    const restoreFocusEl = document.activeElement;
     const overlay = document.createElement("div");
     overlay.className = "note-modal-overlay";
+    const closeInputModal = (value) => {
+      overlay.remove();
+      restoreFocus(restoreFocusEl);
+      resolve(value);
+    };
 
     const panel = document.createElement("div");
     panel.className = "input-modal-panel";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-label", title);
 
     const header = document.createElement("div");
     header.className = "note-modal-header";
     const h3 = document.createElement("h3");
     h3.textContent = title;
     const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
     closeBtn.className = "note-modal-close";
+    closeBtn.setAttribute("aria-label", t("common.close"));
     closeBtn.textContent = "\u2715";
-    closeBtn.addEventListener("click", () => { overlay.remove(); resolve(null); });
+    closeBtn.addEventListener("click", () => closeInputModal(null));
     header.appendChild(h3);
     header.appendChild(closeBtn);
 
@@ -243,11 +297,13 @@ function showInputModal(title, fields, submitLabel = "OK") {
     footer.className = "note-modal-footer";
 
     const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
     cancelBtn.className = "note-modal-cancel";
     cancelBtn.textContent = t("common.cancel");
-    cancelBtn.addEventListener("click", () => { overlay.remove(); resolve(null); });
+    cancelBtn.addEventListener("click", () => closeInputModal(null));
 
     const submitBtn = document.createElement("button");
+    submitBtn.type = "button";
     submitBtn.className = "note-modal-save";
     submitBtn.textContent = submitLabel;
 
@@ -273,8 +329,7 @@ function showInputModal(title, fields, submitLabel = "OK") {
         }
       });
       if (!valid) return;
-      overlay.remove();
-      resolve(values);
+      closeInputModal(values);
     };
 
     submitBtn.addEventListener("click", doSubmit);
@@ -283,7 +338,7 @@ function showInputModal(title, fields, submitLabel = "OK") {
         e.preventDefault();
         doSubmit();
       }
-      if (e.key === "Escape") { overlay.remove(); resolve(null); }
+      if (e.key === "Escape") closeInputModal(null);
     });
 
     footer.appendChild(cancelBtn);
@@ -295,7 +350,10 @@ function showInputModal(title, fields, submitLabel = "OK") {
     document.body.appendChild(overlay);
 
     overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) { overlay.remove(); resolve(null); }
+      if (e.target === overlay) closeInputModal(null);
+    });
+    overlay.addEventListener("keydown", (e) => {
+      if (e.key === "Tab") trapFocusIn(panel, e);
     });
 
     setTimeout(() => {
@@ -312,9 +370,14 @@ function showShortcutsOverlay() {
     return;
   }
 
+  const restoreFocusEl = document.activeElement;
   const overlay = document.createElement("div");
   overlay.id = "shortcuts-overlay";
   overlay.className = "shortcuts-overlay";
+  const closeShortcuts = () => {
+    overlay.remove();
+    restoreFocus(restoreFocusEl);
+  };
 
   const shortcuts = [
     { group: t("shortcuts.groupNavigation"), items: [
@@ -352,21 +415,57 @@ function showShortcutsOverlay() {
   `).join("");
 
   overlay.innerHTML = `
-    <div class="shortcuts-panel">
+    <div class="shortcuts-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("shortcuts.title"))}">
       <div class="shortcuts-header">
         <span>${escapeHtml(t("shortcuts.title"))}</span>
-        <button class="shortcuts-close" id="shortcuts-close-btn">&times;</button>
+        <button type="button" class="shortcuts-close" id="shortcuts-close-btn" aria-label="${escapeHtml(t("common.close"))}">&times;</button>
       </div>
       <div class="shortcuts-body">${groupsHTML}</div>
     </div>
   `;
 
   document.body.appendChild(overlay);
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-  document.getElementById("shortcuts-close-btn").addEventListener("click", () => overlay.remove());
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeShortcuts(); });
+  overlay.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeShortcuts();
+    if (e.key === "Tab") trapFocusIn(overlay, e);
+  });
+  document.getElementById("shortcuts-close-btn").addEventListener("click", closeShortcuts);
+  setTimeout(() => document.getElementById("shortcuts-close-btn")?.focus(), 0);
 }
 
 // ── COMMAND PALETTE (Ctrl+P) ────────────────────
+let _paletteRestoreFocusEl = null;
+
+function restoreFocus(el) {
+  if (!el || !el.isConnected || typeof el.focus !== "function") return;
+  try { el.focus({ preventScroll: true }); }
+  catch (_) { try { el.focus(); } catch (_) {} }
+}
+
+function getFocusableElements(root) {
+  return [...root.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  )].filter(el => !el.disabled && !el.hidden && el.getClientRects().length > 0);
+}
+
+function trapFocusIn(root, e) {
+  const items = getFocusableElements(root);
+  if (!items.length) {
+    e.preventDefault();
+    return;
+  }
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 function setupCommandPalette() {
   let paletteEl = document.getElementById("command-palette");
   if (!paletteEl) {
@@ -374,15 +473,18 @@ function setupCommandPalette() {
     paletteEl.id = "command-palette";
     paletteEl.className = "cmd-palette-overlay";
     paletteEl.innerHTML = `
-      <div class="cmd-palette">
-        <input type="text" id="palette-input" class="palette-input" placeholder="${t("palette.placeholder")}" autocomplete="off">
-        <div id="palette-results" class="palette-results"></div>
+      <div class="cmd-palette" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("palette.title"))}">
+        <input type="text" id="palette-input" class="palette-input" placeholder="${escapeHtml(t("palette.placeholder"))}" aria-label="${escapeHtml(t("palette.placeholder"))}" aria-controls="palette-results" aria-autocomplete="list" autocomplete="off">
+        <div id="palette-results" class="palette-results" role="listbox" aria-label="${escapeHtml(t("palette.title"))}"></div>
       </div>
     `;
     document.body.appendChild(paletteEl);
 
     paletteEl.addEventListener("click", (e) => {
       if (e.target === paletteEl) closePalette();
+    });
+    paletteEl.addEventListener("keydown", (e) => {
+      if (e.key === "Tab") trapFocusIn(paletteEl, e);
     });
 
     document.getElementById("palette-input").addEventListener("input", (e) => {
@@ -406,6 +508,10 @@ function setupCommandPalette() {
 function openPalette() {
   setupCommandPalette();
   const overlay = document.getElementById("command-palette");
+  const active = document.activeElement;
+  if (active && active !== document.body && !overlay.contains(active)) {
+    _paletteRestoreFocusEl = active;
+  }
   overlay.classList.add("visible");
   const input = document.getElementById("palette-input");
   input.value = "";
@@ -413,17 +519,28 @@ function openPalette() {
   renderPaletteResults("");
 }
 
-function closePalette() {
+function closePalette(options = {}) {
   document.getElementById("command-palette")?.classList.remove("visible");
+  document.getElementById("palette-input")?.removeAttribute("aria-activedescendant");
+  if (options.restoreFocus !== false) restoreFocus(_paletteRestoreFocusEl);
+  _paletteRestoreFocusEl = null;
 }
 
 function navigatePalette(dir) {
   const items = [...document.querySelectorAll(".palette-item")];
   const current = items.findIndex(i => i.classList.contains("selected"));
-  items.forEach(i => i.classList.remove("selected"));
+  items.forEach(i => {
+    i.classList.remove("selected");
+    i.setAttribute("aria-selected", "false");
+  });
   const next = Math.max(0, Math.min(items.length - 1, current + dir));
-  items[next]?.classList.add("selected");
-  items[next]?.scrollIntoView({ block: "nearest" });
+  const selected = items[next];
+  if (selected) {
+    selected.classList.add("selected");
+    selected.setAttribute("aria-selected", "true");
+    document.getElementById("palette-input")?.setAttribute("aria-activedescendant", selected.id);
+    selected.scrollIntoView({ block: "nearest" });
+  }
 }
 
 function renderPaletteResults(query) {
@@ -451,15 +568,21 @@ function renderPaletteResults(query) {
   container.innerHTML = "";
 
   if (filtered.length === 0) {
-    container.innerHTML = '<div class="palette-empty">' + escapeHtml(t("modals.nothingFound")) + '</div>';
+    document.getElementById("palette-input")?.removeAttribute("aria-activedescendant");
+    container.innerHTML = '<div class="palette-empty" role="status">' + escapeHtml(t("modals.nothingFound")) + '</div>';
     return;
   }
 
   filtered.slice(0, 20).forEach((item, i) => {
     const el = document.createElement("div");
+    el.id = `palette-item-${i}`;
     el.className = "palette-item" + (i === 0 ? " selected" : "");
+    el.setAttribute("role", "option");
+    el.setAttribute("aria-selected", i === 0 ? "true" : "false");
+    el.setAttribute("aria-label", `${item.name}: ${item.desc}`);
+    el.tabIndex = -1;
     el.innerHTML = `
-      <span class="palette-icon">${item.icon}</span>
+      <span class="palette-icon" aria-hidden="true">${item.icon}</span>
       <div class="palette-item-info">
         <span class="palette-name">${escapeHtml(item.name)}</span>
         <span class="palette-desc">${escapeHtml(item.desc)}</span>
@@ -467,16 +590,17 @@ function renderPaletteResults(query) {
       <span class="palette-type">${item.type === "view" ? "VIEW" : escapeHtml(item.cat || "CMD")}</span>
     `;
     el.addEventListener("click", () => {
-      if (item.type === "view") { switchView(item.name); closePalette(); }
+      if (item.type === "view") { switchView(item.name); closePalette({ restoreFocus: false }); }
       else if (item.type === "action") { 
         const fnName = item.action.replace("()", "");
         if (typeof window[fnName] === "function") window[fnName]();
-        closePalette(); 
+        closePalette({ restoreFocus: false });
       }
-      else { insertCommand(item.name); closePalette(); }
+      else { insertCommand(item.name); closePalette({ restoreFocus: false }); }
     });
     container.appendChild(el);
   });
+  document.getElementById("palette-input")?.setAttribute("aria-activedescendant", "palette-item-0");
 }
 
 // ── ONBOARDING WIZARD (Phase 17 + enhanced Phase 38) ────────────────
@@ -599,12 +723,14 @@ function showOnboarding() {
 
     if (isFirst) {
       const skip = document.createElement("button");
+      skip.type = "button";
       skip.className = "onboarding-skip";
       skip.textContent = t("onboarding.skip");
       skip.addEventListener("click", closeOnboarding);
       actions.appendChild(skip);
     } else {
       const back = document.createElement("button");
+      back.type = "button";
       back.className = "onboarding-back";
       back.textContent = t("onboarding.back");
       back.addEventListener("click", () => { currentStep--; renderStep(); });
@@ -612,6 +738,7 @@ function showOnboarding() {
     }
 
     const next = document.createElement("button");
+    next.type = "button";
     next.className = "onboarding-next";
     next.textContent = isLast ? t("onboarding.letsGo") : t("onboarding.next");
     next.addEventListener("click", () => {

@@ -20,6 +20,10 @@ process.stderr?.on("error", () => {});
 
 // ── BACKEND PROCESS MANAGEMENT ──────────────────
 let backendProcess = null;
+const BACKEND_RESTART_DELAY_MS = 1500;
+const EXTERNAL_LEXA_BACKEND = "__external_lexa_backend__";
+const HEALTH_CHECK_BODY_LIMIT = 64 * 1024;
+const HEALTH_CHECK_TIMEOUT_MS = 2000;
 const INSTANCE_TOKEN = crypto.randomBytes(16).toString("hex");
 
 function getBackendPath() {
@@ -47,25 +51,43 @@ async function isPortInUse(port) {
 
 function _healthCheck() {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
     const req = http.get("http://127.0.0.1:8000/health", (res) => {
       let body = "";
-      res.on("data", (c) => (body += c));
+      res.on("data", (c) => {
+        body += c;
+        if (body.length > HEALTH_CHECK_BODY_LIMIT) {
+          req.destroy();
+          finish(null);
+        }
+      });
       res.on("end", () => {
         try {
           const data = JSON.parse(body);
-          resolve(data.instance_token || null);
-        } catch (e) { console.warn("[Main] Health check JSON parse failed:", e.message || e); resolve(null); }
+          if (data.instance_token) {
+            finish(data.instance_token);
+          } else if (data.service === "lexa-ai") {
+            finish(EXTERNAL_LEXA_BACKEND);
+          } else {
+            finish(null);
+          }
+        } catch (e) { console.warn("[Main] Health check JSON parse failed:", e.message || e); finish(null); }
       });
     });
-    req.on("error", () => resolve(null));
-    req.setTimeout(2000, () => { req.destroy(); resolve(null); });
+    req.on("error", () => finish(null));
+    req.setTimeout(HEALTH_CHECK_TIMEOUT_MS, () => { req.destroy(); finish(null); });
   });
 }
 
 async function _waitForBackend(maxRetries = 30) {
   for (let i = 0; i < maxRetries; i++) {
     const token = await _healthCheck();
-    if (token === INSTANCE_TOKEN) return true;
+    if (token === INSTANCE_TOKEN || token === EXTERNAL_LEXA_BACKEND) return true;
     await new Promise((r) => setTimeout(r, 500));
   }
   return false;
@@ -77,15 +99,19 @@ async function startBackend() {
     // Check if it's a Lexa backend and whether it's ours
     const token = await _healthCheck();
     if (token === INSTANCE_TOKEN) {
-      console.log("[Backend] Our backend already running — reusing");
+      console.log("[Backend] Our backend already running - reusing");
+      return;
+    }
+    if (token === EXTERNAL_LEXA_BACKEND) {
+      console.warn("[Backend] Port 8000 occupied by Lexa backend without instance token - reusing (dev mode)");
       return;
     }
     if (token) {
       // It's a Lexa backend from a different instance; in dev mode this is OK
-      console.warn("[Backend] Port 8000 occupied by another Lexa instance — reusing (dev mode)");
+      console.warn("[Backend] Port 8000 occupied by another Lexa instance - reusing (dev mode)");
       return;
     }
-    console.warn("[Backend] Port 8000 occupied by non-Lexa process — backend may not work");
+    console.warn("[Backend] Port 8000 occupied by non-Lexa process - backend may not work");
     return;
   }
 
@@ -102,18 +128,25 @@ async function startBackend() {
     backendProcess = spawn(python, ["-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8000"], { cwd, stdio: "pipe", windowsHide: true, env });
   }
 
-  const _log = (...args) => { try { console.log(...args); } catch (e) { /* console itself failed — nothing to do */ } };
-  backendProcess.stdout?.on("data", (data) => _log("[Backend]", data.toString().trim()));
-  backendProcess.stderr?.on("data", (data) => _log("[Backend]", data.toString().trim()));
-  backendProcess.on("error", (err) => _log("[Backend] Failed to start:", err.message));
-  backendProcess.on("exit", (code) => {
+  const _log = (...args) => { try { console.log(...args); } catch (e) { /* console itself failed - nothing to do */ } };
+  const child = backendProcess;
+  child.stdout?.on("data", (data) => _log("[Backend]", data.toString().trim()));
+  child.stderr?.on("data", (data) => _log("[Backend]", data.toString().trim()));
+  child.on("error", (err) => _log("[Backend] Failed to start:", err.message));
+  child.on("exit", (code) => {
     _log("[Backend] Exited with code:", code);
-    backendProcess = null;
+    if (backendProcess === child) backendProcess = null;
+    if (!app.isQuitting) {
+      setTimeout(() => {
+        if (app.isQuitting || backendProcess) return;
+        startBackend().catch((err) => _log("[Backend] Restart failed:", err.message || err));
+      }, BACKEND_RESTART_DELAY_MS);
+    }
   });
 
   // Wait for backend to be ready
   const ready = await _waitForBackend();
-  _log("[Backend]", ready ? "Health check passed — backend is ready" : "Health check failed after 15s");
+  _log("[Backend]", ready ? "Health check passed - backend is ready" : "Health check failed after 15s");
 }
 
 // Fix GPU cache errors on some systems
@@ -122,6 +155,37 @@ app.commandLine.appendSwitch("disable-software-rasterizer");
 
 let mainWindow;
 let tray = null;
+let frontendWatcher = null;
+let frontendReloadTimer = null;
+
+function setupFrontendAutoReload() {
+  if (app.isPackaged) return;
+  const srcDir = path.join(__dirname, "src");
+  if (!fs.existsSync(srcDir)) return;
+
+  const scheduleReload = (filename) => {
+    const changed = String(filename || "");
+    if (changed && !/\.(?:js|css|html)$/i.test(changed)) return;
+    clearTimeout(frontendReloadTimer);
+    frontendReloadTimer = setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      console.log(`[Frontend] Reloading after source change${changed ? `: ${changed}` : ""}`);
+      mainWindow.webContents.reloadIgnoringCache();
+    }, 350);
+  };
+
+  try {
+    frontendWatcher = fs.watch(srcDir, { recursive: true }, (_event, filename) => scheduleReload(filename));
+    mainWindow?.on("closed", () => {
+      clearTimeout(frontendReloadTimer);
+      frontendWatcher?.close();
+      frontendWatcher = null;
+    });
+    console.log("[Frontend] Dev auto-reload watcher active");
+  } catch (e) {
+    console.warn("[Frontend] Dev auto-reload watcher unavailable:", e.message || e);
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -142,6 +206,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, "src", "index.html"));
+  setupFrontendAutoReload();
 
   // DevTools in development
   if (process.argv.includes("--dev")) {
@@ -171,11 +236,11 @@ function createTray() {
   }
 
   tray = new Tray(trayIcon);
-  tray.setToolTip("Lexa AI — Lokaler KI-Assistent");
+  tray.setToolTip("Lexa AI - Lokaler KI-Assistent");
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: "Lexa AI öffnen",
+      label: "Lexa AI oeffnen",
       click: () => {
         mainWindow?.show();
         mainWindow?.focus();

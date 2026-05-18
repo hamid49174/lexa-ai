@@ -134,6 +134,15 @@ const LexaI18n = (() => {
         el.title = translated;
       }
     });
+
+    // Translate accessible labels
+    document.querySelectorAll("[data-i18n-aria-label]").forEach(el => {
+      const key = el.getAttribute("data-i18n-aria-label");
+      const translated = t(key);
+      if (translated !== key) {
+        el.setAttribute("aria-label", translated);
+      }
+    });
   }
 
   // ── Getters ────────────────────────────────────

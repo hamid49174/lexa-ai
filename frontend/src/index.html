@@ -29,6 +29,8 @@
 
 <body>
   <div id="app">
+    <canvas id="lexa-ambient-canvas" class="lexa-ambient-canvas" aria-hidden="true"></canvas>
+
     <!-- Title Bar -->
     <div class="titlebar" id="titlebar">
       <div class="titlebar-left">
@@ -42,17 +44,17 @@
         </div>
       </div>
       <div class="titlebar-controls">
-        <button class="tb-btn" data-action="lexa-minimize" aria-label="Minimize">
+        <button type="button" class="tb-btn" data-action="lexa-minimize" aria-label="Minimize">
           <svg width="12" height="12" viewBox="0 0 12 12">
             <rect y="5" width="12" height="2" fill="currentColor" />
           </svg>
         </button>
-        <button class="tb-btn" data-action="lexa-maximize" aria-label="Maximize">
+        <button type="button" class="tb-btn" data-action="lexa-maximize" aria-label="Maximize">
           <svg width="12" height="12" viewBox="0 0 12 12">
             <rect x="1" y="1" width="10" height="10" stroke="currentColor" stroke-width="1.5" fill="none" />
           </svg>
         </button>
-        <button class="tb-btn tb-close" data-action="lexa-close" aria-label="Close">
+        <button type="button" class="tb-btn tb-close" data-action="lexa-close" aria-label="Close">
           <svg width="12" height="12" viewBox="0 0 12 12">
             <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5" />
           </svg>
@@ -60,11 +62,20 @@
       </div>
     </div>
 
-    <!-- Voice Status Bar (hidden compat stub) -->
-    <div id="voice-status-bar" class="hidden">
-      <div id="voice-status-dot"></div><span id="voice-status-text"></span>
-      <canvas id="voice-level-meter" width="1" height="1"></canvas>
-      <span id="voice-live-transcript"></span><span id="voice-provider-badge"></span><span id="voice-latency"></span>
+    <!-- Voice Status Bar -->
+    <div id="voice-status-bar" class="voice-status-bar hidden" role="status" aria-live="polite" aria-atomic="true">
+      <div class="voice-status-left">
+        <div id="voice-status-dot" class="voice-dot idle"></div>
+        <span id="voice-status-text">Bereit</span>
+      </div>
+      <div class="voice-status-center">
+        <canvas id="voice-level-meter" width="96" height="24" aria-hidden="true"></canvas>
+        <span id="voice-live-transcript" class="voice-live-transcript"></span>
+      </div>
+      <div class="voice-status-right">
+        <span id="voice-provider-badge" class="voice-provider-badge"></span>
+        <span id="voice-latency" class="voice-latency"></span>
+      </div>
     </div>
 
     <!-- Connection Banner -->
@@ -76,11 +87,11 @@
     <div class="toast-container" id="toast-container" aria-live="polite" role="status"></div>
 
     <!-- Notification Center Panel -->
-    <div class="notif-center hidden" id="notif-center" role="dialog" aria-modal="true" aria-label="Benachrichtigungen">
+    <div class="notif-center hidden" id="notif-center" role="dialog" aria-modal="true" aria-hidden="true" aria-label="Benachrichtigungen" data-i18n-aria-label="notifications.title">
       <div class="notif-center-header">
         <span data-i18n="notifications.title">Benachrichtigungen</span>
-        <button class="notif-center-clear" data-action="clearNotifCenter" data-i18n="notifications.clearAll">Alle l&ouml;schen</button>
-        <button class="notif-center-close" data-action="toggleNotifCenter">&#x2715;</button>
+        <button type="button" class="notif-center-clear" data-action="clearNotifCenter" data-i18n="notifications.clearAll">Alle l&ouml;schen</button>
+        <button type="button" class="notif-center-close" data-action="toggleNotifCenter" aria-label="Schließen" data-i18n-aria-label="common.close">&#x2715;</button>
       </div>
       <div class="notif-center-list" id="notif-center-list">
         <div class="notif-center-empty" data-i18n="notifications.empty">Keine Benachrichtigungen</div>
@@ -95,7 +106,7 @@
       <aside class="sidebar" role="navigation" aria-label="Hauptnavigation">
         <div class="sidebar-section" role="tablist" aria-label="Ansichten">
           <div class="sidebar-label" data-i18n="sidebar.main">HAUPT</div>
-          <button class="sidebar-btn" data-view="dashboard" role="tab" aria-label="Dashboard">
+          <button type="button" class="sidebar-btn" data-view="dashboard" role="tab" aria-label="Dashboard">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="3" y="3" width="7" height="7" rx="1" />
               <rect x="14" y="3" width="7" height="7" rx="1" />
@@ -104,20 +115,20 @@
             </svg>
             <span data-i18n="nav.dashboard">Dashboard</span>
           </button>
-          <button class="sidebar-btn active" data-view="chat" role="tab" aria-label="Chat" aria-selected="true">
+          <button type="button" class="sidebar-btn active" data-view="chat" role="tab" aria-label="Chat" aria-selected="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
             </svg>
             <span data-i18n="nav.chat">Chat</span>
           </button>
-          <button class="sidebar-btn" data-view="system" role="tab" aria-label="System">
+          <button type="button" class="sidebar-btn" data-view="system" role="tab" aria-label="System">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="2" y="3" width="20" height="14" rx="2" />
               <path d="M8 21h8M12 17v4" />
             </svg>
             <span data-i18n="nav.system">System</span>
           </button>
-          <button class="sidebar-btn" data-view="commands" role="tab" aria-label="Befehle">
+          <button type="button" class="sidebar-btn" data-view="commands" role="tab" aria-label="Befehle">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="4 17 10 11 4 5" />
               <line x1="12" y1="19" x2="20" y2="19" />
@@ -130,13 +141,13 @@
           <div class="sidebar-label">
             <span data-i18n="sidebar.chats">CHATS</span>
             <div class="conv-header-actions">
-              <button class="new-chat-btn" data-action="openSearchOverlay" title="Suche (Ctrl+F)" data-i18n-title="nav.searchTooltip" role="button" aria-label="Suche">
+              <button type="button" class="new-chat-btn" data-action="openSearchOverlay" title="Suche (Ctrl+F)" data-i18n-title="nav.searchTooltip" role="button" aria-label="Suche">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                   <circle cx="11" cy="11" r="7" />
                   <line x1="21" y1="21" x2="16.65" y2="16.65" />
                 </svg>
               </button>
-              <button class="new-chat-btn" data-action="newConversation" title="Neuer Chat" data-i18n-title="chat.newChat" role="button" aria-label="Neuer Chat">+</button>
+              <button type="button" class="new-chat-btn" data-action="newConversation" title="Neuer Chat" data-i18n-title="chat.newChat" role="button" aria-label="Neuer Chat">+</button>
             </div>
           </div>
           <div class="conversation-list" id="conversation-list"></div>
@@ -144,7 +155,7 @@
 
         <div class="sidebar-section" role="tablist" aria-label="Tools">
           <div class="sidebar-label" data-i18n="sidebar.tools">TOOLS</div>
-          <button class="sidebar-btn" data-view="productivity" role="tab" aria-label="Produktivit&auml;t">
+          <button type="button" class="sidebar-btn" data-view="productivity" role="tab" aria-label="Produktivit&auml;t">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M9 11l3 3L22 4" />
               <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
@@ -152,14 +163,22 @@
             <span data-i18n="nav.productivityShort">Produktiv</span>
             <span class="sidebar-badge hidden" id="nav-todo-badge"></span>
           </button>
-          <button class="sidebar-btn" data-view="memory" role="tab" aria-label="Ged&auml;chtnis">
+          <button type="button" class="sidebar-btn" data-view="memory" role="tab" aria-label="Ged&auml;chtnis">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
               <path d="M12 6v6l4 2" />
             </svg>
             <span data-i18n="nav.memory">Ged&auml;chtnis</span>
           </button>
-          <button class="sidebar-btn" data-view="settings" role="tab" aria-label="Einstellungen">
+          <button type="button" class="sidebar-btn" data-view="personal-os" role="tab" aria-label="Personal OS">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 5h16v14H4z" />
+              <path d="M8 9h8M8 13h5M16 13l2 2 3-4" />
+            </svg>
+            <span>OS</span>
+            <span class="sidebar-badge hidden" id="nav-pos-badge"></span>
+          </button>
+          <button type="button" class="sidebar-btn" data-view="settings" role="tab" aria-label="Einstellungen">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="3" />
               <path
@@ -272,10 +291,10 @@
             <div class="dash-widget dash-widget-greeting">
               <div class="dash-clock" id="dash-clock">00:00:00</div>
               <div class="dash-date" id="dash-date"></div>
-              <div class="dash-greeting-text" id="dash-greeting" data-i18n="dashboard.greetingDefault">Guten Tag, Chef!</div>
+              <div class="dash-greeting-text" id="dash-greeting" data-i18n="dashboard.greetingDefault">Guten Tag.</div>
               <div class="dash-greeting-sub" id="dash-greeting-sub" data-i18n="dashboard.subtitle">Lexa AI v1.0.0 &mdash; Dein lokaler KI-Assistent
               </div>
-              <button class="dash-chat-btn" data-action="switchView" data-arg="chat" data-i18n="dashboard.openChat">&#9889; Chat &ouml;ffnen</button>
+              <button type="button" class="dash-chat-btn" data-action="switchView" data-arg="chat" data-i18n="dashboard.openChat">&#9889; Chat &ouml;ffnen</button>
             </div>
           </div>
         </div>
@@ -287,6 +306,17 @@
 
           <!-- Uptime & Quick System Info -->
           <div class="prod-stats-bar" id="sys-quick-bar"></div>
+
+          <div class="system-audit-panel">
+            <div class="system-audit-header">
+              <div>
+                <div class="system-audit-kicker" data-i18n="system.trust">TRUST</div>
+                <h3 class="section-title" data-i18n="system.recentToolActivity">Letzte Tool-Aktivitaet</h3>
+              </div>
+              <button type="button" class="action-btn action-btn-sm" data-action="refreshSystemAuditActivity" data-i18n="system.refresh">Refresh</button>
+            </div>
+            <div class="system-audit-list" id="system-audit-list" role="list" aria-live="polite" aria-busy="false"></div>
+          </div>
 
           <!-- Fenster-Steuerung -->
           <div class="section-spacing">
@@ -421,7 +451,7 @@
 
         <!-- Top Nav Pill (outside chat-container so it's visible in all views) -->
         <div class="top-nav-pill" id="top-nav-pill">
-            <button class="icon-btn mobile-menu-btn" id="nav-menu-btn" data-action="toggleNavMenu" title="Navigation" aria-label="Navigation" aria-expanded="false">
+            <button type="button" class="icon-btn mobile-menu-btn" id="nav-menu-btn" data-action="toggleNavMenu" title="Navigation" aria-label="Navigation" aria-expanded="false">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="4" y1="12" x2="20" y2="12"></line>
                 <line x1="4" y1="6" x2="20" y2="6"></line>
@@ -432,26 +462,26 @@
             <span class="nav-dot"></span>
             <span class="nav-time" id="nav-time">13:54:18</span>
             <span class="nav-status" id="nav-status" data-i18n="status.local">LOKAL</span>
-            <button id="wakeword-indicator" class="icon-btn wakeword-btn" data-action="toggleWakeWord" title="Wake Word (immer zuh&ouml;ren)" data-i18n-title="nav.wakeWordTooltip">
+            <button type="button" id="wakeword-indicator" class="icon-btn wakeword-btn" data-action="toggleWakeWord" title="Wake Word (immer zuh&ouml;ren)" aria-label="Wake Word (immer zuh&ouml;ren)" data-i18n-title="nav.wakeWordTooltip" data-i18n-aria-label="nav.wakeWordTooltip">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
                 <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
                 <line x1="12" y1="19" x2="12" y2="22"/>
               </svg>
             </button>
-            <button class="icon-btn notif-bell-btn" id="notif-bell-btn" data-action="toggleNotifCenter" title="Benachrichtigungen" data-i18n-title="notifications.title">
+            <button type="button" class="icon-btn notif-bell-btn" id="notif-bell-btn" data-action="toggleNotifCenter" title="Benachrichtigungen" aria-label="Benachrichtigungen" aria-expanded="false" aria-controls="notif-center" data-i18n-title="notifications.title" data-i18n-aria-label="notifications.title">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
               </svg>
               <span class="notif-badge hidden" id="notif-badge">0</span>
             </button>
-            <button class="icon-btn" data-action="switchView" data-arg="memory" title="Ged&auml;chtnis" data-i18n-title="nav.memory">
+            <button type="button" class="icon-btn" data-action="switchView" data-arg="memory" title="Ged&auml;chtnis" aria-label="Ged&auml;chtnis" data-i18n-title="nav.memory" data-i18n-aria-label="nav.memory">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon
                   points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
               </svg>
             </button>
-            <button class="icon-btn" data-action="switchView" data-arg="settings" title="Einstellungen" data-i18n-title="nav.settings">
+            <button type="button" class="icon-btn" data-action="switchView" data-arg="settings" title="Einstellungen" aria-label="Einstellungen" data-i18n-title="nav.settings" data-i18n-aria-label="nav.settings">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3" />
                 <path
@@ -476,7 +506,7 @@
           </div>
           <!-- Orb (click to speak) -->
           <div class="voice-orb-container" id="voice-orb-container">
-            <div id="voice-orb-canvas" data-action="startOrbConversation" title="Klicken zum Sprechen">
+            <div id="voice-orb-canvas" data-action="startOrbConversation" role="button" tabindex="0" aria-pressed="false" title="Klicken zum Sprechen" aria-label="Mit Lexa sprechen" data-i18n-title="app.orbClickSpeak" data-i18n-aria-label="chat.talkToLexaBtn">
               <!-- 3D Canvas injected by orb3d.js -->
             </div>
             <div id="orb-transcript" class="orb-transcript hidden">
@@ -495,14 +525,14 @@
               <span class="stat-pill" id="greeting-cmd-count">162 Befehle bereit</span>
               <span class="stat-pill" id="greeting-conv-count">0 Chats gespeichert</span>
             </div>
-            <button class="talk-to-lexa-btn" id="talk-to-lexa-btn" aria-label="Mit Lexa sprechen (Ctrl+M)">
+            <button class="talk-to-lexa-btn" id="talk-to-lexa-btn" type="button" aria-pressed="false" title="Klicken zum Sprechen" aria-label="Mit Lexa sprechen" data-i18n-title="app.orbClickSpeak" data-i18n-aria-label="chat.talkToLexaBtn">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="talk-btn-icon">
                 <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Zm0 14a5 5 0 0 1-5-5H5a7 7 0 0 0 14 0h-2a5 5 0 0 1-5 5Zm-2 4v3h4v-3h-4Z"/>
               </svg>
-              <span>Mit Lexa sprechen</span>
+              <span data-voice-entry-label data-i18n="chat.talkToLexaBtn">Mit Lexa sprechen</span>
             </button>
             <!-- Arrow to show chat messages -->
-            <button id="chat-view-arrow" class="chat-view-arrow" data-action="toggleChatView" aria-label="Chat anzeigen" title="Chat anzeigen">
+            <button type="button" id="chat-view-arrow" class="chat-view-arrow" data-action="toggleChatView" aria-label="Chat anzeigen" title="Chat anzeigen">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="6 9 12 15 18 9"/>
               </svg>
@@ -513,7 +543,7 @@
           <div id="focus-mode-banner" class="focus-mode-banner hidden">
             <span class="focus-mode-banner-icon">&#127919;</span>
             <span class="focus-mode-banner-text">Fokus-Modus aktiv</span>
-            <button class="focus-mode-banner-off" data-action="toggleFocusMode">Beenden</button>
+            <button type="button" class="focus-mode-banner-off" data-action="toggleFocusMode">Beenden</button>
           </div>
 
           <!-- Conversation Starters -->
@@ -530,37 +560,46 @@
 
           <div class="chat-input-area sleek-input-area">
             <div class="sleek-input-container">
+              <div id="composer-command-palette" class="composer-command-palette hidden" role="listbox" aria-hidden="true" aria-label="Lexa command suggestions" data-i18n-aria-label="composer.paletteLabel"></div>
               <div class="input-wrapper sleek-pill">
                 <!-- Hidden file input for attachments -->
-                <input type="file" id="file-input" class="hidden">
-                <button id="attach-btn" class="hidden"></button>
+                <input type="file" id="file-input" class="hidden" aria-label="Datei anhängen" data-i18n-aria-label="chat.attachFile">
+                <button type="button" id="attach-btn" class="hidden" aria-label="Datei anhängen" data-i18n-aria-label="chat.attachFile"></button>
+
+                <button class="sleek-icon-btn composer-command-btn" id="composer-command-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="composer-command-palette" aria-label="Befehle" title="Befehle und Workflows" data-i18n-aria-label="composer.buttonLabel" data-i18n-title="composer.buttonTitle" data-action="toggleComposerCommandPalette">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6 6 18"/>
+                    <path d="m8 6 4 6-4 6"/>
+                    <path d="M14 18h4"/>
+                  </svg>
+                </button>
 
                 <label for="chat-input" class="sr-only" data-i18n="chat.enterMessage">Nachricht eingeben</label>
-                <input type="text" id="chat-input" placeholder="Frag mich was... (Enter zum Senden)" data-i18n-placeholder="chat.inputPlaceholder" autofocus aria-label="Nachricht eingeben">
+                <textarea id="chat-input" rows="1" placeholder="Frag mich was... (Enter zum Senden)" data-i18n-placeholder="chat.inputPlaceholder" autofocus aria-label="Nachricht eingeben" data-i18n-aria-label="chat.enterMessage" aria-controls="composer-command-palette" aria-expanded="false" aria-autocomplete="list"></textarea>
                 <span id="char-counter" class="char-counter hidden"></span>
 
                 <div class="sleek-actions-right">
-                  <button class="sleek-icon-btn tts-toggle-btn" id="tts-toggle" aria-label="TTS Ein/Aus" title="Sprachausgabe ein/aus">
+                  <button class="sleek-icon-btn tts-toggle-btn" id="tts-toggle" type="button" aria-pressed="false" aria-label="Sprachausgabe" title="Sprachausgabe ist aus. Klicken zum Einschalten." data-i18n-aria-label="chat.ttsToggleLabel" data-i18n-title="chat.ttsToggleOffTitle">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
                       <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
                       <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
                     </svg>
                   </button>
-                  <button class="sleek-icon-btn mic-toggle-btn" id="mic-btn" aria-label="Mikrofon (Ctrl+M)" title="Sprachaufnahme starten (Ctrl+M)">
+                  <button class="sleek-icon-btn mic-toggle-btn" id="mic-btn" type="button" aria-pressed="false" aria-busy="false" aria-label="Sprachaufnahme" title="Sprachaufnahme starten (Ctrl+M)" data-i18n-aria-label="chat.micToggleLabel" data-i18n-title="chat.micStartTitle">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
                       <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
                       <line x1="12" y1="19" x2="12" y2="22"/>
                     </svg>
                   </button>
-                  <button class="sleek-icon-btn vision-screenshot-btn" id="vision-screenshot-btn" aria-label="Screenshot analysieren" title="Screenshot analysieren (Ctrl+Shift+S)" data-action="visionScreenshot">
+                  <button type="button" class="sleek-icon-btn vision-screenshot-btn" id="vision-screenshot-btn" aria-label="Screenshot analysieren" title="Screenshot analysieren (Ctrl+Shift+S)" data-action="visionScreenshot">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
                       <circle cx="12" cy="13" r="4"/>
                     </svg>
                   </button>
-                  <button class="send-btn sleek-icon-btn" id="send-btn" aria-label="Senden">
+                  <button type="button" class="send-btn sleek-icon-btn" id="send-btn" aria-label="Senden">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <line x1="22" y1="2" x2="11" y2="13" />
                       <polygon points="22 2 15 22 11 13 2 9 22 2" />
@@ -585,15 +624,15 @@
               <h3 data-i18n="productivity.todoList">To-Do Liste</h3>
               <div class="flex-row">
                 <input type="text" id="todo-search" class="settings-input compact-input" placeholder="Suchen..." data-i18n-placeholder="productivity.search" data-action="filterTodosLocal" aria-label="To-Do suchen">
-                <select id="todo-filter" class="settings-select compact-select"
+                <select id="todo-filter" class="settings-select compact-select" aria-label="To-Do Status filtern" data-i18n-aria-label="productivity.todoFilter"
                   data-action="refreshTodos">
                   <option value="" data-i18n="todo.all">Alle</option>
                   <option value="open" data-i18n="todo.open">Offen</option>
                   <option value="in_progress" data-i18n="todo.inProgress">In Arbeit</option>
                   <option value="done" data-i18n="todo.done">Erledigt</option>
                 </select>
-                <button class="action-btn" data-action="createTodo" data-i18n="todo.newTodo">+ Neues To-Do</button>
-                <button class="action-btn bg-surface2" data-action="exportTodos" title="Todos exportieren" data-i18n-title="todo.exportTodos">&#8595; MD</button>
+                <button type="button" class="action-btn" data-action="createTodo" data-i18n="todo.newTodo">+ Neues To-Do</button>
+                <button type="button" class="action-btn bg-surface2" data-action="exportTodos" title="Todos exportieren" data-i18n-title="todo.exportTodos">&#8595; MD</button>
               </div>
             </div>
             <div id="todo-list" class="todo-list"></div>
@@ -612,7 +651,7 @@
           <div class="prod-section section-spacing-sm">
             <div class="section-header">
               <h3 data-i18n="productivity.habits">Gewohnheiten</h3>
-              <button class="action-btn" data-action="createHabit" data-i18n="habits.newHabit">+ Neue Gewohnheit</button>
+              <button type="button" class="action-btn" data-action="createHabit" data-i18n="habits.newHabit">+ Neue Gewohnheit</button>
             </div>
             <div id="habits-list" class="habits-list"></div>
           </div>
@@ -622,9 +661,9 @@
             <div class="section-header">
               <h3 data-i18n="productivity.timeTrackingFocus">Zeiterfassung &amp; Fokus</h3>
               <div class="flex-row-nowrap">
-                <button class="action-btn" id="time-tracking-btn" data-action="toggleTimeTracking" data-i18n="productivity.trackingStart">Tracking
+                <button type="button" class="action-btn" id="time-tracking-btn" data-action="toggleTimeTracking" data-i18n="productivity.trackingStart">Tracking
                   starten</button>
-                <button class="action-btn" id="focus-mode-btn" data-action="toggleFocusMode" data-i18n="focus.mode">Fokus-Modus</button>
+                <button type="button" class="action-btn" id="focus-mode-btn" data-action="toggleFocusMode" data-i18n="focus.mode">Fokus-Modus</button>
               </div>
             </div>
             <div id="time-tracking-live" class="time-tracking-live hidden"></div>
@@ -642,7 +681,7 @@
               <h3 data-i18n="memory.notes">Notizen</h3>
               <div class="flex-row">
                 <input type="text" id="notes-filter" class="cmd-search-input compact-filter" placeholder="Filtern..." data-i18n-placeholder="memory.filter" data-action="filterNotes" aria-label="Notizen filtern">
-                <button class="action-btn" data-action="createNote" data-i18n="notes.newNote">+ Neue Notiz</button>
+                <button type="button" class="action-btn" data-action="createNote" data-i18n="notes.newNote">+ Neue Notiz</button>
               </div>
             </div>
             <div id="notes-list" class="notes-list"></div>
@@ -651,7 +690,7 @@
           <div class="memory-section section-spacing-sm">
             <div class="section-header">
               <h3 data-i18n="memory.textSnippets">Text-Snippets</h3>
-              <button class="action-btn" data-action="createSnippet" data-i18n="snippets.newSnippet">+ Neues Snippet</button>
+              <button type="button" class="action-btn" data-action="createSnippet" data-i18n="snippets.newSnippet">+ Neues Snippet</button>
             </div>
             <div id="snippets-list" class="notes-list"></div>
           </div>
@@ -666,7 +705,7 @@
           <div class="memory-section section-spacing-sm">
             <div class="section-header">
               <h3 data-i18n="memory.routines">Routinen</h3>
-              <button class="action-btn" data-action="createRoutine" data-i18n="memory.newRoutine">+ Neue Routine</button>
+              <button type="button" class="action-btn" data-action="createRoutine" data-i18n="memory.newRoutine">+ Neue Routine</button>
             </div>
             <div id="routines-list" class="notes-list"></div>
           </div>
@@ -674,7 +713,7 @@
           <div class="memory-section section-spacing-sm">
             <div class="section-header">
               <h3 data-i18n="memory.clipboardHistory">Zwischenablage-Verlauf</h3>
-              <button class="action-btn" data-action="clearClipboardHistory" title="Verlauf leeren" data-i18n="memory.clear">&times; Leeren</button>
+              <button type="button" class="action-btn" data-action="clearClipboardHistory" title="Verlauf leeren" data-i18n="memory.clear">&times; Leeren</button>
             </div>
             <div id="clipboard-history-list" class="notes-list"></div>
           </div>
@@ -684,15 +723,108 @@
               <h3 data-i18n="memory.maintenance">Wartung</h3>
             </div>
             <div id="memory-cleanup-info">
-              <button class="action-btn" data-action="runMemoryCleanup" data-i18n="memory.cleanupOld">&#129529; Alte Erinnerungen aufr&auml;umen</button>
-              <button class="action-btn ml-8" data-action="showDiagnostics" data-i18n="memory.diagnosticsBtn">&#128202; Diagnostics</button>
+              <button type="button" class="action-btn" data-action="runMemoryCleanup" data-i18n="memory.cleanupOld">&#129529; Alte Erinnerungen aufr&auml;umen</button>
+              <button type="button" class="action-btn ml-8" data-action="showDiagnostics" data-i18n="memory.diagnosticsBtn">&#128202; Diagnostics</button>
             </div>
+          </div>
+        </div>
+
+        <!-- Personal OS View -->
+        <div class="tool-view" id="personal-os-view">
+          <div class="view-title" role="heading" aria-level="2">Personal <span>OS</span></div>
+          <div class="info-grid" id="pos-status-grid"></div>
+
+          <section class="pos-panel pos-query-panel" aria-label="Personal OS Context Query">
+            <div class="section-header">
+              <h3>Context Browser</h3>
+              <div class="flex-row">
+                <button type="button" class="action-btn" data-action="personalOsOpenIndex">Open Index</button>
+                <button type="button" class="action-btn" data-action="personalOsSearchTag">Search Tag</button>
+                <button type="button" class="action-btn" data-action="personalOsLoadGraph">Context Map</button>
+                <button type="button" class="action-btn" data-action="personalOsLoadContextPack">Context Pack</button>
+                <button type="button" class="action-btn" data-action="personalOsLoadCodeLoop">Code Loop</button>
+              </div>
+            </div>
+            <div class="pos-query-controls">
+              <label class="pos-query-field">
+                <span>Area</span>
+                <input type="text" id="pos-area-input" class="settings-input" value="00_System" placeholder="00_System">
+              </label>
+              <label class="pos-query-field">
+                <span>Tag</span>
+                <input type="text" id="pos-tag-input" class="settings-input" value="lexa" placeholder="lexa">
+              </label>
+            </div>
+            <div id="pos-query-results" class="pos-query-results">
+              <div class="empty-state">Index &ouml;ffnen oder Tag suchen.</div>
+            </div>
+            <div id="pos-graph-summary" class="pos-graph-summary"></div>
+            <div id="pos-graph-stage" class="pos-graph-stage">
+              <div class="empty-state">Keine Context Map geladen.</div>
+            </div>
+          </section>
+
+          <div class="pos-shell">
+            <section class="pos-panel pos-queue-panel" aria-label="Draft Queue">
+              <div class="section-header">
+                <h3>Draft Queue</h3>
+                <div class="flex-row">
+                  <select id="pos-approval-filter" class="settings-select pos-filter" aria-label="Approval Filter">
+                    <option value="pending" selected>Pending</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="conflict">Conflict</option>
+                    <option value="missing">Missing</option>
+                    <option value="all">All</option>
+                  </select>
+                  <input type="text" id="pos-draft-search" class="settings-input pos-draft-search" placeholder="Search drafts" aria-label="Search Drafts">
+                  <button type="button" class="action-btn" data-action="findPersonalOsDraft">Find</button>
+                  <button type="button" class="action-btn" data-action="submitPersonalOsRawInbox">New Raw</button>
+                  <button type="button" class="action-btn" data-action="refreshPersonalOsView">Refresh</button>
+                </div>
+              </div>
+              <div id="pos-draft-list" class="pos-draft-list"></div>
+            </section>
+
+            <section class="pos-panel pos-detail-panel" aria-label="Draft Detail">
+              <div class="section-header">
+                <h3 id="pos-detail-title">Draft</h3>
+                <div class="pos-detail-actions">
+                  <button type="button" class="action-btn" id="pos-approve-btn" disabled>Approve</button>
+                  <button type="button" class="action-btn action-btn-danger" id="pos-reject-btn" disabled>Reject</button>
+                  <button type="button" class="action-btn" id="pos-apply-btn" disabled>Apply</button>
+                  <button type="button" class="action-btn" id="pos-chat-review-btn" data-action="personalOsSendReviewToChat" disabled>Chat Review</button>
+                </div>
+              </div>
+              <div id="pos-draft-detail" class="pos-draft-detail">
+                <div class="empty-state">Kein Draft ausgew&auml;hlt.</div>
+              </div>
+            </section>
           </div>
         </div>
 
         <!-- Settings View -->
         <div class="tool-view" id="settings-view">
           <div class="view-title" role="heading" aria-level="2">Ein<span>stellungen</span></div>
+
+          <div class="settings-group">
+            <div class="settings-group-title">READINESS</div>
+            <div class="readiness-hero" id="readiness-hero">
+              <div class="readiness-hero-main">
+                <div class="readiness-kicker">System Readiness</div>
+                <div class="readiness-score-row">
+                  <span class="readiness-score" id="readiness-score">--</span>
+                  <span class="setting-status" id="readiness-status">Pr&uuml;fe...</span>
+                </div>
+                <div class="readiness-summary" id="readiness-summary">Backend, KI, Voice und lokale Tools werden gepr&uuml;ft...</div>
+              </div>
+              <div class="readiness-actions">
+                <button type="button" class="action-btn" data-action="runSystemDiagnostics">Refresh</button>
+              </div>
+            </div>
+            <div class="readiness-grid" id="readiness-grid"></div>
+            <div class="readiness-checks" id="readiness-checks"></div>
+          </div>
 
           <div class="settings-group">
             <div class="settings-group-title" data-i18n="settings.ai">KI-PROVIDER</div>
@@ -722,7 +854,7 @@
                 <div class="setting-name" data-i18n="settings.aiModel">KI-Modell</div>
                 <div class="setting-desc" id="model-desc" data-i18n="settings.aiModelDesc">Aktiven Provider und Modell w&auml;hlen</div>
               </div>
-              <select id="model-select" class="settings-select" data-action="changeAiModel"></select>
+              <select id="model-select" class="settings-select" data-action="changeAiModel" aria-label="KI-Modell" data-i18n-aria-label="settings.aiModel"></select>
             </div>
           </div>
 
@@ -744,11 +876,11 @@
                 <div class="setting-desc" data-i18n="settings.accentDesc">Passe die Hauptfarbe der Oberfl&auml;che an</div>
               </div>
               <div class="accent-picker" id="accent-picker">
-                <button class="accent-dot active color-swatch-purple" data-accent="purple" data-action="setAccentColor" data-arg="purple" title="Lila" data-i18n-title="settings.purple"></button>
-                <button class="accent-dot color-swatch-blue" data-accent="blue" data-action="setAccentColor" data-arg="blue" title="Blau" data-i18n-title="settings.blue"></button>
-                <button class="accent-dot color-swatch-green" data-accent="green" data-action="setAccentColor" data-arg="green" title="Gr&uuml;n" data-i18n-title="settings.green"></button>
-                <button class="accent-dot color-swatch-red" data-accent="rose" data-action="setAccentColor" data-arg="rose" title="Rosa" data-i18n-title="settings.rose"></button>
-                <button class="accent-dot color-swatch-amber" data-accent="amber" data-action="setAccentColor" data-arg="amber" title="Gold" data-i18n-title="settings.gold"></button>
+                <button type="button" class="accent-dot active color-swatch-purple" data-accent="purple" data-action="setAccentColor" data-arg="purple" title="Lila" aria-label="Lila" aria-pressed="true" data-i18n-title="settings.purple" data-i18n-aria-label="settings.purple"></button>
+                <button type="button" class="accent-dot color-swatch-blue" data-accent="blue" data-action="setAccentColor" data-arg="blue" title="Blau" aria-label="Blau" aria-pressed="false" data-i18n-title="settings.blue" data-i18n-aria-label="settings.blue"></button>
+                <button type="button" class="accent-dot color-swatch-green" data-accent="green" data-action="setAccentColor" data-arg="green" title="Gr&uuml;n" aria-label="Gr&uuml;n" aria-pressed="false" data-i18n-title="settings.green" data-i18n-aria-label="settings.green"></button>
+                <button type="button" class="accent-dot color-swatch-red" data-accent="rose" data-action="setAccentColor" data-arg="rose" title="Rosa" aria-label="Rosa" aria-pressed="false" data-i18n-title="settings.rose" data-i18n-aria-label="settings.rose"></button>
+                <button type="button" class="accent-dot color-swatch-amber" data-accent="amber" data-action="setAccentColor" data-arg="amber" title="Gold" aria-label="Gold" aria-pressed="false" data-i18n-title="settings.gold" data-i18n-aria-label="settings.gold"></button>
               </div>
             </div>
             <div class="setting-item">
@@ -756,7 +888,7 @@
                 <div class="setting-name" data-i18n="settings.fontSize">Schriftgr&ouml;&szlig;e</div>
                 <div class="setting-desc" data-i18n="settings.fontSizeDesc">Text-Gr&ouml;&szlig;e anpassen</div>
               </div>
-              <select id="fontsize-select" class="settings-select" data-action="setFontSize">
+              <select id="fontsize-select" class="settings-select" data-action="setFontSize" aria-label="Schriftgröße" data-i18n-aria-label="settings.fontSize">
                 <option value="13" data-i18n="settings.fontSmall">Klein (13px)</option>
                 <option value="14" selected data-i18n="settings.fontNormal">Normal (14px)</option>
                 <option value="15" data-i18n="settings.fontLarge">Gro&szlig; (15px)</option>
@@ -768,7 +900,7 @@
                 <div class="setting-name" data-i18n="settings.language">Sprache</div>
                 <div class="setting-desc" data-i18n="settings.languageDesc">Language / Sprache</div>
               </div>
-              <select id="language-select" class="settings-select" data-action="changeLanguage">
+              <select id="language-select" class="settings-select" data-action="changeLanguage" aria-label="Sprache" data-i18n-aria-label="settings.language">
                 <option value="de" selected>Deutsch</option>
                 <option value="en">English</option>
               </select>
@@ -790,22 +922,22 @@
           </div>
 
           <div class="settings-group">
-            <div class="settings-group-title">CARTESIA SONIC (Primary TTS)</div>
+            <div class="settings-group-title">TTS PROVIDER</div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">Cartesia Status</div>
-                <div class="setting-desc">Sonic 2 &mdash; schnellstes TTS, ~90ms Latenz</div>
+                <div class="setting-name">Aktive TTS Engine</div>
+                <div class="setting-desc">OpenAI prim&auml;r, ElevenLabs, Cartesia und SAPI als Fallbacks</div>
               </div>
               <div class="setting-status" id="cartesia-status">Pr&uuml;fe...</div>
             </div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">API Key</div>
-                <div class="setting-desc" id="cartesia-key-desc">Gespeichert in Windows Keyring</div>
+                <div class="setting-name">Cartesia API Key</div>
+                <div class="setting-desc" id="cartesia-key-desc">Optionaler Sonic-Fallback, gespeichert in Windows Keyring</div>
               </div>
               <div class="setting-actions">
-                <button class="action-btn action-btn-sm" data-action="setCartesiaKey">Key setzen</button>
-                <button class="action-btn action-btn-sm action-btn-danger" data-action="deleteCartesiaKey">Entfernen</button>
+                <button type="button" class="action-btn action-btn-sm" data-action="setCartesiaKey">Key setzen</button>
+                <button type="button" class="action-btn action-btn-sm action-btn-danger" data-action="deleteCartesiaKey">Entfernen</button>
               </div>
             </div>
           </div>
@@ -824,7 +956,7 @@
                 <div class="setting-name" data-i18n="settings.apiKey">API Key</div>
                 <div class="setting-desc" id="el-key-desc" data-i18n="settings.savedInKeyring">Gespeichert in Windows Keyring</div>
               </div>
-              <button class="btn-small" id="el-key-btn" data-action="elevenlabsKeyAction" data-i18n="settings.setKey">Key setzen</button>
+              <button type="button" class="btn-small" id="el-key-btn" data-action="elevenlabsKeyAction" data-i18n="settings.setKey">Key setzen</button>
             </div>
             <div class="setting-item">
               <div class="setting-info">
@@ -841,7 +973,7 @@
                 <div class="setting-name" data-i18n="settings.voice">Stimme</div>
                 <div class="setting-desc" id="el-voice-desc" data-i18n="settings.elVoiceDesc">W&auml;hle eine ElevenLabs Stimme</div>
               </div>
-              <select id="el-voice-select" class="settings-select" data-action="elevenlabsVoiceChange">
+              <select id="el-voice-select" class="settings-select" data-action="elevenlabsVoiceChange" aria-label="Stimme" data-i18n-aria-label="settings.voice">
                 <option value="" data-i18n="common.loading">Laden...</option>
               </select>
             </div>
@@ -850,7 +982,7 @@
                 <div class="setting-name" data-i18n="settings.model">Modell</div>
                 <div class="setting-desc" data-i18n="settings.elModelDesc">Multilingual v2 = beste Qualit&auml;t, Turbo = schneller</div>
               </div>
-              <select id="el-model-select" class="settings-select" data-action="elevenlabsModelChange">
+              <select id="el-model-select" class="settings-select" data-action="elevenlabsModelChange" aria-label="Modell" data-i18n-aria-label="settings.model">
                 <option value="eleven_multilingual_v2" data-i18n="settings.elModelMultiV2">Multilingual v2 (Beste Qualit&auml;t)</option>
                 <option value="eleven_turbo_v2_5" data-i18n="settings.elModelTurboV25">Turbo v2.5 (Schneller)</option>
                 <option value="eleven_turbo_v2">Turbo v2</option>
@@ -861,14 +993,14 @@
                 <div class="setting-name" data-i18n="settings.stability">Stabilit&auml;t</div>
                 <div class="setting-desc">Stimmkonsistenz (<span id="el-stability-label">0.50</span>)</div>
               </div>
-              <input type="range" id="el-stability-slider" class="settings-range" min="0" max="1" step="0.05" value="0.5" data-action="elevenlabsSettingsChange">
+              <input type="range" id="el-stability-slider" class="settings-range" min="0" max="1" step="0.05" value="0.5" data-action="elevenlabsSettingsChange" aria-label="Stabilität" data-i18n-aria-label="settings.stability">
             </div>
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name" data-i18n="settings.similarity">&Auml;hnlichkeit</div>
                 <div class="setting-desc">Stimm-Treue (<span id="el-similarity-label">0.75</span>)</div>
               </div>
-              <input type="range" id="el-similarity-slider" class="settings-range" min="0" max="1" step="0.05" value="0.75" data-action="elevenlabsSettingsChange">
+              <input type="range" id="el-similarity-slider" class="settings-range" min="0" max="1" step="0.05" value="0.75" data-action="elevenlabsSettingsChange" aria-label="Ähnlichkeit" data-i18n-aria-label="settings.similarity">
             </div>
           </div>
 
@@ -876,17 +1008,28 @@
             <div class="settings-group-title">STIMME TESTEN</div>
             <div class="setting-item">
               <div class="setting-info">
-                <div class="setting-name">Sprachausgabe testen</div>
-                <div class="setting-desc">Testet TTS (Cartesia/ElevenLabs/SAPI)</div>
+                <div class="setting-name">Voice Diagnostics</div>
+                <div class="setting-desc" id="voice-diagnostics-summary">Mikrofon, STT, TTS, Wake Word</div>
               </div>
-              <button class="action-btn action-btn-sm" data-action="testVoice">TTS testen</button>
+              <div class="setting-actions">
+                <div class="setting-status" id="voice-diagnostics-status">Pr&uuml;fe...</div>
+                <button type="button" class="action-btn action-btn-sm" data-action="runVoiceDiagnostics">Diagnose</button>
+              </div>
+            </div>
+            <div class="voice-diagnostics-panel" id="voice-diagnostics-panel" aria-live="polite"></div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name">Sprachausgabe testen</div>
+                <div class="setting-desc">Testet TTS (OpenAI/ElevenLabs/Cartesia/SAPI)</div>
+              </div>
+              <button type="button" class="action-btn action-btn-sm" data-action="testVoice">TTS testen</button>
             </div>
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name">Mikrofon testen</div>
                 <div class="setting-desc">3 Sekunden aufnehmen + STT transkribieren</div>
               </div>
-              <button class="action-btn action-btn-sm" data-action="testMicrophone">Mikrofon testen</button>
+              <button type="button" class="action-btn action-btn-sm" data-action="testMicrophone">Mikrofon testen</button>
             </div>
           </div>
 
@@ -895,9 +1038,10 @@
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name">STT Engine</div>
-                <div class="setting-desc">Deepgram Nova-3 (Primary) | Groq Whisper (Fallback) | Lokal</div>
+                <div class="setting-desc">OpenAI GPT-4o Transcribe | Deepgram Nova-3 | Groq Whisper | Lokal</div>
               </div>
-              <select id="stt-engine-select" class="settings-select" data-action="changeSttEngine">
+              <select id="stt-engine-select" class="settings-select" data-action="changeSttEngine" aria-label="Spracheingabe" data-i18n-aria-label="settings.stt">
+                <option value="openai">OpenAI GPT-4o Transcribe (Modern)</option>
                 <option value="deepgram">Deepgram Nova-3 (Bestes Deutsch)</option>
                 <option value="groq">Groq Whisper (Schnellstes, Gratis)</option>
                 <option value="local">Lokal (Offline)</option>
@@ -916,8 +1060,8 @@
                 <div class="setting-desc">Kostenlos auf deepgram.com registrieren</div>
               </div>
               <div class="setting-actions">
-                <button class="action-btn action-btn-sm" data-action="setDeepgramKey">Key setzen</button>
-                <button class="action-btn action-btn-sm action-btn-danger" data-action="deleteDeepgramKey">Entfernen</button>
+                <button type="button" class="action-btn action-btn-sm" data-action="setDeepgramKey">Key setzen</button>
+                <button type="button" class="action-btn action-btn-sm action-btn-danger" data-action="deleteDeepgramKey">Entfernen</button>
               </div>
             </div>
             <div class="setting-item">
@@ -925,7 +1069,7 @@
                 <div class="setting-name">STT Modell (Lokal)</div>
                 <div class="setting-desc">Fallback-Modell fuer Offline-Nutzung</div>
               </div>
-              <select id="stt-model-select" class="settings-select" data-action="changeSttModel">
+              <select id="stt-model-select" class="settings-select" data-action="changeSttModel" aria-label="STT Modell" data-i18n-aria-label="settings.sttModel">
                 <option value="" data-i18n="common.loading">Laden...</option>
               </select>
             </div>
@@ -942,7 +1086,7 @@
                 <label for="profile-language" data-i18n="settings.profileLanguage">Sprache</label>
                 <input type="text" id="profile-language" placeholder="Deutsch" class="settings-input" value="Deutsch">
               </div>
-              <button class="action-btn" data-action="saveProfile" data-i18n="settings.saveProfile">Profil speichern</button>
+              <button type="button" class="action-btn" data-action="saveProfile" data-i18n="settings.saveProfile">Profil speichern</button>
             </div>
           </div>
 
@@ -1002,14 +1146,14 @@
                 <div class="setting-name" data-i18n="license.key">Lizenzschl&uuml;ssel</div>
                 <div class="setting-desc" id="license-key-display" data-i18n="license.noKey">Kein Schl&uuml;ssel hinterlegt</div>
               </div>
-              <button class="action-btn" data-action="activateLicense" data-i18n="license.activate">Aktivieren</button>
+              <button type="button" class="action-btn" data-action="activateLicense" data-i18n="license.activate">Aktivieren</button>
             </div>
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name" data-i18n="license.validUntil">G&uuml;ltig bis</div>
                 <div class="setting-desc" id="license-expires">&mdash;</div>
               </div>
-              <button class="action-btn" data-action="removeLicense" data-i18n="license.remove">Entfernen</button>
+              <button type="button" class="action-btn" data-action="removeLicense" data-i18n="license.remove">Entfernen</button>
             </div>
           </div>
 
@@ -1042,14 +1186,14 @@
                 <div class="setting-name" data-i18n="settings.memoryCleanup">Memory Cleanup</div>
                 <div class="setting-desc" data-i18n="settings.cleanupDesc">Alte unwichtige Erinnerungen l&ouml;schen (&gt;90 Tage, Wichtigkeit &le;3)</div>
               </div>
-              <button class="action-btn" data-action="runMemoryCleanup" data-i18n="settings.cleanup">Cleanup</button>
+              <button type="button" class="action-btn" data-action="runMemoryCleanup" data-i18n="settings.cleanup">Cleanup</button>
             </div>
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name" data-i18n="settings.diagnosticsLabel">Diagnostics</div>
                 <div class="setting-desc" data-i18n="settings.diagnosticsDesc">System-Status und DB-Statistiken anzeigen</div>
               </div>
-              <button class="action-btn" data-action="showDiagnostics" data-i18n="settings.show">Anzeigen</button>
+              <button type="button" class="action-btn" data-action="runSystemDiagnostics" data-i18n="settings.show">Anzeigen</button>
             </div>
           </div>
 
@@ -1062,9 +1206,9 @@
               </div>
             </div>
             <div id="backup-controls" class="backup-controls">
-              <button class="action-btn" id="btn-backup-create" data-i18n="settings.createBackup">Backup erstellen</button>
-              <button class="action-btn" id="btn-backup-list" data-i18n="settings.showBackups">Backups anzeigen</button>
-              <button class="action-btn" id="btn-fts-rebuild" data-i18n="settings.rebuildIndex">Suchindex neu aufbauen</button>
+              <button type="button" class="action-btn" id="btn-backup-create" data-i18n="settings.createBackup">Backup erstellen</button>
+              <button type="button" class="action-btn" id="btn-backup-list" data-i18n="settings.showBackups">Backups anzeigen</button>
+              <button type="button" class="action-btn" id="btn-fts-rebuild" data-i18n="settings.rebuildIndex">Suchindex neu aufbauen</button>
             </div>
             <div id="backup-list-container"></div>
           </div>
@@ -1086,6 +1230,7 @@
   <script src="./system.js"></script>
   <script src="./commands.js"></script>
   <script src="./memory.js"></script>
+  <script src="./personal_os.js"></script>
   <script src="./settings.js"></script>
   <script src="./devtools.js"></script>
   <!-- Main orchestrator (must load last) -->

@@ -98,7 +98,7 @@ def _extract_tool_result(exec_result: dict, action_name: str) -> str:
         return exec_result.get("error", f"{action_name} fehlgeschlagen.")
     data = exec_result.get("data")
     if not data:
-        return f"{action_name} erledigt, Chef."
+        return f"{action_name} erledigt."
     if isinstance(data, str):
         return data
     if isinstance(data, dict):
@@ -108,7 +108,7 @@ def _extract_tool_result(exec_result: dict, action_name: str) -> str:
         return ". ".join(
             f"{k}: {v}" for k, v in data.items()
             if v and k not in ("icon", "icon_code", "will_rain")
-        ) or f"{action_name} erledigt, Chef."
+        ) or f"{action_name} erledigt."
     return str(data)
 
 
@@ -253,11 +253,10 @@ class ConversationEngine:
             from backend.ai_engine import chat_stream
             full_text = ""
             sentence_buffer = ""
-            tts_futures: list[concurrent.futures.Future] = []
             sentence_count = 0
             tool_call_result = None
             t0 = time.time()
-            first_tts_submitted = False
+            first_response_sent = False
 
             for chunk in chat_stream(command_text, conversation_history=conversation_history):
                 if isinstance(chunk, dict) and chunk.get("type") == "tool_call":
@@ -274,18 +273,16 @@ class ConversationEngine:
                     for sent in sentences[:-1]:
                         sentence_count += 1
                         push_response_chunk(sent)
-                        future = _tts_executor.submit(_tts_for_text, sent)
-                        tts_futures.append(future)
-                        if not first_tts_submitted:
-                            first_tts_submitted = True
+                        if not first_response_sent:
+                            first_response_sent = True
                             latency_ms = int((time.time() - t0) * 1000)
-                            logger.info(f"[Conv] First TTS latency: {latency_ms}ms")
+                            logger.info(f"[Conv] First text latency: {latency_ms}ms")
                             push_event("latency", "", ms=latency_ms)
                     sentence_buffer = sentences[-1]
 
             # Handle tool calls
             if tool_call_result is not None:
-                audio_paths = _collect_tts_results(tts_futures)
+                audio_paths = []
                 reply, tool_audio = _handle_tool_call(
                     tool_call_result, full_text, command_text, source="voice_stream",
                 )
@@ -298,8 +295,6 @@ class ConversationEngine:
             if full_text:
                 fallback = _detect_text_tool_call(full_text, command_text)
                 if fallback:
-                    for f in tts_futures:
-                        f.cancel()
                     reply, fb_audio = fallback
                     push_response(reply, tts_handled=True)
                     return {"reply": reply, "audio_paths": fb_audio}
@@ -309,10 +304,11 @@ class ConversationEngine:
             if remaining:
                 sentence_count += 1
                 push_response_chunk(remaining)
-                future = _tts_executor.submit(_tts_for_text, remaining)
-                tts_futures.append(future)
 
-            audio_paths = _collect_tts_results(tts_futures)
+            audio_paths = []
+            path = _tts_for_text(full_text)
+            if path:
+                audio_paths.append(path)
             push_response(full_text, tts_handled=True)
             audit_log("voice", "stream_done", f"sentences={sentence_count}")
             logger.info(f"[Conv] Done — {sentence_count} sentences, {len(audio_paths)} audio")
@@ -477,57 +473,60 @@ class ConversationEngine:
         abs_start = time.time()
         abs_max = max_s + timeout_s + 5
 
-        while is_listening() and self._active:
-            if time.time() - abs_start > abs_max:
-                break
-
-            try:
-                chunk = sd.rec(chunk_samples, samplerate=sr, channels=1, dtype="float32")
-                sd.wait()
-            except Exception:
-                return None
-
-            if not is_listening() or not self._active:
-                return None
-
-            flat = chunk.flatten()
-            total_chunks += 1
-            rms = np.sqrt(np.mean(flat ** 2))
-
-            if self._on_volume:
-                self._on_volume(rms)
-
-            if rms > peak_rms:
-                peak_rms = rms
-
-            speech = is_speech(flat, peak_rms=peak_rms, noise_floor=noise_floor)
-
-            if not speech_started:
-                pre_buffer.append(flat)
-                if speech:
-                    speech_started = True
-                    for pre_chunk in pre_buffer:
-                        speech_chunks.append(pre_chunk)
-                    speech_chunks.append(flat)
-                    silence_chunks = 0
-                elif total_chunks >= timeout_chunks:
-                    return None
-            else:
-                speech_chunks.append(flat)
-                if speech:
-                    silence_chunks = 0
-                else:
-                    silence_chunks += 1
-                if silence_chunks >= silence_needed:
-                    duration_ms = len(speech_chunks) * RECORD_CHUNK_MS
-                    if duration_ms >= MIN_SPEECH_MS:
+        try:
+            with sd.InputStream(samplerate=sr, channels=1, dtype="float32", blocksize=chunk_samples) as stream:
+                while is_listening() and self._active:
+                    if time.time() - abs_start > abs_max:
                         break
+
+                    try:
+                        chunk, _overflowed = stream.read(chunk_samples)
+                    except Exception:
+                        return None
+
+                    if not is_listening() or not self._active:
+                        return None
+
+                    flat = chunk.flatten()
+                    total_chunks += 1
+                    rms = np.sqrt(np.mean(flat ** 2))
+
+                    if self._on_volume:
+                        self._on_volume(rms)
+
+                    if rms > peak_rms:
+                        peak_rms = rms
+
+                    speech = is_speech(flat, peak_rms=peak_rms, noise_floor=noise_floor)
+
+                    if not speech_started:
+                        pre_buffer.append(flat)
+                        if speech:
+                            speech_started = True
+                            for pre_chunk in pre_buffer:
+                                speech_chunks.append(pre_chunk)
+                            speech_chunks.append(flat)
+                            silence_chunks = 0
+                        elif total_chunks >= timeout_chunks:
+                            return None
                     else:
-                        speech_started = False
-                        speech_chunks.clear()
-                        silence_chunks = 0
-                if total_chunks >= max_chunks:
-                    break
+                        speech_chunks.append(flat)
+                        if speech:
+                            silence_chunks = 0
+                        else:
+                            silence_chunks += 1
+                        if silence_chunks >= silence_needed:
+                            duration_ms = len(speech_chunks) * RECORD_CHUNK_MS
+                            if duration_ms >= MIN_SPEECH_MS:
+                                break
+                            else:
+                                speech_started = False
+                                speech_chunks.clear()
+                                silence_chunks = 0
+                        if total_chunks >= max_chunks:
+                            break
+        except Exception:
+            return None
 
         if not speech_chunks:
             return None

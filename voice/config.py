@@ -27,7 +27,14 @@ RECORD_CHUNK_MS = 30             # Milliseconds per chunk
 # ══════════════════════════════════════════════════
 
 STT_LANGUAGE = "de"
-STT_ENGINE = "deepgram"          # "deepgram" (primary) | "groq" (fallback)
+STT_ENGINE = "openai"            # "openai" (modern) | "deepgram" | "groq" | "local"
+
+# OpenAI current audio stack (optional, used when an OpenAI key is available)
+OPENAI_AUDIO_BASE_URL = "https://api.openai.com/v1"
+OPENAI_STT_MODEL = "gpt-4o-mini-transcribe"
+OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
+OPENAI_TTS_VOICE = os.environ.get("LEXA_OPENAI_TTS_VOICE", "nova").strip() or "nova"
+OPENAI_REALTIME_MODEL = "gpt-realtime-2"
 
 # Deepgram Nova-3 (WebSocket streaming, ~150ms, best German)
 DEEPGRAM_WS_URL = "wss://api.deepgram.com/v1/listen"
@@ -43,7 +50,11 @@ GROQ_STT_MODEL = "whisper-large-v3-turbo"
 #  TTS PROVIDERS
 # ══════════════════════════════════════════════════
 
-TTS_ENGINE = "cartesia"          # "cartesia" (primary) | "elevenlabs" (fallback)
+TTS_ENGINE = "elevenlabs"        # Legacy primary label; order below is authoritative
+TTS_PROVIDER_ORDER = os.environ.get(
+    "LEXA_TTS_PROVIDER_ORDER",
+    "elevenlabs,cartesia,openai,sapi",
+)
 
 # Cartesia Sonic Turbo (WebSocket streaming, 40ms TTFB)
 CARTESIA_API_URL = "https://api.cartesia.ai/tts/bytes"
@@ -90,8 +101,22 @@ EXIT_PHRASES = {
 }
 
 WAKE_COOLDOWN_S = 2.0            # Between wake word detections
-WAKE_WINDOW_S = 1.5              # Sliding window for wake detection
-WAKE_STEP_S = 0.5                # Step between wake windows
+WAKE_WINDOW_S = 0.32             # 4 x 80ms frames, aligned with openWakeWord streaming
+WAKE_STEP_S = 0.32               # Kept for diagnostics/config parity
+WAKE_ENGINE = os.environ.get("LEXA_WAKE_ENGINE", "openwakeword").strip().lower() or "openwakeword"
+WAKE_OPENWAKEWORD_MODELS = os.environ.get("LEXA_OPENWAKEWORD_MODELS", "alexa").strip() or "alexa"
+WAKE_OPENWAKEWORD_THRESHOLD = float(os.environ.get("LEXA_OPENWAKEWORD_THRESHOLD", "0.55"))
+WAKE_OPENWAKEWORD_PATIENCE = int(os.environ.get("LEXA_OPENWAKEWORD_PATIENCE", "2"))
+WAKE_OPENWAKEWORD_VAD_THRESHOLD = float(os.environ.get("LEXA_OPENWAKEWORD_VAD_THRESHOLD", "0.05"))
+WAKE_OPENWAKEWORD_AUTO_DOWNLOAD = os.environ.get("LEXA_OPENWAKEWORD_AUTO_DOWNLOAD", "1").strip().lower() in {"1", "true", "yes", "on"}
+WAKE_PORCUPINE_ACCESS_KEY = os.environ.get("LEXA_PORCUPINE_ACCESS_KEY") or os.environ.get("PICOVOICE_ACCESS_KEY", "")
+WAKE_PORCUPINE_KEYWORDS = os.environ.get("LEXA_PORCUPINE_KEYWORDS", "")
+WAKE_PORCUPINE_KEYWORD_PATHS = os.environ.get("LEXA_PORCUPINE_KEYWORD_PATHS", "")
+WAKE_PORCUPINE_SENSITIVITY = float(os.environ.get("LEXA_PORCUPINE_SENSITIVITY", "0.55"))
+WAKE_LEGACY_TRANSCRIPT_ENABLED = os.environ.get("LEXA_WAKE_LEGACY_TRANSCRIPT_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+WAKE_FALLBACK_STT_MIN_INTERVAL_S = float(os.environ.get("LEXA_WAKE_FALLBACK_STT_MIN_INTERVAL_S", "0.75"))
+WAKE_FALLBACK_STT_MAX_INTERVAL_S = float(os.environ.get("LEXA_WAKE_FALLBACK_STT_MAX_INTERVAL_S", "1.5"))
+WAKE_FALLBACK_STT_BACKOFF_STEP_S = float(os.environ.get("LEXA_WAKE_FALLBACK_STT_BACKOFF_STEP_S", "0.25"))
 
 # ══════════════════════════════════════════════════
 #  BARGE-IN (user interrupts AI while speaking)

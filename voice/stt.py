@@ -19,6 +19,7 @@ import soundfile as sf
 from voice.config import (
     STT_LANGUAGE as _DEFAULT_LANG,
     STT_ENGINE as _DEFAULT_ENGINE,
+    OPENAI_AUDIO_BASE_URL, OPENAI_STT_MODEL,
     DEEPGRAM_HTTP_URL, DEEPGRAM_MODEL,
     GROQ_STT_URL, GROQ_STT_MODEL,
     CB_BASE_RETRY_S, CB_MAX_RETRY_S,
@@ -38,13 +39,14 @@ STT_ENGINE = _DEFAULT_ENGINE
 #  API KEYS (cached from keyring)
 # ═══════════════════════════════════════════════════
 
-_keys: dict[str, str | None] = {"deepgram": None, "groq": None}
-_keys_loaded: dict[str, bool] = {"deepgram": False, "groq": False}
+_keys: dict[str, str | None] = {"deepgram": None, "groq": None, "openai": None}
+_keys_loaded: dict[str, bool] = {"deepgram": False, "groq": False, "openai": False}
 
 # Persistent HTTP sessions (reuse TCP connections)
 _sessions: dict[str, requests.Session] = {
     "deepgram": requests.Session(),
     "groq": requests.Session(),
+    "openai": requests.Session(),
 }
 
 
@@ -57,6 +59,7 @@ def _get_key(provider: str) -> str | None:
         key_names = {
             "deepgram": "deepgram_api_key",
             "groq": "groq_api_key",
+            "openai": "openai_api_key",
         }
         _keys[provider] = keyring.get_password("lexa-ai", key_names[provider])
     except Exception:
@@ -69,8 +72,8 @@ def _get_key(provider: str) -> str | None:
 #  CIRCUIT BREAKER
 # ═══════════════════════════════════════════════════
 
-_fail_counts: dict[str, int] = {"deepgram": 0, "groq": 0}
-_last_fail_times: dict[str, float] = {"deepgram": 0.0, "groq": 0.0}
+_fail_counts: dict[str, int] = {"deepgram": 0, "groq": 0, "openai": 0}
+_last_fail_times: dict[str, float] = {"deepgram": 0.0, "groq": 0.0, "openai": 0.0}
 
 
 def _circuit_open(provider: str) -> bool:
@@ -306,6 +309,85 @@ def _transcribe_groq_file(audio_path: str) -> str | None:
         return None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  OPENAI TRANSCRIBE (modern GPT audio fallback / optional primary)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _transcribe_openai(audio: np.ndarray, sample_rate: int = 16000) -> str | None:
+    api_key = _get_key("openai")
+    if not api_key or _circuit_open("openai"):
+        return None
+
+    try:
+        wav_bytes = _audio_to_wav_bytes(audio, sample_rate)
+        t0 = time.time()
+        resp = _sessions["openai"].post(
+            f"{OPENAI_AUDIO_BASE_URL}/audio/transcriptions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files={"file": ("audio.wav", wav_bytes, "audio/wav")},
+            data={
+                "model": OPENAI_STT_MODEL,
+                "language": STT_LANGUAGE,
+                "response_format": "json",
+            },
+            timeout=20,
+        )
+        latency = int((time.time() - t0) * 1000)
+
+        if resp.status_code == 200:
+            text = resp.json().get("text", "").strip()
+            logger.info(f"[OpenAI STT {OPENAI_STT_MODEL}] ({latency}ms): '{text[:80]}'")
+            _record_success("openai")
+            return text
+        logger.warning(f"[OpenAI STT] Error {resp.status_code}: {resp.text[:200]}")
+        _record_failure("openai")
+        return None
+    except requests.Timeout:
+        logger.warning("[OpenAI STT] Timeout")
+        _record_failure("openai")
+        return None
+    except Exception as e:
+        logger.warning(f"[OpenAI STT] Error: {e}")
+        _record_failure("openai")
+        return None
+
+
+def _transcribe_openai_file(audio_path: str) -> str | None:
+    api_key = _get_key("openai")
+    if not api_key or _circuit_open("openai"):
+        return None
+
+    try:
+        mime = _mime_for_ext(audio_path)
+        with open(audio_path, "rb") as f:
+            t0 = time.time()
+            resp = _sessions["openai"].post(
+                f"{OPENAI_AUDIO_BASE_URL}/audio/transcriptions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                files={"file": (os.path.basename(audio_path), f, mime)},
+                data={
+                    "model": OPENAI_STT_MODEL,
+                    "language": STT_LANGUAGE,
+                    "response_format": "json",
+                },
+                timeout=20,
+            )
+            latency = int((time.time() - t0) * 1000)
+
+        if resp.status_code == 200:
+            text = resp.json().get("text", "").strip()
+            logger.info(f"[OpenAI STT {OPENAI_STT_MODEL}] File ({latency}ms): '{text[:80]}'")
+            _record_success("openai")
+            return text
+        logger.warning(f"[OpenAI STT] File error {resp.status_code}: {resp.text[:200]}")
+        _record_failure("openai")
+        return None
+    except Exception as e:
+        logger.warning(f"[OpenAI STT] File error: {e}")
+        _record_failure("openai")
+        return None
+
+
 # ═══════════════════════════════════════════════════
 #  LOCAL FALLBACK (faster-whisper, offline)
 # ═══════════════════════════════════════════════════
@@ -376,8 +458,10 @@ def _transcribe_local_file(audio_path: str) -> str:
 
 def _get_provider_order() -> list[str]:
     """Build provider order: user-selected STT_ENGINE first, then fallbacks."""
-    fallback_order = ["deepgram", "groq"]
-    selected = STT_ENGINE if STT_ENGINE in fallback_order else "deepgram"
+    if STT_ENGINE == "local":
+        return []
+    fallback_order = ["openai", "deepgram", "groq"]
+    selected = STT_ENGINE if STT_ENGINE in fallback_order else "openai"
     return [selected] + [p for p in fallback_order if p != selected]
 
 
@@ -385,6 +469,7 @@ def _cloud_transcribe(audio: np.ndarray, sample_rate: int = 16000,
                       prompt: str = "") -> str | None:
     providers = _get_provider_order()
     transcribers = {
+        "openai": lambda: _transcribe_openai(audio, sample_rate),
         "deepgram": lambda: _transcribe_deepgram(audio, sample_rate,
                                                   keywords="Lexa" if "Lexa" in prompt else ""),
         "groq": lambda: _transcribe_groq(audio, sample_rate, prompt=prompt),
@@ -408,6 +493,7 @@ def _cloud_transcribe(audio: np.ndarray, sample_rate: int = 16000,
 def _cloud_transcribe_file(audio_path: str) -> str | None:
     providers = _get_provider_order()
     transcribers = {
+        "openai": lambda: _transcribe_openai_file(audio_path),
         "deepgram": lambda: _transcribe_deepgram_file(audio_path),
         "groq": lambda: _transcribe_groq_file(audio_path),
     }
@@ -473,13 +559,17 @@ def fast_transcribe(audio: np.ndarray, sample_rate: int = 16000) -> str:
     model = _get_local_model()
     if model is None:
         return ""
-    segments, _ = model.transcribe(
-        audio, language=STT_LANGUAGE,
-        beam_size=1, best_of=1,
-        no_speech_threshold=0.8,
-        condition_on_previous_text=False,
-    )
-    return " ".join(seg.text.strip() for seg in segments)
+    try:
+        segments, _ = model.transcribe(
+            audio, language=STT_LANGUAGE,
+            beam_size=1, best_of=1,
+            no_speech_threshold=0.8,
+            condition_on_previous_text=False,
+        )
+        return " ".join(seg.text.strip() for seg in segments)
+    except Exception as e:
+        logger.warning(f"[Local] Fast transcribe error: {e}")
+        return ""
 
 
 # ═══════════════════════════════════════════════════
@@ -514,7 +604,7 @@ def delete_deepgram_key() -> dict:
 
 def set_engine(engine: str) -> dict:
     global STT_ENGINE
-    valid = ("deepgram", "groq", "local")
+    valid = ("openai", "deepgram", "groq", "local")
     if engine not in valid:
         return {"success": False, "error": f"Unknown engine: {engine}. Use: {', '.join(valid)}"}
     STT_ENGINE = engine
@@ -546,6 +636,10 @@ def set_model_size(size: str) -> dict:
 # ═══════════════════════════════════════════════════
 
 STT_MODELS = {
+    "openai-gpt-4o-mini-transcribe": {
+        "size_mb": 0, "speed": "Schnell", "quality": "Modern GPT audio",
+        "desc": "OpenAI Cloud - gpt-4o-mini-transcribe, aktueller GPT-STT Provider",
+    },
     "deepgram-nova-3": {
         "size_mb": 0, "speed": "Ultraschnell (~150ms)", "quality": "Exzellent (Deutsch #1)",
         "desc": "Deepgram Cloud — Nova-3, beste deutsche Erkennung",
@@ -570,6 +664,7 @@ STT_MODELS = {
 def get_stt_status() -> dict:
     dg_key = _get_key("deepgram")
     groq_key = _get_key("groq")
+    openai_key = _get_key("openai")
 
     try:
         import faster_whisper
@@ -578,8 +673,10 @@ def get_stt_status() -> dict:
         local_available = False
 
     return {
-        "ready": bool(dg_key) or bool(groq_key) or local_available,
+        "ready": bool(openai_key) or bool(dg_key) or bool(groq_key) or local_available,
         "engine": STT_ENGINE,
+        "openai_available": bool(openai_key),
+        "openai_model": OPENAI_STT_MODEL,
         "deepgram_available": bool(dg_key),
         "deepgram_model": DEEPGRAM_MODEL,
         "groq_available": bool(groq_key),
@@ -594,6 +691,11 @@ def get_stt_status() -> dict:
 
 def get_available_models() -> list[dict]:
     models = []
+    openai_key = _get_key("openai")
+    models.append({
+        "name": "openai-gpt-4o-mini-transcribe", "active": STT_ENGINE == "openai",
+        "available": bool(openai_key), **STT_MODELS["openai-gpt-4o-mini-transcribe"],
+    })
     dg_key = _get_key("deepgram")
     models.append({
         "name": "deepgram-nova-3", "active": STT_ENGINE == "deepgram",

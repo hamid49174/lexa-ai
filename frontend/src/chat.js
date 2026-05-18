@@ -13,17 +13,47 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+function bindKeyboardAction(el, handler, options = {}) {
+  if (!el || typeof handler !== "function") return;
+  const nativeInteractive = ["BUTTON", "A", "INPUT", "SELECT", "TEXTAREA"].includes(el.tagName);
+  if (options.label) el.setAttribute("aria-label", options.label);
+  if (!nativeInteractive) {
+    if (!el.hasAttribute("role")) el.setAttribute("role", "button");
+    if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "0");
+    el.addEventListener("keydown", (e) => {
+      if (e.target !== el) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        handler(e);
+      }
+    });
+  }
+  el.addEventListener("click", handler);
+}
+
 // ── CHAT PERSISTENCE ─────────────────────────────
 // Data flow: SQLite (backend) = single source of truth.
 // localStorage = session cache only (max CHAT_HISTORY_LOCAL_MAX messages).
 // saveChatHistory() writes to localStorage as a fast local cache.
 // loadChatHistory() tries backend conversation first, falls back to localStorage.
+function getMessagePersistText(msg) {
+  return (
+    msg.querySelector(".msg-text")?.textContent
+    || msg.querySelector(".agent-summary")?.textContent
+    || ""
+  ).trim();
+}
+
+function isPersistableChatMessage(msg) {
+  return Boolean(msg) && !msg.classList.contains("typing-message");
+}
+
 function saveChatHistory() {
   if (!chatMessages) return;
   const messages = [];
-  chatMessages.querySelectorAll(".message").forEach((msg, i) => {
-    if (i === 0) return;
-    const text = msg.querySelector(".msg-text")?.textContent || "";
+  chatMessages.querySelectorAll(".message").forEach((msg) => {
+    if (!isPersistableChatMessage(msg)) return;
+    const text = getMessagePersistText(msg);
     const type = msg.classList.contains("user-message") ? "user" : "system";
     if (text) messages.push({ text, type });
   });
@@ -38,9 +68,9 @@ async function autoSaveConversation() {
   if (!LexaState.get("currentConversationId") || !LexaState.get("backendOnline") || !chatMessages) return;
   try {
     const messages = [];
-    chatMessages.querySelectorAll(".message").forEach((msg, i) => {
-      if (i === 0) return;
-      const text = msg.querySelector(".msg-text")?.textContent || "";
+    chatMessages.querySelectorAll(".message").forEach((msg) => {
+      if (!isPersistableChatMessage(msg)) return;
+      const text = getMessagePersistText(msg);
       const role = msg.classList.contains("user-message") ? "user" : "assistant";
       if (text) messages.push({ role, content: text });
     });
@@ -136,10 +166,12 @@ async function loadChatHistory() {
 // ── CHAT MESSAGE DISPLAY ─────────────────────────
 function clearChat() {
   const msgs = chatMessages.querySelectorAll(".message");
-  msgs.forEach((m, i) => { if (i > 0) m.remove(); });
+  msgs.forEach((m) => m.remove());
   localStorage.removeItem("lexa-chat-history");
   if (LexaState.get("currentConversationId")) {
-    window.lexa.conversationUpdate(LexaState.get("currentConversationId"), { messages: [] }).catch(() => { });
+    window.lexa.conversationUpdate(LexaState.get("currentConversationId"), { messages: [] })
+      .then(() => refreshConversationSidebar())
+      .catch(() => { });
   }
   // Restore hero greeting view — orb always stays visible
   const sleekGreeting = document.getElementById("sleek-greeting");
@@ -213,6 +245,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   timeSpan.className = "msg-time";
   timeSpan.textContent = timeStr;
   const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
   copyBtn.className = "msg-copy-btn";
   setIconButton(copyBtn, "\u2398", t("chat.copyTooltip"));
   copyBtn.addEventListener("click", () => copyMessage(copyBtn));
@@ -222,6 +255,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   if (!isUser) {
     // Thumbs-up to save as memory
     const thumbsBtn = document.createElement("button");
+    thumbsBtn.type = "button";
     thumbsBtn.className = "msg-thumbs-btn";
     setIconButton(thumbsBtn, "\u2605", t("chat.saveAsMemoryTooltip"));
     thumbsBtn.addEventListener("click", async () => {
@@ -238,6 +272,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
     // Regenerate button for Lexa messages
     if (!silent) {
       const regenBtn = document.createElement("button");
+      regenBtn.type = "button";
       regenBtn.className = "msg-action-btn msg-regen-btn";
       setIconButton(regenBtn, "\u21BB", t("chat.regenerateTooltip"));
       regenBtn.addEventListener("click", () => {
@@ -265,6 +300,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   if (isUser && !silent) {
     // Edit button for user messages
     const editBtn = document.createElement("button");
+    editBtn.type = "button";
     editBtn.className = "msg-action-btn msg-edit-btn";
     setIconButton(editBtn, "\u270E", t("chat.editTooltip"));
     editBtn.addEventListener("click", () => {
@@ -277,7 +313,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
       const idx = allMsgs.indexOf(msg);
       if (idx >= 0) {
         for (let i = allMsgs.length - 1; i >= idx; i--) {
-          if (i > 0) allMsgs[i].remove(); // Keep greeting (index 0)
+          allMsgs[i].remove();
         }
       }
       showToast(t("chat.editLoaded"), "info", 2000);
@@ -286,6 +322,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
 
     // Delete button for user messages
     const delBtn = document.createElement("button");
+    delBtn.type = "button";
     delBtn.className = "msg-action-btn msg-del-btn";
     setIconButton(delBtn, "\u00D7", t("chat.deleteTooltip"));
     delBtn.addEventListener("click", () => {
@@ -318,10 +355,12 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
     body.appendChild(actionDiv);
 
     const confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
     confirmBtn.className = "confirm-btn";
     confirmBtn.textContent = t("chat.confirmBtn");
     confirmBtn.addEventListener("click", () => confirmAction(confirmBtn, encodeURIComponent(JSON.stringify(action))));
     const denyBtn = document.createElement("button");
+    denyBtn.type = "button";
     denyBtn.className = "deny-btn";
     denyBtn.textContent = t("common.cancel");
     denyBtn.addEventListener("click", () => denyAction(denyBtn));
@@ -405,7 +444,7 @@ function formatMessage(text) {
     const placeholder = `\x00CODE${codeBlocks.length}\x00`;
     const langLabel = lang ? `<span class="code-lang">${escapeHtml(lang)}</span>` : "";
     const copyLabel = escapeHtml(translate("chat.copyTooltip", "Copy code"));
-    codeBlocks.push(`<div class="code-block-wrap"><div class="code-block-header">${langLabel}<button class="code-copy-btn" data-action="copy-code" title="${copyLabel}" aria-label="${copyLabel}" data-icon="&#x2398;"></button></div><pre class="code-block"><code>${escaped}</code></pre></div>`);
+    codeBlocks.push(`<div class="code-block-wrap"><div class="code-block-header">${langLabel}<button type="button" class="code-copy-btn" data-action="copy-code" title="${copyLabel}" aria-label="${copyLabel}" data-icon="&#x2398;"></button></div><pre class="code-block"><code>${escaped}</code></pre></div>`);
     return placeholder;
   });
 
@@ -587,9 +626,44 @@ function recoverDraft() {
   }
 }
 
+function chatInputMetrics(value, config = LexaConfig) {
+  const text = String(value || "");
+  const max = Number(config?.MAX_CHAT_INPUT_LENGTH) || 4000;
+  const warnAt = Number(config?.CHAR_COUNTER_WARN) || Math.floor(max * 0.75);
+  const dangerAt = Math.min(Number(config?.CHAR_COUNTER_DANGER) || Math.floor(max * 0.95), max);
+  const length = text.length;
+  return {
+    length,
+    max,
+    warn: length >= warnAt && length < dangerAt,
+    danger: length >= dangerAt && length <= max,
+    over: length > max,
+    visible: length >= warnAt,
+    label: `${length}/${max}`,
+  };
+}
+
 function syncChatInputSize() {
   if (!chatInput) return;
+  if (chatInput.tagName === "TEXTAREA") {
+    const maxHeight = 160;
+    const metrics = window.getComputedStyle ? window.getComputedStyle(chatInput) : null;
+    const lineHeight = Number.parseFloat(metrics?.lineHeight) || 22;
+    const paddingY = (Number.parseFloat(metrics?.paddingTop) || 0) + (Number.parseFloat(metrics?.paddingBottom) || 0);
+    const maxRows = Math.max(1, Math.floor((maxHeight - paddingY) / lineHeight));
+    const neededRows = Math.max(1, Math.ceil(((chatInput.scrollHeight || lineHeight) - paddingY) / lineHeight));
+    chatInput.rows = Math.min(maxRows, neededRows);
+    chatInput.classList.toggle("is-scrollable", neededRows > maxRows);
+  }
   chatInput.classList.toggle("has-content", Boolean(chatInput.value));
+  const counter = document.getElementById("char-counter");
+  const metrics = chatInputMetrics(chatInput.value);
+  chatInput.setAttribute("aria-invalid", metrics.over ? "true" : "false");
+  if (!counter) return;
+  counter.textContent = metrics.label;
+  counter.classList.toggle("hidden", !metrics.visible);
+  counter.classList.toggle("warn", metrics.warn);
+  counter.classList.toggle("danger", metrics.danger || metrics.over);
 }
 
 function showTyping() {
@@ -612,11 +686,14 @@ function showTyping() {
   for (let i = 0; i < 3; i++) { const dot = document.createElement("span"); dot.className = "typing-dot"; dots.appendChild(dot); }
   indicator.appendChild(dots);
   const stopBtn = document.createElement("button");
+  stopBtn.type = "button";
   stopBtn.className = "stop-thinking-btn";
-  stopBtn.textContent = "\u25A0 Stop";
-  stopBtn.title = "Antwort abbrechen";
+  stopBtn.textContent = t("chat.stopResponseButton");
+  stopBtn.title = t("chat.stopResponseTooltip");
+  stopBtn.setAttribute("aria-label", t("chat.stopResponseTooltip"));
   stopBtn.addEventListener("click", () => {
     if (window._lexaStreamAbort) {
+      window._lexaStreamAbortReason = "user";
       window._lexaStreamAbort.abort();
     }
     hideTyping();
@@ -645,9 +722,22 @@ async function sendMessage() {
   if (LexaState.get("isLoading")) return;
   const text = chatInput.value.trim();
   if (!text) return;
-  LexaState.set("isLoading", true);
   if (text.length > LexaConfig.MAX_CHAT_INPUT_LENGTH) { showToast(t("chat.messageTooLong", {max: LexaConfig.MAX_CHAT_INPUT_LENGTH}), "warning"); return; }
   if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+
+  // Phase 46: Auto-detect if this task needs the multi-step agent
+  // Manual override: /agent prefix always triggers agent mode
+  // Auto-detect: complex tasks with multiple actions, "und dann", etc.
+  const agentManual = text.startsWith("/agent ");
+  const agentText = agentManual ? text.slice(7).trim() : text;
+  if (agentManual || _needsAgentMode(text)) {
+    if (agentText) {
+      sendAgentMessage(agentText);
+      return;
+    }
+  }
+
+  LexaState.set("isLoading", true);
   pushChatHistory(text);
   chatHistoryIdx = -1;
 
@@ -660,18 +750,6 @@ async function sendMessage() {
       LexaState.set("conversationsList", data.conversations || []);
       renderConversationList();
     } catch (e) { console.warn("[Chat] Failed to create conversation:", e.message || e); }
-  }
-
-  // Phase 46: Auto-detect if this task needs the multi-step agent
-  // Manual override: /agent prefix always triggers agent mode
-  // Auto-detect: complex tasks with multiple actions, "und dann", etc.
-  const agentManual = text.startsWith("/agent ");
-  const agentText = agentManual ? text.slice(7).trim() : text;
-  if (agentManual || _needsAgentMode(text)) {
-    if (agentText) {
-      sendAgentMessage(agentText);
-      return;
-    }
   }
 
   const isFirstMessage = chatMessages.querySelectorAll(".user-message").length === 0;
@@ -704,10 +782,12 @@ async function sendMessage() {
   timeSpan.className = "msg-time";
   timeSpan.textContent = timeStr;
   const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
   copyBtn.className = "msg-copy-btn";
   setIconButton(copyBtn, "\u2398", t("chat.copyTooltip"));
   copyBtn.addEventListener("click", () => copyMessage(copyBtn));
   const regenBtn = document.createElement("button");
+  regenBtn.type = "button";
   regenBtn.className = "msg-action-btn msg-regen-btn";
   setIconButton(regenBtn, "\u21BB", t("chat.regenerateTooltip"));
   regenBtn.addEventListener("click", () => regenerateMessage(text));
@@ -747,7 +827,11 @@ async function sendMessage() {
 
   try {
     window._lexaStreamAbort = new AbortController();
-    const _streamTimeout = setTimeout(() => window._lexaStreamAbort.abort(), 45000);
+    window._lexaStreamAbortReason = "";
+    const _streamTimeout = setTimeout(() => {
+      window._lexaStreamAbortReason = "timeout";
+      window._lexaStreamAbort.abort();
+    }, 45000);
     let response;
     try {
       response = await fetch(`${window.lexa.API_BASE}/chat/stream`, {
@@ -759,16 +843,22 @@ async function sendMessage() {
     } catch (abortErr) {
       clearTimeout(_streamTimeout);
       if (abortErr.name === "AbortError") {
+        const stoppedByUser = window._lexaStreamAbortReason === "user";
         streamRenderActive = false;
         textEl.classList.remove("streaming-text");
-        textEl.textContent = t("chat.connectionTimeout");
+        textEl.textContent = stoppedByUser ? t("chat.responseStopped") : t("chat.connectionTimeout");
         LexaState.set("isLoading", false); sendBtn.disabled = false;
+        window._lexaStreamAbort = null;
+        window._lexaStreamAbortReason = "";
+        saveChatHistory();
+        saveCurrentConversation();
         return;
       }
       throw abortErr;
     }
 
     if (!response.ok) {
+      clearTimeout(_streamTimeout);
       const errData = await response.json().catch(() => ({}));
       streamRenderActive = false;
       textEl.classList.remove("streaming-text");
@@ -778,6 +868,8 @@ async function sendMessage() {
       else if (response.status >= 500) errMsg = t("common.error") + ` (${response.status})`;
       renderFormattedMessage(textEl, errMsg);
       LexaState.set("isLoading", false); sendBtn.disabled = false;
+      window._lexaStreamAbort = null;
+      window._lexaStreamAbortReason = "";
       return;
     }
 
@@ -785,12 +877,16 @@ async function sendMessage() {
     const decoder = new TextDecoder();
     let buffer = "";
     let streamError = null;
+    let streamStoppedByUser = false;
+    let streamTimedOut = false;
     const streamStart = Date.now();
     const STREAM_TIMEOUT_MS = 45000;
     try {
       while (true) {
         if (Date.now() - streamStart > STREAM_TIMEOUT_MS) {
           console.warn("[LEXA] Stream timeout after 45s");
+          streamTimedOut = true;
+          window._lexaStreamAbortReason = "timeout";
           await reader.cancel();
           break;
         }
@@ -810,14 +906,30 @@ async function sendMessage() {
           } catch (e) { console.warn("SSE parse error:", e, "raw:", raw); }
         }
       }
-    } catch (streamErr) { streamError = streamErr; console.warn("[LEXA] Stream unterbrochen:", streamErr); try { await reader.cancel(); } catch (e) { console.warn("[Chat] Reader cancel failed:", e.message || e); } }
+    } catch (streamErr) {
+      streamStoppedByUser = window._lexaStreamAbortReason === "user";
+      if (!streamStoppedByUser) {
+        streamError = streamErr;
+        console.warn("[LEXA] Stream unterbrochen:", streamErr);
+      }
+      try { await reader.cancel(); } catch (e) { console.warn("[Chat] Reader cancel failed:", e.message || e); }
+    }
 
     clearTimeout(_streamTimeout);
     streamRenderActive = false;
     textEl.classList.remove("streaming-text");
     if (fullText) {
       renderFormattedMessage(textEl, fullText);
-      if (streamError) { const warn = document.createElement("span"); warn.className = "stream-warning"; warn.textContent = "\u26A0 " + t("chat.connectionInterrupted"); textEl.appendChild(warn); }
+      if (streamStoppedByUser || streamTimedOut || streamError) {
+        const warn = document.createElement("span");
+        warn.className = "stream-warning";
+        warn.textContent = streamStoppedByUser ? t("chat.responseStopped") : "\u26A0 " + t("chat.connectionInterrupted");
+        textEl.appendChild(warn);
+      }
+    } else if (streamStoppedByUser) {
+      textEl.textContent = t("chat.responseStopped");
+    } else if (streamTimedOut) {
+      textEl.textContent = t("chat.connectionTimeout");
     } else if (streamError) {
       textEl.textContent = t("chat.connectionLostRetry");
     }
@@ -838,10 +950,12 @@ async function sendMessage() {
         body.appendChild(actionDiv);
 
         const confirmBtn = document.createElement("button");
+        confirmBtn.type = "button";
         confirmBtn.className = "confirm-btn";
         confirmBtn.textContent = t("chat.confirmBtn");
         confirmBtn.addEventListener("click", () => confirmAction(confirmBtn, encodeURIComponent(JSON.stringify(actionData))));
         const denyBtn = document.createElement("button");
+        denyBtn.type = "button";
         denyBtn.className = "deny-btn";
         denyBtn.textContent = t("common.cancel");
         denyBtn.addEventListener("click", () => denyAction(denyBtn));
@@ -891,6 +1005,7 @@ async function sendMessage() {
       const suggestions = generateSuggestions(fullText, text);
       suggestions.forEach(s => {
         const chip = document.createElement("button");
+        chip.type = "button";
         chip.className = "suggestion-chip";
         chip.textContent = s;
         chip.addEventListener("click", () => {
@@ -914,6 +1029,8 @@ async function sendMessage() {
   saveCurrentConversation();
   LexaState.set("isLoading", false);
   sendBtn.disabled = false;
+  window._lexaStreamAbort = null;
+  window._lexaStreamAbortReason = "";
 }
 
 // ── AGENT MODE (Phase 46) ────────────────────────
@@ -993,6 +1110,8 @@ async function sendAgentMessage(text) {
 
   const body = document.createElement("div");
   body.className = "msg-body";
+  let agentReader = null;
+  let agentStoppedByUser = false;
 
   const header = document.createElement("div");
   header.className = "msg-header";
@@ -1011,6 +1130,27 @@ async function sendAgentMessage(text) {
   const summaryEl = document.createElement("div");
   summaryEl.className = "agent-summary";
 
+  const stopBtn = document.createElement("button");
+  stopBtn.type = "button";
+  stopBtn.className = "stop-thinking-btn agent-stop-btn";
+  stopBtn.textContent = t("common.cancel");
+  stopBtn.title = t("chat.agentStopTooltip");
+  stopBtn.setAttribute("aria-label", t("chat.agentStopTooltip"));
+  stopBtn.addEventListener("click", async () => {
+    if (stopBtn.disabled) return;
+    agentStoppedByUser = true;
+    stopBtn.disabled = true;
+    summaryEl.textContent = t("chat.agentStopped");
+    try {
+      if (agentReader) await agentReader.cancel();
+    } catch (e) {
+      console.warn("[Agent] Reader cancel failed:", e.message || e);
+    }
+    LexaState.set("isLoading", false);
+    sendBtn.disabled = false;
+  });
+  header.appendChild(stopBtn);
+
   body.appendChild(header);
   body.appendChild(stepsContainer);
   body.appendChild(summaryEl);
@@ -1021,19 +1161,40 @@ async function sendAgentMessage(text) {
 
   try {
     const response = await window.lexa.agentRun(text);
+    if (agentStoppedByUser) {
+      try { await response?.body?.cancel?.(); } catch (e) { console.warn("[Agent] Body cancel failed:", e.message || e); }
+      throw new Error("agent_stream_stopped");
+    }
     if (!response.ok) {
       summaryEl.textContent = t("chat.agentError", {msg: response.statusText || "Unknown"});
       LexaState.set("isLoading", false);
       sendBtn.disabled = false;
+      stopBtn.disabled = true;
+      stopBtn.classList.add("is-complete");
       return;
     }
 
-    const reader = response.body.getReader();
+    agentReader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    const AGENT_STREAM_TIMEOUT_MS = 120000;
+    const agentStreamStartedAt = Date.now();
 
     while (true) {
-      const { done, value } = await reader.read();
+      const remainingMs = AGENT_STREAM_TIMEOUT_MS - (Date.now() - agentStreamStartedAt);
+      if (remainingMs <= 0) {
+        try { await agentReader.cancel(); } catch (e) { console.warn("[Agent] Reader cancel failed:", e.message || e); }
+        throw new Error("agent_stream_timeout");
+      }
+      const readResult = await Promise.race([
+        agentReader.read(),
+        new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), remainingMs)),
+      ]);
+      if (readResult.timeout) {
+        try { await agentReader.cancel(); } catch (e) { console.warn("[Agent] Reader cancel failed:", e.message || e); }
+        throw new Error("agent_stream_timeout");
+      }
+      const { done, value } = readResult;
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
@@ -1120,10 +1281,15 @@ async function sendAgentMessage(text) {
       }
     }
   } catch (err) {
-    summaryEl.textContent = t("chat.agentUnreachable");
-    showToast(t("chat.agentErrorGeneric"), "error");
+    const timedOut = err?.message === "agent_stream_timeout";
+    const stopped = err?.message === "agent_stream_stopped" || agentStoppedByUser;
+    summaryEl.textContent = stopped ? t("chat.agentStopped") : (timedOut ? t("chat.agentTimeout") : t("chat.agentUnreachable"));
+    if (!stopped) showToast(timedOut ? t("chat.agentTimeout") : t("chat.agentErrorGeneric"), "error");
   }
 
+  agentReader = null;
+  stopBtn.disabled = true;
+  stopBtn.classList.add("is-complete");
   saveChatHistory();
   saveCurrentConversation();
   LexaState.set("isLoading", false);
@@ -1233,6 +1399,218 @@ function selectSnippetPopup() {
 }
 function invalidateSnippetCache() { _snippetCache = null; }
 
+const LEXA_COMPOSER_COMMANDS = [
+  { id: "agent", icon: "command", prefixKey: "composer.agent.prefix", labelKey: "composer.agent.label", descKey: "composer.agent.desc", fallbackPrefix: "/agent ", fallbackLabel: "Agent Mode", fallbackDesc: "Plan and execute a multi-step task." },
+  { id: "improve", icon: "spark", prefixKey: "composer.improve.prefix", labelKey: "composer.improve.label", descKey: "composer.improve.desc", fallbackPrefix: "/agent Verbessere Lexa UI/UX mit kleinen sicheren Code-Aenderungen und fuehre passende Tests aus: ", fallbackLabel: "Improve Lexa", fallbackDesc: "Start a professional UI/UX code pass." },
+  { id: "os", icon: "map", prefixKey: "composer.os.prefix", labelKey: "composer.os.label", descKey: "composer.os.desc", fallbackPrefix: "Nutze das Personal OS als Kontext und fasse zusammen: ", fallbackLabel: "Personal OS", fallbackDesc: "Bring OS context into the current chat." },
+  { id: "screen", icon: "image", prefixKey: "composer.screen.prefix", labelKey: "composer.screen.label", descKey: "composer.screen.desc", fallbackPrefix: "Analysiere den Bildschirm und gib mir konkrete UI/UX-Verbesserungen: ", fallbackLabel: "Screen Review", fallbackDesc: "Prepare a visual review prompt." },
+  { id: "voice", icon: "wave", prefixKey: "composer.voice.prefix", labelKey: "composer.voice.label", descKey: "composer.voice.desc", fallbackPrefix: "Pruefe Voice/STT/TTS/Wake-Word-Status und nenne die naechsten echten Blocker: ", fallbackLabel: "Voice Check", fallbackDesc: "Focus on diagnostics instead of demo feel." },
+];
+
+function composerCommandText(command, field) {
+  const key = command?.[`${field}Key`];
+  const fallback = command?.[`fallback${field[0].toUpperCase()}${field.slice(1)}`] || "";
+  if (!key) return fallback;
+  const translated = t(key);
+  return translated === key ? fallback : translated;
+}
+
+function composerCommandLabel(command) { return composerCommandText(command, "label"); }
+function composerCommandDesc(command) { return composerCommandText(command, "desc"); }
+function composerCommandPrefix(command) { return composerCommandText(command, "prefix"); }
+
+let _composerCommandOpen = false;
+let _composerCommandIdx = 0;
+
+function composerCommandIconSvg(icon) {
+  const icons = {
+    command: '<path d="M18 6 6 18"/><path d="m8 6 4 6-4 6"/><path d="M14 18h4"/>',
+    spark: '<path d="M12 2l1.8 6.1L20 10l-6.2 1.9L12 18l-1.8-6.1L4 10l6.2-1.9L12 2Z"/><path d="M19 15l.9 3.1L23 19l-3.1.9L19 23l-.9-3.1L15 19l3.1-.9L19 15Z"/>',
+    map: '<path d="M4 6l5-2 6 2 5-2v14l-5 2-6-2-5 2V6Z"/><path d="M9 4v14"/><path d="M15 6v14"/>',
+    image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8" cy="10" r="1.5"/><path d="M21 15l-5-5L5 19"/>',
+    wave: '<path d="M4 12h2l2-6 4 12 3-8 2 2h3"/>',
+  };
+  return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icons[icon] || icons.command}</svg>`;
+}
+
+function composerCommandQuery() {
+  const value = String(chatInput?.value || "");
+  if (!value.startsWith("/")) return "";
+  return value.slice(1).split(/\s+/)[0].toLowerCase();
+}
+
+function composerCommandMatches(command, query) {
+  if (!query) return true;
+  const haystack = `${command.id} ${composerCommandPrefix(command)} ${composerCommandLabel(command)} ${composerCommandDesc(command)}`.toLowerCase();
+  return haystack.includes(query);
+}
+
+function updateComposerCommandActiveDescendant() {
+  const palette = document.getElementById("composer-command-palette");
+  const rows = _composerCommandRows();
+  const activeRow = _composerCommandOpen ? rows[_composerCommandIdx] : null;
+  if (palette) palette.setAttribute("aria-hidden", _composerCommandOpen ? "false" : "true");
+  if (!chatInput) return;
+  chatInput.setAttribute("aria-controls", "composer-command-palette");
+  chatInput.setAttribute("aria-expanded", _composerCommandOpen ? "true" : "false");
+  chatInput.setAttribute("aria-autocomplete", "list");
+  if (activeRow?.id) chatInput.setAttribute("aria-activedescendant", activeRow.id);
+  else chatInput.removeAttribute("aria-activedescendant");
+}
+
+function renderComposerCommandPalette(query = composerCommandQuery()) {
+  const palette = document.getElementById("composer-command-palette");
+  if (!palette) return;
+  const items = LEXA_COMPOSER_COMMANDS.filter((command) => composerCommandMatches(command, query));
+  if (_composerCommandIdx >= items.length) _composerCommandIdx = 0;
+  palette.innerHTML = "";
+  if (!items.length) {
+    palette.innerHTML = `<div class="composer-command-empty" role="option" aria-disabled="true">${escapeHtml(t("composer.empty"))}</div>`;
+    updateComposerCommandActiveDescendant();
+    return;
+  }
+  items.forEach((command, index) => {
+    const label = composerCommandLabel(command);
+    const desc = composerCommandDesc(command);
+    const prefix = composerCommandPrefix(command);
+    const prefixHint = prefix.trim().split(/\s+/)[0] || "/";
+    const row = document.createElement("button");
+    row.type = "button";
+    row.id = `composer-command-option-${command.id}`;
+    row.className = "composer-command-item" + (index === _composerCommandIdx ? " selected" : "");
+    row.setAttribute("role", "option");
+    row.setAttribute("aria-selected", index === _composerCommandIdx ? "true" : "false");
+    row.setAttribute("aria-label", `${label}: ${desc}`);
+    row.dataset.commandId = command.id;
+    row.innerHTML = `
+      <span class="composer-command-icon" aria-hidden="true">${composerCommandIconSvg(command.icon)}</span>
+      <span class="composer-command-main">
+        <span class="composer-command-label">${escapeHtml(label)}</span>
+        <span class="composer-command-desc">${escapeHtml(desc)}</span>
+      </span>
+      <span class="composer-command-prefix">${escapeHtml(prefixHint)}</span>
+    `;
+    row.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      selectComposerCommand(command.id);
+    });
+    palette.appendChild(row);
+  });
+  updateComposerCommandActiveDescendant();
+}
+
+function setComposerCommandPaletteOpen(open, options = {}) {
+  const palette = document.getElementById("composer-command-palette");
+  const button = document.getElementById("composer-command-btn");
+  if (!palette) return;
+  _composerCommandOpen = Boolean(open);
+  if (button) {
+    button.classList.toggle("active", _composerCommandOpen);
+    button.setAttribute("aria-haspopup", "listbox");
+    button.setAttribute("aria-expanded", _composerCommandOpen ? "true" : "false");
+    button.setAttribute("aria-controls", "composer-command-palette");
+  }
+  palette.classList.toggle("hidden", !_composerCommandOpen);
+  palette.setAttribute("aria-hidden", _composerCommandOpen ? "false" : "true");
+  if (_composerCommandOpen) {
+    renderComposerCommandPalette(options.query || composerCommandQuery());
+    if (options.focusInput !== false && chatInput) {
+      setTimeout(() => {
+        if (_composerCommandOpen && typeof chatInput.focus === "function") chatInput.focus();
+      }, 0);
+    }
+  } else {
+    updateComposerCommandActiveDescendant();
+  }
+}
+
+function toggleComposerCommandPalette() {
+  if (!_composerCommandOpen) {
+    _composerCommandIdx = 0;
+    setComposerCommandPaletteOpen(true, { query: composerCommandQuery(), focusInput: true });
+  } else {
+    setComposerCommandPaletteOpen(false);
+  }
+}
+
+function closeComposerCommandPalette() {
+  setComposerCommandPaletteOpen(false);
+}
+
+function updateComposerCommandPaletteFromInput() {
+  if (!chatInput) return;
+  const value = String(chatInput.value || "");
+  if (value.startsWith("/") && !value.includes(" ")) {
+    setComposerCommandPaletteOpen(true, { query: composerCommandQuery(), focusInput: false });
+  } else if (_composerCommandOpen && value.trim() !== "") {
+    closeComposerCommandPalette();
+  }
+}
+
+function selectComposerCommand(commandId) {
+  const command = LEXA_COMPOSER_COMMANDS.find((item) => item.id === commandId);
+  if (!command || !chatInput) return false;
+  const label = composerCommandLabel(command);
+  chatInput.value = composerCommandPrefix(command);
+  syncChatInputSize();
+  closeComposerCommandPalette();
+  chatInput.focus();
+  try { localStorage.setItem("lexa-chat-draft", chatInput.value); } catch (_) {}
+  showToast(t("composer.readyToast", { label }), "info", 1600);
+  return true;
+}
+
+function _composerCommandRows() {
+  return [...document.querySelectorAll("#composer-command-palette .composer-command-item")];
+}
+
+function handleComposerCommandKeydown(e) {
+  if (!_composerCommandOpen) return false;
+  const rows = _composerCommandRows();
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closeComposerCommandPalette();
+    return true;
+  }
+  if (!rows.length) return false;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const dir = e.key === "ArrowDown" ? 1 : -1;
+    rows[_composerCommandIdx]?.classList.remove("selected");
+    rows[_composerCommandIdx]?.setAttribute("aria-selected", "false");
+    _composerCommandIdx = (_composerCommandIdx + dir + rows.length) % rows.length;
+    rows[_composerCommandIdx]?.classList.add("selected");
+    rows[_composerCommandIdx]?.setAttribute("aria-selected", "true");
+    rows[_composerCommandIdx]?.scrollIntoView({ block: "nearest" });
+    updateComposerCommandActiveDescendant();
+    return true;
+  }
+  if (e.key === "Enter" || e.key === "Tab") {
+    e.preventDefault();
+    const id = rows[_composerCommandIdx]?.dataset.commandId;
+    return selectComposerCommand(id);
+  }
+  return false;
+}
+
+function setupComposerCommandPalette() {
+  const button = document.getElementById("composer-command-btn");
+  const palette = document.getElementById("composer-command-palette");
+  if (!button || !palette) return;
+  updateComposerCommandActiveDescendant();
+  button.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowDown") return;
+    e.preventDefault();
+    _composerCommandIdx = 0;
+    setComposerCommandPaletteOpen(true, { query: composerCommandQuery(), focusInput: true });
+  });
+  document.addEventListener("mousedown", (e) => {
+    if (!_composerCommandOpen) return;
+    if (palette.contains(e.target) || button.contains(e.target)) return;
+    closeComposerCommandPalette();
+  });
+}
+
 // ══════════════════════════════════════════════════════
 //  VOICE SYSTEM v3 — Clean rebuild
 //  Flow: Mic Button → Record → STT → Show Text → AI → TTS
@@ -1246,10 +1624,68 @@ const Voice = {
   stream: null,
   ttsQueue: [],
   ttsPlaying: false,
+  ttsAudio: null,
+  ttsAudioUrl: null,
+  ttsRunId: 0,
+  recordMimeType: "audio/webm",
   silenceTimer: null,
   recordTimeout: null,
   audioCtx: null,
 };
+
+const VOICE_TTS_MIN_CHUNK_CHARS = 10;
+const VOICE_TTS_MAX_CHUNK_CHARS = 420;
+const VOICE_TTS_PLAYBACK_RATE = 1.08;
+
+function voiceUiText(key, fallback, params) {
+  try {
+    const text = typeof t === "function" ? t(key, params) : "";
+    return text && text !== key ? text : fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function setVoiceToggleA11y(button, active, labelKey, titleKey, fallbackLabel, fallbackTitle) {
+  if (!button) return;
+  button.dataset.i18nAriaLabel = labelKey;
+  button.dataset.i18nTitle = titleKey;
+  button.setAttribute("aria-label", voiceUiText(labelKey, fallbackLabel));
+  button.setAttribute("aria-pressed", active ? "true" : "false");
+  button.title = voiceUiText(titleKey, fallbackTitle);
+}
+
+function updateMicToggleA11y(active = false) {
+  const mic = document.getElementById("mic-btn");
+  setVoiceToggleA11y(
+    mic,
+    active,
+    "chat.micToggleLabel",
+    active ? "chat.micStopTitle" : "chat.micStartTitle",
+    "Voice recording",
+    active ? "Stop voice recording (Ctrl+M)" : "Start voice recording (Ctrl+M)"
+  );
+}
+
+function updateMicProcessingA11y(processing = false) {
+  const mic = document.getElementById("mic-btn");
+  if (!mic) return;
+  const isProcessing = Boolean(processing);
+  mic.classList.toggle("processing", isProcessing);
+  mic.setAttribute("aria-busy", isProcessing ? "true" : "false");
+}
+
+function updateTtsToggleA11y(active = false) {
+  const ttsToggle = document.getElementById("tts-toggle");
+  setVoiceToggleA11y(
+    ttsToggle,
+    active,
+    "chat.ttsToggleLabel",
+    active ? "chat.ttsToggleOnTitle" : "chat.ttsToggleOffTitle",
+    "Text-to-speech",
+    active ? "Text-to-speech is on. Click to turn off." : "Text-to-speech is off. Click to turn on."
+  );
+}
 
 // ── SETUP (called once from app.js init) ──
 function setupVoice() {
@@ -1257,6 +1693,8 @@ function setupVoice() {
   const tts = document.getElementById("tts-toggle");
 
   if (mic) {
+    updateMicToggleA11y(Voice.recording);
+    updateMicProcessingA11y(false);
     mic.addEventListener("click", voiceToggle);
     console.log("[Voice] Mic button ready");
   } else {
@@ -1264,12 +1702,16 @@ function setupVoice() {
   }
 
   if (tts) {
-    tts.classList.toggle("active", LexaState.get("ttsEnabled"));
+    const initialTtsEnabled = Boolean(LexaState.get("ttsEnabled"));
+    tts.classList.toggle("active", initialTtsEnabled);
+    updateTtsToggleA11y(initialTtsEnabled);
     tts.addEventListener("click", () => {
       const on = !LexaState.get("ttsEnabled");
       LexaState.set("ttsEnabled", on);
       tts.classList.toggle("active", on);
-      showToast(on ? "Sprachausgabe an" : "Sprachausgabe aus", "info", 1500);
+      updateTtsToggleA11y(on);
+      if (!on) voiceTTSClear();
+      showToast(on ? t("chat.ttsEnabled") : t("chat.ttsDisabled"), "info", 1500);
     });
   }
 }
@@ -1279,25 +1721,179 @@ function voiceToggle() {
   if (Voice.recording) voiceStop(); else voiceStart();
 }
 
+function voicePreferredMimeType() {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") return "";
+  return [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
+    "audio/mp4",
+  ].find((type) => MediaRecorder.isTypeSupported(type)) || "";
+}
+
+function voiceStatusBarUpdate({ state, transcript, provider, latency } = {}) {
+  if (typeof VoiceStatusBar === "undefined") return;
+  if (state === "speaking") {
+    voiceStatusBarReset({ hide: true });
+    return;
+  }
+  VoiceStatusBar.show();
+  if (state) VoiceStatusBar.setState(state);
+  if (transcript !== undefined) VoiceStatusBar.setTranscript(transcript);
+  if (provider !== undefined) VoiceStatusBar.setProvider(provider);
+  if (latency !== undefined) VoiceStatusBar.setLatency(latency);
+}
+
+function voiceStatusBarReset(options) {
+  const hide = Boolean(options?.hide);
+  if (typeof VoiceStatusBar === "undefined") return;
+  if (!VoiceStatusBar._bar && typeof VoiceStatusBar.init === "function") VoiceStatusBar.init();
+  VoiceStatusBar.setState("idle");
+  VoiceStatusBar.setTranscript("");
+  VoiceStatusBar.setProvider("");
+  VoiceStatusBar.setLatency(0);
+  if (hide) VoiceStatusBar.hide();
+}
+
+function voiceSpeechPending() {
+  return Boolean(LexaState.get("ttsEnabled") && (Voice.ttsPlaying || Voice.ttsQueue.length > 0));
+}
+
+function voiceStatusBarResetIfNoSpeechPending() {
+  if (!voiceSpeechPending()) voiceStatusBarReset();
+}
+
+function voiceSetOrbConversationState(state) {
+  const safeState = state || null;
+  if (typeof window !== "undefined" && typeof window.setOrbConversationState === "function") {
+    window.setOrbConversationState(safeState);
+    return;
+  }
+  if (typeof _setOrbConversationState === "function") {
+    _setOrbConversationState(safeState);
+    return;
+  }
+
+  const orbCanvas = document.getElementById("voice-orb-canvas");
+  const orbContainer = document.getElementById("voice-orb-container");
+  if (orbCanvas) {
+    orbCanvas.classList.remove("conv-listening", "conv-processing", "conv-speaking", "conv-bargein");
+    if (safeState) orbCanvas.classList.add("conv-" + safeState);
+  }
+  if (orbContainer) {
+    orbContainer.classList.toggle("conversation-active", Boolean(safeState));
+    if (safeState) orbContainer.dataset.convState = safeState;
+    else delete orbContainer.dataset.convState;
+  }
+  if (window.dashboardOrb && typeof window.dashboardOrb.setConversationState === "function") {
+    window.dashboardOrb.setConversationState(safeState);
+  }
+}
+
+function voiceRecorderWillProcessOnStop() {
+  return Boolean(Voice.mediaRecorder && Voice.mediaRecorder.state !== "inactive");
+}
+
+function voiceApiBase() {
+  return window.lexa?.API_BASE || "http://127.0.0.1:8000";
+}
+
+function voiceTTSFindSplit(text, maxLength = VOICE_TTS_MAX_CHUNK_CHARS) {
+  const value = String(text || "");
+  if (value.length <= maxLength) return value.length;
+  const windowText = value.slice(0, maxLength);
+  const minSplit = Math.floor(maxLength * 0.45);
+  for (const boundary of [". ", "! ", "? ", "\n", "; ", ": ", ", "]) {
+    const index = windowText.lastIndexOf(boundary);
+    if (index >= minSplit) return index + (boundary === "\n" ? 1 : boundary.length - 1);
+  }
+  const spaceIndex = windowText.lastIndexOf(" ");
+  if (spaceIndex >= minSplit) return spaceIndex;
+  return maxLength;
+}
+
+function voiceTTSChunkText(text, maxLength = VOICE_TTS_MAX_CHUNK_CHARS) {
+  let remaining = String(text || "").replace(/\s+/g, " ").trim();
+  const chunks = [];
+  while (remaining.length > maxLength) {
+    const splitAt = voiceTTSFindSplit(remaining, maxLength);
+    const chunk = remaining.slice(0, splitAt).trim();
+    if (chunk) chunks.push(chunk);
+    remaining = remaining.slice(splitAt).trim();
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
+function voiceTTSFlushBuffer(buffer, force = false) {
+  const value = String(buffer || "");
+  const complete = value.match(/^(.*[.!?\n])\s*/s);
+  let speakable = "";
+  let remaining = value;
+  if (complete && complete[1].trim().length >= VOICE_TTS_MIN_CHUNK_CHARS) {
+    speakable = complete[1];
+    remaining = value.slice(complete[0].length);
+  } else if (force) {
+    speakable = value;
+    remaining = "";
+  } else if (value.length >= VOICE_TTS_MAX_CHUNK_CHARS) {
+    const splitAt = voiceTTSFindSplit(value);
+    speakable = value.slice(0, splitAt);
+    remaining = value.slice(splitAt);
+  }
+  if (speakable.trim()) voiceTTSEnqueue(speakable.trim());
+  return remaining.trimStart();
+}
+
 // ── START RECORDING ──
 async function voiceStart() {
   const mic = document.getElementById("mic-btn");
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    if (typeof _updateOrbActionA11y === "function") _updateOrbActionA11y(false);
+    updateMicToggleA11y(false);
+    updateMicProcessingA11y(false);
+    voiceStatusBarUpdate({ state: "error", transcript: t("chat.sttUnavailableMsg"), provider: "" });
+    showToast(t("chat.sttUnavailableMsg"), "error");
+    return;
+  }
+
   try {
     Voice.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
-    showToast("Mikrofon-Zugriff verweigert", "error");
+    if (typeof _updateOrbActionA11y === "function") _updateOrbActionA11y(false);
+    updateMicToggleA11y(false);
+    updateMicProcessingA11y(false);
+    const message = voiceUiText("chat.micAccessDeniedMsg", "Microphone access denied. Please allow access.");
+    voiceStatusBarUpdate({ state: "error", transcript: message, provider: "" });
+    showToast(message, "error");
     return;
   }
 
   Voice.audioChunks = [];
-  Voice.mediaRecorder = new MediaRecorder(Voice.stream, { mimeType: "audio/webm" });
+  const mimeType = voicePreferredMimeType();
+  try {
+    Voice.mediaRecorder = new MediaRecorder(Voice.stream, mimeType ? { mimeType } : undefined);
+    Voice.recordMimeType = Voice.mediaRecorder.mimeType || mimeType || "audio/webm";
+  } catch (e) {
+    if (Voice.stream) { Voice.stream.getTracks().forEach(t => t.stop()); Voice.stream = null; }
+    if (typeof _updateOrbActionA11y === "function") _updateOrbActionA11y(false);
+    updateMicToggleA11y(false);
+    updateMicProcessingA11y(false);
+    voiceStatusBarUpdate({ state: "error", transcript: t("chat.sttUnavailableMsg"), provider: "" });
+    showToast(t("chat.sttUnavailableMsg"), "error");
+    return;
+  }
   Voice.mediaRecorder.ondataavailable = e => { if (e.data.size > 0) Voice.audioChunks.push(e.data); };
   Voice.mediaRecorder.onstop = () => voiceProcess();
   Voice.mediaRecorder.start();
   Voice.recording = true;
   LexaState.set("isRecording", true);
+  if (typeof _updateOrbActionA11y === "function") _updateOrbActionA11y(true);
+  updateMicToggleA11y(true);
 
   if (mic) mic.classList.add("recording");
+  voiceStatusBarUpdate({ state: "listening", transcript: "", provider: voiceUiText("chat.voiceProviderRecording", "Recording") });
 
   // Silence detection
   voiceStartSilenceDetect(Voice.stream);
@@ -1311,13 +1907,22 @@ async function voiceStart() {
 // ── STOP RECORDING ──
 function voiceStop() {
   const mic = document.getElementById("mic-btn");
+  const shouldProcessRecording = voiceRecorderWillProcessOnStop();
   if (Voice.silenceTimer) { clearInterval(Voice.silenceTimer); Voice.silenceTimer = null; }
   if (Voice.recordTimeout) { clearTimeout(Voice.recordTimeout); Voice.recordTimeout = null; }
-  if (Voice.mediaRecorder && Voice.mediaRecorder.state !== "inactive") Voice.mediaRecorder.stop();
+  if (shouldProcessRecording) Voice.mediaRecorder.stop();
   if (Voice.stream) { Voice.stream.getTracks().forEach(t => t.stop()); Voice.stream = null; }
   Voice.recording = false;
   LexaState.set("isRecording", false);
+  if (typeof _updateOrbActionA11y === "function") _updateOrbActionA11y(false);
+  updateMicToggleA11y(false);
   if (mic) mic.classList.remove("recording");
+  updateMicProcessingA11y(shouldProcessRecording);
+  if (shouldProcessRecording) {
+    voiceStatusBarUpdate({ state: "processing", provider: "STT" });
+  } else {
+    voiceStatusBarResetIfNoSpeechPending();
+  }
   console.log("[Voice] Recording stopped");
 }
 
@@ -1357,11 +1962,18 @@ function voiceStartSilenceDetect(stream) {
 
 // ── PROCESS: STT → CHAT → TTS ──
 async function voiceProcess() {
-  const blob = new Blob(Voice.audioChunks, { type: "audio/webm" });
-  if (blob.size < 100) { showToast("Keine Aufnahme", "warning"); return; }
+  const blob = new Blob(Voice.audioChunks, { type: Voice.recordMimeType || "audio/webm" });
+  if (blob.size < 100) {
+    const message = voiceUiText("chat.voiceNoRecording", "No recording captured.");
+    updateMicProcessingA11y(false);
+    voiceStatusBarUpdate({ state: "error", transcript: message, provider: "" });
+    showToast(message, "warning");
+    return;
+  }
 
   const mic = document.getElementById("mic-btn");
-  if (mic) mic.classList.add("processing");
+  updateMicProcessingA11y(true);
+  voiceStatusBarUpdate({ state: "processing", transcript: voiceUiText("chat.voiceTranscribing", "Transcribing speech..."), provider: "STT" });
 
   // Auto-open chat so user sees results
   if (!window._chatViewOpen && typeof toggleChatView === "function") toggleChatView();
@@ -1373,37 +1985,45 @@ async function voiceProcess() {
     console.log("[Voice] STT result:", stt);
 
     if (!stt.success || !stt.text || !stt.text.trim()) {
-      showToast("Konnte nichts verstehen — nochmal versuchen", "warning", 2500);
-      if (mic) mic.classList.remove("processing");
+      voiceStatusBarUpdate({ state: "error", transcript: voiceUiText("chat.voiceNotUnderstood", "Could not understand."), provider: stt.engine || "STT" });
+      showToast(voiceUiText("chat.voiceNotUnderstoodFull", "Could not understand. Please try again."), "warning", 2500);
+      updateMicProcessingA11y(false);
       return;
     }
+
+    voiceStatusBarUpdate({ state: "processing", transcript: stt.text, provider: stt.engine || "STT" });
 
     // Show user text in chat
     addMessage(stt.text, "user", null, false, true);
 
     // 2. AI Chat (streaming)
     console.log("[Voice] Sending to AI:", stt.text);
-    if (mic) mic.classList.remove("processing");
+    updateMicProcessingA11y(false);
 
     await voiceStreamChat(stt.text);
 
   } catch (e) {
     console.error("[Voice] Pipeline error:", e);
-    showToast("Sprachfehler: " + (e.message || e), "error");
-    if (mic) mic.classList.remove("processing");
+    const errorText = e.message || String(e);
+    voiceStatusBarUpdate({ state: "error", transcript: errorText, provider: "" });
+    showToast(voiceUiText("chat.voiceErrorPrefix", "Voice error: {{msg}}", { msg: errorText }), "error");
+    updateMicProcessingA11y(false);
   }
 }
 
 // ── STREAMING CHAT + TTS ──
 async function voiceStreamChat(text) {
-  const API = "http://127.0.0.1:8000";
+  const API = voiceApiBase();
   let fullText = "";
   let action = null;
   let requiresConfirmation = false;
+  let timeout = null;
+  let reader = null;
 
   try {
+    voiceStatusBarUpdate({ state: "processing", provider: "AI", transcript: text });
     const abort = new AbortController();
-    const timeout = setTimeout(() => abort.abort(), 45000);
+    timeout = setTimeout(() => abort.abort(), 45000);
 
     const resp = await fetch(`${API}/chat/stream`, {
       method: "POST",
@@ -1419,11 +2039,12 @@ async function voiceStreamChat(text) {
       // Fallback to non-streaming
       const fallback = await window.lexa.chat(text);
       handleChatResponse(fallback, true);
-      clearTimeout(timeout);
+      voiceStatusBarResetIfNoSpeechPending();
+      if (timeout) { clearTimeout(timeout); timeout = null; }
       return;
     }
 
-    const reader = resp.body.getReader();
+    reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let ttsBuf = "";
@@ -1443,23 +2064,19 @@ async function voiceStreamChat(text) {
           if (d.c) {
             fullText += d.c;
             ttsBuf += d.c;
-            // TTS at sentence boundaries
-            const m = ttsBuf.match(/^(.*[.!?\n])\s*/s);
-            if (m && m[1].trim().length > 10) {
-              voiceTTSEnqueue(m[1].trim());
-              ttsBuf = ttsBuf.slice(m[0].length);
-            }
+            ttsBuf = voiceTTSFlushBuffer(ttsBuf);
           }
           if (d.done) {
             action = d.action || null;
             requiresConfirmation = d.rc || false;
-            if (ttsBuf.trim()) { voiceTTSEnqueue(ttsBuf.trim()); ttsBuf = ""; }
+            ttsBuf = voiceTTSFlushBuffer(ttsBuf, true);
           }
         } catch (_) {}
       }
     }
 
-    clearTimeout(timeout);
+    ttsBuf = voiceTTSFlushBuffer(ttsBuf, true);
+    if (timeout) { clearTimeout(timeout); timeout = null; }
 
     if (fullText) {
       addMessage(fullText, "system", action, requiresConfirmation, true);
@@ -1467,48 +2084,117 @@ async function voiceStreamChat(text) {
         window.lexa.execute(action.action, action.params || {}).catch(() => {});
       }
     }
+    voiceStatusBarResetIfNoSpeechPending();
 
   } catch (e) {
+    if (timeout) { clearTimeout(timeout); timeout = null; }
+    if (reader) {
+      try { await reader.cancel(); } catch (cancelErr) { console.warn("[Voice] Reader cancel failed:", cancelErr.message || cancelErr); }
+    }
     console.warn("[Voice] Stream failed, fallback:", e);
     try {
       const fb = await window.lexa.chat(text);
       handleChatResponse(fb, true);
+      voiceStatusBarResetIfNoSpeechPending();
     } catch (_) {
-      addMessage("Verbindungsfehler — Backend nicht erreichbar.", "system");
+      const backendMessage = voiceUiText("chat.voiceBackendUnreachable", "Connection error. Backend not reachable.");
+      voiceStatusBarUpdate({ state: "error", transcript: backendMessage, provider: "" });
+      addMessage(backendMessage, "system");
     }
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
 // ── TTS QUEUE ──
 function voiceTTSEnqueue(text) {
   if (!LexaState.get("ttsEnabled") || !text) return;
-  Voice.ttsQueue.push(text);
-  if (!Voice.ttsPlaying) voiceTTSNext();
+  const chunks = voiceTTSChunkText(text);
+  chunks.forEach((chunk) => Voice.ttsQueue.push(chunk));
+  if (!Voice.ttsPlaying && Voice.ttsQueue.length > 0) voiceTTSNext();
+}
+
+function voiceTTSResetPlayback(options) {
+  const hide = Boolean(options?.hide);
+  Voice.ttsQueue.length = 0;
+  Voice.ttsPlaying = false;
+  voiceStatusBarReset({ hide });
+  voiceSetOrbConversationState(null);
 }
 
 async function voiceTTSNext() {
-  if (Voice.ttsQueue.length === 0) { Voice.ttsPlaying = false; return; }
+  if (Voice.ttsQueue.length === 0) {
+    const wasPlaying = Voice.ttsPlaying;
+    Voice.ttsPlaying = false;
+    if (wasPlaying) {
+      voiceStatusBarReset();
+      voiceSetOrbConversationState(null);
+    }
+    return;
+  }
   Voice.ttsPlaying = true;
+  const runId = Voice.ttsRunId;
   const text = Voice.ttsQueue.shift();
   try {
+    voiceSetOrbConversationState("speaking");
+    voiceStatusBarUpdate({
+      state: "speaking",
+      transcript: voiceUiText("chat.voiceSpeakingResponse", "Speaking response..."),
+      provider: voiceUiText("chat.voiceProviderSpeech", "Voice"),
+    });
     const url = await window.lexa.tts(text);
     if (url) {
+      if (runId !== Voice.ttsRunId || !LexaState.get("ttsEnabled")) {
+        URL.revokeObjectURL(url);
+        voiceTTSResetPlayback({ hide: !LexaState.get("ttsEnabled") });
+        return;
+      }
       const audio = new Audio(url);
-      audio.onended = () => { URL.revokeObjectURL(url); voiceTTSNext(); };
-      audio.onerror = () => { URL.revokeObjectURL(url); voiceTTSNext(); };
-      audio.play().catch(() => voiceTTSNext());
+      audio.playbackRate = VOICE_TTS_PLAYBACK_RATE;
+      if ("preservesPitch" in audio) audio.preservesPitch = true;
+      Voice.ttsAudio = audio;
+      Voice.ttsAudioUrl = url;
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (Voice.ttsAudio === audio) {
+          Voice.ttsAudio = null;
+          Voice.ttsAudioUrl = null;
+        }
+        URL.revokeObjectURL(url);
+        if (runId === Voice.ttsRunId && Voice.ttsQueue.length === 0) {
+          voiceStatusBarReset();
+          voiceSetOrbConversationState(null);
+        }
+        if (runId === Voice.ttsRunId) voiceTTSNext();
+      };
+      audio.onended = finish;
+      audio.onerror = finish;
+      audio.play().catch(finish);
     } else {
-      voiceTTSNext();
+      if (runId === Voice.ttsRunId) voiceTTSNext();
     }
   } catch (e) {
     console.warn("[TTS] Error:", e);
-    voiceTTSNext();
+    if (runId === Voice.ttsRunId) voiceTTSNext();
   }
 }
 
 function voiceTTSClear() {
-  Voice.ttsQueue.length = 0;
-  Voice.ttsPlaying = false;
+  Voice.ttsRunId += 1;
+  const audio = Voice.ttsAudio;
+  const url = Voice.ttsAudioUrl;
+  Voice.ttsAudio = null;
+  Voice.ttsAudioUrl = null;
+  voiceTTSResetPlayback({ hide: true });
+  if (audio) {
+    audio.onended = null;
+    audio.onerror = null;
+    try { audio.pause(); } catch (_) {}
+    try { audio.removeAttribute("src"); audio.load(); } catch (_) {}
+  }
+  if (url) URL.revokeObjectURL(url);
 }
 
 // ── COMPAT: functions referenced by other modules ──
@@ -1570,8 +2256,10 @@ function renderTalkButton(listening = false) {
   const icon = active
     ? '<path d="M12 2v20M17 5v14M7 5v14M22 8v8M2 8v8"/>'
     : '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Zm0 14a5 5 0 0 1-5-5H5a7 7 0 0 0 14 0h-2a5 5 0 0 1-5 5Zm-2 4v3h4v-3h-4Z"/>';
-  const label = active ? "Stopp" : "Mit Lexa sprechen";
-  btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="talk-btn-icon">' + icon + '</svg>' + label;
+  const labelKey = active ? "chat.endConversation" : "chat.talkToLexaBtn";
+  const label = typeof t === "function" ? t(labelKey) : (active ? "End conversation" : "Talk to Lexa");
+  btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="talk-btn-icon">' + icon + '</svg><span data-voice-entry-label data-i18n="' + labelKey + '">' + label + '</span>';
+  if (typeof _updateOrbActionA11y === "function") _updateOrbActionA11y(active);
 }
 
 // ══════════════════════════════════════════════════════
@@ -1623,36 +2311,55 @@ function handleChatResponse(res, ambient = false) {
 function _getConversationStarters() {
   return {
     morning: [
-      { icon: "\u2600\uFE0F", title: t("chat.starterDayPlan"), text: t("chat.starterDayPlanDesc"), msg: t("chat.starterMsgDayPlan") },
-      { icon: "\uD83D\uDCE7", title: t("chat.starterEmails"), text: t("chat.starterEmailsDesc"), msg: t("chat.starterMsgEmails") },
-      { icon: "\uD83D\uDCCB", title: t("chat.starterTodos"), text: t("chat.starterTodosDescMorning"), msg: t("chat.starterMsgTodos") },
-      { icon: "\uD83D\uDCBB", title: t("chat.starterSystem"), text: t("chat.starterSystemDesc"), msg: t("chat.starterMsgSysteminfo") },
+      { icon: "sun", title: t("chat.starterDayPlan"), text: t("chat.starterDayPlanDesc"), msg: t("chat.starterMsgDayPlan") },
+      { icon: "mail", title: t("chat.starterEmails"), text: t("chat.starterEmailsDesc"), msg: t("chat.starterMsgEmails") },
+      { icon: "checklist", title: t("chat.starterTodos"), text: t("chat.starterTodosDescMorning"), msg: t("chat.starterMsgTodos") },
+      { icon: "system", title: t("chat.starterSystem"), text: t("chat.starterSystemDesc"), msg: t("chat.starterMsgSysteminfo") },
     ],
     afternoon: [
-      { icon: "\u23F1\uFE0F", title: t("chat.starterPomodoro"), text: t("chat.starterPomodoroDesc"), msg: t("chat.starterMsgPomodoro") },
-      { icon: "\uD83D\uDCCB", title: t("chat.starterTodos"), text: t("chat.starterTodosDescAfternoon"), msg: t("chat.starterMsgTodos") },
-      { icon: "\uD83C\uDFB5", title: t("chat.starterMusic"), text: t("chat.starterMusicDescWork"), msg: t("chat.starterMsgFocusMusic") },
-      { icon: "\uD83D\uDCBB", title: t("chat.starterSystem"), text: t("chat.starterSystemDescPerf"), msg: t("chat.starterMsgSysteminfo") },
+      { icon: "timer", title: t("chat.starterPomodoro"), text: t("chat.starterPomodoroDesc"), msg: t("chat.starterMsgPomodoro") },
+      { icon: "checklist", title: t("chat.starterTodos"), text: t("chat.starterTodosDescAfternoon"), msg: t("chat.starterMsgTodos") },
+      { icon: "music", title: t("chat.starterMusic"), text: t("chat.starterMusicDescWork"), msg: t("chat.starterMsgFocusMusic") },
+      { icon: "system", title: t("chat.starterSystem"), text: t("chat.starterSystemDescPerf"), msg: t("chat.starterMsgSysteminfo") },
     ],
     evening: [
-      { icon: "\uD83D\uDCCA", title: t("chat.starterReview"), text: t("chat.starterReviewDesc"), msg: t("chat.starterMsgWhatDone") },
-      { icon: "\uD83C\uDFB5", title: t("chat.starterMusic"), text: t("chat.starterMusicDescChill"), msg: t("chat.starterMsgChillMusic") },
-      { icon: "\uD83E\uDDF9", title: t("chat.starterCleanup"), text: t("chat.starterCleanupDesc"), msg: t("chat.starterMsgCleanDownloads") },
-      { icon: "\uD83D\uDCDD", title: t("chat.starterNotes"), text: t("chat.starterNotesDesc"), msg: t("chat.starterMsgShowNotes") },
+      { icon: "chart", title: t("chat.starterReview"), text: t("chat.starterReviewDesc"), msg: t("chat.starterMsgWhatDone") },
+      { icon: "music", title: t("chat.starterMusic"), text: t("chat.starterMusicDescChill"), msg: t("chat.starterMsgChillMusic") },
+      { icon: "spark", title: t("chat.starterCleanup"), text: t("chat.starterCleanupDesc"), msg: t("chat.starterMsgCleanDownloads") },
+      { icon: "note", title: t("chat.starterNotes"), text: t("chat.starterNotesDesc"), msg: t("chat.starterMsgShowNotes") },
     ],
     night: [
-      { icon: "\uD83C\uDF19", title: t("chat.starterNightMode"), text: t("chat.starterNightModeDesc"), msg: t("chat.starterMsgQuieter") },
-      { icon: "\uD83D\uDCDD", title: t("chat.starterNotes"), text: t("chat.starterNotesDescNight"), msg: t("chat.starterMsgShowNotes") },
-      { icon: "\u23F1\uFE0F", title: t("chat.starterTimer"), text: t("chat.starterTimerDesc"), msg: t("chat.starterMsgTimer30") },
-      { icon: "\uD83D\uDCAC", title: t("chat.starterSmalltalk"), text: t("chat.starterSmalltalkDesc"), msg: t("chat.starterMsgHowAreYou") },
+      { icon: "moon", title: t("chat.starterNightMode"), text: t("chat.starterNightModeDesc"), msg: t("chat.starterMsgQuieter") },
+      { icon: "note", title: t("chat.starterNotes"), text: t("chat.starterNotesDescNight"), msg: t("chat.starterMsgShowNotes") },
+      { icon: "timer", title: t("chat.starterTimer"), text: t("chat.starterTimerDesc"), msg: t("chat.starterMsgTimer30") },
+      { icon: "message", title: t("chat.starterSmalltalk"), text: t("chat.starterSmalltalkDesc"), msg: t("chat.starterMsgHowAreYou") },
     ],
     general: [
-      { icon: "\uD83D\uDD25", title: t("chat.starterQuickStart"), text: t("chat.starterQuickStartDesc"), msg: t("chat.starterMsgWhatCanYouDo") },
-      { icon: "\uD83D\uDCCB", title: t("chat.starterTodos"), text: t("chat.starterTodosDescGeneral"), msg: t("chat.starterMsgTodos") },
-      { icon: "\uD83C\uDFB5", title: t("chat.starterMusic"), text: t("chat.starterMusicDescGeneral"), msg: t("chat.starterMsgGoodMusic") },
-      { icon: "\uD83D\uDCBB", title: t("chat.starterSystem"), text: t("chat.starterSystemDescGeneral"), msg: t("chat.starterMsgSysteminfo") },
+      { icon: "bolt", title: t("chat.starterQuickStart"), text: t("chat.starterQuickStartDesc"), msg: t("chat.starterMsgWhatCanYouDo") },
+      { icon: "checklist", title: t("chat.starterTodos"), text: t("chat.starterTodosDescGeneral"), msg: t("chat.starterMsgTodos") },
+      { icon: "music", title: t("chat.starterMusic"), text: t("chat.starterMusicDescGeneral"), msg: t("chat.starterMsgGoodMusic") },
+      { icon: "system", title: t("chat.starterSystem"), text: t("chat.starterSystemDescGeneral"), msg: t("chat.starterMsgSysteminfo") },
     ],
   };
+}
+
+function starterIconSvg(name) {
+  const paths = {
+    bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/>',
+    chart: '<path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 3-3 3 2 4-6"/>',
+    checklist: '<path d="m5 7 2 2 4-4"/><path d="M13 7h6"/><path d="m5 17 2 2 4-4"/><path d="M13 17h6"/>',
+    mail: '<path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/>',
+    message: '<path d="M5 6h14v10H8l-3 3V6Z"/><path d="M8 10h8"/><path d="M8 13h5"/>',
+    moon: '<path d="M20 15.4A7.5 7.5 0 0 1 8.6 4 8 8 0 1 0 20 15.4Z"/>',
+    music: '<path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/>',
+    note: '<path d="M6 4h9l3 3v13H6z"/><path d="M14 4v5h5"/><path d="M9 13h6"/><path d="M9 17h4"/>',
+    spark: '<path d="m12 3 1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3Z"/><path d="M19 15v4"/><path d="M17 17h4"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.9 4.9 1.4 1.4"/><path d="m17.7 17.7 1.4 1.4"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m4.9 19.1 1.4-1.4"/><path d="m17.7 6.3 1.4-1.4"/>',
+    system: '<rect x="4" y="5" width="16" height="11" rx="2"/><path d="M8 20h8"/><path d="M10 16v4"/><path d="M14 16v4"/>',
+    timer: '<circle cx="12" cy="13" r="7"/><path d="M12 9v4l3 2"/><path d="M9 2h6"/>',
+  };
+  const path = paths[name] || paths.spark;
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
 }
 
 function renderConversationStarters() {
@@ -1671,10 +2378,14 @@ function renderConversationStarters() {
   grid.innerHTML = "";
   starters.forEach(s => {
     const card = document.createElement("button");
+    card.type = "button";
     card.className = "starter-card";
+    card.setAttribute("aria-label", `${s.title}: ${s.text}`);
     const iconEl = document.createElement("span");
     iconEl.className = "starter-icon";
-    iconEl.textContent = s.icon;
+    iconEl.dataset.icon = s.icon;
+    iconEl.innerHTML = starterIconSvg(s.icon);
+    iconEl.setAttribute("aria-hidden", "true");
     const content = document.createElement("div");
     content.className = "starter-content";
     const titleEl = document.createElement("span");
@@ -1701,18 +2412,16 @@ function renderConversationStarters() {
 // ── PERFORMANCE ──────────────────────────────────
 function trimChatMessages() {
   const msgs = chatMessages.querySelectorAll(".message");
-  if (msgs.length > LexaConfig.MAX_DOM_MESSAGES + 1) { const toRemove = msgs.length - LexaConfig.MAX_DOM_MESSAGES - 1; for (let i = 1; i <= toRemove; i++) msgs[i].remove(); }
+  if (msgs.length > LexaConfig.MAX_DOM_MESSAGES) {
+    const toRemove = msgs.length - LexaConfig.MAX_DOM_MESSAGES;
+    for (let i = 0; i < toRemove; i++) msgs[i].remove();
+  }
 }
 
 // ── CONVERSATIONS ───────────────────────────────
 async function loadConversations() {
   try {
-    const data = await window.lexa.conversations();
-    LexaState.set("conversationsList", data.conversations || []);
-    if (typeof updateConversationCount === "function") {
-      updateConversationCount(LexaState.get("conversationsList").length);
-    }
-    renderConversationList();
+    await refreshConversationSidebar();
 
     // We explicitly do NOT auto-switch to an old conversation here
     // so the app remains in its beautiful, clean zero-state.
@@ -1722,6 +2431,16 @@ async function loadConversations() {
     console.warn("[Chat] Failed to load conversations:", e.message || e);
   }
 }
+
+async function refreshConversationSidebar() {
+  const data = await window.lexa.conversations();
+  LexaState.set("conversationsList", data.conversations || []);
+  if (typeof updateConversationCount === "function") {
+    updateConversationCount(LexaState.get("conversationsList").length);
+  }
+  renderConversationList();
+}
+
 function renderConversationList() {
   const container = document.getElementById("conversation-list");
   if (!container) return;
@@ -1738,6 +2457,8 @@ function renderConversationList() {
     const item = document.createElement("div");
     item.className = "conv-item" + (isActive ? " active" : "");
     item.dataset.convId = c.id;
+    item.title = c.title;
+    item.setAttribute("aria-current", isActive ? "page" : "false");
     const content = document.createElement("div");
     content.className = "conv-item-content";
     const titleEl = document.createElement("div");
@@ -1752,20 +2473,26 @@ function renderConversationList() {
     const actions = document.createElement("div");
     actions.className = "conv-actions";
     const exportBtn = document.createElement("button");
+    exportBtn.type = "button";
     exportBtn.className = "conv-action-btn";
     exportBtn.title = t("chat.export");
+    exportBtn.setAttribute("aria-label", t("chat.exportConversationLabel", { title: c.title }));
     exportBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
     exportBtn.addEventListener("click", (e) => { e.stopPropagation(); exportConversation(c.id); });
     const delBtn = document.createElement("button");
+    delBtn.type = "button";
     delBtn.className = "conv-delete-btn";
     delBtn.title = t("common.delete");
+    delBtn.setAttribute("aria-label", t("chat.deleteConversationLabel", { title: c.title }));
     delBtn.textContent = "\u00d7";
     delBtn.addEventListener("click", (e) => { e.stopPropagation(); deleteConversation(c.id); });
     actions.appendChild(exportBtn);
     actions.appendChild(delBtn);
     item.appendChild(content);
     item.appendChild(actions);
-    item.addEventListener("click", () => switchConversation(c.id));
+    bindKeyboardAction(item, () => switchConversation(c.id), {
+      label: t("chat.openConversationLabel", { title: c.title, count }),
+    });
     container.appendChild(item);
   });
 }
@@ -1775,7 +2502,7 @@ async function newConversation() {
     LexaState.set("currentConversationId", result.id);
     localStorage.setItem("lexa-active-conversation", result.id);
     const msgs = chatMessages.querySelectorAll(".message");
-    msgs.forEach((m, i) => { if (i > 0) m.remove(); });
+    msgs.forEach((m) => m.remove());
     await window.lexa.historyClear();
     // Restore hero greeting view — orb always stays visible
     const sleekGreeting = document.getElementById("sleek-greeting");
@@ -1812,7 +2539,7 @@ async function switchConversation(convId, notify = true) {
     if (!conv || conv.detail) { if (notify) showToast(t("toast.convNotFound"), "error"); return; }
     await window.lexa.conversationLoad(convId);
     const msgs = chatMessages.querySelectorAll(".message");
-    msgs.forEach((m, i) => { if (i > 0) m.remove(); });
+    msgs.forEach((m) => m.remove());
     const messages = conv.messages || [];
     for (const msg of messages) addMessage(msg.content, msg.role === "user" ? "user" : "system", null, false, true);
     renderConversationList();
@@ -1827,13 +2554,16 @@ async function switchConversation(convId, notify = true) {
 async function saveCurrentConversation() {
   if (!LexaState.get("currentConversationId")) return;
   const messages = [];
-  chatMessages.querySelectorAll(".message").forEach((msg, i) => {
-    if (i === 0) return;
-    const text = msg.querySelector(".msg-text")?.textContent || "";
+  chatMessages.querySelectorAll(".message").forEach((msg) => {
+    if (!isPersistableChatMessage(msg)) return;
+    const text = getMessagePersistText(msg);
     const role = msg.classList.contains("user-message") ? "user" : "assistant";
     if (text) messages.push({ role, content: text });
   });
-  try { await window.lexa.conversationUpdate(LexaState.get("currentConversationId"), { messages }); } catch (e) { console.warn("[Chat] Failed to save conversation:", e.message || e); }
+  try {
+    await window.lexa.conversationUpdate(LexaState.get("currentConversationId"), { messages });
+    await refreshConversationSidebar();
+  } catch (e) { console.warn("[Chat] Failed to save conversation:", e.message || e); }
 }
 async function deleteConversation(convId) {
   try {
@@ -1876,16 +2606,102 @@ function setupDragDrop() {
 }
 function triggerFileUpload() { document.getElementById("file-input")?.click(); }
 function handleFileSelect(event) { const file = event.target.files?.[0]; if (file) handleFileUpload(file); event.target.value = ""; }
+
+function fileUploadSizeLabel(file) {
+  if (file.size < 1024) return `${file.size} B`;
+  if (file.size < 1048576) return `${(file.size / 1024).toFixed(1)} KB`;
+  return `${(file.size / 1048576).toFixed(1)} MB`;
+}
+
+function fileUploadExtension(file) {
+  return file.name.includes(".") ? file.name.split(".").pop().toUpperCase() : "FILE";
+}
+
+function buildFileUploadCard(file) {
+  const ext = fileUploadExtension(file);
+  const card = document.createElement("div");
+  card.className = "file-card";
+
+  const icon = document.createElement("div");
+  icon.className = "file-card-icon";
+  icon.textContent = getFileIcon(ext);
+
+  const info = document.createElement("div");
+  info.className = "file-card-info";
+
+  const name = document.createElement("div");
+  name.className = "file-card-name";
+  name.textContent = file.name;
+
+  const meta = document.createElement("div");
+  meta.className = "file-card-meta";
+  meta.textContent = `${ext} · ${fileUploadSizeLabel(file)}`;
+
+  info.appendChild(name);
+  info.appendChild(meta);
+  card.appendChild(icon);
+  card.appendChild(info);
+  return card;
+}
+
+function addFileUploadMessage(file, userMsg) {
+  addMessage(userMsg || "", "user");
+  const messages = chatMessages.querySelectorAll(".message.user-message");
+  const msg = messages[messages.length - 1];
+  const textEl = msg?.querySelector(".msg-text");
+  if (!textEl) return;
+  const card = buildFileUploadCard(file);
+  if (textEl.firstChild) {
+    textEl.insertBefore(document.createElement("br"), textEl.firstChild);
+  }
+  textEl.insertBefore(card, textEl.firstChild);
+}
+
+function buildFileInfoBadge(fileInfo) {
+  const badge = document.createElement("div");
+  badge.className = "file-info-badge";
+  const parts = [
+    String(fileInfo.type || "file").toUpperCase(),
+    `${fileInfo.size_kb || 0} KB`,
+  ];
+  if (fileInfo.line_count) parts.push(t("chat.fileLines", {count: fileInfo.line_count}));
+  badge.textContent = parts.join(" · ");
+  return badge;
+}
+
+function addFileUploadResponse(res) {
+  addMessage(res.reply || "", "system", res.action, res.requires_confirmation);
+  if (!res.file_info) return;
+  const messages = chatMessages.querySelectorAll(".message.system-message");
+  const msg = messages[messages.length - 1];
+  const textEl = msg?.querySelector(".msg-text");
+  if (!textEl) return;
+  const badge = buildFileInfoBadge(res.file_info);
+  if (textEl.firstChild) {
+    textEl.insertBefore(document.createElement("br"), textEl.firstChild);
+  }
+  textEl.insertBefore(badge, textEl.firstChild);
+}
+
 async function handleFileUpload(file) {
+  if (LexaState.get("isLoading")) { showToast(t("chat.uploadBusy"), "warning"); return; }
   if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
   const maxSize = 2 * 1024 * 1024;
   if (file.size > maxSize) { showToast(t("toast.fileTooLarge"), "error"); return; }
-  if (!LexaState.get("currentConversationId")) { try { const result = await window.lexa.conversationCreate(t("chat.newChatTitle")); LexaState.set("currentConversationId", result.id); localStorage.setItem("lexa-active-conversation", result.id); const data = await window.lexa.conversations(); LexaState.set("conversationsList", data.conversations || []); renderConversationList(); } catch (e) { console.warn("[Chat] Failed to create conversation for file upload:", e.message || e); } }
-  const sizeStr = file.size < 1024 ? file.size + " B" : file.size < 1048576 ? (file.size / 1024).toFixed(1) + " KB" : (file.size / 1048576).toFixed(1) + " MB";
-  const ext = file.name.includes(".") ? file.name.split(".").pop().toUpperCase() : "FILE";
-  const fileCardHtml = `<div class="file-card"><div class="file-card-icon">${getFileIcon(ext)}</div><div class="file-card-info"><div class="file-card-name">${escapeHtml(file.name)}</div><div class="file-card-meta">${ext} \u00b7 ${sizeStr}</div></div></div>`;
+  if (!LexaState.get("currentConversationId")) {
+    try {
+      const result = await window.lexa.conversationCreate(t("chat.newChatTitle"));
+      LexaState.set("currentConversationId", result.id);
+      localStorage.setItem("lexa-active-conversation", result.id);
+      await refreshConversationSidebar();
+    } catch (e) {
+      console.warn("[Chat] Failed to create conversation for file upload:", e.message || e);
+      showToast(t("toast.createError"), "error");
+      return;
+    }
+  }
   const userMsg = chatInput.value.trim();
-  addMessage(fileCardHtml + (userMsg ? `<br>${formatMessage(userMsg)}` : ""), "user");
+  addFileUploadMessage(file, userMsg);
   chatInput.value = ""; syncChatInputSize();
   const isFirst = chatMessages.querySelectorAll(".user-message").length <= 1;
   if (isFirst) autoTitleConversation(file.name);
@@ -1895,9 +2711,7 @@ async function handleFileUpload(file) {
     hideTyping();
     if (res.detail) { addMessage(res.detail, "system"); showToast(t("toast.fileError"), "error"); }
     else {
-      let infoHtml = "";
-      if (res.file_info) { const fi = res.file_info; infoHtml = `<div class="file-info-badge">${fi.type.toUpperCase()} \u00b7 ${fi.size_kb} KB${fi.line_count ? " \u00b7 " + t("chat.fileLines", {count: fi.line_count}) : ""}</div>`; }
-      addMessage(infoHtml + formatMessage(res.reply), "system", res.action, res.requires_confirmation);
+      addFileUploadResponse(res);
       if (res.action && !res.requires_confirmation) { try { const execResult = await window.lexa.execute(res.action.action, res.action.params || {}); if (execResult.success) { showToast(t("chat.actionDoneToast", {action: res.action.action}), "success", 2500); } else { showToast(execResult.error || t("chat.actionFailedToast", {action: res.action.action}), "error", 3000); } } catch (e) { console.warn("[Chat] File upload action execution failed:", e.message || e); showToast(t("toast.executionError"), "error"); } }
       playTTS(res.reply);
     }
@@ -1911,22 +2725,63 @@ function getFileIcon(ext) {
 
 // ── GLOBAL SEARCH OVERLAY ────────────────────────
 let searchDebounce = null;
+let searchRestoreFocusEl = null;
+function restoreSearchFocus() {
+  const el = searchRestoreFocusEl;
+  searchRestoreFocusEl = null;
+  if (!el || !el.isConnected || typeof el.focus !== "function") return;
+  try { el.focus({ preventScroll: true }); }
+  catch (_) { try { el.focus(); } catch (_) {} }
+}
+function searchFocusableElements(root) {
+  return [...root.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  )].filter(el => !el.disabled && !el.hidden && el.getClientRects().length > 0);
+}
+function trapSearchFocus(root, event) {
+  const items = searchFocusableElements(root);
+  if (!items.length) {
+    event.preventDefault();
+    return;
+  }
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
 function openSearchOverlay() {
   let overlay = document.getElementById("search-overlay");
   if (!overlay) {
     overlay = document.createElement("div"); overlay.id = "search-overlay"; overlay.className = "search-overlay";
-    overlay.innerHTML = `<div class="search-panel"><div class="search-header"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="text" id="search-input" class="search-input" placeholder="${escapeHtml(t("chat.searchPlaceholder"))}" autocomplete="off"><button class="search-close-btn" id="search-close-btn">\u00d7</button></div><div id="search-results" class="search-results"><div class="search-empty">${escapeHtml(t("chat.searchHint"))}</div></div></div>`;
+    overlay.innerHTML = `<div class="search-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("nav.searchTooltip"))}"><div class="search-header"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="text" id="search-input" class="search-input" placeholder="${escapeHtml(t("chat.searchPlaceholder"))}" aria-label="${escapeHtml(t("chat.searchPlaceholder"))}" autocomplete="off"><button type="button" class="search-close-btn" id="search-close-btn" aria-label="${escapeHtml(t("common.close"))}">\u00d7</button></div><div id="search-results" class="search-results"><div class="search-empty">${escapeHtml(t("chat.searchHint"))}</div></div></div>`;
     document.body.appendChild(overlay);
     overlay.addEventListener("click", (e) => { if (e.target === overlay) closeSearchOverlay(); });
     document.getElementById("search-close-btn").addEventListener("click", closeSearchOverlay);
     document.getElementById("search-input").addEventListener("input", (e) => { clearTimeout(searchDebounce); searchDebounce = setTimeout(() => performSearch(e.target.value.trim()), 300); });
     document.getElementById("search-input").addEventListener("keydown", (e) => { if (e.key === "Escape") closeSearchOverlay(); });
+    overlay.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeSearchOverlay();
+      if (e.key === "Tab") trapSearchFocus(overlay, e);
+    });
+  }
+  const active = document.activeElement;
+  if (active && active !== document.body && !overlay.contains(active)) {
+    searchRestoreFocusEl = active;
   }
   overlay.classList.add("visible");
   const input = document.getElementById("search-input"); input.value = ""; input.focus();
   renderSearchEmpty(document.getElementById("search-results"), t("chat.searchHint"));
 }
-function closeSearchOverlay() { document.getElementById("search-overlay")?.classList.remove("visible"); }
+function closeSearchOverlay(options = {}) {
+  document.getElementById("search-overlay")?.classList.remove("visible");
+  if (options.restoreFocus !== false) restoreSearchFocus();
+  else searchRestoreFocusEl = null;
+}
 async function performSearch(query) {
   const container = document.getElementById("search-results");
   if (!container) return;
@@ -1938,6 +2793,9 @@ async function performSearch(query) {
     const buildSearchItem = (icon, title, meta, action) => {
       const item = document.createElement("div");
       item.className = "search-item";
+      item.setAttribute("role", "button");
+      item.setAttribute("tabindex", "0");
+      item.setAttribute("aria-label", `${title}. ${meta || ""}`.trim());
       const iconEl = document.createElement("span");
       iconEl.className = "search-item-icon";
       iconEl.textContent = icon;
@@ -1953,7 +2811,14 @@ async function performSearch(query) {
       info.appendChild(metaEl);
       item.appendChild(iconEl);
       item.appendChild(info);
-      item.addEventListener("click", () => { closeSearchOverlay(); action(); });
+      const runAction = () => { closeSearchOverlay({ restoreFocus: false }); action(); };
+      item.addEventListener("click", runAction);
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          runAction();
+        }
+      });
       return item;
     };
     if (data.conversations?.length > 0) { const catEl = document.createElement("div"); catEl.className = "search-category"; catEl.textContent = t("chat.categoryChats"); container.appendChild(catEl); for (const c of data.conversations) container.appendChild(buildSearchItem("\u{1F4AC}", c.title, `${t("chat.messageCount", {count: c.message_count || 0})} \u00b7 ${String(c.updated_at || "").substring(0, 16)}`, () => switchConversation(c.id))); }

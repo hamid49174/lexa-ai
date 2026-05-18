@@ -4,6 +4,7 @@ Tests: data models, tool execution, result formatting, agent configuration.
 
 Run with: python -m pytest tests/test_agent_loop.py -v
 """
+import asyncio
 import json
 import time
 import unittest
@@ -14,6 +15,10 @@ from backend.agent_loop import (
     _execute_tool, _format_tool_result,
 )
 from backend.config import AGENT_MAX_STEPS
+
+
+def _run(coro):
+    return asyncio.run(coro)
 
 
 # ══════════════════════════════════════════════════
@@ -60,24 +65,24 @@ class TestToolExecution(unittest.TestCase):
 
     @patch("backend.agent_loop.is_command_allowed", return_value="blocked")
     def test_blocked_command(self, mock_perm):
-        result = _execute_tool("format_disk", {})
+        result = _run(_execute_tool("format_disk", {}))
         self.assertFalse(result["success"])
         self.assertIn("blockiert", result["error"])
 
     @patch("backend.agent_loop.is_command_allowed", return_value="confirmation_required")
     def test_confirmation_required(self, mock_perm):
-        result = _execute_tool("shutdown", {})
+        result = _run(_execute_tool("shutdown", {}))
         self.assertFalse(result["success"])
         self.assertTrue(result.get("needs_confirmation"))
 
     @patch("backend.agent_loop.is_command_allowed", return_value="unknown")
     def test_unknown_command(self, mock_perm):
-        result = _execute_tool("nonexistent_cmd", {})
+        result = _run(_execute_tool("nonexistent_cmd", {}))
         self.assertFalse(result["success"])
         self.assertIn("Unbekannt", result["error"])
 
     def test_invalid_action_name(self):
-        result = _execute_tool("INVALID-NAME!", {})
+        result = _run(_execute_tool("INVALID-NAME!", {}))
         self.assertFalse(result["success"])
         self.assertIn("Ungueltig", result["error"])
 
@@ -86,9 +91,21 @@ class TestToolExecution(unittest.TestCase):
     @patch("companion.engine.companion")
     def test_successful_execution(self, mock_companion, mock_validate, mock_perm):
         mock_companion.execute.return_value = {"success": True, "data": "OK"}
-        result = _execute_tool("system_info", {})
+        result = _run(_execute_tool("system_info", {}))
         self.assertTrue(result["success"])
         self.assertEqual(result["data"], "OK")
+
+    @patch("backend.agent_loop.is_command_allowed", return_value="allowed")
+    @patch("backend.agent_loop.validate_params", return_value={"filepath": "OS_MANIFEST.md"})
+    def test_personal_os_execution_routes_to_async_bridge(self, mock_validate, mock_perm):
+        async def fake_execute(command, params):
+            return {"success": True, "data": f"{command}:{params['filepath']}"}
+
+        with patch("backend.personal_os_actions.execute_personal_os_action", fake_execute):
+            result = _run(_execute_tool("personal_os_read_file", {"filepath": "OS_MANIFEST.md"}))
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["data"], "personal_os_read_file:OS_MANIFEST.md")
 
 
 # ══════════════════════════════════════════════════

@@ -19,10 +19,11 @@ from pathlib import Path
 
 from voice.config import (
     AUDIO_CACHE_DIR,
+    OPENAI_AUDIO_BASE_URL, OPENAI_TTS_MODEL, OPENAI_TTS_VOICE,
     CARTESIA_API_URL, CARTESIA_MODEL, CARTESIA_VOICE_ID, CARTESIA_OUTPUT_FORMAT,
     ELEVENLABS_API_BASE, ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL,
     ELEVENLABS_STABILITY, ELEVENLABS_SIMILARITY, ELEVENLABS_STYLE,
-    MAX_TTS_CHUNK_CHARS, MAX_TTS_TEXT_CHARS,
+    MAX_TTS_CHUNK_CHARS, MAX_TTS_TEXT_CHARS, TTS_PROVIDER_ORDER,
 )
 
 logger = logging.getLogger("lexa.tts")
@@ -31,11 +32,12 @@ logger = logging.getLogger("lexa.tts")
 #  API KEY MANAGEMENT
 # ═══════════════════════════════════════════════════
 
-_keys: dict[str, str | None] = {"cartesia": None, "elevenlabs": None}
-_keys_loaded: dict[str, bool] = {"cartesia": False, "elevenlabs": False}
+_keys: dict[str, str | None] = {"openai": None, "cartesia": None, "elevenlabs": None}
+_keys_loaded: dict[str, bool] = {"openai": False, "cartesia": False, "elevenlabs": False}
 
 # Persistent HTTP sessions
 _sessions: dict[str, requests.Session] = {
+    "openai": requests.Session(),
     "cartesia": requests.Session(),
     "elevenlabs": requests.Session(),
 }
@@ -51,6 +53,7 @@ def _get_key(provider: str) -> str | None:
     try:
         import keyring
         key_names = {
+            "openai": "openai_api_key",
             "cartesia": "cartesia_api_key",
             "elevenlabs": "elevenlabs_api_key",
         }
@@ -69,15 +72,104 @@ def _get_key(provider: str) -> str | None:
 
 _cartesia_voice_id = CARTESIA_VOICE_ID
 _cartesia_model = CARTESIA_MODEL
+_openai_tts_model = OPENAI_TTS_MODEL
+_openai_tts_voice = OPENAI_TTS_VOICE
 _elevenlabs_voice_id = ELEVENLABS_VOICE_ID
 _elevenlabs_model = ELEVENLABS_MODEL
 _elevenlabs_stability = ELEVENLABS_STABILITY
 _elevenlabs_similarity = ELEVENLABS_SIMILARITY
 _elevenlabs_style = ELEVENLABS_STYLE
 _elevenlabs_enabled = True
+_valid_tts_providers = ("elevenlabs", "cartesia", "openai", "sapi")
+
+
+def _normalize_provider_order(raw: str | list[str] | tuple[str, ...]) -> list[str]:
+    if isinstance(raw, str):
+        candidates = raw.split(",")
+    else:
+        candidates = list(raw)
+    order: list[str] = []
+    for item in candidates:
+        provider = str(item or "").strip().lower()
+        if provider in _valid_tts_providers and provider not in order:
+            order.append(provider)
+    for provider in _valid_tts_providers:
+        if provider not in order:
+            order.append(provider)
+    return order
+
+
+_tts_provider_order = _normalize_provider_order(TTS_PROVIDER_ORDER)
 
 # Sentence split pattern
 _SENTENCE_SPLIT = re.compile(r'(?<=[.!?])\s+')
+
+
+def _sapi_available() -> bool:
+    try:
+        import pyttsx3  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _provider_available(provider: str) -> bool:
+    if provider == "openai":
+        return bool(_get_key("openai"))
+    if provider == "elevenlabs":
+        return bool(_elevenlabs_enabled and _get_key("elevenlabs"))
+    if provider == "cartesia":
+        return bool(_get_key("cartesia"))
+    if provider == "sapi":
+        return _sapi_available()
+    return False
+
+
+def _ordered_tts_providers() -> list[str]:
+    providers: list[str] = []
+    for provider in _tts_provider_order:
+        if _provider_available(provider):
+            providers.append(provider)
+    return providers
+
+
+def _provider_cache_signature(provider: str) -> str:
+    if provider == "openai":
+        return "|".join(["openai", _openai_tts_model, _openai_tts_voice])
+    if provider == "elevenlabs":
+        return "|".join([
+            "elevenlabs",
+            _elevenlabs_model,
+            _elevenlabs_voice_id,
+            str(_elevenlabs_stability),
+            str(_elevenlabs_similarity),
+            str(_elevenlabs_style),
+        ])
+    if provider == "cartesia":
+        return "|".join(["cartesia", _cartesia_model, _cartesia_voice_id])
+    if provider == "sapi":
+        return "sapi|windows-sapi-v1"
+    return provider
+
+
+def _provider_cache_path(text: str, provider: str) -> tuple[str, str]:
+    ext = ".wav" if provider == "sapi" else ".mp3"
+    cache_input = f"{text}|{_provider_cache_signature(provider)}".encode()
+    text_hash = hashlib.sha256(cache_input).hexdigest()[:24]
+    return text_hash, str(AUDIO_CACHE_DIR / f"tts_{text_hash}{ext}")
+
+
+async def _speak_with_provider(provider: str, text: str, target: str) -> str:
+    if provider == "openai":
+        return await asyncio.to_thread(_speak_openai, text, target)
+    if provider == "elevenlabs":
+        return await asyncio.to_thread(_speak_elevenlabs, text, target)
+    if provider == "cartesia":
+        return await asyncio.to_thread(_speak_cartesia, text, target)
+    if provider == "sapi":
+        sapi_path = target.replace(".mp3", ".wav") if target.endswith(".mp3") else target
+        return await asyncio.to_thread(_speak_sapi, text, sapi_path)
+    raise RuntimeError(f"Unknown TTS provider: {provider}")
 
 # ═══════════════════════════════════════════════════
 #  TEXT CHUNKING
@@ -262,63 +354,108 @@ def _concat_mp3_chunks(chunk_paths: list[str], output_path: str):
 
 
 # ═══════════════════════════════════════════════════
+#  OPENAI GPT TTS
+# ═══════════════════════════════════════════════════
+
+def _speak_openai(text: str, output_path: str) -> str:
+    """Generate speech via OpenAI's current GPT TTS endpoint."""
+    api_key = _get_key("openai")
+    if not api_key:
+        raise RuntimeError("OpenAI API key not configured")
+
+    payload = {
+        "model": _openai_tts_model,
+        "voice": _openai_tts_voice,
+        "input": text[:MAX_TTS_TEXT_CHARS],
+        "response_format": "mp3",
+    }
+    resp = _sessions["openai"].post(
+        f"{OPENAI_AUDIO_BASE_URL}/audio/speech",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=30,
+    )
+    if resp.status_code == 200 and resp.content:
+        with open(output_path, "wb") as f:
+            f.write(resp.content)
+        logger.info(f"TTS [OpenAI {_openai_tts_model}/{_openai_tts_voice}]: {output_path}")
+        return output_path
+
+    error_msg = resp.text[:200] if hasattr(resp, "text") else "unknown"
+    raise RuntimeError(f"OpenAI TTS error {resp.status_code}: {error_msg}")
+
+
+# ═══════════════════════════════════════════════════
 #  MAIN SPEAK FUNCTIONS
 # ═══════════════════════════════════════════════════
 
 async def speak_async(text: str, output_path: str = "") -> str:
     """Convert text to speech. Returns absolute path to audio file.
-    Fallback chain: Cartesia → ElevenLabs → SAPI."""
+    Fallback chain is provider-locked per response to avoid mixed voices."""
     if not text or not text.strip():
         raise ValueError("Text darf nicht leer sein.")
 
-    # Include voice ID in cache key so voice changes take effect
-    voice_key = _elevenlabs_voice_id if (_elevenlabs_enabled and _get_key("elevenlabs")) else _cartesia_voice_id
-    cache_input = f"{text}|{voice_key}".encode()
-    text_hash = hashlib.sha256(cache_input).hexdigest()[:24]
-    mp3_path = str(AUDIO_CACHE_DIR / f"tts_{text_hash}.mp3")
+    providers = _ordered_tts_providers()
+    if not providers:
+        raise RuntimeError("No TTS provider available")
 
-    # Cache hit
-    if Path(mp3_path).exists():
-        return mp3_path
-
-    target = output_path or mp3_path
     chunks = _chunk_text(text)
+    errors: list[str] = []
 
-    if len(chunks) == 1:
-        return await _speak_single(chunks[0], target)
-    else:
-        return await _speak_multi(chunks, text_hash, target, text)
+    for provider in providers:
+        text_hash, cache_path = _provider_cache_path(text, provider)
+        target = output_path or cache_path
 
+        if not output_path and Path(cache_path).exists():
+            return cache_path
 
-async def _speak_single(text: str, target: str) -> str:
-    """Single chunk — 3-tier fallback."""
-    # Tier 1: ElevenLabs (best quality voice)
-    if _elevenlabs_enabled:
         try:
-            return await asyncio.to_thread(_speak_elevenlabs, text, target)
+            if len(chunks) == 1 or provider == "sapi":
+                return await _speak_single(text if provider == "sapi" else chunks[0], target, provider)
+            return await _speak_multi(chunks, text_hash, target, text, provider)
         except Exception as e:
-            logger.warning(f"ElevenLabs failed: {e}")
+            errors.append(f"{provider}: {e}")
+            logger.warning(f"TTS provider {provider} failed for full response: {e}")
+            if output_path:
+                try:
+                    Path(output_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
 
-    # Tier 2: Cartesia (fast, cheap)
-    try:
-        return await asyncio.to_thread(_speak_cartesia, text, target)
-    except Exception as e:
-        logger.warning(f"Cartesia failed: {e}")
+    raise RuntimeError("All TTS providers failed: " + "; ".join(errors))
 
-    # Tier 3: Windows SAPI (offline)
-    sapi_path = target.replace(".mp3", ".wav") if target.endswith(".mp3") else target + ".wav"
-    return await asyncio.to_thread(_speak_sapi, text, sapi_path)
+
+async def _speak_single(text: str, target: str, provider: str | None = None) -> str:
+    """Generate one chunk. If provider is set, do not fallback inside the chunk."""
+    if provider:
+        return await _speak_with_provider(provider, text, target)
+
+    errors: list[str] = []
+    for candidate in _ordered_tts_providers():
+        try:
+            return await _speak_with_provider(candidate, text, target)
+        except Exception as e:
+            errors.append(f"{candidate}: {e}")
+            logger.warning(f"TTS provider {candidate} failed: {e}")
+    raise RuntimeError("All TTS providers failed: " + "; ".join(errors))
 
 
 async def _speak_multi(chunks: list[str], text_hash: str,
-                       target: str, full_text: str) -> str:
-    """Multi-chunk — generate each chunk, concatenate."""
-    logger.info(f"TTS chunking: {len(chunks)} chunks for {len(full_text)} chars")
+                       target: str, full_text: str,
+                       provider: str = "elevenlabs") -> str:
+    """Multi-chunk generation with one provider for the whole response."""
+    if provider == "sapi":
+        return await _speak_with_provider(provider, full_text, target)
+
+    logger.info(f"TTS chunking: {len(chunks)} chunks for {len(full_text)} chars via {provider}")
     chunk_paths = []
     try:
         for i, chunk in enumerate(chunks):
             chunk_path = str(AUDIO_CACHE_DIR / f"tts_{text_hash}_c{i}.mp3")
-            await _speak_single(chunk, chunk_path)
+            await _speak_single(chunk, chunk_path, provider)
             chunk_paths.append(chunk_path)
 
         _concat_mp3_chunks(chunk_paths, target)
@@ -337,6 +474,10 @@ async def _speak_multi(chunks: list[str], text_hash: str,
                 Path(cp).unlink()
             except OSError:
                 pass
+        try:
+            Path(target).unlink(missing_ok=True)
+        except OSError:
+            pass
         raise
 
 
@@ -510,28 +651,23 @@ def get_elevenlabs_voices() -> list[dict]:
 # ═══════════════════════════════════════════════════
 
 def get_tts_status() -> dict:
+    openai_key = _get_key("openai")
     cartesia_key = _get_key("cartesia")
     el_key = _get_key("elevenlabs")
-    sapi_available = False
-    try:
-        import pyttsx3
-        sapi_available = True
-    except ImportError:
-        pass
+    sapi_available = _sapi_available()
+    provider_order = _ordered_tts_providers()
 
     # ElevenLabs is primary when enabled + key available (matches _speak_single order)
-    if _elevenlabs_enabled and el_key:
-        primary = "elevenlabs"
-    elif cartesia_key:
-        primary = "cartesia"
-    elif sapi_available:
-        primary = "sapi"
-    else:
-        primary = "none"
+    primary = provider_order[0] if provider_order else "none"
 
     return {
-        "available": bool(cartesia_key) or bool(el_key) or sapi_available,
+        "available": bool(openai_key) or bool(cartesia_key) or bool(el_key) or sapi_available,
         "engine": primary,
+        "provider_order": provider_order,
+        "configured_provider_order": list(_tts_provider_order),
+        "openai_available": bool(openai_key),
+        "openai_model": _openai_tts_model,
+        "openai_voice": _openai_tts_voice,
         "cartesia_available": bool(cartesia_key),
         "cartesia_model": _cartesia_model,
         "cartesia_voice_id": _cartesia_voice_id,
@@ -541,7 +677,8 @@ def get_tts_status() -> dict:
         "elevenlabs_model": _elevenlabs_model,
         "elevenlabs_has_key": bool(el_key),
         "sapi_available": sapi_available,
-        "ready": bool(cartesia_key) or bool(el_key) or sapi_available,
+        "ready": bool(openai_key) or bool(cartesia_key) or bool(el_key) or sapi_available,
+        "voice_consistency": "provider_locked_per_response",
         "cache_dir": str(AUDIO_CACHE_DIR),
     }
 

@@ -11,6 +11,21 @@ function _closeOverlay(overlay, escHandler) {
   if (escHandler) document.removeEventListener("keydown", escHandler);
 }
 
+function bindMemoryCardAction(el, handler, label) {
+  if (!el || typeof handler !== "function") return;
+  if (label) el.setAttribute("aria-label", label);
+  if (!el.hasAttribute("role")) el.setAttribute("role", "button");
+  if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "0");
+  el.addEventListener("keydown", (event) => {
+    if (event.target !== el) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handler(event);
+    }
+  });
+  el.addEventListener("click", handler);
+}
+
 // ── MEMORY VIEW ──────────────────────────────────
 async function refreshMemoryView() {
   if (!LexaState.get("backendOnline")) return;
@@ -59,8 +74,10 @@ async function refreshMemoryView() {
         card.appendChild(metaEl);
 
         const delBtn = document.createElement("button");
+        delBtn.type = "button";
         delBtn.className = "note-delete-btn";
         delBtn.title = t("memory.deleteNoteTooltip");
+        delBtn.setAttribute("aria-label", t("memory.deleteNoteLabel", { title: n.title || "" }));
         delBtn.textContent = "\u00d7";
         delBtn.addEventListener("click", async (e) => {
           e.stopPropagation();
@@ -74,7 +91,7 @@ async function refreshMemoryView() {
         });
         card.appendChild(delBtn);
 
-        card.addEventListener("click", () => openNoteModal(n.id, n.title));
+        bindMemoryCardAction(card, () => openNoteModal(n.id, n.title), t("memory.openNoteLabel", { title: n.title || "" }));
         notesList.appendChild(card);
       });
     } else {
@@ -101,12 +118,15 @@ async function refreshMemoryView() {
           meta.className = "note-meta";
           meta.textContent = preview;
           const deleteBtn = document.createElement("button");
+          deleteBtn.type = "button";
           deleteBtn.className = "snippet-delete";
+          deleteBtn.title = t("memory.deleteSnippetTooltip");
+          deleteBtn.setAttribute("aria-label", t("memory.deleteSnippetLabel", { name: s.name || "" }));
           deleteBtn.textContent = "\u00d7";
           card.appendChild(title);
           card.appendChild(meta);
           card.appendChild(deleteBtn);
-          card.addEventListener("click", () => useSnippet(snippetText));
+          bindMemoryCardAction(card, () => useSnippet(snippetText), t("memory.useSnippetLabel", { name: s.name || "" }));
           deleteBtn.addEventListener("click", (e) => {
             e.stopPropagation();
             deleteSnippet(s.name);
@@ -153,8 +173,11 @@ async function refreshMemoryView() {
         const schedule = document.createElement("div");
         schedule.className = "routine-schedule";
         schedule.textContent = (r.schedule || "") + (r.description ? ` \u00b7 ${r.description}` : "");
-        const toggle = document.createElement("div");
+        const toggle = document.createElement("button");
+        toggle.type = "button";
         toggle.className = "routine-toggle" + (r.enabled ? " enabled" : "");
+        toggle.setAttribute("aria-pressed", r.enabled ? "true" : "false");
+        toggle.setAttribute("aria-label", t("memory.toggleRoutineLabel", { name: r.name || "" }));
         info.appendChild(name);
         info.appendChild(schedule);
         card.appendChild(info);
@@ -188,10 +211,10 @@ async function refreshMemoryView() {
           card.appendChild(title);
           card.appendChild(meta);
           const rawText = e.text || "";
-          card.addEventListener("click", () => {
+          bindMemoryCardAction(card, () => {
             window.lexa.execute("clipboard_write", { text: rawText }, true);
             showToast(t("toast.clipboardCopied"), "success", 2000);
-          });
+          }, t("memory.copyClipboardLabel"));
           cbList.appendChild(card);
         });
       } else {
@@ -205,6 +228,7 @@ async function refreshMemoryView() {
   if (cleanupEl) {
     cleanupEl.innerHTML = "";
     const cleanBtn = document.createElement("button");
+    cleanBtn.type = "button";
     cleanBtn.className = "action-btn memory-cleanup-btn";
     cleanBtn.textContent = t("memory.cleanupBtn", {count: parseInt(stats.memories) || 0});
     cleanBtn.addEventListener("click", runMemoryCleanup);
@@ -232,6 +256,9 @@ function quickCreateNote() {
 
   const panel = document.createElement("div");
   panel.className = "note-modal-panel";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-label", t("notes.newNote"));
 
   const header = document.createElement("div");
   header.className = "note-modal-header";
@@ -241,7 +268,9 @@ function quickCreateNote() {
   titleInput.placeholder = t("memory.noteTitlePlaceholder");
   header.appendChild(titleInput);
   const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
   closeBtn.className = "note-modal-close";
+  closeBtn.setAttribute("aria-label", t("common.close"));
   closeBtn.textContent = "\u00d7";
   const escHandler = (e) => { if (e.key === "Escape") _closeOverlay(overlay, escHandler); };
   closeBtn.addEventListener("click", () => _closeOverlay(overlay, escHandler));
@@ -256,6 +285,7 @@ function quickCreateNote() {
   const footer = document.createElement("div");
   footer.className = "note-modal-footer";
   const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
   saveBtn.className = "action-btn";
   saveBtn.textContent = t("common.save");
   saveBtn.addEventListener("click", async () => {
@@ -270,6 +300,7 @@ function quickCreateNote() {
   });
   footer.appendChild(saveBtn);
   const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
   cancelBtn.className = "action-btn action-btn-secondary";
   cancelBtn.textContent = t("common.cancel");
   cancelBtn.addEventListener("click", () => _closeOverlay(overlay, escHandler));
@@ -321,6 +352,9 @@ async function openNoteModal(noteId, noteTitle) {
 
   const panel = document.createElement("div");
   panel.className = "note-modal-panel";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-label", t("notes.editNote"));
 
   const header = document.createElement("div");
   header.className = "note-modal-header";
@@ -332,7 +366,9 @@ async function openNoteModal(noteId, noteTitle) {
   header.appendChild(titleInput);
 
   const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
   closeBtn.className = "note-modal-close";
+  closeBtn.setAttribute("aria-label", t("common.close"));
   closeBtn.textContent = "\u00d7";
   const escHandler = (e) => { if (e.key === "Escape") _closeOverlay(overlay, escHandler); };
   closeBtn.addEventListener("click", () => _closeOverlay(overlay, escHandler));
@@ -354,6 +390,7 @@ async function openNoteModal(noteId, noteTitle) {
   footer.className = "note-modal-footer";
 
   const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
   saveBtn.className = "action-btn";
   saveBtn.textContent = t("common.save");
   saveBtn.addEventListener("click", async () => {
@@ -372,6 +409,7 @@ async function openNoteModal(noteId, noteTitle) {
   footer.appendChild(saveBtn);
 
   const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
   cancelBtn.className = "action-btn action-btn-secondary";
   cancelBtn.textContent = t("common.cancel");
   cancelBtn.addEventListener("click", () => _closeOverlay(overlay, escHandler));
@@ -405,6 +443,9 @@ function createSnippet() {
 
   const panel = document.createElement("div");
   panel.className = "note-modal-panel note-modal-panel-narrow";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-label", t("memory.newSnippetTitle"));
 
   const header = document.createElement("div");
   header.className = "note-modal-header";
@@ -413,7 +454,9 @@ function createSnippet() {
   hTitle.textContent = t("memory.newSnippetTitle");
   header.appendChild(hTitle);
   const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
   closeBtn.className = "note-modal-close";
+  closeBtn.setAttribute("aria-label", t("common.close"));
   closeBtn.textContent = "\u00d7";
   const escHandler = (e) => { if (e.key === "Escape") _closeOverlay(overlay, escHandler); };
   closeBtn.addEventListener("click", () => _closeOverlay(overlay, escHandler));
@@ -438,6 +481,7 @@ function createSnippet() {
   const footer = document.createElement("div");
   footer.className = "note-modal-footer";
   const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
   saveBtn.className = "action-btn";
   saveBtn.textContent = t("common.save");
   saveBtn.addEventListener("click", async () => {
@@ -453,6 +497,7 @@ function createSnippet() {
   });
   footer.appendChild(saveBtn);
   const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
   cancelBtn.className = "action-btn action-btn-secondary";
   cancelBtn.textContent = t("common.cancel");
   cancelBtn.addEventListener("click", () => _closeOverlay(overlay, escHandler));

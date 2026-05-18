@@ -132,6 +132,37 @@ venv\Scripts\python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 cd frontend && npx electron .
 ```
 
+### Personal OS Integration
+
+Lexa exposes a narrow extraction endpoint for the local Personal OS:
+
+```http
+POST /personal-os/raw-inbox/extract
+```
+
+Request:
+
+```json
+{
+  "sourcePath": "06_Inbox/Raw/example.txt",
+  "body": "Raw inbox text"
+}
+```
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "summary": "...",
+  "tags": ["inbox", "raw"],
+  "provider": "groq",
+  "model": "llama-3.3-70b-versatile"
+}
+```
+
+This endpoint is intentionally separate from normal `/chat`: it does not use chat history or tool execution, and is meant for summary/tag extraction only.
+
 ---
 
 ## Tech-Stack

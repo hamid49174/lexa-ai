@@ -33,8 +33,129 @@ const micBtn = document.getElementById("mic-btn");
 const ttsToggle = document.getElementById("tts-toggle");
 const connBanner = document.getElementById("connection-banner");
 const navStatus = document.getElementById("nav-status");
+let _ambientCanvasRaf = 0;
+
+function initLexaAmbientCanvas() {
+  const canvas = document.getElementById("lexa-ambient-canvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d", { alpha: true });
+  if (!ctx) return;
+
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  let width = 0;
+  let height = 0;
+  let frame = 0;
+
+  const resize = () => {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    width = Math.max(1, window.innerWidth);
+    height = Math.max(1, window.innerHeight);
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+
+  const draw = (time = 0) => {
+    frame += 1;
+    const tWave = reducedMotion ? 18 : time * 0.00035;
+    ctx.clearRect(0, 0, width, height);
+
+    const bg = ctx.createLinearGradient(0, 0, width, height);
+    bg.addColorStop(0, "rgba(7, 11, 18, 0.96)");
+    bg.addColorStop(0.48, "rgba(9, 9, 16, 0.98)");
+    bg.addColorStop(1, "rgba(7, 15, 18, 0.96)");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, width, height);
+
+    const gap = 44;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.018)";
+    for (let x = -gap; x < width + gap; x += gap) {
+      const drift = Math.sin(tWave + x * 0.01) * 8;
+      ctx.beginPath();
+      ctx.moveTo(x + drift, 0);
+      ctx.lineTo(x - drift * 0.3, height);
+      ctx.stroke();
+    }
+    for (let y = -gap; y < height + gap; y += gap) {
+      const drift = Math.cos(tWave + y * 0.012) * 7;
+      ctx.beginPath();
+      ctx.moveTo(0, y + drift);
+      ctx.lineTo(width, y - drift * 0.25);
+      ctx.stroke();
+    }
+
+    const waveColors = [
+      "rgba(91, 124, 250, 0.085)",
+      "rgba(16, 185, 129, 0.06)",
+      "rgba(194, 77, 224, 0.055)",
+    ];
+    for (let line = 0; line < 8; line += 1) {
+      const base = height * (0.28 + line * 0.07);
+      ctx.beginPath();
+      for (let x = -20; x <= width + 20; x += 18) {
+        const y = base
+          + Math.sin(x * 0.009 + tWave * (1.6 + line * 0.08) + line) * (18 + line * 2)
+          + Math.cos(x * 0.004 + tWave * 1.2) * 12;
+        if (x === -20) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = waveColors[line % waveColors.length];
+      ctx.lineWidth = line % 3 === 0 ? 0.85 : 0.62;
+      ctx.stroke();
+    }
+
+    const topShade = ctx.createLinearGradient(0, 0, 0, height * 0.22);
+    topShade.addColorStop(0, "rgba(5, 6, 11, 0.72)");
+    topShade.addColorStop(1, "rgba(5, 6, 11, 0)");
+    ctx.fillStyle = topShade;
+    ctx.fillRect(0, 0, width, height * 0.24);
+
+    const vignette = ctx.createRadialGradient(width * 0.5, height * 0.42, 0, width * 0.5, height * 0.42, Math.max(width, height) * 0.72);
+    vignette.addColorStop(0, "rgba(255, 255, 255, 0.035)");
+    vignette.addColorStop(0.58, "rgba(0, 0, 0, 0.02)");
+    vignette.addColorStop(1, "rgba(0, 0, 0, 0.46)");
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, width, height);
+
+    window.__lexaAmbientDebug = { frame, width, height, reducedMotion: Boolean(reducedMotion) };
+    if (!reducedMotion) _ambientCanvasRaf = requestAnimationFrame(draw);
+  };
+
+  resize();
+  window.addEventListener("resize", () => {
+    resize();
+    if (reducedMotion) draw(0);
+  });
+  if (_ambientCanvasRaf) cancelAnimationFrame(_ambientCanvasRaf);
+  draw(0);
+}
 
 // ── GLOBAL STATE ─────────
+
+function _chatInputShouldSendOnEnter(e) {
+  if (!chatInput || e.key !== "Enter" || e.isComposing) return false;
+  if (window.ctrlEnterMode) return e.ctrlKey || e.metaKey;
+  return !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey;
+}
+
+function _chatInputAtHistoryBoundary(direction) {
+  if (!chatInput) return false;
+  const value = chatInput.value || "";
+  if (value.trim() === "") return true;
+  const start = typeof chatInput.selectionStart === "number" ? chatInput.selectionStart : value.length;
+  const end = typeof chatInput.selectionEnd === "number" ? chatInput.selectionEnd : value.length;
+  if (direction === "up") return start === 0 && end === 0;
+  return start === value.length && end === value.length;
+}
+
+function _setChatInputValue(value) {
+  if (!chatInput) return;
+  chatInput.value = value;
+  const cursor = chatInput.value.length;
+  if (typeof chatInput.setSelectionRange === "function") chatInput.setSelectionRange(cursor, cursor);
+  if (typeof syncChatInputSize === "function") syncChatInputSize();
+}
 
 function setNavStatus(text, state = "idle") {
   if (!navStatus) return;
@@ -78,26 +199,89 @@ function normalizeUiCopy() {
 // ── WAKE WORD STATE (wakeWordActive in LexaState) ──
 // Module-local polling intervals (not shared):
 let _wakeWordPollInterval = null;
+let _wakeWordNextStatusCheck = 0;
+let _wakeWordRestartTimer = null;
+let _wakeWordRestartAttempts = 0;
+let _orbRealtimeVoiceActive = false;
 
-const VIEW_KEYS = ["dashboard", "chat", "system", "commands", "productivity", "memory", "settings"];
+const VIEW_KEYS = ["dashboard", "chat", "system", "commands", "productivity", "memory", "personal-os", "settings"];
 
 // ── EVENT DELEGATION (replaces all inline onclick/onchange/oninput in HTML) ──────
+function _isKeyboardActionTarget(el) {
+  if (!el?.dataset?.action) return false;
+  const tag = String(el.tagName || "").toUpperCase();
+  if (["BUTTON", "A", "INPUT", "SELECT", "TEXTAREA", "OPTION"].includes(tag)) return false;
+  return el.getAttribute("role") === "button" || el.tabIndex >= 0;
+}
+
+function _keyboardActionShouldActivate(e) {
+  return e.key === "Enter" || e.key === " ";
+}
+
+function _isNativeInteractiveAction(el) {
+  const tag = String(el?.tagName || "").toUpperCase();
+  return ["BUTTON", "A", "INPUT", "SELECT", "TEXTAREA", "OPTION", "LABEL"].includes(tag);
+}
+
+function _prepareActionElement(el) {
+  if (!el?.dataset?.action || _isNativeInteractiveAction(el)) return;
+  if (!el.hasAttribute("role")) el.setAttribute("role", "button");
+  if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "0");
+}
+
+function _setupActionAccessibility(root = document) {
+  root.querySelectorAll?.("[data-action]").forEach(_prepareActionElement);
+}
+
+function _safeDispatch(el, ds, value) {
+  try {
+    _dispatch(el, ds, value);
+  } catch (e) {
+    const action = ds?.action || "unknown";
+    console.warn("[Action] Handler failed:", action, e.message || e);
+    if (typeof showToast === "function") {
+      showToast(t("toast.executionError"), "error", 3000);
+    }
+  }
+}
+
 function _initDelegation() {
+  _setupActionAccessibility();
+  const actionObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      mutation.addedNodes.forEach((node) => {
+        if (!(node instanceof Element)) return;
+        _prepareActionElement(node);
+        _setupActionAccessibility(node);
+      });
+    }
+  });
+  actionObserver.observe(document.body, { childList: true, subtree: true });
+
   document.addEventListener("click", (e) => {
     const el = e.target.closest("[data-action]");
     if (!el) return;
-    _dispatch(el, el.dataset, null);
+    _safeDispatch(el, el.dataset, null);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!_keyboardActionShouldActivate(e)) return;
+    const el = e.target.closest("[data-action]");
+    if (!_isKeyboardActionTarget(el)) return;
+    e.preventDefault();
+    _safeDispatch(el, el.dataset, null);
   });
   document.addEventListener("change", (e) => {
     const el = e.target;
     if (!el.dataset || !el.dataset.action) return;
-    _dispatch(el, el.dataset, el.type === "checkbox" ? el.checked : el.value);
+    _safeDispatch(el, el.dataset, el.type === "checkbox" ? el.checked : el.value);
   });
   document.addEventListener("input", (e) => {
     const el = e.target;
     if (!el.dataset || !el.dataset.action) return;
-    _dispatch(el, el.dataset, el.value);
+    _safeDispatch(el, el.dataset, el.value);
   });
+
+  window.addEventListener("beforeunload", () => actionObserver.disconnect(), { once: true });
 }
 
 function _dispatch(el, ds, value) {
@@ -111,7 +295,16 @@ function _dispatch(el, ds, value) {
     case "lexa-close": window.lexa.close(); break;
     // Parameterized tool/action calls
     case "runTool": {
-      const params = ds.params ? JSON.parse(ds.params) : {};
+      let params = {};
+      if (ds.params) {
+        try {
+          params = JSON.parse(ds.params);
+        } catch (e) {
+          console.warn("[Action] Invalid data-params for runTool:", e.message || e);
+          showToast(t("toast.executionError"), "error", 3000);
+          return;
+        }
+      }
       runTool(cmd, params, ds.confirm === "true");
       break;
     }
@@ -178,6 +371,8 @@ async function init() {
     // Setup UI immediately (don't wait for backend)
     setupSidebar();
     setupVoice();
+    initLexaAmbientCanvas();
+    if (typeof setupComposerCommandPalette === "function") setupComposerCommandPalette();
     setupKeyboardShortcuts();
     setupDesktopIntegration();
     setupDragDrop();
@@ -210,6 +405,7 @@ async function init() {
 
     window.addEventListener("beforeunload", () => {
       if (_wakeWordPollInterval) clearInterval(_wakeWordPollInterval);
+      if (_ambientCanvasRaf) cancelAnimationFrame(_ambientCanvasRaf);
       LexaState.clearAllIntervals();
     });
 
@@ -264,26 +460,28 @@ async function init() {
       // Save draft on every keystroke for crash recovery
       chatInput.addEventListener("input", () => {
         try { localStorage.setItem("lexa-chat-draft", chatInput.value); } catch (_) {}
+        if (typeof syncChatInputSize === "function") syncChatInputSize();
+        if (typeof updateComposerCommandPaletteFromInput === "function") updateComposerCommandPaletteFromInput();
       });
       chatInput.addEventListener("keydown", (e) => {
+        if (typeof handleComposerCommandKeydown === "function" && handleComposerCommandKeydown(e)) return;
         if (e.key === "Enter") {
-          if (window.ctrlEnterMode && !e.ctrlKey) return; // Need Ctrl+Enter
-          if (!window.ctrlEnterMode && e.ctrlKey) return; // Need just Enter
+          if (!_chatInputShouldSendOnEnter(e)) return;
           e.preventDefault();
           if (typeof sendMessage === "function") sendMessage();
         } else if (e.key === "ArrowUp") {
-          if (typeof chatInputHistory !== "undefined" && chatInputHistory.length > 0) {
+          if (typeof chatInputHistory !== "undefined" && chatInputHistory.length > 0 && _chatInputAtHistoryBoundary("up")) {
             e.preventDefault();
             if (chatHistoryIdx === -1) chatInputDraft = chatInput.value;
             chatHistoryIdx = Math.min(chatHistoryIdx + 1, chatInputHistory.length - 1);
-            chatInput.value = chatInputHistory[chatHistoryIdx];
+            _setChatInputValue(chatInputHistory[chatHistoryIdx]);
           }
         } else if (e.key === "ArrowDown") {
-          if (typeof chatInputHistory !== "undefined" && chatHistoryIdx >= 0) {
+          if (typeof chatInputHistory !== "undefined" && chatHistoryIdx >= 0 && _chatInputAtHistoryBoundary("down")) {
             e.preventDefault();
             chatHistoryIdx--;
-            if (chatHistoryIdx === -1) chatInput.value = chatInputDraft;
-            else chatInput.value = chatInputHistory[chatHistoryIdx];
+            if (chatHistoryIdx === -1) _setChatInputValue(chatInputDraft);
+            else _setChatInputValue(chatInputHistory[chatHistoryIdx]);
           }
         }
       });
@@ -564,6 +762,9 @@ async function checkHealth() {
       `;
       setNavStatus(t("app.statusOnlineNav"), "online");
       connBanner.classList.remove("visible");
+      if (_wakeWordPreferenceOn() && !LexaState.get("wakeWordActive")) {
+        await _ensureWakeWordRunning("Backend healthy");
+      }
     } else {
       handleOffline();
     }
@@ -579,6 +780,11 @@ function handleOffline() {
     sendNotification("Lexa AI", t("app.backendLostNotif"));
   }
   LexaState.set("backendOnline", false);
+  if (LexaState.get("wakeWordActive")) {
+    LexaState.set("wakeWordActive", false);
+    _stopWakeWordPolling();
+    _updateWakeWordUI();
+  }
   const attempts = (LexaState.get("reconnectAttempts") || 0) + 1;
   LexaState.set("reconnectAttempts", attempts);
   statusBadge.innerHTML = `
@@ -653,6 +859,7 @@ function switchView(view) {
   // Stop all view-specific intervals when switching
   LexaState.clearInterval("dashboard");
   LexaState.clearInterval("memory");
+  LexaState.clearInterval("personal-os");
   LexaState.clearInterval("pomodoro");
 
   document.querySelectorAll(".sidebar-btn").forEach((b) => {
@@ -698,6 +905,12 @@ function switchView(view) {
     LexaState.setInterval("memory", () => {
       if (LexaState.get("currentView") === "memory") refreshMemoryView();
     }, LexaConfig.MEMORY_REFRESH_INTERVAL);
+  } else if (view === "personal-os") {
+    document.getElementById("personal-os-view").classList.add("active");
+    refreshPersonalOsView();
+    LexaState.setInterval("personal-os", () => {
+      if (LexaState.get("currentView") === "personal-os") refreshPersonalOsView({ auto: true });
+    }, LexaConfig.MEMORY_REFRESH_INTERVAL);
   } else if (view === "settings") {
     document.getElementById("settings-view").classList.add("active");
     refreshSettingsView();
@@ -705,16 +918,90 @@ function switchView(view) {
 }
 
 // ── WAKE WORD ────────────────────────────────────
+function _wakeWordPreferenceOn() {
+  return localStorage.getItem("lexa-wakeword") !== "off";
+}
+
+function _setWakeWordPreference(enabled) {
+  localStorage.setItem("lexa-wakeword", enabled ? "on" : "off");
+}
+
+function _clearWakeWordRestart() {
+  if (_wakeWordRestartTimer) {
+    clearTimeout(_wakeWordRestartTimer);
+    _wakeWordRestartTimer = null;
+  }
+}
+
+async function _ensureWakeWordRunning(reason = "") {
+  if (!_wakeWordPreferenceOn() || LexaState.get("wakeWordActive") || !LexaState.get("backendOnline")) return false;
+  try {
+    const res = await window.lexa.wakewordStart();
+    if (_wakeWordStartOk(res)) {
+      _wakeWordRestartAttempts = 0;
+      _clearWakeWordRestart();
+      LexaState.set("wakeWordActive", true);
+      _startWakeWordPolling();
+      _updateWakeWordUI();
+      return true;
+    }
+    console.warn("[WakeWord] Auto-restart failed:", res?.error || reason || "unknown");
+  } catch (e) {
+    console.warn("[WakeWord] Auto-restart failed:", e.message || e);
+  }
+  return false;
+}
+
+function _scheduleWakeWordRestart(reason = "") {
+  if (!_wakeWordPreferenceOn() || !LexaState.get("backendOnline") || _wakeWordRestartTimer) return;
+  _wakeWordRestartAttempts += 1;
+  const baseDelay = LexaConfig.WAKEWORD_RETRY_DELAY || 2000;
+  const delay = Math.min(baseDelay * _wakeWordRestartAttempts, 60000);
+  _wakeWordRestartTimer = setTimeout(async () => {
+    _wakeWordRestartTimer = null;
+    const restarted = await _ensureWakeWordRunning(reason);
+    if (!restarted && _wakeWordPreferenceOn()) {
+      _scheduleWakeWordRestart(reason);
+    }
+  }, delay);
+}
+
+function _wakeWordStartOk(res) {
+  return Boolean(res && !res.error && res.status !== "failed" && res.active !== false && res.ready !== false);
+}
+
+function _wakeWordErrorText(res) {
+  return res?.error || res?.detail || res?.message || "unbekannt";
+}
+
+function _markWakeWordInactive(reason = "", options = {}) {
+  const keepPreference = Boolean(options.keepPreference);
+  const autoRestart = Boolean(options.autoRestart);
+  LexaState.set("wakeWordActive", false);
+  _stopWakeWordPolling();
+  _updateWakeWordUI();
+  if (!keepPreference) _setWakeWordPreference(false);
+  if (autoRestart) _scheduleWakeWordRestart(reason);
+  if (reason) showToast(t("toast.wakewordError", {error: reason}), "warning", 4000);
+}
+
 async function toggleWakeWord() {
   try {
     if (LexaState.get("wakeWordActive")) {
       await window.lexa.wakewordStop();
       LexaState.set("wakeWordActive", false);
       _stopWakeWordPolling();
+      _clearWakeWordRestart();
+      _setWakeWordPreference(false);
       showToast(t("toast.wakewordDisabled"), "info", 2000);
     } else {
+      _setWakeWordPreference(true);
       const res = await window.lexa.wakewordStart();
-      if (res.error) { showToast(t("toast.wakewordError", {error: res.error}), "error"); return; }
+      if (!_wakeWordStartOk(res)) {
+        _markWakeWordInactive("", { keepPreference: true, autoRestart: true });
+        showToast(t("toast.wakewordError", {error: _wakeWordErrorText(res)}), "error");
+        return;
+      }
       LexaState.set("wakeWordActive", true);
       _startWakeWordPolling();
       showToast(t("toast.wakewordEnabled"), "success", 3000);
@@ -724,8 +1011,10 @@ async function toggleWakeWord() {
     if (wakewordIndicator) {
       wakewordIndicator.title = LexaState.get("wakeWordActive") ? t("nav.wakeWordTooltip") : t("nav.wakeWordTooltip");
     }
-    localStorage.setItem("lexa-wakeword", LexaState.get("wakeWordActive") ? "on" : "off");
   } catch (e) {
+    if (_wakeWordPreferenceOn()) {
+      _markWakeWordInactive("", { keepPreference: true, autoRestart: true });
+    }
     showToast(t("toast.wakewordUnavailable"), "error");
   }
 }
@@ -743,7 +1032,9 @@ function _updateWakeWordUI() {
 
 function _startWakeWordPolling() {
   _stopWakeWordPolling();
+  _wakeWordNextStatusCheck = 0;
   _wakeWordPollInterval = setInterval(_pollWakeWordEvents, LexaConfig.WAKEWORD_POLL_INTERVAL);
+  _pollWakeWordEvents();
 }
 
 function _stopWakeWordPolling() {
@@ -754,8 +1045,24 @@ function _stopWakeWordPolling() {
 }
 
 async function _pollWakeWordEvents() {
-  if (!LexaState.get("wakeWordActive") || !LexaState.get("backendOnline")) return;
+  if (!LexaState.get("backendOnline")) return;
+  if (!LexaState.get("wakeWordActive")) {
+    if (!_wakeWordPreferenceOn()) return;
+    const adopted = await _ensureWakeWordRunning("Wake poll adoption");
+    if (!adopted) return;
+    return;
+  }
   try {
+    const now = Date.now();
+    if (now >= _wakeWordNextStatusCheck) {
+      _wakeWordNextStatusCheck = now + 5000;
+      const status = await window.lexa.wakewordStatus();
+      if (status?.error || status?.active === false) {
+        _markWakeWordInactive(_wakeWordErrorText(status), { keepPreference: true, autoRestart: true });
+        return;
+      }
+    }
+
     const res = await window.lexa.wakewordEvents();
     if (!res.events || res.events.length === 0) return;
 
@@ -764,15 +1071,18 @@ async function _pollWakeWordEvents() {
         case "volume":
           // Real-time volume from backend mic → drive 3D orb
           if (window.dashboardOrb) window.dashboardOrb.setVolume(evt.vol || 0);
+          _voiceStatusBarEventUpdate({ volume: evt.vol || 0 });
               break;
         case "wake":
           // Wake word heard — show listening on orb
           if (LexaState.get("currentView") !== "chat") switchView("chat");
           _setOrbConversationState("listening");
+          _voiceStatusBarEventUpdate({ state: "listening", provider: "Wake Word", transcript: _voiceText("app.voiceWakeHeard", "Wake word heard.") });
           break;
         case "command":
           // User's command captured
           _setOrbConversationState("processing");
+          _voiceStatusBarEventUpdate({ state: "processing", provider: "STT -> AI", transcript: evt.text || _voiceText("app.voiceCommandProcessing", "Processing command.") });
           if (evt.text) {
             if (LexaState.get("currentView") !== "chat") switchView("chat");
             if (!window._chatViewOpen && typeof toggleChatView === "function") toggleChatView();
@@ -782,6 +1092,11 @@ async function _pollWakeWordEvents() {
           break;
         case "response":
           // AI response ready
+          _voiceStatusBarEventUpdate({
+            state: evt.tts_handled ? "speaking" : "processing",
+            provider: evt.tts_handled ? _voiceSpeechProviderLabel() : "AI",
+            transcript: evt.tts_handled ? _voiceSpeakingResponseLabel() : (evt.text || ""),
+          });
           if (evt.text) {
             showOrbTranscript(undefined, evt.text);
             addMessage(evt.text, "system", null, false, true);
@@ -794,11 +1109,19 @@ async function _pollWakeWordEvents() {
           // Listening for speech
           if (LexaState.get("currentView") !== "chat") switchView("chat");
           _setOrbConversationState("listening");
+          _voiceStatusBarEventUpdate({ state: "listening", provider: "Wake Word", transcript: _voiceText("app.voiceListeningForCommand", "Listening for command.") });
+          break;
+        case "wake_timeout":
+          _setOrbConversationState(null);
+          if (window.dashboardOrb) window.dashboardOrb.setVolume(0);
+          _voiceStatusBarEventUpdate({ state: "idle", provider: "", transcript: "", volume: 0 });
+          showToast(_voiceText("app.voiceWakeNoCommand", "Wake word heard. Say the command after Lexa."), "info", 2200);
           break;
         case "conversation_start":
           // conversation mode active
           _updateConversationModeUI(true);
           _setOrbConversationState("listening");
+          _voiceStatusBarEventUpdate({ state: "listening", provider: "Conversation", transcript: _voiceText("app.voiceConversationActive", "Conversation mode active.") });
           _stopWakeWordPolling();
           _wakeWordPollInterval = setInterval(_pollWakeWordEvents, LexaConfig.WAKEWORD_FAST_POLL_INTERVAL);
           break;
@@ -808,6 +1131,7 @@ async function _pollWakeWordEvents() {
           clearOrbTranscript();
           _setOrbConversationState(null);
           if (window.dashboardOrb) window.dashboardOrb.setVolume(0);
+          _voiceStatusBarEventUpdate({ state: "idle", provider: "", transcript: "", volume: 0 });
               showToast(t("toast.conversationEnded"), "info", 2000);
           // Back to normal polling speed
           _stopWakeWordPolling();
@@ -817,20 +1141,96 @@ async function _pollWakeWordEvents() {
           // Lexa is speaking (TTS playing from backend)
           showOrbListening(false);
           _setOrbConversationState("speaking");
+          _voiceStatusBarEventUpdate({
+            state: "speaking",
+            provider: _voiceSpeechProviderLabel(),
+            transcript: _voiceSpeakingResponseLabel(),
+          });
           break;
         case "bargein":
           // User interrupted Lexa
           _setOrbConversationState("listening");
           showOrbListening(true);
+          _voiceStatusBarEventUpdate({ state: "bargein", provider: "Wake Word", transcript: evt.text || _voiceText("app.voiceInterruptedListening", "Interrupted, listening.") });
           break;
         case "error":
           showOrbListening(false);
           _setOrbConversationState(null);
+          _voiceStatusBarEventUpdate({ state: "error", provider: "Wake Word", transcript: evt.text || _voiceText("app.voiceWakeError", "Wake word error.") });
+          _scheduleWakeWordRestart(evt.text || "wake word event error");
           showToast(t("toast.wakewordError", {error: evt.text || "unbekannt"}), "error");
           break;
       }
     }
   } catch (e) { console.warn("[Lexa:wakeword] Poll error:", e.message || e); }
+}
+
+function _voiceStatusBarEventUpdate({ state, provider, transcript, latency, volume } = {}) {
+  if (typeof VoiceStatusBar === "undefined") return;
+  const safeState = state ? _voiceStatusState(state) : "";
+  const volumeOnly = state === undefined
+    && provider === undefined
+    && transcript === undefined
+    && latency === undefined
+    && volume !== undefined;
+  if (volumeOnly) {
+    if (VoiceStatusBar._visible) VoiceStatusBar.setVolume(volume);
+    return;
+  }
+  if (safeState === "speaking") {
+    if (!VoiceStatusBar._bar && typeof VoiceStatusBar.init === "function") VoiceStatusBar.init();
+    VoiceStatusBar.setState("idle");
+    VoiceStatusBar.setProvider("");
+    VoiceStatusBar.setTranscript("");
+    VoiceStatusBar.setLatency(0);
+    VoiceStatusBar.hide();
+    return;
+  }
+  VoiceStatusBar.show();
+  if (state) VoiceStatusBar.setState(safeState);
+  if (provider !== undefined) VoiceStatusBar.setProvider(provider);
+  if (transcript !== undefined) VoiceStatusBar.setTranscript(transcript);
+  if (latency !== undefined) VoiceStatusBar.setLatency(latency);
+  if (volume !== undefined) VoiceStatusBar.setVolume(volume);
+}
+
+function _voiceText(key, fallback, values = {}) {
+  try {
+    const text = typeof t === "function" ? t(key, values) : "";
+    return text && text !== key ? text : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function _voiceSpeechProviderLabel() {
+  return _voiceText("app.voiceProviderSpeech", "Voice");
+}
+
+function _voiceSpeakingResponseLabel() {
+  return _voiceText("app.voiceSpeakingResponse", "Speaking response.");
+}
+
+function _voiceStatusTextClip(value, max = 120) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= max) return text;
+  return text.slice(0, Math.max(0, max - 12)).trimEnd() + " [truncated]";
+}
+
+function _voiceStatusSetText(el, value, max = 120) {
+  if (!el) return "";
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  const clipped = _voiceStatusTextClip(text, max);
+  el.textContent = clipped;
+  if (text && clipped !== text) el.title = text;
+  else if (typeof el.removeAttribute === "function") el.removeAttribute("title");
+  return clipped;
+}
+
+function _voiceStatusState(state) {
+  const safeStates = new Set(["idle", "listening", "processing", "speaking", "error", "bargein"]);
+  const normalized = String(state || "idle").toLowerCase();
+  return safeStates.has(normalized) ? normalized : "idle";
 }
 
 function _updateConversationModeUI(active) {
@@ -845,47 +1245,87 @@ function _updateConversationModeUI(active) {
   }
 }
 
-function _setOrbConversationState(state) {
+function _updateOrbActionA11y(active = false) {
   const orbCanvas = document.getElementById("voice-orb-canvas");
+  const talkBtn = document.getElementById("talk-to-lexa-btn");
+  const controls = [orbCanvas, talkBtn].filter(Boolean);
+  if (controls.length === 0) return;
+  const isActive = Boolean(active);
+  const titleKey = isActive ? "app.orbClickEnd" : "app.orbClickSpeak";
+  const labelKey = isActive ? "chat.endConversation" : "chat.talkToLexaBtn";
+  const title = _voiceText(titleKey, isActive ? "Click to end" : "Click to speak");
+  const label = _voiceText(labelKey, isActive ? "End conversation" : "Talk to Lexa");
+  controls.forEach((control) => {
+    control.dataset.i18nTitle = titleKey;
+    control.dataset.i18nAriaLabel = labelKey;
+    control.title = title;
+    control.setAttribute("aria-label", label);
+    control.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+  if (talkBtn) {
+    talkBtn.classList.toggle("listening", isActive);
+    const labelEl = talkBtn.querySelector("[data-voice-entry-label]");
+    if (labelEl) {
+      labelEl.dataset.i18n = labelKey;
+      labelEl.textContent = label;
+    }
+  }
+}
+
+function _setOrbConversationState(state) {
+  const safeState = state || null;
+  const orbCanvas = document.getElementById("voice-orb-canvas");
+  const orbContainer = document.getElementById("voice-orb-container");
   const statusEl = document.getElementById("orb-conversation-status");
   if (orbCanvas) {
     orbCanvas.classList.remove("conv-listening", "conv-processing", "conv-speaking", "conv-bargein");
-    if (state) orbCanvas.classList.add("conv-" + state);
+    if (safeState) orbCanvas.classList.add("conv-" + safeState);
+  }
+  if (orbContainer) {
+    orbContainer.classList.toggle("conversation-active", Boolean(safeState));
+    if (safeState) orbContainer.dataset.convState = safeState;
+    else delete orbContainer.dataset.convState;
   }
   if (statusEl) {
-    const labels = { listening: "Ich h\u00F6re zu...", processing: "Verarbeite...", speaking: "Lexa spricht...", bargein: "Unterbrochen..." };
-    if (state && labels[state]) {
-      statusEl.textContent = labels[state];
+    const labels = {
+      listening: _voiceText("app.orbListening", "Listening..."),
+      processing: _voiceText("app.orbProcessing", "Processing..."),
+      speaking: _voiceText("app.orbSpeaking", "Lexa is speaking..."),
+      bargein: _voiceText("app.orbBargein", "Interrupted..."),
+    };
+    if (safeState && labels[safeState]) {
+      statusEl.textContent = labels[safeState];
       statusEl.classList.remove("hidden");
-      statusEl.className = "orb-conversation-status conv-status-" + state;
+      statusEl.className = "orb-conversation-status conv-status-" + safeState;
     } else {
       statusEl.textContent = "";
       statusEl.classList.add("hidden");
     }
   }
   if (window.dashboardOrb && window.dashboardOrb.setConversationState) {
-    window.dashboardOrb.setConversationState(state);
+    window.dashboardOrb.setConversationState(safeState);
   }
 }
+window.setOrbConversationState = _setOrbConversationState;
 
 async function _initWakeWord() {
-  const saved = localStorage.getItem("lexa-wakeword");
   // Auto-enable wake word unless explicitly disabled
-  if (saved !== "off") {
+  if (_wakeWordPreferenceOn()) {
     // Try up to 3 times with delay (backend may still be starting)
     for (let attempt = 1; attempt <= LexaConfig.WAKEWORD_MAX_RETRIES; attempt++) {
       try {
         const res = await window.lexa.wakewordStart();
-        if (res && !res.error) {
+        if (_wakeWordStartOk(res)) {
           LexaState.set("wakeWordActive", true);
           _startWakeWordPolling();
-          if (!saved) localStorage.setItem("lexa-wakeword", "on");
+          _setWakeWordPreference(true);
           console.log("[WakeWord] Aktiviert (Versuch " + attempt + ")");
           break;
         } else {
           console.warn("[WakeWord] " + t("common.error") + ":", res?.error || "unbekannt");
           if (attempt === 3) {
             showToast(t("toast.wakewordStartFailed", {error: res?.error || "unbekannt"}), "warning", 5000);
+            _scheduleWakeWordRestart(res?.error || "wake word start failed");
           }
         }
       } catch (err) {
@@ -895,6 +1335,7 @@ async function _initWakeWord() {
           await new Promise(r => setTimeout(r, LexaConfig.WAKEWORD_RETRY_DELAY));
         } else {
           showToast(t("toast.wakewordNotAvailable"), "warning", 5000);
+          _scheduleWakeWordRestart(err.message || "wake word unavailable");
         }
       }
     }
@@ -904,12 +1345,94 @@ async function _initWakeWord() {
 
 // ── DIRECT CONVERSATION (Orb Click → same as Mic Button) ────────
 // Orb click → start/stop voice recording
-function startOrbConversation() {
+function _voicePathLabel(path) {
+  if (path === "cascaded_stt_llm_tts") return "STT -> AI -> TTS";
+  return path || "Voice";
+}
+
+function _voiceRealtimeStarted(res) {
+  const sessionState = String(res?.session_state || "").toLowerCase();
+  return Boolean(
+    res?.ok
+    && res?.can_start !== false
+    && sessionState !== "blocked"
+    && sessionState !== "not_started"
+    && sessionState !== "stopped"
+  );
+}
+
+async function _primeOrbRealtimeBoundary() {
+  if (typeof VoiceStatusBar === "undefined" || typeof window.lexa?.voiceRealtimeStart !== "function") return false;
+  VoiceStatusBar.show();
+  VoiceStatusBar.setState("processing");
+  VoiceStatusBar.setProvider(_voiceText("app.voiceRealtimeChecking", "Realtime check"));
+  try {
+    const res = await window.lexa.voiceRealtimeStart();
+    const blockers = Array.isArray(res?.blockers) ? res.blockers : [];
+    VoiceStatusBar.setProvider(_voicePathLabel(res?.active_path));
+    if (_voiceRealtimeStarted(res)) {
+      _orbRealtimeVoiceActive = true;
+      _updateOrbActionA11y(true);
+      VoiceStatusBar.setState("listening");
+      VoiceStatusBar.setTranscript(_voiceText("app.voiceRealtimeReady", "Realtime voice session ready."));
+      return true;
+    } else {
+      const blocker = blockers[0] || _voiceText("app.voiceClassicFallbackActive", "Classic voice fallback active.");
+      VoiceStatusBar.setTranscript(_voiceText("app.voiceClassicFallback", "Classic voice active: {{reason}}", { reason: blocker }));
+    }
+  } catch (e) {
+    VoiceStatusBar.setProvider("STT -> AI -> TTS");
+    VoiceStatusBar.setTranscript(_voiceText("app.voiceClassicFallbackActive", "Classic voice fallback active."));
+  }
+  _orbRealtimeVoiceActive = false;
+  _updateOrbActionA11y(false);
+  return false;
+}
+
+async function startOrbConversation() {
+  if (_orbRealtimeVoiceActive) {
+    await stopOrbConversation();
+    return;
+  }
+  const isRecording = typeof Voice !== "undefined" && Voice.recording;
+  if (!isRecording) {
+    const realtimeStarted = await _primeOrbRealtimeBoundary();
+    if (realtimeStarted) return;
+  }
   if (typeof voiceToggle === "function") voiceToggle();
   else showToast("Voice nicht verfuegbar", "error");
 }
-function stopOrbConversation() {
-  if (typeof voiceStop === "function" && typeof Voice !== "undefined" && Voice.recording) voiceStop();
+async function stopOrbConversation() {
+  if (typeof voiceStop === "function" && typeof Voice !== "undefined" && Voice.recording) {
+    voiceStop();
+    return;
+  }
+  if (!_orbRealtimeVoiceActive || typeof window.lexa?.voiceRealtimeStop !== "function") return;
+  try {
+    if (typeof VoiceStatusBar !== "undefined") {
+      VoiceStatusBar.show();
+      VoiceStatusBar.setState("processing");
+      VoiceStatusBar.setProvider("Realtime");
+      VoiceStatusBar.setTranscript(_voiceText("app.voiceRealtimeStopping", "Stopping realtime voice session."));
+    }
+    const res = await window.lexa.voiceRealtimeStop();
+    _orbRealtimeVoiceActive = false;
+    _updateOrbActionA11y(false);
+    if (typeof VoiceStatusBar !== "undefined") {
+      VoiceStatusBar.setState("idle");
+      VoiceStatusBar.setProvider("");
+      VoiceStatusBar.setTranscript(res?.session_state === "stopped"
+        ? _voiceText("app.voiceRealtimeStopped", "Realtime voice stopped.")
+        : _voiceText("app.voiceStopped", "Voice stopped."));
+    }
+  } catch (e) {
+    _orbRealtimeVoiceActive = false;
+    _updateOrbActionA11y(false);
+    if (typeof VoiceStatusBar !== "undefined") {
+      VoiceStatusBar.setState("error");
+      VoiceStatusBar.setTranscript(_voiceText("app.voiceRealtimeStopFailed", "Realtime stop failed: {{error}}", { error: e.message || e }));
+    }
+  }
 }
 
 // ── VoiceStatusBar (stub — kept for compat) ────
@@ -923,6 +1446,7 @@ const VoiceStatusBar = {
   _latency: null,
   _provider: null,
   _visible: false,
+  _state: "idle",
 
   init() {
     this._bar = document.getElementById("voice-status-bar");
@@ -954,60 +1478,107 @@ const VoiceStatusBar = {
 
   setState(state) {
     if (!this._dot || !this._text) return;
-    this._dot.className = "voice-dot " + state;
+    const safeState = _voiceStatusState(state);
+    this._state = safeState;
+    this._dot.className = "voice-dot " + safeState;
+    if (this._bar) this._bar.dataset.state = this._state;
+    if (safeState === "speaking" || safeState === "idle") this.clearVolume();
     const labels = {
-      idle: "Bereit",
-      listening: "\uD83C\uDFA4 Ich h\u00F6re zu...",
-      processing: "\u26A1 Verarbeite Sprache...",
-      speaking: "\uD83D\uDD0A Lexa spricht...",
-      error: "\u274C Fehler",
-      bargein: "\uD83C\uDFA4 Unterbrochen \u2014 h\u00F6re zu..."
+      idle: _voiceText("app.voiceStateIdle", "Ready"),
+      listening: _voiceText("app.voiceStateListening", "Listening"),
+      processing: _voiceText("app.voiceStateProcessing", "Processing voice"),
+      speaking: _voiceText("app.voiceStateSpeaking", "Lexa is speaking"),
+      error: _voiceText("app.voiceStateError", "Error"),
+      bargein: _voiceText("app.voiceStateBargein", "Interrupted, listening"),
     };
-    this._text.textContent = labels[state] || state;
+    _voiceStatusSetText(this._text, labels[safeState] || labels.idle, 48);
+    this._refreshA11yLabel();
+  },
+
+  clearVolume() {
+    if (!this._meterCtx || !this._meter) return;
+    this._meterCtx.clearRect(0, 0, this._meter.width, this._meter.height);
   },
 
   setVolume(vol) {
     if (!this._meterCtx || !this._meter) return;
+    const level = Math.max(0, Math.min(1, Number(vol) || 0));
     const ctx = this._meterCtx;
     const w = this._meter.width;
     const h = this._meter.height;
     ctx.clearRect(0, 0, w, h);
 
-    // Background
-    ctx.fillStyle = "rgba(255,255,255,0.03)";
-    ctx.fillRect(0, 0, w, h);
+    const radius = 5;
+    const drawRoundRect = (x, y, width, height, r) => {
+      const safeR = Math.min(r, width / 2, height / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + safeR, y);
+      ctx.lineTo(x + width - safeR, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + safeR);
+      ctx.lineTo(x + width, y + height - safeR);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - safeR, y + height);
+      ctx.lineTo(x + safeR, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - safeR);
+      ctx.lineTo(x, y + safeR);
+      ctx.quadraticCurveTo(x, y, x + safeR, y);
+      ctx.closePath();
+    };
 
-    // Volume bar
-    const barW = Math.max(2, vol * w);
+    drawRoundRect(0.5, 5.5, w - 1, h - 11, radius);
+    ctx.fillStyle = "rgba(255,255,255,0.045)";
+    ctx.fill();
+
+    const barW = Math.max(level > 0 ? 3 : 0, level * (w - 1));
+    if (barW <= 0) return;
     const gradient = ctx.createLinearGradient(0, 0, w, 0);
-    gradient.addColorStop(0, "rgba(139, 92, 246, 0.8)");
-    gradient.addColorStop(0.6, "rgba(236, 72, 153, 0.8)");
-    gradient.addColorStop(1, "rgba(239, 68, 68, 0.8)");
+    gradient.addColorStop(0, "rgba(139, 146, 255, 0.72)");
+    gradient.addColorStop(0.7, "rgba(199, 130, 255, 0.7)");
+    gradient.addColorStop(1, "rgba(16, 185, 129, 0.72)");
+    drawRoundRect(0.5, 5.5, barW, h - 11, radius);
     ctx.fillStyle = gradient;
-    ctx.fillRect(0, 2, barW, h - 4);
+    ctx.fill();
 
-    // Peak indicator
-    if (vol > 0.5) {
-      ctx.fillStyle = "rgba(255, 200, 50, 0.9)";
-      ctx.fillRect(barW - 3, 0, 3, h);
+    if (level > 0.72) {
+      ctx.fillStyle = "rgba(245, 158, 11, 0.75)";
+      ctx.fillRect(Math.min(w - 3, barW - 2), 4, 2, h - 8);
     }
   },
 
   setTranscript(text) {
     if (this._transcript) {
-      this._transcript.textContent = text || "";
+      const clipped = _voiceStatusSetText(this._transcript, text, 140);
+      this._transcript.classList.toggle("empty", !clipped);
+      this._refreshA11yLabel();
     }
   },
 
   setLatency(ms) {
     if (this._latency) {
-      this._latency.textContent = ms > 0 ? ms + "ms" : "";
+      _voiceStatusSetText(this._latency, Number(ms) > 0 ? `${Math.round(Number(ms))}ms` : "", 32);
+      this._refreshA11yLabel();
     }
   },
 
   setProvider(name) {
     if (this._provider) {
-      this._provider.textContent = name || "";
+      const clipped = _voiceStatusSetText(this._provider, name, 48);
+      this._provider.classList.toggle("empty", !clipped);
+      this._refreshA11yLabel();
+    }
+  },
+
+  _refreshA11yLabel() {
+    if (!this._bar) return;
+    const parts = [
+      this._text?.textContent,
+      this._provider?.textContent,
+      this._transcript?.textContent,
+      this._latency?.textContent,
+    ].map((part) => String(part || "").trim()).filter(Boolean);
+    if (parts.length) {
+      this._bar.setAttribute("aria-label", _voiceStatusTextClip(parts.join(" - "), 180));
+    } else if (typeof this._bar.removeAttribute === "function") {
+      this._bar.removeAttribute("aria-label");
     }
   }
 };

@@ -183,8 +183,8 @@ function createCommandsView() {
   div.innerHTML = `
     <div class="view-title">${t("commands.allCommands")}</div>
     <div class="cmd-search-bar">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" id="cmd-search" class="cmd-search-input" placeholder="${t("commands.search")}" data-action="filterCommands">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="cmd-search" class="cmd-search-input" placeholder="${escapeHtml(t("commands.search"))}" aria-label="${escapeHtml(t("commands.search"))}" data-action="filterCommands">
       <span class="cmd-count" id="cmd-count-badge">${ALL_COMMANDS_DATA.length} ${t("nav.commands")}</span>
     </div>
     <div id="cmd-results"></div>
@@ -207,6 +207,21 @@ function trackRecentCommand(name) {
   recent.unshift(name);
   recent = recent.slice(0, MAX_RECENT_CMDS);
   localStorage.setItem("lexa-recent-cmds", JSON.stringify(recent));
+}
+
+function bindCommandItemAction(el, handler, label) {
+  if (!el || typeof handler !== "function") return;
+  if (label) el.setAttribute("aria-label", label);
+  if (!el.hasAttribute("role")) el.setAttribute("role", "button");
+  if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "0");
+  el.addEventListener("keydown", (event) => {
+    if (event.target !== el) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handler(event);
+    }
+  });
+  el.addEventListener("click", handler);
 }
 
 function renderCommands(query) {
@@ -295,8 +310,11 @@ function buildCmdItem(c, query, statusLabel) {
   badge.textContent = statusLabel[c.status] || c.status;
 
   const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
   copyBtn.className = "cmd-copy-btn";
-  copyBtn.title = t("cmd.insertInChat");
+  const copyLabel = t("cmd.copyCommandLabel", { name: c.name });
+  copyBtn.title = copyLabel;
+  copyBtn.setAttribute("aria-label", copyLabel);
   copyBtn.textContent = "\u2192";
 
   item.appendChild(nameEl);
@@ -304,10 +322,10 @@ function buildCmdItem(c, query, statusLabel) {
   item.appendChild(badge);
   item.appendChild(copyBtn);
 
-  item.addEventListener("click", (e) => {
+  bindCommandItemAction(item, (e) => {
     if (e.target === copyBtn) return;
     insertCommand(c.name);
-  });
+  }, t("cmd.insertCommandLabel", { name: c.name }));
   copyBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     navigator.clipboard?.writeText(c.name).then(() => showToast(t("commands.copied", {name: c.name}), "success", 2000));
