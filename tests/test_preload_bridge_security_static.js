@@ -132,17 +132,21 @@ console.log("\nBridge args hashing and batch validation:");
 const helperSandbox = new Function("crypto", `
   "use strict";
   ${extractFn(preloadSrc, "stableBridgeValue")}
-  ${extractFn(preloadSrc, "bridgeArgsHash")}
   ${extractFn(preloadSrc, "bridgeArgKeys")}
   ${extractFn(preloadSrc, "companionBatchCommandName")}
   const READ_ONLY_COMPANION_BATCH_COMMANDS = new Set(["system_info", "weather_current", "weather_forecast"]);
   ${extractFn(preloadSrc, "validateExecuteBatchCommands")}
-  return { bridgeArgsHash, bridgeArgKeys, validateExecuteBatchCommands };
+  return { stableBridgeValue, bridgeArgKeys, validateExecuteBatchCommands };
 `);
-const { bridgeArgsHash, bridgeArgKeys, validateExecuteBatchCommands } = helperSandbox(crypto);
-const hashA = bridgeArgsHash([{ b: 2, a: { y: "yes", x: 1 } }]);
-const hashB = bridgeArgsHash([{ a: { x: 1, y: "yes" }, b: 2 }]);
-const hashC = bridgeArgsHash([{ a: { x: 2, y: "yes" }, b: 2 }]);
+const { stableBridgeValue, bridgeArgKeys, validateExecuteBatchCommands } = helperSandbox(crypto);
+function testBridgeArgsHash(args = []) {
+  const normalized = stableBridgeValue(Array.from(args));
+  return crypto.createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+}
+const hashA = testBridgeArgsHash([{ b: 2, a: { y: "yes", x: 1 } }]);
+const hashB = testBridgeArgsHash([{ a: { x: 1, y: "yes" }, b: 2 }]);
+const hashC = testBridgeArgsHash([{ a: { x: 2, y: "yes" }, b: 2 }]);
+assert("preload uses sandbox-safe WebCrypto for args_hash", preloadSrc.includes("async function bridgeArgsHash") && preloadSrc.includes("globalThis.crypto?.subtle") && !preloadSrc.includes('require("crypto")'));
 assert("args_hash is stable for key order", hashA === hashB && /^[a-f0-9]{64}$/.test(hashA));
 assert("args_hash changes when args change", hashA !== hashC);
 assert("arg keys expose only structure, not values", bridgeArgKeys([{ api_key: "SECRET", nested: "private" }]).join(",") === "arg0.api_key,arg0.nested");
@@ -151,11 +155,13 @@ assert("executeBatch blocks mutating or unknown companion commands", validateExe
 
 console.log("\nGuarded bridge call:");
 const guardedSource = extractFn(preloadSrc, "guardedBridgeCall");
+assert("guarded bridge applies param-sensitive policy classification", guardedSource.includes("classifyBridgeCall(method, args)") && preloadSrc.includes("function classifyBridgeCall"));
 assert("high-risk calls request main-process presence", guardedSource.includes('ipcRenderer.invoke("bridge:presence:request"') && guardedSource.includes('ipcRenderer.invoke("bridge:presence:consume"'));
 assert("high-risk call without challenge is rejected", guardedSource.includes("!challenge?.ok") && guardedSource.includes("bridge_presence_denied"));
 assert("consume failure is rejected", guardedSource.includes("!consumed?.ok") && guardedSource.includes("bridge_presence_invalid"));
 assert("executeBatch denial happens before backend execution", guardedSource.indexOf("validateExecuteBatchCommands") < guardedSource.indexOf("return executor()") && guardedSource.includes("bridge_batch_denied"));
 assert("confirmed true remains a legacy UI hint only", preloadSrc.includes("void confirmed; // Legacy UI hint only") && !preloadSrc.includes("JSON.stringify({ command, params, confirmed })"));
+assert("presence requests include effective classification metadata", guardedSource.includes("base_risk: policy.base_risk") && guardedSource.includes("effective_risk: policy.effective_risk") && guardedSource.includes("classification_reason: policy.classification_reason"));
 assert("audit logs only arg keys and hash prefixes", preloadSrc.includes("args_hash: String(argsHash || \"\").slice(0, 16)") && preloadSrc.includes("arg_keys: Array.isArray(argKeys)") && !preloadSrc.includes("args: args") && !preloadSrc.includes("JSON.stringify(args)"));
 assert("preload forwards only redacted bridge audit events", preloadSrc.includes('ipcRenderer.invoke("bridge:audit", event)') && !preloadSrc.includes('ipcRenderer.invoke("bridge:audit", args'));
 
@@ -170,6 +176,8 @@ assert("rejects expired challenges", mainSrc.includes("record.expiresAt <= Date.
 assert("rejects replay/single-use consume", mainSrc.includes("record.used") && mainSrc.includes("challenge_replay") && mainSrc.includes("bridgePresenceChallenges.delete(challengeId)"));
 assert("redacted main audit avoids raw args", mainSrc.includes("[BridgePresenceAudit]") && mainSrc.includes("function sanitizeBridgeAuditEvent") && mainSrc.includes("args_hash: String(payload.args_hash") && mainSrc.includes("arg_keys: Array.isArray") && !mainSrc.includes("JSON.stringify(rawPayload)") && !mainSrc.includes("args: rawPayload"));
 assert("main process persists redacted bridge audit outside repo", mainSrc.includes('app.getPath("userData")') && mainSrc.includes('"bridge-audit.log"') && mainSrc.includes("fs.appendFileSync(auditPath"));
+assert("main process rotates bridge audit log", mainSrc.includes("BRIDGE_AUDIT_MAX_BYTES") && mainSrc.includes("function rotateBridgeAuditIfNeeded") && mainSrc.includes("`${auditPath}.1`") && mainSrc.includes("previous_size"));
+assert("smoke mock is not enabled outside explicit non-packaged smoke context", preloadSrc.includes("function isLexaSmokeMockAllowed") && mainSrc.includes("function hardenSmokeMockEnvironment") && mainSrc.includes("app.isPackaged") && mainSrc.includes("LEXA_ELECTRON_SMOKE_TEST"));
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

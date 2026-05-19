@@ -7,6 +7,7 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 const fs = require("fs");
 const path = require("path");
 
+process.env.LEXA_ELECTRON_SMOKE_TEST = "1";
 process.env.LEXA_ELECTRON_SMOKE_MOCK = "1";
 
 ipcMain.handle("i18n-load", (_, lang) => {

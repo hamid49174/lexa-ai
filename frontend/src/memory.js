@@ -31,13 +31,12 @@ async function refreshMemoryView() {
   if (!LexaState.get("backendOnline")) return;
 
   // Fetch all memory data in parallel
-  const [statsRes, notesRes, snippetsRes, aiRes, routinesRes, cbRes] = await Promise.allSettled([
+  const [statsRes, notesRes, snippetsRes, aiRes, routinesRes] = await Promise.allSettled([
     window.lexa.memoryStats(),
     window.lexa.notes(),
     window.lexa.snippets(),
     window.lexa.aiStatus(),
     window.lexa.routines(),
-    window.lexa.clipboardHistory(),
   ]);
 
   const stats = statsRes.status === "fulfilled" ? statsRes.value : {};
@@ -190,38 +189,7 @@ async function refreshMemoryView() {
     }
   }
 
-  // Clipboard history
-  {
-    const cbData = cbRes.status === "fulfilled" ? cbRes.value : { entries: [] };
-    const cbList = document.getElementById("clipboard-history-list");
-    if (cbList) {
-      const entries = cbData.entries || [];
-      if (entries.length > 0) {
-        cbList.innerHTML = "";
-        entries.slice(0, 20).forEach(e => {
-          const preview = String(e.text || "").substring(0, 80);
-          const card = document.createElement("div");
-          card.className = "note-card clipboard-entry";
-          const title = document.createElement("div");
-          title.className = "note-title";
-          title.textContent = preview + ((e.text?.length > 80) ? "\u2026" : "");
-          const meta = document.createElement("div");
-          meta.className = "note-meta";
-          meta.textContent = String(e.created_at || "").substring(0, 16);
-          card.appendChild(title);
-          card.appendChild(meta);
-          const rawText = e.text || "";
-          bindMemoryCardAction(card, () => {
-            window.lexa.execute("clipboard_write", { text: rawText }, true);
-            showToast(t("toast.clipboardCopied"), "success", 2000);
-          }, t("memory.copyClipboardLabel"));
-          cbList.appendChild(card);
-        });
-      } else {
-        cbList.innerHTML = '<div class="empty-state">' + escapeHtml(t("memory.emptyClipboard")) + '</div>';
-      }
-    }
-  }
+  renderClipboardPrivacyPrompt();
 
   // Add cleanup info
   const cleanupEl = document.getElementById("memory-cleanup-info");
@@ -234,6 +202,58 @@ async function refreshMemoryView() {
     cleanBtn.addEventListener("click", runMemoryCleanup);
     cleanupEl.appendChild(cleanBtn);
   }
+}
+
+function renderClipboardEntries(entries = []) {
+  const cbList = document.getElementById("clipboard-history-list");
+  if (!cbList) return;
+  if (entries.length > 0) {
+    cbList.innerHTML = "";
+    entries.slice(0, 20).forEach(e => {
+      const preview = String(e.text || "").substring(0, 80);
+      const card = document.createElement("div");
+      card.className = "note-card clipboard-entry";
+      const title = document.createElement("div");
+      title.className = "note-title";
+      title.textContent = preview + ((e.text?.length > 80) ? "\u2026" : "");
+      const meta = document.createElement("div");
+      meta.className = "note-meta";
+      meta.textContent = String(e.created_at || "").substring(0, 16);
+      card.appendChild(title);
+      card.appendChild(meta);
+      const rawText = e.text || "";
+      bindMemoryCardAction(card, () => {
+        window.lexa.execute("clipboard_write", { text: rawText }, true);
+        showToast(t("toast.clipboardCopied"), "success", 2000);
+      }, t("memory.copyClipboardLabel"));
+      cbList.appendChild(card);
+    });
+  } else {
+    cbList.innerHTML = '<div class="empty-state">' + escapeHtml(t("memory.emptyClipboard")) + '</div>';
+  }
+}
+
+function renderClipboardPrivacyPrompt() {
+  const cbList = document.getElementById("clipboard-history-list");
+  if (!cbList) return;
+  cbList.innerHTML = "";
+  const card = document.createElement("div");
+  card.className = "empty-state";
+  const hint = document.createElement("div");
+  hint.textContent = t("memory.clipboardPrivacyHint");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "action-btn mt-2";
+  button.textContent = t("memory.revealClipboardHistory");
+  button.addEventListener("click", revealClipboardHistory);
+  card.appendChild(hint);
+  card.appendChild(button);
+  cbList.appendChild(card);
+}
+
+async function revealClipboardHistory() {
+  const cbData = await window.lexa.clipboardHistory();
+  renderClipboardEntries(cbData.entries || []);
 }
 
 async function clearClipboardHistory() {

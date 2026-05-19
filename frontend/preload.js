@@ -1,5 +1,4 @@
 const { contextBridge, ipcRenderer } = require("electron");
-const crypto = require("crypto");
 
 const API = "http://127.0.0.1:8000";
 const LOCAL_AUTH_HEADER = "X-Lexa-Local-Token";
@@ -223,6 +222,204 @@ const READ_ONLY_COMPANION_BATCH_COMMANDS = new Set([
   "weather_forecast",
 ]);
 
+const BRIDGE_RISK_RANK = Object.freeze({ low: 0, medium: 1, high: 2, critical: 3 });
+const BRIDGE_AUDIT_RISK = 1;
+const SIMPLE_PROFILE_KEYS = new Set(["name", "language", "theme", "accent", "locale"]);
+const SENSITIVE_PROFILE_KEY_PATTERN = /(?:api|auth|credential|email|identity|key|license|password|payment|secret|security|token)/i;
+const SENSITIVE_OS_PATH_PATTERN = /(?:^|[\\/])(?:00_System|03_Profile|05_Memory[\\/]Core|05_Memory[\\/]Stable)(?:[\\/]|$)|(?:\.env|secret|token|credential|password|private|identity|key)/i;
+const PARAM_SENSITIVE_BRIDGE_METHODS = new Set([
+  "conversationUpdate",
+  "conversationGet",
+  "conversationExport",
+  "setProfile",
+  "memoryAdd",
+  "noteUpdate",
+  "clipboardHistory",
+  "personalOsReadFile",
+  "personalOsQuery",
+  "personalOsContextPack",
+  "personalOsObsidianContext",
+  "notes",
+  "search",
+  "ftsSearch",
+  "mcpServers",
+  "mcpServerTools",
+]);
+
+function riskAtLeast(risk, minimum) {
+  return (BRIDGE_RISK_RANK[risk] ?? 0) >= (BRIDGE_RISK_RANK[minimum] ?? 0);
+}
+
+function effectiveBridgePolicy(basePolicy, overrides = {}) {
+  const risk = overrides.risk || basePolicy.risk;
+  const requiresGate = riskAtLeast(risk, "high");
+  const audit = overrides.audit ?? (basePolicy.audit || (BRIDGE_RISK_RANK[risk] ?? 0) >= BRIDGE_AUDIT_RISK);
+  return Object.freeze({
+    ...basePolicy,
+    ...overrides,
+    base_risk: basePolicy.risk,
+    risk,
+    effective_risk: risk,
+    requires_user_presence: overrides.requires_user_presence ?? requiresGate,
+    requires_main_confirmation: overrides.requires_main_confirmation ?? requiresGate,
+    audit,
+    classification_reason: overrides.classification_reason || "base_policy",
+    rate_limited: Boolean(overrides.rate_limited),
+  });
+}
+
+function firstPayloadObject(args, index = 0) {
+  const value = Array.isArray(args) ? args[index] : undefined;
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function objectKeys(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value).sort() : [];
+}
+
+function hasOnlyKeys(value, allowedKeys) {
+  const keys = objectKeys(value);
+  return keys.length > 0 && keys.every((key) => allowedKeys.includes(key));
+}
+
+function normalizedBridgePath(value) {
+  return String(value || "").replace(/\\/g, "/").replace(/^\/+/, "").trim();
+}
+
+function isPathTraversal(value) {
+  return normalizedBridgePath(value).split("/").some((part) => part === "..");
+}
+
+function isSensitivePersonalOsPath(value) {
+  const normalized = normalizedBridgePath(value);
+  if (!normalized || isPathTraversal(normalized)) return true;
+  return SENSITIVE_OS_PATH_PATTERN.test(normalized);
+}
+
+function clampPositiveInteger(value, fallback, min, max) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function classifyConversationUpdate(basePolicy, args) {
+  const payload = firstPayloadObject(args, 1);
+  if (!payload) {
+    return effectiveBridgePolicy(basePolicy, {
+      risk: "high",
+      classification_reason: "conversation_update_missing_payload",
+    });
+  }
+  if (hasOnlyKeys(payload, ["title"])) {
+    return effectiveBridgePolicy(basePolicy, {
+      risk: "medium",
+      requires_user_presence: false,
+      requires_main_confirmation: false,
+      audit: true,
+      classification_reason: "conversation_title_update",
+    });
+  }
+  if (hasOnlyKeys(payload, ["messages"]) && Array.isArray(payload.messages)) {
+    if (payload.messages.length > 0) {
+      return effectiveBridgePolicy(basePolicy, {
+        risk: "medium",
+        requires_user_presence: false,
+        requires_main_confirmation: false,
+        audit: true,
+        rate_limited: true,
+        classification_reason: "conversation_autosave_messages",
+      });
+    }
+    return effectiveBridgePolicy(basePolicy, {
+      risk: "high",
+      classification_reason: "conversation_clear_messages",
+    });
+  }
+  return effectiveBridgePolicy(basePolicy, {
+    risk: "high",
+    classification_reason: "conversation_update_unusual_payload",
+  });
+}
+
+function classifyProfileSet(basePolicy, args) {
+  const key = String(args?.[0] || "").trim().toLowerCase();
+  if (SIMPLE_PROFILE_KEYS.has(key)) {
+    return effectiveBridgePolicy(basePolicy, {
+      risk: "medium",
+      requires_user_presence: false,
+      requires_main_confirmation: false,
+      audit: true,
+      classification_reason: "profile_simple_key",
+    });
+  }
+  return effectiveBridgePolicy(basePolicy, {
+    risk: SENSITIVE_PROFILE_KEY_PATTERN.test(key) ? "high" : "medium",
+    requires_user_presence: SENSITIVE_PROFILE_KEY_PATTERN.test(key),
+    requires_main_confirmation: SENSITIVE_PROFILE_KEY_PATTERN.test(key),
+    audit: true,
+    classification_reason: SENSITIVE_PROFILE_KEY_PATTERN.test(key) ? "profile_sensitive_key" : "profile_unknown_key",
+  });
+}
+
+function classifyPersonalOsReadFile(basePolicy, args) {
+  const pathValue = args?.[0] || "";
+  if (isPathTraversal(pathValue)) {
+    return effectiveBridgePolicy(basePolicy, {
+      risk: "high",
+      blocked: true,
+      classification_reason: "personal_os_path_traversal",
+    });
+  }
+  const sensitivePath = isSensitivePersonalOsPath(pathValue);
+  return effectiveBridgePolicy(basePolicy, {
+    risk: sensitivePath ? "high" : "medium",
+    requires_user_presence: sensitivePath,
+    requires_main_confirmation: sensitivePath,
+    audit: true,
+    classification_reason: sensitivePath ? "personal_os_sensitive_path" : "personal_os_scope_limited_read",
+  });
+}
+
+function classifyBridgeCall(method, args = []) {
+  const basePolicy = BRIDGE_METHOD_POLICY[method];
+  if (!basePolicy) return null;
+  if (method === "conversationUpdate") return classifyConversationUpdate(basePolicy, args);
+  if (method === "setProfile") return classifyProfileSet(basePolicy, args);
+  if (method === "personalOsReadFile") return classifyPersonalOsReadFile(basePolicy, args);
+  if (method === "conversationExport") {
+    return effectiveBridgePolicy(basePolicy, { risk: "high", classification_reason: "conversation_full_export" });
+  }
+  if (method === "conversationGet") {
+    return effectiveBridgePolicy(basePolicy, {
+      risk: "medium",
+      requires_user_presence: false,
+      requires_main_confirmation: false,
+      audit: true,
+      classification_reason: "conversation_single_read",
+    });
+  }
+  if (["notes", "search", "ftsSearch", "personalOsQuery", "personalOsContextPack", "personalOsObsidianContext"].includes(method)) {
+    return effectiveBridgePolicy(basePolicy, {
+      risk: "medium",
+      requires_user_presence: false,
+      requires_main_confirmation: false,
+      audit: true,
+      rate_limited: true,
+      classification_reason: `${method}_privacy_limited_read`,
+    });
+  }
+  if (["mcpServers", "mcpServerTools"].includes(method)) {
+    return effectiveBridgePolicy(basePolicy, {
+      risk: "medium",
+      requires_user_presence: false,
+      requires_main_confirmation: false,
+      audit: true,
+      classification_reason: "mcp_metadata_read",
+    });
+  }
+  return effectiveBridgePolicy(basePolicy);
+}
+
 function stableBridgeValue(value, seen = new WeakSet()) {
   if (value === null || value === undefined) return value;
   const valueType = typeof value;
@@ -262,9 +459,21 @@ function stableBridgeValue(value, seen = new WeakSet()) {
   return normalized;
 }
 
-function bridgeArgsHash(args = []) {
+function bytesToHex(bytes) {
+  return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256Hex(text) {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) throw new Error("bridge_crypto_unavailable");
+  const encoded = new TextEncoder().encode(String(text));
+  const digest = await subtle.digest("SHA-256", encoded);
+  return bytesToHex(new Uint8Array(digest));
+}
+
+async function bridgeArgsHash(args = []) {
   const normalized = stableBridgeValue(Array.from(args));
-  return crypto.createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+  return sha256Hex(JSON.stringify(normalized));
 }
 
 function bridgeArgKeys(args = []) {
@@ -293,11 +502,14 @@ function auditBridgeDecision(policy, allowed, reason, argsHash, argKeys, challen
     timestamp: new Date().toISOString(),
     method: policy?.name || "unknown",
     risk: policy?.risk || "unknown",
+    base_risk: policy?.base_risk || policy?.risk || "unknown",
+    effective_risk: policy?.effective_risk || policy?.risk || "unknown",
     action_type: policy?.action_type || "unknown",
     allowed: Boolean(allowed),
     reason: String(reason || ""),
     args_hash: String(argsHash || "").slice(0, 16),
     arg_keys: Array.isArray(argKeys) ? argKeys.slice(0, 40) : [],
+    classification_reason: String(policy?.classification_reason || ""),
     challenge_id_prefix: bridgeChallengePrefix(challengeId),
   };
   const line = `[BridgeAudit] ${JSON.stringify(event)}`;
@@ -335,11 +547,15 @@ function validateExecuteBatchCommands(commands) {
 }
 
 async function guardedBridgeCall(method, args, executor, options = {}) {
-  const policy = BRIDGE_METHOD_POLICY[method];
+  const policy = classifyBridgeCall(method, args);
   if (!policy) throw bridgeSecurityError(`Blocked unclassified bridge method: ${method}`, "bridge_policy_missing");
 
-  const argsHash = bridgeArgsHash(args);
+  const argsHash = await bridgeArgsHash(args);
   const argKeys = bridgeArgKeys(args);
+  if (policy.blocked) {
+    auditBridgeDecision(policy, false, policy.classification_reason || "blocked_by_policy", argsHash, argKeys);
+    throw bridgeSecurityError("Bridge call blocked by privacy policy", "bridge_privacy_denied");
+  }
 
   if (method === "executeBatch") {
     const batchCheck = validateExecuteBatchCommands(args[0]);
@@ -355,10 +571,13 @@ async function guardedBridgeCall(method, args, executor, options = {}) {
     const challenge = await ipcRenderer.invoke("bridge:presence:request", {
       method,
       risk: policy.risk,
+      base_risk: policy.base_risk || policy.risk,
+      effective_risk: policy.effective_risk || policy.risk,
       action_type: policy.action_type,
       target: policy.target,
       args_hash: argsHash,
       arg_keys: argKeys,
+      classification_reason: policy.classification_reason || "",
     });
     if (!challenge?.ok || !challenge.challenge_id) {
       auditBridgeDecision(policy, false, challenge?.reason || "presence_denied", argsHash, argKeys);
@@ -392,7 +611,12 @@ function createGuardedBridge(bridge, options = {}) {
   const guarded = {};
   for (const [name, value] of Object.entries(bridge)) {
     const policy = BRIDGE_METHOD_POLICY[name];
-    const requiresGuard = policy.requires_user_presence || policy.requires_main_confirmation || name === "executeBatch";
+    const requiresGuard = policy.requires_user_presence
+      || policy.requires_main_confirmation
+      || policy.audit
+      || riskAtLeast(policy.risk, "medium")
+      || name === "executeBatch"
+      || PARAM_SENSITIVE_BRIDGE_METHODS.has(name);
     if (typeof value !== "function" || !requiresGuard) {
       guarded[name] = value;
       continue;
@@ -402,7 +626,16 @@ function createGuardedBridge(bridge, options = {}) {
   return Object.freeze(guarded);
 }
 
-if (process.env.LEXA_ELECTRON_SMOKE_MOCK === "1") {
+function isLexaSmokeMockAllowed() {
+  const argv = Array.isArray(process.argv) ? process.argv.join(" ") : "";
+  const explicitSmokeTest = process.env.LEXA_ELECTRON_SMOKE_TEST === "1";
+  const smokeRunner = /electron_(?:ui_visual|presence_challenge)_smoke\.js/i.test(argv);
+  return process.env.LEXA_ELECTRON_SMOKE_MOCK === "1"
+    && process.env.NODE_ENV !== "production"
+    && (explicitSmokeTest || smokeRunner);
+}
+
+if (isLexaSmokeMockAllowed()) {
   let nextConversationId = 1000;
   const conversations = [
     { id: 1, title: "Smoke Test Chat", message_count: 2, last_message: "Mocked local data" },
@@ -1961,7 +2194,7 @@ const lexaBridge = {
     const params = new URLSearchParams();
     params.set("areaPath", areaPath || ".");
     if (tag) params.set("tag", tag);
-    params.set("maxMatches", String(maxMatches || 50));
+    params.set("maxMatches", String(clampPositiveInteger(maxMatches, 50, 1, 50)));
     const r = await fetchWithTimeout(`${API}/personal-os/query?${params.toString()}`);
     return personalOsJson(r, "Personal OS query failed");
   },
@@ -1984,8 +2217,8 @@ const lexaBridge = {
     const params = new URLSearchParams();
     params.set("areaPath", areaPath || ".");
     if (tag) params.set("tag", tag);
-    params.set("maxFiles", String(maxFiles || 5));
-    params.set("bodyChars", String(bodyChars || 700));
+    params.set("maxFiles", String(clampPositiveInteger(maxFiles, 5, 1, 5)));
+    params.set("bodyChars", String(clampPositiveInteger(bodyChars, 700, 0, 700)));
     params.set("includeGraph", includeGraph ? "true" : "false");
     params.set("hideSmoke", hideSmoke ? "true" : "false");
     const r = await fetchWithTimeout(`${API}/personal-os/context-pack?${params.toString()}`);
@@ -1994,8 +2227,8 @@ const lexaBridge = {
   personalOsObsidianContext: async ({ topic = "", maxFiles = 5, bodyChars = 600, includePreviews = true } = {}) => {
     const params = new URLSearchParams();
     if (topic) params.set("topic", topic);
-    params.set("maxFiles", String(maxFiles || 5));
-    params.set("bodyChars", String(bodyChars || 600));
+    params.set("maxFiles", String(clampPositiveInteger(maxFiles, 5, 1, 5)));
+    params.set("bodyChars", String(clampPositiveInteger(bodyChars, 600, 0, 600)));
     params.set("includePreviews", includePreviews ? "true" : "false");
     const r = await fetchWithTimeout(`${API}/personal-os/obsidian-context?${params.toString()}`);
     return personalOsJson(r, "Personal OS Obsidian context failed");

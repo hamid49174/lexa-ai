@@ -77,5 +77,10 @@ assert("blocks unsafe renderer navigation", src.includes('webContents.on("will-n
 assert("limits trusted renderer URLs to frontend src files", src.includes("fileURLToPath") && src.includes('path.join(__dirname, "src")') && src.includes("isPathInside"));
 assert("defaults permission requests to deny except trusted audio capture", src.includes("setPermissionRequestHandler") && src.includes('permission === "media"') && src.includes('mediaTypes.includes("audio")') && src.includes('!mediaTypes.includes("video")') && src.includes("callback(Boolean(allowAudioCapture))"));
 
+console.log("\nElectron bridge audit and smoke guard:");
+assert("rotates bridge audit log under userData", src.includes("BRIDGE_AUDIT_MAX_BYTES") && src.includes("function rotateBridgeAuditIfNeeded") && src.includes('app.getPath("userData")') && src.includes("`${auditPath}.1`"));
+assert("bridge audit records effective risk classification", src.includes("base_risk") && src.includes("effective_risk") && src.includes("classification_reason"));
+assert("smoke mock is fail-closed outside non-packaged smoke tests", src.includes("function hardenSmokeMockEnvironment") && src.includes("app.isPackaged") && src.includes("delete process.env.LEXA_ELECTRON_SMOKE_MOCK") && src.includes("function isElectronSmokeTestContext"));
+
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

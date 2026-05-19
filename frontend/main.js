@@ -476,6 +476,7 @@ const BRIDGE_PRESENCE_METHODS = new Set([
   "setProfile",
   "conversationUpdate",
   "conversationDelete",
+  "conversationExport",
   "calendarConnect",
   "clipboardHistory",
   "clipboardClear",
@@ -492,9 +493,11 @@ const BRIDGE_PRESENCE_METHODS = new Set([
   "mcpCallTool",
   "personalOsDraftDecision",
   "personalOsDraftApply",
+  "personalOsReadFile",
   "personalOsRawSubmit",
 ]);
 const bridgePresenceChallenges = new Map();
+const BRIDGE_AUDIT_MAX_BYTES = 3 * 1024 * 1024;
 
 function bridgePresenceIdPrefix(challengeId) {
   return String(challengeId || "").slice(0, 10);
@@ -505,7 +508,9 @@ function sanitizeBridgeAuditEvent(payload = {}, source = "main") {
     timestamp: String(payload.timestamp || new Date().toISOString()).slice(0, 80),
     source,
     method: String(payload.method || "unknown").slice(0, 100),
-    risk: String(payload.risk || "unknown").slice(0, 30),
+    risk: String(payload.risk || payload.effective_risk || "unknown").slice(0, 30),
+    base_risk: String(payload.base_risk || payload.risk || "unknown").slice(0, 30),
+    effective_risk: String(payload.effective_risk || payload.risk || "unknown").slice(0, 30),
     action_type: String(payload.action_type || payload.actionType || "unknown").slice(0, 30),
     allowed: Boolean(payload.allowed),
     reason: String(payload.reason || "").slice(0, 160),
@@ -513,13 +518,37 @@ function sanitizeBridgeAuditEvent(payload = {}, source = "main") {
     arg_keys: Array.isArray(payload.arg_keys || payload.argKeys)
       ? (payload.arg_keys || payload.argKeys).map((key) => String(key || "").slice(0, 80)).slice(0, 40)
       : [],
+    classification_reason: String(payload.classification_reason || "").slice(0, 120),
     challenge_id_prefix: bridgePresenceIdPrefix(payload.challenge_id_prefix || payload.challengeId || ""),
   };
 }
 
+function bridgeAuditPath() {
+  return path.join(app.getPath("userData"), "bridge-audit.log");
+}
+
+function rotateBridgeAuditIfNeeded(auditPath = bridgeAuditPath()) {
+  try {
+    if (!fs.existsSync(auditPath)) return;
+    const stat = fs.statSync(auditPath);
+    if (stat.size <= BRIDGE_AUDIT_MAX_BYTES) return;
+    const rotatedPath = `${auditPath}.1`;
+    if (fs.existsSync(rotatedPath)) fs.unlinkSync(rotatedPath);
+    fs.renameSync(auditPath, rotatedPath);
+    fs.writeFileSync(
+      auditPath,
+      `${JSON.stringify({ timestamp: new Date().toISOString(), source: "main", method: "bridge_audit", allowed: true, reason: "rotated", previous_size: stat.size })}\n`,
+      "utf8",
+    );
+  } catch (error) {
+    console.warn("[BridgePresenceAudit] rotation failed:", String(error?.message || error).slice(0, 120));
+  }
+}
+
 function writeBridgeAuditEvent(event) {
   try {
-    const auditPath = path.join(app.getPath("userData"), "bridge-audit.log");
+    const auditPath = bridgeAuditPath();
+    rotateBridgeAuditIfNeeded(auditPath);
     fs.appendFileSync(auditPath, `${JSON.stringify(event)}\n`, "utf8");
   } catch (error) {
     console.warn("[BridgePresenceAudit] write failed:", String(error?.message || error).slice(0, 120));
@@ -529,13 +558,16 @@ function writeBridgeAuditEvent(event) {
 function sanitizeBridgePresenceRequest(payload = {}) {
   const method = String(payload.method || "").trim();
   const risk = String(payload.risk || "unknown").trim();
+  const baseRisk = String(payload.base_risk || payload.risk || "unknown").trim();
+  const effectiveRisk = String(payload.effective_risk || payload.risk || "unknown").trim();
   const actionType = String(payload.action_type || "unknown").trim();
   const target = String(payload.target || "unknown").trim();
   const argsHash = String(payload.args_hash || "").trim();
   const argKeys = Array.isArray(payload.arg_keys)
     ? payload.arg_keys.map((key) => String(key || "").slice(0, 80)).slice(0, 40)
     : [];
-  return { method, risk, actionType, target, argsHash, argKeys };
+  const classificationReason = String(payload.classification_reason || "").slice(0, 120);
+  return { method, risk, baseRisk, effectiveRisk, actionType, target, argsHash, argKeys, classificationReason };
 }
 
 function isValidBridgePresenceRequest(payload) {
@@ -549,11 +581,14 @@ function auditBridgePresence(status, payload = {}, reason = "", challengeId = ""
     timestamp: new Date().toISOString(),
     method: payload.method,
     risk: payload.risk,
+    base_risk: payload.baseRisk || payload.base_risk,
+    effective_risk: payload.effectiveRisk || payload.effective_risk || payload.risk,
     action_type: payload.actionType || payload.action_type,
     allowed: status === "allowed",
     reason: reason || status,
     args_hash: payload.argsHash || payload.args_hash,
     arg_keys: payload.argKeys || payload.arg_keys,
+    classification_reason: payload.classificationReason || payload.classification_reason,
     challenge_id_prefix: bridgePresenceIdPrefix(challengeId),
   }, "main");
   const line = `[BridgePresenceAudit] ${JSON.stringify(event)}`;
@@ -1016,7 +1051,22 @@ function checkForUpdates() {
 }
 
 // ── APP LIFECYCLE ────────────────────────────────
+function isElectronSmokeTestContext() {
+  const argvText = Array.isArray(process.argv) ? process.argv.join(" ") : "";
+  return process.env.LEXA_ELECTRON_SMOKE_TEST === "1"
+    || /electron_(?:ui_visual|presence_challenge)_smoke\.js/i.test(argvText);
+}
+
+function hardenSmokeMockEnvironment() {
+  if (process.env.LEXA_ELECTRON_SMOKE_MOCK !== "1") return;
+  if (!app.isPackaged && isElectronSmokeTestContext()) return;
+  console.warn("[App] Ignoring unsafe LEXA_ELECTRON_SMOKE_MOCK outside Electron smoke tests.");
+  delete process.env.LEXA_ELECTRON_SMOKE_MOCK;
+}
+
 app.whenReady().then(async () => {
+  hardenSmokeMockEnvironment();
+
   // Set data directory for backend (e.g. C:\Users\admin\AppData\Roaming\lexa-ai)
   const dataDir = app.getPath("userData");
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });

@@ -696,6 +696,8 @@
   "memory.emptySnippets": "No snippets. Create reusable text blocks.",
   "memory.emptyRoutines": "No routines. Tell Lexa \"Create a morning routine...\"",
   "memory.emptyClipboard": "No clipboard history",
+  "memory.clipboardPrivacyHint": "Clipboard history is private. Reveal it only when you need it.",
+  "memory.revealClipboardHistory": "Reveal clipboard history",
   "memory.cleanupBtn": "🧹 Cleanup ({{count}} memories)",
   "memory.noteTitlePlaceholder": "Note title...",
   "memory.noteContentPlaceholder": "Note content... (Markdown supported)",

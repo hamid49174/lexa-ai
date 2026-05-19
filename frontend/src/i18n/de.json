@@ -696,6 +696,8 @@
   "memory.emptySnippets": "Keine Snippets. Erstelle wiederverwendbare Textbausteine.",
   "memory.emptyRoutines": "Keine Routinen. Sag Lexa \"Erstelle eine Morgenroutine...\"",
   "memory.emptyClipboard": "Kein Clipboard-Verlauf",
+  "memory.clipboardPrivacyHint": "Clipboard-Verlauf ist privat. Zeige ihn nur an, wenn du ihn brauchst.",
+  "memory.revealClipboardHistory": "Clipboard-Verlauf anzeigen",
   "memory.cleanupBtn": "🧹 Cleanup ({{count}} Erinnerungen)",
   "memory.noteTitlePlaceholder": "Notiz-Titel...",
   "memory.noteContentPlaceholder": "Inhalt der Notiz... (Markdown unterstützt)",
