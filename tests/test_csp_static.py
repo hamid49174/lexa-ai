@@ -30,3 +30,18 @@ def test_frontend_has_no_inline_style_or_csp_bypass_regressions():
                     findings.append(f"{rel}:{line_no}: {label}: {line.strip()}")
 
     assert not findings, "CSP/static inline-style blockers found:\n" + "\n".join(findings)
+
+
+def test_index_csp_has_electron_defense_in_depth_directives():
+    index_html = FRONTEND_SRC / "index.html"
+    text = index_html.read_text(encoding="utf-8")
+    match = re.search(r'Content-Security-Policy"\s+content="([^"]+)"', text)
+    assert match, "index.html must define a Content-Security-Policy meta tag"
+    csp = match.group(1)
+    for directive in [
+        "object-src 'none'",
+        "base-uri 'self'",
+        "frame-ancestors 'none'",
+        "img-src 'self' data: blob: http: https:",
+    ]:
+        assert directive in csp, f"CSP missing directive: {directive}"

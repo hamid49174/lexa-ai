@@ -111,6 +111,7 @@ const http = require("http");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
+const { fileURLToPath } = require("url");
 
 // Suppress broken stdout/stderr pipes when launched from transient shells or tests.
 function isBrokenPipeError(error) {
@@ -418,6 +419,71 @@ function setupFrontendAutoReload() {
   }
 }
 
+function isPathInside(childPath, parentPath) {
+  const relative = path.relative(parentPath, childPath);
+  return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function isTrustedRendererUrl(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || ""));
+    if (parsed.protocol !== "file:") return false;
+    const filePath = path.normalize(fileURLToPath(parsed));
+    return isPathInside(filePath, path.join(__dirname, "src"));
+  } catch (_) {
+    return false;
+  }
+}
+
+function safeExternalUrl(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || ""));
+    if (!["http:", "https:", "mailto:"].includes(parsed.protocol.toLowerCase())) return "";
+    return parsed.href;
+  } catch (_) {
+    return "";
+  }
+}
+
+function openExternalUrl(rawUrl) {
+  const url = safeExternalUrl(rawUrl);
+  if (!url) return false;
+  electron.shell.openExternal(url).catch((err) => {
+    console.warn("[Main] external open failed:", err.message || err);
+  });
+  return true;
+}
+
+function installElectronSecurityGuards(win) {
+  if (!win?.webContents || win.webContents.__lexaSecurityGuardsInstalled) return;
+  win.webContents.__lexaSecurityGuardsInstalled = true;
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalUrl(url);
+    return { action: "deny" };
+  });
+
+  win.webContents.on("will-navigate", (event, url) => {
+    if (isTrustedRendererUrl(url)) return;
+    event.preventDefault();
+    openExternalUrl(url);
+  });
+
+  const ses = win.webContents.session;
+  if (ses && !ses.__lexaPermissionGuardInstalled) {
+    ses.__lexaPermissionGuardInstalled = true;
+    ses.setPermissionRequestHandler((webContents, permission, callback, details = {}) => {
+      const requestingUrl = details.requestingUrl || webContents?.getURL?.() || "";
+      const mediaTypes = Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
+      const allowAudioCapture = permission === "media"
+        && isTrustedRendererUrl(requestingUrl)
+        && mediaTypes.includes("audio")
+        && !mediaTypes.includes("video");
+      callback(Boolean(allowAudioCapture));
+    });
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100,
@@ -437,6 +503,7 @@ function createWindow() {
   });
 
   installRendererConsoleGuard(mainWindow.webContents);
+  installElectronSecurityGuards(mainWindow);
   mainWindow.loadFile(path.join(__dirname, "src", "index.html"));
   setupFrontendAutoReload();
 

@@ -69,5 +69,13 @@ assert("wraps main process console methods safely", src.includes("function insta
 assert("swallows uncaught EPIPE exceptions before Electron dialog listeners", src.includes("process.emit = (eventName, ...args)") && src.includes('eventName === "uncaughtException"') && src.includes("return true") && src.includes('process.on("uncaughtException"') && src.includes("if (isBrokenPipeError(error)) return"));
 assert("prevents renderer console forwarding from using Electron default pipe writer", src.includes("function installRendererConsoleGuard") && src.includes('webContents.on("console-message"') && src.includes("event.preventDefault?.()") && src.includes("installRendererConsoleGuard(mainWindow.webContents);") && src.indexOf("installRendererConsoleGuard(mainWindow.webContents);") < src.indexOf("mainWindow.loadFile"));
 
+console.log("\nElectron renderer security guards:");
+assert("installs renderer security guards before loading index", src.includes("function installElectronSecurityGuards") && src.indexOf("installElectronSecurityGuards(mainWindow);") > 0 && src.indexOf("installElectronSecurityGuards(mainWindow);") < src.indexOf("mainWindow.loadFile"));
+assert("denies renderer-created windows", src.includes("setWindowOpenHandler") && src.includes('return { action: "deny" };'));
+assert("opens only safe external URLs outside Lexa webContents", src.includes("function safeExternalUrl") && src.includes('["http:", "https:", "mailto:"]') && src.includes("electron.shell.openExternal"));
+assert("blocks unsafe renderer navigation", src.includes('webContents.on("will-navigate"') && src.includes("event.preventDefault();") && src.includes("isTrustedRendererUrl(url)"));
+assert("limits trusted renderer URLs to frontend src files", src.includes("fileURLToPath") && src.includes('path.join(__dirname, "src")') && src.includes("isPathInside"));
+assert("defaults permission requests to deny except trusted audio capture", src.includes("setPermissionRequestHandler") && src.includes('permission === "media"') && src.includes('mediaTypes.includes("audio")') && src.includes('!mediaTypes.includes("video")') && src.includes("callback(Boolean(allowAudioCapture))"));
+
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

@@ -1804,7 +1804,8 @@ function createMessageExportButton(disabled = false) {
 
 function renderFormattedMessage(target, text) {
   if (!target) return;
-  target.innerHTML = formatMessage(String(text || ""));
+  target.replaceChildren();
+  appendFormattedMessage(target, String(text || ""));
 }
 
 function renderStreamingText(target, text, showCursor = true) {
@@ -1828,103 +1829,276 @@ function denyAction(btn) {
   showToast(t("toast.actionCancelled"), "warning");
 }
 
-function formatMessage(text) {
-  // Strip <function=name>...</function> tags (AI model artifact, not real content)
-  text = text.replace(/<function=\w+[^>]*>[\s\S]*?<\/function>/g, "").trim();
-  text = text.replace(/<function=\w+[^>]*\/?>/g, "").trim();
-  if (!text) return "";
-  const translate = (key, fallback = "") => {
-    try {
-      if (typeof t === "function") {
-        const value = t(key);
-        if (value !== undefined && value !== null && value !== "") return String(value);
-      }
-    } catch (_) {}
-    return fallback || key;
-  };
+function stripModelFunctionTags(text) {
+  return String(text || "")
+    .replace(/<function=\w+[^>]*>[\s\S]*?<\/function>/g, "")
+    .replace(/<function=\w+[^>]*\/?>/g, "")
+    .trim();
+}
 
-  // Phase 1: Extract code blocks (protect from other processing)
-  const codeBlocks = [];
-  text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-    const escaped = code.replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
-    const placeholder = `\x00CODE${codeBlocks.length}\x00`;
-    const langLabel = lang ? `<span class="code-lang">${escapeHtml(lang)}</span>` : "";
-    const copyLabel = escapeHtml(translate("chat.copyTooltip", "Copy code"));
-    codeBlocks.push(`<div class="code-block-wrap"><div class="code-block-header">${langLabel}<button type="button" class="code-copy-btn" data-action="copy-code" title="${copyLabel}" aria-label="${copyLabel}" data-icon="&#x2398;"></button></div><pre class="code-block"><code>${escaped}</code></pre></div>`);
-    return placeholder;
-  });
+function normalizeChatUrl(rawUrl, { image = false } = {}) {
+  const value = String(rawUrl || "").trim();
+  if (!value) return "";
+  try {
+    const parsed = new URL(value);
+    const protocol = parsed.protocol.toLowerCase();
+    const allowed = image
+      ? new Set(["http:", "https:"])
+      : new Set(["http:", "https:", "mailto:"]);
+    if (!allowed.has(protocol)) return "";
+    return parsed.href;
+  } catch (_) {
+    return "";
+  }
+}
 
-  // Phase 2: Extract tables (protect from escaping)
-  const tables = [];
-  text = text.replace(/((?:\|.+\|[\t ]*\n)+)/g, (tableBlock) => {
-    const rows = tableBlock.trim().split("\n").filter(r => r.trim());
-    if (rows.length < 2) return tableBlock;
-    const isSep = /^\|[\s\-:|]+\|$/.test(rows[1].trim());
-    const dataRows = isSep ? [rows[0], ...rows.slice(2)] : rows;
-    if (dataRows.length === 0) return tableBlock;
-    let html = '<div class="table-wrap"><table class="chat-table">';
-    dataRows.forEach((row, i) => {
-      const cells = row.split("|").filter((c, ci, arr) => ci > 0 && ci < arr.length);
-      const tag = (i === 0 && isSep) ? "th" : "td";
-      html += "<tr>" + cells.map(c => `<${tag}>${escapeHtml(c.trim())}</${tag}>`).join("") + "</tr>";
-    });
-    html += "</table></div>";
-    const placeholder = `\x00TABLE${tables.length}\x00`;
-    tables.push(html);
-    return placeholder;
-  });
+function appendInlineMarkdown(parent, source) {
+  const text = String(source || "");
+  if (!text) return;
 
-  // Phase 3: Escape HTML (safety first)
-  text = escapeHtml(text);
+  const tokenPattern = /(`([^`\n]+)`|!\[([^\]\n]*)\]\(([^)\s]+(?:\s+[^)]*)?)\)|\[([^\]\n]+)\]\(([^)\s]+(?:\s+[^)]*)?)\)|\*\*([^*\n]+)\*\*|~~([^~\n]+)~~|\*([^*\n]+)\*)/g;
+  let lastIndex = 0;
+  let match;
 
-  // Phase 4: Restore protected blocks
-  text = text.replace(/\x00CODE(\d+)\x00/g, (_, i) => codeBlocks[parseInt(i, 10)]);
-  text = text.replace(/\x00TABLE(\d+)\x00/g, (_, i) => tables[parseInt(i, 10)]);
-
-  // Phase 5: Inline formatting
-  text = text.replace(/`([^`]+)`/g, (_, code) =>
-    `<code class="inline-code">${code.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>`
-  );
-  text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  text = text.replace(/~~([^~]+)~~/g, "<s>$1</s>");
-  text = text.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-
-  // Phase 6: Images & links
-  text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
-    const urlLower = url.trim().toLowerCase();
-    if (/^https?:\/\//.test(urlLower) && !/^(javascript|data|vbscript|file):/i.test(urlLower)) {
-      return `<img src="${escapeHtml(url.trim())}" alt="${escapeHtml(alt)}" class="chat-img">`;
+  while ((match = tokenPattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parent.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
     }
-    return alt || "";
-  });
-  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
-    if (!url.startsWith("http://") && !url.startsWith("https://")) return label;
-    return `<a href="${url}" class="chat-link" target="_blank" rel="noopener noreferrer">${label}</a>`;
+
+    const raw = match[0];
+    if (raw.startsWith("`")) {
+      const code = document.createElement("code");
+      code.className = "inline-code";
+      code.textContent = match[2] || "";
+      parent.appendChild(code);
+    } else if (raw.startsWith("![")) {
+      const safeUrl = normalizeChatUrl(match[4], { image: true });
+      if (safeUrl) {
+        const img = document.createElement("img");
+        img.className = "chat-img";
+        img.src = safeUrl;
+        img.alt = match[3] || "";
+        parent.appendChild(img);
+      } else if (match[3]) {
+        parent.appendChild(document.createTextNode(match[3]));
+      }
+    } else if (raw.startsWith("[")) {
+      const safeUrl = normalizeChatUrl(match[6]);
+      if (safeUrl) {
+        const link = document.createElement("a");
+        link.className = "chat-link";
+        link.href = safeUrl;
+        link.rel = "noopener noreferrer";
+        if (!safeUrl.toLowerCase().startsWith("mailto:")) link.target = "_blank";
+        link.textContent = match[5] || safeUrl;
+        parent.appendChild(link);
+      } else {
+        parent.appendChild(document.createTextNode(match[5] || raw));
+      }
+    } else if (raw.startsWith("**")) {
+      const strong = document.createElement("strong");
+      strong.textContent = match[7] || "";
+      parent.appendChild(strong);
+    } else if (raw.startsWith("~~")) {
+      const strike = document.createElement("s");
+      strike.textContent = match[8] || "";
+      parent.appendChild(strike);
+    } else if (raw.startsWith("*")) {
+      const em = document.createElement("em");
+      em.textContent = match[9] || "";
+      parent.appendChild(em);
+    } else {
+      parent.appendChild(document.createTextNode(raw));
+    }
+    lastIndex = tokenPattern.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    parent.appendChild(document.createTextNode(text.slice(lastIndex)));
+  }
+}
+
+function appendLineBreak(parent) {
+  parent.appendChild(document.createElement("br"));
+}
+
+function chatTableCells(row) {
+  return String(row || "").trim().replace(/^\|/, "").replace(/\|$/, "").split("|");
+}
+
+function isChatTableSeparator(row) {
+  return /^\s*\|?[\s:-]+\|[\s|:-]*\s*$/.test(String(row || ""));
+}
+
+function appendChatTable(parent, rows) {
+  const tableWrap = document.createElement("div");
+  tableWrap.className = "table-wrap";
+  const table = document.createElement("table");
+  table.className = "chat-table";
+  const hasHeader = rows.length > 1 && isChatTableSeparator(rows[1]);
+  const dataRows = hasHeader ? [rows[0], ...rows.slice(2)] : rows;
+
+  dataRows.forEach((row, index) => {
+    const tr = document.createElement("tr");
+    const tag = hasHeader && index === 0 ? "th" : "td";
+    chatTableCells(row).forEach((cell) => {
+      const el = document.createElement(tag);
+      appendInlineMarkdown(el, cell.trim());
+      tr.appendChild(el);
+    });
+    table.appendChild(tr);
   });
 
-  // Phase 7: Block elements
-  text = text.replace(/^### (.+)$/gm, '<h4 class="chat-h4">$1</h4>');
-  text = text.replace(/^## (.+)$/gm, '<h3 class="chat-h3">$1</h3>');
-  text = text.replace(/(?:^|\n)&gt; (.+)/g, '<blockquote class="chat-quote">$1</blockquote>');
-  text = text.replace(/^-{3,}$/gm, '<hr class="chat-hr">');
+  tableWrap.appendChild(table);
+  parent.appendChild(tableWrap);
+}
 
-  // Numbered lists
-  text = text.replace(/((?:^\d+\.\s+.+$\n?)+)/gm, (block) => {
-    const items = block.trim().split("\n").filter(l => /^\d+\.\s+/.test(l));
-    if (items.length < 1) return block;
-    return '<ol class="chat-ol">' + items.map(l => `<li>${l.replace(/^\d+\.\s+/, "")}</li>`).join("") + "</ol>";
-  });
+function appendCodeBlock(parent, lang, codeText) {
+  const wrap = document.createElement("div");
+  wrap.className = "code-block-wrap";
+  const header = document.createElement("div");
+  header.className = "code-block-header";
+  const safeLang = String(lang || "").replace(/[^\w.+-]/g, "").slice(0, 32);
+  if (safeLang) {
+    const label = document.createElement("span");
+    label.className = "code-lang";
+    label.textContent = safeLang;
+    header.appendChild(label);
+  }
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.className = "code-copy-btn";
+  copyButton.dataset.action = "copy-code";
+  const copyLabel = typeof t === "function" ? t("chat.copyTooltip") : "Copy code";
+  copyButton.title = copyLabel;
+  copyButton.setAttribute("aria-label", copyLabel);
+  copyButton.dataset.icon = "\u2398";
+  header.appendChild(copyButton);
 
-  // Unordered lists
-  text = text.replace(/((?:^[-*] .+$\n?)+)/gm, (block) => {
-    const lines = block.split("\n").filter(l => /^[-*] /.test(l));
-    if (lines.length < 1) return block;
-    return '<ul class="chat-ul">' + lines.map(l => `<li>${l.replace(/^[-*] /, "")}</li>`).join("") + "</ul>";
-  });
+  const pre = document.createElement("pre");
+  pre.className = "code-block";
+  const code = document.createElement("code");
+  code.textContent = String(codeText || "").trim();
+  pre.appendChild(code);
+  wrap.appendChild(header);
+  wrap.appendChild(pre);
+  parent.appendChild(wrap);
+}
 
-  // Phase 8: Line breaks (skip inside block elements)
-  text = text.replace(/\n(?!<\/?(ul|ol|li|pre|code|table|tr|td|th|div|h[34]|blockquote|hr))/g, "<br>");
-  return text;
+function isMarkdownBlockStart(line) {
+  return /^(#{2,3}\s+|>\s+|-{3,}\s*$|\d+\.\s+|[-*]\s+)/.test(line)
+    || (/^\s*\|.*\|\s*$/.test(line));
+}
+
+function appendMarkdownSegment(parent, segment) {
+  const lines = String(segment || "").replace(/\r\n/g, "\n").split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) {
+      appendLineBreak(parent);
+      i += 1;
+      continue;
+    }
+
+    if (/^###\s+/.test(line)) {
+      const h4 = document.createElement("h4");
+      h4.className = "chat-h4";
+      appendInlineMarkdown(h4, line.replace(/^###\s+/, ""));
+      parent.appendChild(h4);
+      i += 1;
+      continue;
+    }
+    if (/^##\s+/.test(line)) {
+      const h3 = document.createElement("h3");
+      h3.className = "chat-h3";
+      appendInlineMarkdown(h3, line.replace(/^##\s+/, ""));
+      parent.appendChild(h3);
+      i += 1;
+      continue;
+    }
+    if (/^-{3,}\s*$/.test(line)) {
+      const hr = document.createElement("hr");
+      hr.className = "chat-hr";
+      parent.appendChild(hr);
+      i += 1;
+      continue;
+    }
+    if (/^>\s+/.test(line)) {
+      const quote = document.createElement("blockquote");
+      quote.className = "chat-quote";
+      let first = true;
+      while (i < lines.length && /^>\s+/.test(lines[i])) {
+        if (!first) appendLineBreak(quote);
+        appendInlineMarkdown(quote, lines[i].replace(/^>\s+/, ""));
+        first = false;
+        i += 1;
+      }
+      parent.appendChild(quote);
+      continue;
+    }
+    if (/^\d+\.\s+/.test(line)) {
+      const list = document.createElement("ol");
+      list.className = "chat-ol";
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
+        const item = document.createElement("li");
+        appendInlineMarkdown(item, lines[i].replace(/^\d+\.\s+/, ""));
+        list.appendChild(item);
+        i += 1;
+      }
+      parent.appendChild(list);
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      const list = document.createElement("ul");
+      list.className = "chat-ul";
+      while (i < lines.length && /^[-*]\s+/.test(lines[i])) {
+        const item = document.createElement("li");
+        appendInlineMarkdown(item, lines[i].replace(/^[-*]\s+/, ""));
+        list.appendChild(item);
+        i += 1;
+      }
+      parent.appendChild(list);
+      continue;
+    }
+    if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && isChatTableSeparator(lines[i + 1])) {
+      const tableRows = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+        tableRows.push(lines[i]);
+        i += 1;
+      }
+      appendChatTable(parent, tableRows);
+      continue;
+    }
+
+    let first = true;
+    while (i < lines.length && lines[i].trim() && !isMarkdownBlockStart(lines[i])) {
+      if (!first) appendLineBreak(parent);
+      appendInlineMarkdown(parent, lines[i]);
+      first = false;
+      i += 1;
+    }
+  }
+}
+
+function appendFormattedMessage(parent, text) {
+  const source = stripModelFunctionTags(text);
+  if (!source) return;
+  const codePattern = /```([A-Za-z0-9_.+-]*)\n?([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = codePattern.exec(source)) !== null) {
+    appendMarkdownSegment(parent, source.slice(lastIndex, match.index));
+    appendCodeBlock(parent, match[1], match[2]);
+    lastIndex = codePattern.lastIndex;
+  }
+  appendMarkdownSegment(parent, source.slice(lastIndex));
+}
+
+function formatMessage(text) {
+  const wrapper = document.createElement("div");
+  appendFormattedMessage(wrapper, String(text || ""));
+  return wrapper.innerHTML;
 }
 
 // ── FOLLOW-UP SUGGESTIONS ─────────────────────────
