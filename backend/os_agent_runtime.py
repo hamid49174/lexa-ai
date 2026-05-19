@@ -6,7 +6,9 @@ and worker agents such as Hermes execute bounded tasks through this runtime.
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 import threading
 import time
 import uuid
@@ -26,8 +28,25 @@ from backend.lexa_voice import LEXA_WORKER_VOICE_RULES
 
 TASK_STORE_ROOT = HERMES_WORKSPACE_ROOT / "os_agent_tasks"
 _MAX_STORED_TEXT = 16000
+_MAX_REVIEW_OUTPUT = 2000
 _LOCK = threading.RLock()
 _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="lexa-os-agent")
+_SECRET_REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\b\d{5,20}:[A-Za-z0-9_-]{20,120}\b"), "[telegram-token-redacted]"),
+    (re.compile(r"\b(sk|rk|pk|xox[baprs]?)-[A-Za-z0-9_-]{16,}\b", re.IGNORECASE), "[api-token-redacted]"),
+    (re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b", re.IGNORECASE), "Bearer [redacted]"),
+    (
+        re.compile(
+            r"\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL)[A-Z0-9_]*\s*[=:]\s*)([\"']?)[^\s\"'`]+",
+            re.IGNORECASE,
+        ),
+        r"\1\2[redacted]",
+    ),
+    (
+        re.compile(r"\b(authorization|api[_-]?key|token|secret|password)\b\s*[:=]\s*([\"']?)[^\s\"'`]+", re.IGNORECASE),
+        r"\1=\2[redacted]",
+    ),
+)
 
 
 def _now() -> str:
@@ -54,6 +73,132 @@ def _clip(value: Any, limit: int = _MAX_STORED_TEXT) -> Any:
     if isinstance(value, list):
         return [_clip(item, limit) for item in value]
     return value
+
+
+def _redact_review_text(value: Any, limit: int = _MAX_REVIEW_OUTPUT) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    for pattern, replacement in _SECRET_REDACTIONS:
+        text = pattern.sub(replacement, text)
+    if len(text) > limit:
+        return text[:limit].rstrip() + "\n...[truncated]"
+    return text
+
+
+def _build_review_output_summary(result: dict[str, Any]) -> list[str]:
+    stdout = str(result.get("stdout") or "")
+    stderr = str(result.get("stderr") or "")
+    error = str(result.get("error") or "")
+    return [
+        f"- stdout characters: `{len(stdout)}`",
+        f"- stderr characters: `{len(stderr)}`",
+        f"- error present: `{'yes' if error else 'no'}`",
+        f"- output excerpt limit: `{_MAX_REVIEW_OUTPUT}` characters per stream",
+    ]
+
+
+def _sdk_root() -> Path:
+    return PERSONAL_OS_ROOT / "00_System" / "SDK" / "os-sdk"
+
+
+def _ensure_os_sdk_build(sdk_root: Path) -> bool:
+    if (sdk_root / "dist" / "index.js").exists():
+        return True
+    if not (sdk_root / "package.json").exists():
+        return False
+    try:
+        build = subprocess.run(
+            ["npm", "run", "build", "--silent"],
+            cwd=sdk_root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return build.returncode == 0 and (sdk_root / "dist" / "index.js").exists()
+
+
+def _write_os_draft_via_sdk(
+    *,
+    target_path: str,
+    title: str,
+    markdown_body: str,
+    agent_name: str,
+    reason: str,
+) -> str | None:
+    sdk_root = _sdk_root()
+    if not _ensure_os_sdk_build(sdk_root):
+        return None
+
+    payload = {
+        "targetPath": target_path,
+        "title": title,
+        "body": markdown_body,
+        "agentName": agent_name,
+        "reason": _redact_review_text(reason, 600),
+    }
+    node_script = r"""
+import { readFile } from "node:fs/promises";
+import { OS, parseMarkdownBody } from "./dist/index.js";
+
+const input = JSON.parse(await readFile(0, "utf8"));
+const now = new Date().toISOString();
+const file = {
+  path: input.targetPath,
+  absolutePath: "",
+  frontmatter: {
+    id: `pos-${input.targetPath.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 96)}`,
+    type: "memory",
+    title: input.title,
+    status: "active",
+    memory_level: "session",
+    created: now,
+    updated: now,
+    owner: "agent",
+    confidence: "medium",
+    source: "agent",
+    tags: ["lexa", "personal-os", "agent-runtime", "hermes"],
+    related: []
+  },
+  ast: parseMarkdownBody(input.body),
+  body: input.body,
+  raw: input.body
+};
+const result = await OS.write(file, {
+  agent: input.agentName,
+  reason: input.reason,
+  requireApproval: true
+});
+console.log(JSON.stringify(result));
+"""
+    env = os.environ.copy()
+    env["PERSONAL_OS_SDK_ROOT"] = str(PERSONAL_OS_ROOT)
+    try:
+        proc = subprocess.run(
+            ["node", "--input-type=module", "-e", node_script],
+            cwd=sdk_root,
+            env=env,
+            input=json.dumps(payload, ensure_ascii=False),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        result = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    if result.get("status") != "draft":
+        return None
+    draft_path = result.get("draft")
+    if not isinstance(draft_path, str) or not draft_path.startswith("06_Inbox/Drafts/"):
+        return None
+    return draft_path
 
 
 def _save_task(task: dict[str, Any]) -> dict[str, Any]:
@@ -115,41 +260,15 @@ def _write_review_draft(task: dict[str, Any]) -> str | None:
     if not result:
         return None
 
-    drafts_dir = PERSONAL_OS_ROOT / "06_Inbox" / "Drafts"
-    if not drafts_dir.exists():
-        return None
-
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     slug = _safe_slug(task.get("title", ""), "os-agent-task")
-    filename = f"{stamp}_lexa_os_agent_{slug}_{task['id']}_review_draft.md"
-    path = drafts_dir / filename
     created = _now()
-    stdout = str(result.get("stdout") or "").strip()
-    stderr = str(result.get("stderr") or "").strip()
-    error = str(result.get("error") or "").strip()
+    stdout = _redact_review_text(result.get("stdout"))
+    stderr = _redact_review_text(result.get("stderr"))
+    error = _redact_review_text(result.get("error"), 800)
+    target_path = f"05_Memory/Session/{stamp}_lexa_os_agent_{slug}_{task['id']}_review.md"
 
-    body = f"""---
-id: pos-{task['id']}
-type: draft
-title: Lexa OS Agent Task Review - {task.get('title', 'Untitled')}
-status: review
-memory_level: working
-created: {created}
-updated: {created}
-owner: agent
-confidence: medium
-source: lexa-os-agent-runtime
-agent: {task.get('agent', 'hermes')}
-approval: pending
-decision: pending
-tags:
-  - lexa
-  - personal-os
-  - agent-runtime
-  - hermes
-reason: Review controlled OS-agent output before applying durable context.
----
-# Lexa OS Agent Task Review
+    body = f"""# Lexa OS Agent Task Review
 
 ## Facts
 
@@ -157,8 +276,9 @@ reason: Review controlled OS-agent output before applying durable context.
 - Agent: `{task.get('agent', 'hermes')}`
 - Mode: `{task.get('mode', 'general')}`
 - Runtime status: `{task.get('status', 'unknown')}`
-- Lexa root: `{PROJECT_ROOT}`
-- Personal OS root: `{PERSONAL_OS_ROOT}`
+- Created at: `{created}`
+- Lexa workspace: local project root
+- Personal OS: configured local OS root
 
 ## Assumptions
 
@@ -170,16 +290,20 @@ reason: Review controlled OS-agent output before applying durable context.
 - No stable OS file was intentionally overwritten by Lexa while creating this draft.
 - Any durable follow-up should be reviewed before apply.
 
+## Output Summary
+
+{chr(10).join(_build_review_output_summary(result))}
+
 ## Evidence
 
 ```text
-{stdout[:12000] if stdout else '[no stdout]'}
+{stdout if stdout else '[no stdout]'}
 ```
 
 ## Errors Or Warnings
 
 ```text
-{(stderr or error or '[none]')[:4000]}
+{stderr or error or '[none]'}
 ```
 
 ## Tasks
@@ -188,9 +312,13 @@ reason: Review controlled OS-agent output before applying durable context.
 - [ ] Decide whether any durable OS memory update is needed.
 - [ ] Apply only the specific approved change, not the full raw output.
 """
-    with _LOCK:
-        path.write_text(body, encoding="utf-8")
-    return path.relative_to(PERSONAL_OS_ROOT).as_posix()
+    return _write_os_draft_via_sdk(
+        target_path=target_path,
+        title=f"Lexa OS Agent Task Review - {task.get('title', 'Untitled')}",
+        markdown_body=body,
+        agent_name="LexaOSAgentRuntime",
+        reason="Create review draft for completed OS-agent task",
+    )
 
 
 def get_os_agent_registry() -> dict[str, Any]:
