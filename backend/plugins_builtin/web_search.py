@@ -14,6 +14,13 @@ PLUGIN_META = {
     "version": "1.0.0",
     "description": "Durchsucht das Web mit DuckDuckGo (kein API Key noetig)",
     "author": "Lexa AI",
+    "trusted": True,
+    "admin_approved": True,
+    "permissions": {
+        "network": {
+            "allowed_hosts": ["html.duckduckgo.com"],
+        },
+    },
     "tools": [
         {
             "type": "function",

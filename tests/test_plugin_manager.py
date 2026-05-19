@@ -8,6 +8,14 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def _trusted_shell_policy(argv):
+    return pm.PluginPermissionPolicy(
+        "Test Plugin",
+        {"shell": {"commands": [argv]}},
+        trusted=True,
+    )
+
+
 def test_yaml_shell_uses_subprocess_without_shell(monkeypatch):
     manager = pm.PluginManager()
     captured = {}
@@ -19,7 +27,11 @@ def test_yaml_shell_uses_subprocess_without_shell(monkeypatch):
 
     monkeypatch.setattr(pm.subprocess, "run", fake_run)
 
-    result = _run(manager._yaml_action_shell({"command": "echo hello"}, {}))
+    result = _run(manager._yaml_action_shell(
+        {"command": "echo hello"},
+        {},
+        _trusted_shell_policy(["echo", "hello"]),
+    ))
 
     assert result["success"] is True
     assert captured["argv"] == ["echo", "hello"]
@@ -39,17 +51,28 @@ def test_yaml_shell_supports_explicit_argv_templates(monkeypatch):
     monkeypatch.setattr(pm.subprocess, "run", fake_run)
 
     result = _run(manager._yaml_action_shell({
-        "argv": ["tool", "{{params.name}}", "{{env.LEXA_TEST_VALUE}}"]
-    }, {"name": "from-params"}))
+        "argv": ["tool", "{{env.LEXA_TEST_VALUE}}"]
+    }, {"name": "from-params"}, pm.PluginPermissionPolicy(
+        "Test Plugin",
+        {
+            "env": {"keys": ["LEXA_TEST_VALUE"]},
+            "shell": {"commands": [["tool", "{{env.LEXA_TEST_VALUE}}"]]},
+        },
+        trusted=True,
+    )))
 
     assert result["success"] is True
-    assert captured["argv"] == ["tool", "from-params", "from-env"]
+    assert captured["argv"] == ["tool", "from-env"]
 
 
 def test_yaml_shell_blocks_shell_operator_tokens():
     manager = pm.PluginManager()
 
-    result = _run(manager._yaml_action_shell({"command": "echo ok && whoami"}, {}))
+    result = _run(manager._yaml_action_shell(
+        {"command": "echo ok && whoami"},
+        {},
+        _trusted_shell_policy(["echo", "ok", "&&", "whoami"]),
+    ))
 
     assert result["success"] is False
     assert "Shell-Operatoren" in result["error"]
@@ -58,7 +81,11 @@ def test_yaml_shell_blocks_shell_operator_tokens():
 def test_yaml_shell_blocks_operator_tokens_in_argv():
     manager = pm.PluginManager()
 
-    result = _run(manager._yaml_action_shell({"argv": ["echo", "ok", "&&", "whoami"]}, {}))
+    result = _run(manager._yaml_action_shell(
+        {"argv": ["echo", "ok", "&&", "whoami"]},
+        {},
+        _trusted_shell_policy(["echo", "ok", "&&", "whoami"]),
+    ))
 
     assert result["success"] is False
     assert "Shell-Operatoren" in result["error"]
@@ -67,7 +94,11 @@ def test_yaml_shell_blocks_operator_tokens_in_argv():
 def test_yaml_shell_blocks_dangerous_patterns():
     manager = pm.PluginManager()
 
-    result = _run(manager._yaml_action_shell({"argv": ["cmd", "/c", "format", "C:"]}, {}))
+    result = _run(manager._yaml_action_shell(
+        {"argv": ["cmd", "/c", "format", "C:"]},
+        {},
+        _trusted_shell_policy(["cmd", "/c", "format", "C:"]),
+    ))
 
     assert result["success"] is False
     assert "Befehl blockiert" in result["error"]

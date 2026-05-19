@@ -2,6 +2,18 @@ name: "Quick Notes"
 version: "1.0.0"
 description: "Schnelle Notizen erstellen und lesen. Speichert Notizen als Markdown-Datei."
 author: "Lexa AI"
+trusted: true
+admin_approved: true
+permissions:
+  file_append:
+    paths:
+      - "~/.lexa/quick_notes.md"
+  file_read:
+    paths:
+      - "~/.lexa/quick_notes.md"
+  file_write:
+    paths:
+      - "~/.lexa/quick_notes.md"
 
 tools:
   - name: "quick_note_create"

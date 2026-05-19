@@ -24,6 +24,7 @@ import re
 from pathlib import Path
 
 from backend.i18n import t
+from backend.security import audit_log
 
 logger = logging.getLogger("lexa.plugins")
 
@@ -55,6 +56,14 @@ if _DATA_DIR:
     PLUGINS_DIR = Path(_DATA_DIR) / "plugins"
 else:
     PLUGINS_DIR = Path(__file__).resolve().parent.parent / "plugins"
+
+
+def _legacy_loader_enabled() -> bool:
+    return os.environ.get("LEXA_ENABLE_LEGACY_PLUGIN_LOADER", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _audit_legacy_loader(status: str, details: str = "") -> None:
+    audit_log("legacy_plugin_loader", status, details[:300])
 
 
 def _validate_plugin(plugin_path: Path) -> list[str]:
@@ -97,6 +106,12 @@ def discover_plugins(existing_commands: set[str] | None = None) -> dict[str, dic
     Returns:
         Dict mapping command_name -> {"func": callable, "plugin": plugin_name}
     """
+    if not _legacy_loader_enabled():
+        logger.warning("Legacy plugin_loader is disabled by default. Set LEXA_ENABLE_LEGACY_PLUGIN_LOADER=1 to opt in.")
+        _audit_legacy_loader("disabled", "legacy_loader_default_disabled")
+        return {}
+
+    _audit_legacy_loader("enabled", "legacy_loader_opt_in")
     _protected = existing_commands or set()
     if not PLUGINS_DIR.exists():
         PLUGINS_DIR.mkdir(exist_ok=True)
@@ -174,6 +189,9 @@ def discover_plugins(existing_commands: set[str] | None = None) -> dict[str, dic
 
 def list_plugins() -> list[dict]:
     """List all loaded plugins with their commands."""
+    if not _legacy_loader_enabled():
+        return []
+
     if not PLUGINS_DIR.exists():
         return []
 

@@ -2,6 +2,22 @@ name: "System Shortcuts"
 version: "1.0.0"
 description: "Haeufig genutzte System-Shortcuts fuer Windows. Schnellzugriff auf System-Aktionen."
 author: "Lexa AI"
+trusted: true
+admin_approved: true
+permissions:
+  env:
+    keys:
+      - TEMP
+  shell:
+    commands:
+      - ["PowerShell", "-NoProfile", "-Command", "Clear-RecycleBin -Force -ErrorAction SilentlyContinue; Write-Output 'Papierkorb geleert'"]
+      - ["ipconfig", "/all"]
+      - ["PowerShell", "-NoProfile", "-Command", "Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,2)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,2)}} | Format-Table -AutoSize"]
+      - ["explorer", "{{env.TEMP}}"]
+      - ["PowerShell", "-NoProfile", "-Command", "$os = Get-CimInstance Win32_OperatingSystem; $uptime = (Get-Date) - $os.LastBootUpTime; Write-Output ('Uptime: {0} Tage, {1} Stunden, {2} Minuten' -f $uptime.Days, $uptime.Hours, $uptime.Minutes)"]
+      - ["ipconfig", "/flushdns"]
+      - ["netsh", "wlan", "show", "profiles"]
+      - ["explorer", "shell:startup"]
 
 tools:
   - name: "shortcut_empty_recycle_bin"

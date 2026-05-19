@@ -31,6 +31,7 @@ YAML Plugin Format:
 
 import asyncio
 import importlib.util
+import ipaddress
 import json
 import logging
 import os
@@ -41,6 +42,9 @@ import threading
 import traceback
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+
+from backend.security import audit_log
 
 logger = logging.getLogger("lexa.plugin_manager")
 
@@ -50,6 +54,14 @@ MAX_TOOLS_PER_PLUGIN = 30
 PLUGIN_LOAD_TIMEOUT_SEC = 10
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(params|env)\.([a-zA-Z_][a-zA-Z0-9_.]*)\}\}")
 _SHELL_OPERATOR_TOKENS = {"&", "&&", "|", "||", ";", "<", ">", ">>", "2>", "1>"}
+_SECRET_KEY_RE = re.compile(r"(token|secret|password|passwd|api[_-]?key|authorization|credential|private[_-]?key)", re.IGNORECASE)
+_SECRET_VALUE_RE = re.compile(
+    r"(\b\d{5,20}:[A-Za-z0-9_-]{20,120}\b|\b(sk|rk|pk|xox[baprs]?)-[A-Za-z0-9_-]{16,}\b|\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b)",
+    re.IGNORECASE,
+)
+_SENSITIVE_PATH_PARTS = {".ssh", ".git"}
+_SENSITIVE_FILENAMES = {".env", "audit.log", "lexa_memory.db"}
+_LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 
 # Verbotene Muster in Python-Plugins (Sandbox)
 _FORBIDDEN_PATTERNS = [
@@ -69,6 +81,258 @@ _FORBIDDEN_REGEX_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 
 # Erlaubte YAML Action-Typen
 _ALLOWED_YAML_ACTIONS = {"http", "shell", "file_append", "file_write", "file_read"}
+_ACTION_PERMISSION = {
+    "http": "network",
+    "shell": "shell",
+    "file_append": "file_append",
+    "file_write": "file_write",
+    "file_read": "file_read",
+}
+_MUTATING_ACTIONS = {"shell", "file_append", "file_write"}
+
+
+class PluginPermissionError(PermissionError):
+    """Raised when a plugin action is denied by the permission policy."""
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _is_enabled_permission(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, dict):
+        return bool(value.get("enabled", True))
+    if isinstance(value, list):
+        return bool(value)
+    return value is not None
+
+
+def _redact_plugin_value(value: Any, limit: int = 220) -> str:
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    text = _SECRET_VALUE_RE.sub("[secret-redacted]", text)
+    text = re.sub(
+        r"\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL)[A-Z0-9_]*\s*[=:]\s*)([\"']?)[^\s\"'`]+",
+        r"\1\2[redacted]",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 14)].rstrip() + " [truncated]"
+
+
+def _normalize_host(host: str) -> str:
+    return str(host or "").strip().lower().rstrip(".")
+
+
+def _host_matches_allowed(host: str, allowed_hosts: list[str]) -> bool:
+    normalized = _normalize_host(host)
+    for allowed in allowed_hosts:
+        pattern = _normalize_host(allowed)
+        if not pattern:
+            continue
+        if pattern == normalized:
+            return True
+        if pattern.startswith("*.") and normalized.endswith(pattern[1:]):
+            return True
+    return False
+
+
+def _is_local_or_private_host(host: str) -> bool:
+    normalized = _normalize_host(host)
+    if normalized in _LOCAL_HOSTNAMES or normalized.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(normalized.strip("[]"))
+    except ValueError:
+        return False
+    return bool(ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast)
+
+
+def _resolve_config_path(value: str) -> Path:
+    return Path(os.path.expanduser(str(value))).resolve(strict=False)
+
+
+def _looks_sensitive_path(path: Path) -> bool:
+    parts = {part.lower() for part in path.parts}
+    if parts.intersection(_SENSITIVE_PATH_PARTS):
+        return True
+    return path.name.lower() in _SENSITIVE_FILENAMES
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+class PluginPermissionPolicy:
+    """Declarative plugin permissions; default is deny for risky capabilities."""
+
+    def __init__(self, plugin_name: str, raw_permissions: Any = None, trusted: bool = False):
+        self.plugin_name = plugin_name
+        self.trusted = bool(trusted)
+        self.permissions = raw_permissions if isinstance(raw_permissions, dict) else {}
+
+    @classmethod
+    def from_plugin_data(cls, plugin_name: str, data: dict[str, Any]) -> "PluginPermissionPolicy":
+        trusted = bool(data.get("trusted") or data.get("admin_approved") or data.get("adminApproved"))
+        return cls(plugin_name, data.get("permissions", {}), trusted=trusted)
+
+    def permission_config(self, permission: str) -> dict[str, Any]:
+        value = self.permissions.get(permission)
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, bool):
+            return {"enabled": value}
+        if isinstance(value, list):
+            return {"items": value}
+        return {}
+
+    def has_permission(self, permission: str) -> bool:
+        return _is_enabled_permission(self.permissions.get(permission))
+
+    def require_permission(self, action_type: str) -> str:
+        permission = _ACTION_PERMISSION.get(action_type, action_type)
+        if not self.has_permission(permission):
+            raise PluginPermissionError(f"Plugin '{self.plugin_name}' lacks permission: {permission}")
+        if action_type in _MUTATING_ACTIONS and not self.trusted:
+            raise PluginPermissionError(f"Plugin '{self.plugin_name}' must be trusted/admin-approved for {action_type}")
+        return permission
+
+    def allowed_env_keys(self) -> set[str]:
+        cfg = self.permission_config("env")
+        return {str(item) for item in _as_list(cfg.get("keys") or cfg.get("allowed_keys")) if str(item).strip()}
+
+    def resolve_template(self, template: Any, args: dict, *, field: str = "") -> Any:
+        if isinstance(template, str):
+            def replacer(match: re.Match[str]) -> str:
+                source = match.group(1)
+                key = match.group(2)
+                if source == "params":
+                    return str(args.get(key, ""))
+                if key not in self.allowed_env_keys():
+                    raise PluginPermissionError(f"Env expansion denied for key: {key}")
+                return os.environ.get(key, "")
+            return _TEMPLATE_VAR_RE.sub(replacer, template)
+        if isinstance(template, dict):
+            return {k: self.resolve_template(v, args, field=f"{field}.{k}" if field else str(k)) for k, v in template.items()}
+        if isinstance(template, list):
+            return [self.resolve_template(item, args, field=field) for item in template]
+        return template
+
+    def _file_entries(self, permission: str, key: str) -> list[str]:
+        cfg = self.permission_config(permission)
+        values: list[str] = []
+        values.extend(str(item) for item in _as_list(cfg.get(key)) if str(item).strip())
+        if permission == "file_append":
+            write_cfg = self.permission_config("file_write")
+            values.extend(str(item) for item in _as_list(write_cfg.get(key)) if str(item).strip())
+        return values
+
+    def resolve_allowed_file_path(self, permission: str, raw_path: str) -> Path:
+        self.require_permission(permission)
+        if not raw_path:
+            raise PluginPermissionError("File path is required")
+        target = _resolve_config_path(raw_path)
+        if _looks_sensitive_path(target):
+            raise PluginPermissionError("Sensitive file path is not allowed")
+
+        allowed_paths = [_resolve_config_path(item) for item in self._file_entries(permission, "paths")]
+        if any(target == allowed for allowed in allowed_paths):
+            return target
+
+        allowed_roots = [_resolve_config_path(item) for item in self._file_entries(permission, "roots")]
+        if any(target == root or _is_relative_to(target, root) for root in allowed_roots):
+            return target
+
+        raise PluginPermissionError(f"File path is outside allowed {permission} roots")
+
+    def allowed_hosts(self) -> list[str]:
+        cfg = self.permission_config("network")
+        return [str(item) for item in _as_list(cfg.get("allowed_hosts")) if str(item).strip()]
+
+    def allow_private_hosts(self) -> bool:
+        return bool(self.permission_config("network").get("allow_private_hosts", False))
+
+    def validate_url(self, url: str) -> tuple[str, str]:
+        self.require_permission("http")
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            raise PluginPermissionError(f"Only http/https URLs are allowed: {parsed.scheme or 'missing scheme'}")
+        host = parsed.hostname or ""
+        if not host:
+            raise PluginPermissionError("URL host is required")
+        if _is_local_or_private_host(host) and not self.allow_private_hosts():
+            raise PluginPermissionError("Local/private network targets are denied")
+        if not _host_matches_allowed(host, self.allowed_hosts()):
+            raise PluginPermissionError(f"Host is not allowed: {host}")
+        return parsed.geturl(), _normalize_host(host)
+
+    def allowed_command_templates(self) -> list[list[str]]:
+        cfg = self.permission_config("shell")
+        commands = cfg.get("commands") or cfg.get("argv")
+        out: list[list[str]] = []
+        for command in _as_list(commands):
+            if isinstance(command, list):
+                out.append([str(part) for part in command])
+            elif isinstance(command, str):
+                try:
+                    out.append(shlex.split(command, posix=(os.name != "nt")))
+                except ValueError:
+                    continue
+        return out
+
+    def validate_shell_command(self, template_argv: list[str], resolved_argv: list[str]) -> None:
+        self.require_permission("shell")
+        if any("{{params." in part for part in template_argv):
+            raise PluginPermissionError("Shell commands must not include free user parameters")
+        allowed = self.allowed_command_templates()
+        if not allowed:
+            raise PluginPermissionError("Shell permission requires explicit allowed commands")
+        if template_argv not in allowed:
+            raise PluginPermissionError("Shell command is not in the plugin allowlist")
+        blocked_tokens = [token for token in resolved_argv if token in _SHELL_OPERATOR_TOKENS]
+        if blocked_tokens:
+            raise PluginPermissionError(f"Shell operators are not allowed: {' '.join(blocked_tokens)}")
+
+
+def _audit_plugin_action(
+    plugin_name: str,
+    action_type: str,
+    status: str,
+    reason: str,
+    *,
+    permission_used: str = "",
+    target_kind: str = "",
+    target_host: str = "",
+    target_path: str = "",
+    command_name: str = "",
+) -> None:
+    details = {
+        "plugin_name": plugin_name,
+        "action_type": action_type,
+        "reason": reason,
+        "permission_used": permission_used,
+        "target_kind": target_kind,
+        "target_host": target_host,
+        "target_path": target_path,
+        "command_name": command_name,
+    }
+    safe_details = " ".join(
+        f"{key}={_redact_plugin_value(value)}"
+        for key, value in details.items()
+        if value not in (None, "")
+    )
+    audit_log("plugin_action", status, safe_details)
 
 
 def _get_user_plugin_dir() -> Path:
@@ -90,7 +354,7 @@ class PluginInfo:
     __slots__ = (
         "name", "version", "description", "author", "path",
         "plugin_type", "tools", "enabled", "error",
-        "_module", "_yaml_data",
+        "policy", "_module", "_yaml_data",
     )
 
     def __init__(
@@ -101,6 +365,7 @@ class PluginInfo:
         author: str = "",
         path: Path | None = None,
         plugin_type: str = "python",
+        policy: PluginPermissionPolicy | None = None,
     ):
         self.name = name
         self.version = version
@@ -111,6 +376,7 @@ class PluginInfo:
         self.tools: list[dict] = []
         self.enabled: bool = True
         self.error: str | None = None
+        self.policy = policy or PluginPermissionPolicy(name)
         self._module = None
         self._yaml_data: dict | None = None
 
@@ -125,6 +391,8 @@ class PluginInfo:
             "tools": [t["function"]["name"] for t in self.tools],
             "enabled": self.enabled,
             "error": self.error,
+            "trusted": self.policy.trusted,
+            "permissions": sorted(self.policy.permissions.keys()),
         }
 
 
@@ -303,6 +571,7 @@ class PluginManager:
             author=meta.get("author", ""),
             path=path,
             plugin_type="python",
+            policy=PluginPermissionPolicy.from_plugin_data(name, meta),
         )
         info.tools = tools
         info._module = module
@@ -418,6 +687,7 @@ class PluginManager:
             author=data.get("author", ""),
             path=path,
             plugin_type="yaml",
+            policy=PluginPermissionPolicy.from_plugin_data(name, data),
         )
         info.tools = tools
         info._yaml_data = data
@@ -672,6 +942,11 @@ class PluginManager:
         self, info: PluginInfo, tool_name: str, args: dict
     ) -> dict:
         """Fuehrt ein Python-Plugin-Tool in separatem Thread aus."""
+        if not info.policy.trusted:
+            reason = "Python plugins require trusted/admin-approved metadata"
+            _audit_plugin_action(info.name, "python", "denied", reason, target_kind="python")
+            return {"success": False, "result": None, "error": reason}
+
         module = info._module
         if module is None:
             return {"success": False, "result": None, "error": "Plugin-Modul nicht geladen"}
@@ -682,6 +957,14 @@ class PluginManager:
 
         # In separatem Thread ausfuehren (Sandbox)
         try:
+            _audit_plugin_action(
+                info.name,
+                "python",
+                "allowed",
+                "trusted python plugin execution",
+                permission_used="trusted",
+                target_kind="python",
+            )
             if asyncio.iscoroutinefunction(execute_fn):
                 result = await asyncio.wait_for(
                     execute_fn(tool_name, args),
@@ -727,57 +1010,53 @@ class PluginManager:
         action_type = action.get("type", "")
 
         if action_type == "http":
-            return await self._yaml_action_http(action, args)
+            return await self._yaml_action_http(action, args, info.policy, info.name, tool_name)
         elif action_type == "shell":
-            return await self._yaml_action_shell(action, args)
+            return await self._yaml_action_shell(action, args, info.policy, info.name, tool_name)
         elif action_type == "file_append":
-            return await self._yaml_action_file_append(action, args)
+            return await self._yaml_action_file_append(action, args, info.policy, info.name, tool_name)
         elif action_type == "file_write":
-            return await self._yaml_action_file_write(action, args)
+            return await self._yaml_action_file_write(action, args, info.policy, info.name, tool_name)
         elif action_type == "file_read":
-            return await self._yaml_action_file_read(action, args)
+            return await self._yaml_action_file_read(action, args, info.policy, info.name, tool_name)
         else:
             return {"success": False, "result": None, "error": f"Unbekannter Action-Typ: {action_type}"}
 
     # ── YAML Action Handlers ──
 
-    def _resolve_template(self, template: Any, args: dict) -> Any:
+    def _resolve_template(self, template: Any, args: dict, policy: PluginPermissionPolicy | None = None) -> Any:
         """Ersetzt {{params.x}} und {{env.X}} Template-Variablen.
 
         Unterstuetzt Strings, Dicts und Listen rekursiv.
         """
-        if isinstance(template, str):
-            def replacer(match):
-                source = match.group(1)  # "params" oder "env"
-                key = match.group(2)
-                if source == "params":
-                    return str(args.get(key, ""))
-                elif source == "env":
-                    return os.environ.get(key, "")
-                return match.group(0)
-            return _TEMPLATE_VAR_RE.sub(replacer, template)
-        elif isinstance(template, dict):
-            return {k: self._resolve_template(v, args) for k, v in template.items()}
-        elif isinstance(template, list):
-            return [self._resolve_template(item, args) for item in template]
-        return template
+        return (policy or PluginPermissionPolicy("direct")).resolve_template(template, args)
 
-    async def _yaml_action_http(self, action: dict, args: dict) -> dict:
+    async def _yaml_action_http(
+        self,
+        action: dict,
+        args: dict,
+        policy: PluginPermissionPolicy | None = None,
+        plugin_name: str = "direct",
+        tool_name: str = "",
+    ) -> dict:
         """Fuehrt eine HTTP-Action aus."""
         import urllib.request
         import urllib.error
 
-        url = self._resolve_template(action.get("url", ""), args)
-        method = self._resolve_template(action.get("method", "GET"), args).upper()
-        headers_raw = self._resolve_template(action.get("headers", {}), args)
-        body_raw = self._resolve_template(action.get("body"), args)
+        policy = policy or PluginPermissionPolicy(plugin_name)
+        try:
+            permission = policy.require_permission("http")
+            url = self._resolve_template(action.get("url", ""), args, policy)
+            method = self._resolve_template(action.get("method", "GET"), args, policy).upper()
+            headers_raw = self._resolve_template(action.get("headers", {}), args, policy)
+            body_raw = self._resolve_template(action.get("body"), args, policy)
+            url, target_host = policy.validate_url(url)
+        except PluginPermissionError as e:
+            _audit_plugin_action(plugin_name, "http", "denied", str(e), target_kind="network")
+            return {"success": False, "result": None, "error": str(e)}
 
         if not url:
             return {"success": False, "result": None, "error": "Keine URL angegeben"}
-
-        # Nur http/https erlauben
-        if not url.startswith(("http://", "https://")):
-            return {"success": False, "result": None, "error": f"Nur http/https erlaubt: {url}"}
 
         try:
             body_bytes = None
@@ -800,6 +1079,15 @@ class PluginManager:
                         "headers": dict(resp.headers),
                     }
 
+            _audit_plugin_action(
+                plugin_name,
+                "http",
+                "allowed",
+                "network request allowed by plugin policy",
+                permission_used=permission,
+                target_kind="network",
+                target_host=target_host,
+            )
             result = await asyncio.to_thread(do_request)
             return {"success": True, "result": result, "error": None}
 
@@ -813,11 +1101,27 @@ class PluginManager:
         except Exception as e:
             return {"success": False, "result": None, "error": str(e)}
 
-    async def _yaml_action_shell(self, action: dict, args: dict) -> dict:
+    async def _yaml_action_shell(
+        self,
+        action: dict,
+        args: dict,
+        policy: PluginPermissionPolicy | None = None,
+        plugin_name: str = "direct",
+        tool_name: str = "",
+    ) -> dict:
         """Fuehrt einen Prozess ohne Shell aus (mit Sicherheitspruefung)."""
-        argv, command_for_checks, error = self._resolve_process_argv(action, args)
+        policy = policy or PluginPermissionPolicy(plugin_name)
+        argv, command_for_checks, template_argv, error = self._resolve_process_argv(action, args, policy)
         if error:
+            _audit_plugin_action(plugin_name, "shell", "denied", error, target_kind="process")
             return {"success": False, "result": None, "error": error}
+
+        try:
+            permission = policy.require_permission("shell")
+            policy.validate_shell_command(template_argv or [], argv or [])
+        except PluginPermissionError as e:
+            _audit_plugin_action(plugin_name, "shell", "denied", str(e), target_kind="process", command_name=(argv or [""])[0])
+            return {"success": False, "result": None, "error": str(e)}
 
         # Gefaehrliche Befehle blockieren
         dangerous_patterns = [
@@ -827,6 +1131,7 @@ class PluginManager:
         cmd_lower = command_for_checks.lower()
         for p in dangerous_patterns:
             if p in cmd_lower:
+                _audit_plugin_action(plugin_name, "shell", "denied", f"dangerous pattern: {p}", target_kind="process", command_name=(argv or [""])[0])
                 return {
                     "success": False,
                     "result": None,
@@ -834,6 +1139,15 @@ class PluginManager:
                 }
 
         try:
+            _audit_plugin_action(
+                plugin_name,
+                "shell",
+                "allowed",
+                "shell command allowed by plugin policy",
+                permission_used=permission,
+                target_kind="process",
+                command_name=(argv or [""])[0],
+            )
             def do_process():
                 proc = subprocess.run(
                     argv,
@@ -855,50 +1169,79 @@ class PluginManager:
         except Exception as e:
             return {"success": False, "result": None, "error": str(e)}
 
-    def _resolve_process_argv(self, action: dict, args: dict) -> tuple[list[str] | None, str, str | None]:
+    def _resolve_process_argv(
+        self,
+        action: dict,
+        args: dict,
+        policy: PluginPermissionPolicy | None = None,
+    ) -> tuple[list[str] | None, str, list[str] | None, str | None]:
         """Build an argv list for YAML process actions without invoking a shell."""
+        policy = policy or PluginPermissionPolicy("direct")
         raw_argv = action.get("argv")
         if raw_argv is not None:
-            resolved = self._resolve_template(raw_argv, args)
+            if not isinstance(raw_argv, list):
+                return None, "", None, "'argv' muss eine Liste sein"
+            template_argv = [str(part) for part in raw_argv if str(part)]
+            try:
+                resolved = self._resolve_template(raw_argv, args, policy)
+            except PluginPermissionError as e:
+                return None, " ".join(template_argv), template_argv, str(e)
             if not isinstance(resolved, list):
-                return None, "", "'argv' muss eine Liste sein"
+                return None, "", template_argv, "'argv' muss eine Liste sein"
             argv = [str(part) for part in resolved if str(part)]
             if not argv:
-                return None, "", "Keine argv-Argumente angegeben"
+                return None, "", template_argv, "Keine argv-Argumente angegeben"
             blocked_tokens = [token for token in argv if token in _SHELL_OPERATOR_TOKENS]
             if blocked_tokens:
-                return None, " ".join(argv), f"Shell-Operatoren sind nicht erlaubt: {' '.join(blocked_tokens)}"
-            return argv, " ".join(argv), None
+                return None, " ".join(argv), template_argv, f"Shell-Operatoren sind nicht erlaubt: {' '.join(blocked_tokens)}"
+            return argv, " ".join(argv), template_argv, None
 
-        command = self._resolve_template(action.get("command", ""), args)
+        raw_command = action.get("command", "")
+        try:
+            command = self._resolve_template(raw_command, args, policy)
+        except PluginPermissionError as e:
+            return None, str(raw_command), None, str(e)
         if not command:
-            return None, "", "Kein Befehl angegeben"
+            return None, "", None, "Kein Befehl angegeben"
         if not isinstance(command, str):
-            return None, "", "'command' muss ein String sein"
+            return None, "", None, "'command' muss ein String sein"
 
         try:
             argv = shlex.split(command, posix=(os.name != "nt"))
+            template_argv = shlex.split(str(raw_command), posix=(os.name != "nt"))
         except ValueError as e:
-            return None, command, f"Befehl konnte nicht geparst werden: {e}"
+            return None, command, None, f"Befehl konnte nicht geparst werden: {e}"
 
         if not argv:
-            return None, command, "Kein Befehl angegeben"
+            return None, command, template_argv, "Kein Befehl angegeben"
 
         blocked_tokens = [token for token in argv if token in _SHELL_OPERATOR_TOKENS]
         if blocked_tokens:
-            return None, command, f"Shell-Operatoren sind nicht erlaubt: {' '.join(blocked_tokens)}"
+            return None, command, template_argv, f"Shell-Operatoren sind nicht erlaubt: {' '.join(blocked_tokens)}"
 
-        return argv, command, None
+        return argv, command, template_argv, None
 
-    async def _yaml_action_file_append(self, action: dict, args: dict) -> dict:
+    async def _yaml_action_file_append(
+        self,
+        action: dict,
+        args: dict,
+        policy: PluginPermissionPolicy | None = None,
+        plugin_name: str = "direct",
+        tool_name: str = "",
+    ) -> dict:
         """Haengt Text an eine Datei an."""
-        path_str = self._resolve_template(action.get("path", ""), args)
-        content = self._resolve_template(action.get("content", ""), args)
+        policy = policy or PluginPermissionPolicy(plugin_name)
+        try:
+            path_str = self._resolve_template(action.get("path", ""), args, policy)
+            content = self._resolve_template(action.get("content", ""), args, policy)
+            path = policy.resolve_allowed_file_path("file_append", path_str)
+            permission = "file_append"
+        except PluginPermissionError as e:
+            _audit_plugin_action(plugin_name, "file_append", "denied", str(e), target_kind="file")
+            return {"success": False, "result": None, "error": str(e)}
 
         if not path_str:
             return {"success": False, "result": None, "error": "Kein Dateipfad angegeben"}
-
-        path = Path(os.path.expanduser(path_str))
 
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -908,21 +1251,42 @@ class PluginManager:
                     f.write(content)
                 return {"path": str(path), "bytes_written": len(content.encode("utf-8"))}
 
+            _audit_plugin_action(
+                plugin_name,
+                "file_append",
+                "allowed",
+                "file append allowed by plugin policy",
+                permission_used=permission,
+                target_kind="file",
+                target_path=str(path),
+            )
             result = await asyncio.to_thread(do_append)
             return {"success": True, "result": result, "error": None}
 
         except Exception as e:
             return {"success": False, "result": None, "error": str(e)}
 
-    async def _yaml_action_file_write(self, action: dict, args: dict) -> dict:
+    async def _yaml_action_file_write(
+        self,
+        action: dict,
+        args: dict,
+        policy: PluginPermissionPolicy | None = None,
+        plugin_name: str = "direct",
+        tool_name: str = "",
+    ) -> dict:
         """Schreibt Text in eine Datei (ueberschreibt)."""
-        path_str = self._resolve_template(action.get("path", ""), args)
-        content = self._resolve_template(action.get("content", ""), args)
+        policy = policy or PluginPermissionPolicy(plugin_name)
+        try:
+            path_str = self._resolve_template(action.get("path", ""), args, policy)
+            content = self._resolve_template(action.get("content", ""), args, policy)
+            path = policy.resolve_allowed_file_path("file_write", path_str)
+            permission = "file_write"
+        except PluginPermissionError as e:
+            _audit_plugin_action(plugin_name, "file_write", "denied", str(e), target_kind="file")
+            return {"success": False, "result": None, "error": str(e)}
 
         if not path_str:
             return {"success": False, "result": None, "error": "Kein Dateipfad angegeben"}
-
-        path = Path(os.path.expanduser(path_str))
 
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -932,25 +1296,55 @@ class PluginManager:
                     f.write(content)
                 return {"path": str(path), "bytes_written": len(content.encode("utf-8"))}
 
+            _audit_plugin_action(
+                plugin_name,
+                "file_write",
+                "allowed",
+                "file write allowed by plugin policy",
+                permission_used=permission,
+                target_kind="file",
+                target_path=str(path),
+            )
             result = await asyncio.to_thread(do_write)
             return {"success": True, "result": result, "error": None}
 
         except Exception as e:
             return {"success": False, "result": None, "error": str(e)}
 
-    async def _yaml_action_file_read(self, action: dict, args: dict) -> dict:
+    async def _yaml_action_file_read(
+        self,
+        action: dict,
+        args: dict,
+        policy: PluginPermissionPolicy | None = None,
+        plugin_name: str = "direct",
+        tool_name: str = "",
+    ) -> dict:
         """Liest den Inhalt einer Datei."""
-        path_str = self._resolve_template(action.get("path", ""), args)
+        policy = policy or PluginPermissionPolicy(plugin_name)
+        try:
+            path_str = self._resolve_template(action.get("path", ""), args, policy)
+            path = policy.resolve_allowed_file_path("file_read", path_str)
+            permission = "file_read"
+        except PluginPermissionError as e:
+            _audit_plugin_action(plugin_name, "file_read", "denied", str(e), target_kind="file")
+            return {"success": False, "result": None, "error": str(e)}
 
         if not path_str:
             return {"success": False, "result": None, "error": "Kein Dateipfad angegeben"}
-
-        path = Path(os.path.expanduser(path_str))
 
         if not path.exists():
             return {"success": False, "result": None, "error": f"Datei nicht gefunden: {path}"}
 
         try:
+            _audit_plugin_action(
+                plugin_name,
+                "file_read",
+                "allowed",
+                "file read allowed by plugin policy",
+                permission_used=permission,
+                target_kind="file",
+                target_path=str(path),
+            )
             def do_read():
                 content = path.read_text(encoding="utf-8", errors="replace")
                 return {"path": str(path), "content": content[:50000], "size": len(content)}
