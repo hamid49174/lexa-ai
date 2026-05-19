@@ -26,6 +26,11 @@ JSONRPC_VERSION = "2.0"
 # MCP protocol version we support
 MCP_PROTOCOL_VERSION = "2024-11-05"
 
+# Some Personal OS review packets and context maps exceed asyncio's default
+# 64 KiB StreamReader line limit because MCP stdio frames are newline-delimited
+# JSON. Keep this comfortably above expected local Markdown payloads.
+MCP_STDIO_READ_LIMIT = 16 * 1024 * 1024
+
 # Client info sent during initialization
 CLIENT_INFO = {
     "name": "lexa-ai",
@@ -117,6 +122,7 @@ class MCPClient:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                         env=self.env,
+                        limit=MCP_STDIO_READ_LIMIT,
                     ),
                     timeout=MCP_CONNECT_TIMEOUT,
                 )

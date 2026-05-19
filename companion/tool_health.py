@@ -9,6 +9,7 @@ Der LLM bekommt nur Tools angezeigt die auch funktionieren.
 import logging
 import shutil
 import subprocess
+import sys
 import threading
 from dataclasses import dataclass, field
 from typing import Optional
@@ -99,18 +100,32 @@ def _run_health_checks() -> dict[str, ToolStatus]:
         try:
             import subprocess as _sp
             result = _sp.run(
-                ["playwright", "install", "--dry-run", "chromium"],
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "from playwright.sync_api import sync_playwright\n"
+                        "pw = sync_playwright().start()\n"
+                        "browser = pw.chromium.launch(headless=True)\n"
+                        "browser.close()\n"
+                        "pw.stop()\n"
+                    ),
+                ],
                 capture_output=True, text=True, timeout=10,
+                encoding="utf-8", errors="replace",
             )
-            # If dry-run succeeds without "not installed", browsers are ready
             if result.returncode == 0:
                 checks["playwright_browser"] = ToolStatus(
                     name="playwright_browser", available=True, note="Chromium ready"
                 )
             else:
+                output = (result.stdout + result.stderr).strip()
+                note = "Run: python -m playwright install chromium"
+                if output and "playwright install" not in output:
+                    note = output.splitlines()[-1][:120]
                 checks["playwright_browser"] = ToolStatus(
                     name="playwright_browser", available=False,
-                    note="Run: playwright install chromium"
+                    note=note
                 )
         except Exception:
             checks["playwright_browser"] = ToolStatus(
@@ -128,9 +143,9 @@ def _build_cache() -> None:
         _health_cache = _run_health_checks()
         available = [k for k, v in _health_cache.items() if v.available]
         missing = [k for k, v in _health_cache.items() if not v.available]
-        logger.info(f"Tool health: {len(available)} available, {len(missing)} missing")
+        logger.debug(f"Tool health: {len(available)} available, {len(missing)} missing")
         if missing:
-            logger.info(f"Missing tools: {', '.join(missing)}")
+            logger.debug(f"Missing optional tools: {', '.join(missing)}")
     except Exception as e:
         logger.error(f"Health check failed: {e}")
     finally:

@@ -49,6 +49,8 @@ if _sentry_available:
         )
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
@@ -61,6 +63,14 @@ from backend.config import (
     MAX_HISTORY,
     CACHE_HEALTH_TTL,
     SLOW_REQUEST_THRESHOLD,
+)
+from backend.error_response import error_payload
+from backend.local_auth import (
+    LOCAL_AUTH_HEADER,
+    health_auth_fields,
+    is_local_auth_required,
+    is_public_path as is_local_auth_public_path,
+    request_has_valid_local_token,
 )
 from backend.shared import (
     conversation_history,
@@ -75,6 +85,7 @@ from backend.ai_engine import (
     set_ai_model as set_active_ai_model,
     generate_title,
 )
+from backend.hermes_adapter import get_hermes_status
 from backend import memory
 from backend.security import (
     check_rate_limit,
@@ -95,8 +106,11 @@ from backend.router_voice import router as voice_router
 from backend.router_productivity import router as productivity_router
 from backend.router_stripe import router as stripe_router
 from backend.router_agent import router as agent_router
+from backend.router_hermes import router as hermes_router
+from backend.router_os_agents import router as os_agents_router
 from backend.router_embeddings import router as embeddings_router
 from backend.router_calendar import router as calendar_router
+from backend.router_health import router as health_router
 
 # ── Phase 39+ Feature Routers ──
 try:
@@ -155,10 +169,16 @@ app.add_middleware(
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID", LOCAL_AUTH_HEADER],
 )
 
-_health_instance_token = os.environ.get("LEXA_INSTANCE_TOKEN", "")
+
+def _ensure_request_id(request: Request) -> str:
+    request_id = getattr(request.state, "request_id", "")
+    if not request_id:
+        request_id = str(uuid.uuid4())
+        request.state.request_id = request_id
+    return request_id
 
 
 # ══════════════════════════════════════════════════
@@ -168,11 +188,34 @@ _health_instance_token = os.environ.get("LEXA_INSTANCE_TOKEN", "")
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
     """Generate UUID per request and add to response headers as X-Request-ID."""
-    request_id = str(uuid.uuid4())
-    request.state.request_id = request_id
+    request_id = _ensure_request_id(request)
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     return response
+
+
+@app.middleware("http")
+async def local_auth_middleware(request: Request, call_next):
+    """Require the per-instance local token for non-public localhost endpoints."""
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    if not is_local_auth_required() or is_local_auth_public_path(request.url.path):
+        return await call_next(request)
+    if request_has_valid_local_token(request):
+        return await call_next(request)
+
+    request_id = _ensure_request_id(request)
+    return JSONResponse(
+        status_code=401,
+        content=error_payload(
+            status_code=401,
+            detail="Missing or invalid local Lexa authentication token.",
+            request_id=request_id,
+            code="local_auth_required",
+            retryable=False,
+        ),
+        headers={"X-Request-ID": request_id},
+    )
 
 
 @app.middleware("http")
@@ -189,11 +232,29 @@ async def body_size_limit_middleware(request: Request, call_next):
         try:
             cl = int(content_length)
         except (ValueError, OverflowError):
-            return JSONResponse(status_code=400, content={"error": "Invalid Content-Length header."})
+            request_id = _ensure_request_id(request)
+            return JSONResponse(
+                status_code=400,
+                content=error_payload(
+                    status_code=400,
+                    detail="Invalid Content-Length header.",
+                    request_id=request_id,
+                    code="invalid_content_length",
+                ),
+                headers={"X-Request-ID": request_id},
+            )
         if cl > MAX_BODY_SIZE:
+            request_id = _ensure_request_id(request)
             return JSONResponse(
                 status_code=413,
-                content={"error": f"Request body too large (max {MAX_BODY_SIZE // 1024}KB)."},
+                content=error_payload(
+                    status_code=413,
+                    detail=f"Request body too large (max {MAX_BODY_SIZE // 1024}KB).",
+                    request_id=request_id,
+                    code="payload_too_large",
+                    retryable=False,
+                ),
+                headers={"X-Request-ID": request_id},
             )
     return await call_next(request)
 
@@ -226,8 +287,11 @@ app.include_router(voice_router)
 app.include_router(productivity_router)
 app.include_router(stripe_router)
 app.include_router(agent_router)
+app.include_router(hermes_router)
+app.include_router(os_agents_router)
 app.include_router(embeddings_router)
 app.include_router(calendar_router)
+app.include_router(health_router)
 
 # Phase 39+ Feature Routers (graceful — nur wenn verfügbar)
 for _r in (vision_router, plugins_router, workflows_router, smart_router, context_router, mcp_router, personal_os_router):
@@ -255,6 +319,9 @@ _v1_router.include_router(voice_router)
 _v1_router.include_router(productivity_router)
 _v1_router.include_router(stripe_router)
 _v1_router.include_router(agent_router)
+_v1_router.include_router(hermes_router)
+_v1_router.include_router(os_agents_router)
+_v1_router.include_router(health_router)
 if personal_os_router is not None:
     _v1_router.include_router(personal_os_router)
 
@@ -288,6 +355,7 @@ async def startup_event():
         "GROQ_API_KEY": "Groq",
         "OPENAI_API_KEY": "OpenAI",
         "GEMINI_API_KEY": "Gemini",
+        "ANTHROPIC_API_KEY": "Anthropic",
     }
     for env_var, provider in _env_key_names.items():
         if os.environ.get(env_var):
@@ -301,7 +369,7 @@ async def startup_event():
     # Startup: Verify DB is writable and accessible
     try:
         test_stats = memory.get_memory_stats()
-        logger.info(f"DB OK — {test_stats.get('conversations', 0)} Conversations, {test_stats.get('memories', 0)} Memories")
+        logger.info(f"DB OK - {test_stats.get('conversations', 0)} Conversations, {test_stats.get('memories', 0)} Memories")
     except Exception as e:
         logger.error(f"KRITISCH: DB nicht erreichbar beim Start: {e}")
 
@@ -473,22 +541,44 @@ async def shutdown_event():
 # ══════════════════════════════════════════════════
 
 @app.get("/health")
-async def health():
+async def health(request: Request):
     cached = cache_get("health", ttl=CACHE_HEALTH_TTL)
     if cached:
-        return cached
+        result = dict(cached)
+        result.update(health_auth_fields(request))
+        return result
     uptime_seconds = int(time.time() - _shared.startup_time) if _shared.startup_time else 0
     uptime_str = f"{uptime_seconds // 3600}h {(uptime_seconds % 3600) // 60}m {uptime_seconds % 60}s"
+    try:
+        hermes_status = await asyncio.to_thread(get_hermes_status)
+        hermes_health = {
+            "state": hermes_status.get("health_state", "unknown"),
+            "available": bool(hermes_status.get("available")),
+            "can_run_tasks": bool(hermes_status.get("can_run_tasks")),
+            "telegram_configured": bool((hermes_status.get("gateway") or {}).get("configured")),
+            "summary": hermes_status.get("summary", ""),
+        }
+    except Exception as exc:
+        logger.warning(f"Hermes health check failed: {exc}")
+        hermes_health = {
+            "state": "unknown",
+            "available": False,
+            "can_run_tasks": False,
+            "telegram_configured": False,
+            "summary": "Hermes health check failed.",
+        }
     result = {
         "status": "ok",
         "service": "lexa-ai",
         "version": VERSION,
         "uptime": uptime_str,
         "uptime_seconds": uptime_seconds,
-        "instance_token": _health_instance_token,
         "sentry": bool(_sentry_dsn),
+        "hermes": hermes_health,
     }
     cache_set("health", result)
+    result = dict(result)
+    result.update(health_auth_fields(request))
     return result
 
 
@@ -511,7 +601,17 @@ async def set_language(request: Request):
     body = await parse_json_body(request)
     lang = body.get("language", "").strip().lower()
     if not lang or lang not in ("de", "en"):
-        return JSONResponse(status_code=400, content={"error": "Invalid language. Allowed: de, en"})
+        request_id = _ensure_request_id(request)
+        return JSONResponse(
+            status_code=400,
+            content=error_payload(
+                status_code=400,
+                detail="Invalid language. Allowed: de, en",
+                request_id=request_id,
+                code="invalid_language",
+            ),
+            headers={"X-Request-ID": request_id},
+        )
     ok = i18n_set_language(lang)
     return {"success": ok, "language": i18n_get_language()}
 
@@ -540,6 +640,11 @@ async def diagnostics():
     except Exception:
         sched = {}
 
+    try:
+        hermes_info = await asyncio.to_thread(get_hermes_status)
+    except Exception as exc:
+        hermes_info = {"status": "error", "health_state": "unknown", "summary": str(exc)}
+
     # DB file size — use LEXA_DATA_DIR for packaged builds
     _diag_data_dir = Path(os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent)))
     db_size_kb = 0
@@ -566,6 +671,7 @@ async def diagnostics():
         "platform": platform.platform(),
         "memory": mem_stats,
         "ai": ai_info,
+        "hermes": hermes_info,
         "scheduler": sched,
         "db_size_kb": db_size_kb,
         "audit_log_size_kb": audit_size_kb,
@@ -630,15 +736,38 @@ async def set_ai_model_endpoint(req: Request):
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    """Consistent error response format: always {"error": "message"}."""
-    headers = getattr(exc, "headers", None) or {}
+    """Return the canonical Lexa error envelope for HTTP errors."""
+    headers = dict(getattr(exc, "headers", None) or {})
     request_id = getattr(request.state, "request_id", None)
     if request_id:
         headers["X-Request-ID"] = request_id
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": exc.detail},
+        content=error_payload(
+            status_code=exc.status_code,
+            detail=exc.detail,
+            request_id=request_id or "",
+            retryable=exc.status_code in (408, 429, 502, 503, 504),
+        ),
         headers=headers if headers else None,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return validation errors in the same envelope while keeping detail."""
+    request_id = getattr(request.state, "request_id", "")
+    headers = {"X-Request-ID": request_id} if request_id else None
+    return JSONResponse(
+        status_code=422,
+        content=error_payload(
+            status_code=422,
+            detail=jsonable_encoder(exc.errors()),
+            request_id=request_id,
+            code="validation_error",
+            retryable=False,
+        ),
+        headers=headers,
     )
 
 
@@ -648,7 +777,13 @@ async def general_exception_handler(request: Request, exc: Exception):
     logger.exception(f"Unhandled exception on {request.method} {request.url.path}")
     return JSONResponse(
         status_code=500,
-        content={"error": "Internal server error"},
+        content=error_payload(
+            status_code=500,
+            detail="Internal server error",
+            request_id=getattr(request.state, "request_id", ""),
+            code="internal_error",
+            retryable=True,
+        ),
     )
 
 

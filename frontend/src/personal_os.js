@@ -10,6 +10,7 @@ const PersonalOSState = {
   graph: null,
   selectedContext: null,
   selectedContextPack: null,
+  selectedObsidianContext: null,
   selectedCodeLoop: null,
   rawInboxStatus: null,
   lastRefreshAt: null,
@@ -261,7 +262,7 @@ function clearPersonalOsDraftDetail(message = null) {
   PersonalOSState.selectedPath = null;
   PersonalOSState.selectedDraft = null;
   PersonalOSState.selectedReview = null;
-  const emptyMessage = message ?? posUiText("pos.noDraftSelected", "Kein Draft ausgewaehlt.");
+  const emptyMessage = message ?? posUiText("pos.noDraftSelected", "Kein Entwurf ausgewählt.");
   const detail = document.getElementById("pos-draft-detail");
   const title = document.getElementById("pos-detail-title");
   const approveBtn = document.getElementById("pos-approve-btn");
@@ -280,6 +281,7 @@ function clearPersonalOsQuerySelection() {
   PersonalOSState.queryMatches = [];
   PersonalOSState.selectedContext = null;
   PersonalOSState.selectedContextPack = null;
+  PersonalOSState.selectedObsidianContext = null;
   PersonalOSState.selectedCodeLoop = null;
 }
 
@@ -371,9 +373,18 @@ function posRawStatusSummary(status) {
   const processors = Array.isArray(status?.processors) ? status.processors : [];
   const available = processors
     .filter((entry) => ["deterministic", "lexa"].includes(posText(entry?.name).toLowerCase()) && entry?.status === "available")
-    .map((entry) => posText(entry.name));
+    .map((entry) => {
+      const name = posText(entry.name).toLowerCase();
+      if (posUiLanguage().startsWith("de")) {
+        if (name === "deterministic") return posUiText("pos.rawProcessorSafeDefault", "sicherer Standard");
+        if (name === "lexa") return "Lexa";
+      }
+      return posText(entry.name);
+    });
   const failed = posCount(status?.failureState?.failed);
-  const names = available.length ? available.join(", ") : "deterministic";
+  const names = available.length
+    ? available.join(", ")
+    : (posUiLanguage().startsWith("de") ? posUiText("pos.rawProcessorSafeDefault", "sicherer Standard") : "deterministic");
   return posUiText("pos.rawReadySummary", "Raw Inbox ready: {{names}}; {{failed}} worker failure{{plural}}.", {
     names,
     failed,
@@ -381,13 +392,78 @@ function posRawStatusSummary(status) {
   });
 }
 
+function posUiLanguage() {
+  try {
+    if (typeof LexaI18n === "object" && typeof LexaI18n.getCurrentLanguage === "function") {
+      return posText(LexaI18n.getCurrentLanguage()).toLowerCase();
+    }
+  } catch (_) { }
+  try {
+    if (typeof document !== "undefined" && document.documentElement?.lang) {
+      return posText(document.documentElement.lang).toLowerCase();
+    }
+  } catch (_) { }
+  return "en";
+}
+
+function posLanguageText(value) {
+  const text = posText(value);
+  if (!text || !posUiLanguage().startsWith("de")) return text;
+  const exact = {
+    "connected": "verbunden",
+    "offline": "offline",
+    "unknown": "unbekannt",
+    "Personal OS connected.": "Personal OS verbunden.",
+    "Personal OS unavailable.": "Personal OS nicht verfügbar.",
+    "Personal OS integration is connected and the review queue is clear.": "Personal OS ist verbunden. Keine Prüfung offen.",
+    "Personal OS integration is connected but needs review attention.": "Personal OS ist verbunden. Prüfungen brauchen Aufmerksamkeit.",
+    "Personal OS integration has blocking issues.": "Personal OS hat blockierende Probleme.",
+    "Continue with context browsing, Context Map review, or new controlled draft intake.": "Kontext suchen, Kontextkarte prüfen oder neue Notiz ablegen.",
+    "Continue with context browsing or Code Loop.": "Kontext suchen oder Lexa-Plan starten.",
+    "Continue with context browsing.": "Kontext suchen.",
+    "Review pending drafts through the cockpit.": "Offene Entwürfe in Lexa prüfen.",
+    "Review pending drafts.": "Offene Entwürfe prüfen.",
+    "Review queue is free.": "Keine Prüfung offen.",
+    "Reconnect Personal OS and refresh the cockpit.": "Personal OS neu verbinden und Cockpit aktualisieren.",
+    "Pending drafts": "Offene Entwürfe",
+    "MCP connection": "MCP-Verbindung",
+    "Capabilities": "Fähigkeiten",
+    "Personal OS tools unavailable.": "Personal-OS-Werkzeuge nicht verfügbar.",
+    "Fix blocking diagnostics before continuing.": "Blockierende Diagnose vor dem Fortfahren beheben.",
+    "Low disk space.": "Wenig freier Speicher.",
+  };
+  if (Object.prototype.hasOwnProperty.call(exact, text)) return exact[text];
+  let translated = text
+    .replace(/\bContext Map\b/g, "Kontextkarte")
+    .replace(/\bContext Pack\b/g, "Kontextpaket")
+    .replace(/\bCode Loop\b/g, "Lexa-Plan")
+    .replace(/\bDrafts\b/g, "Entwürfe")
+    .replace(/\bdrafts\b/g, "Entwürfe")
+    .replace(/\bDraft\b/g, "Entwurf")
+    .replace(/\bdraft\b/g, "Entwurf")
+    .replace(/\bReview\b/g, "Prüfung")
+    .replace(/\breview\b/g, "Prüfung")
+    .replace(/\bQueue\b/g, "Liste")
+    .replace(/\bqueue\b/g, "Liste")
+    .replace(/\bMissing capabilities\b/g, "Fehlende Fähigkeiten")
+    .replace(/\bgraph\b/g, "Kontextkarte")
+    .replace(/\bLow disk space\b/g, "Wenig freier Speicher")
+    .replace(/\bfree\b/g, "frei")
+    .replace(/\bconnected\b/g, "verbunden");
+  translated = translated.replace(/(\d+) Entwurf\(s\) still need human Prüfung\./g, (_match, count) => {
+    const one = Number(count) === 1;
+    return `${count} ${one ? "Entwurf braucht" : "Entwürfe brauchen"} menschliche Prüfung.`;
+  });
+  return translated;
+}
+
 function posDiagnosticHeadline(diagnostics, fallback = "Personal OS connected.") {
-  const summary = posText(diagnostics?.summary, fallback);
+  const summary = posLanguageText(posText(diagnostics?.summary, fallback));
   const checks = Array.isArray(diagnostics?.checks) ? diagnostics.checks : [];
   const priority = checks.find((check) => check?.state === "block") || checks.find((check) => check?.state === "warn");
   if (!priority) return summary;
-  const label = posText(priority.label, posUiText("pos.metricDiagnostic", "Diagnostic"));
-  const detail = posText(priority.detail, summary);
+  const label = posLanguageText(posText(priority.label, posUiText("pos.metricDiagnostic", "Diagnostic")));
+  const detail = posLanguageText(posText(priority.detail, summary));
   return `${label}: ${detail}`;
 }
 
@@ -434,7 +510,7 @@ function posIsOfflineDiagnostics(diagnostics) {
 
 function posNextActionText(diagnostics, queue) {
   if (posIsOfflineDiagnostics(diagnostics)) {
-    return posText(diagnostics?.nextAction, posUiText("pos.nextReconnect", "Reconnect Personal OS and refresh the cockpit."));
+    return posLanguageText(posText(diagnostics?.nextAction, posUiText("pos.nextReconnect", "Reconnect Personal OS and refresh the cockpit.")));
   }
   const counts = posQueueCounts(queue);
   const drafts = Array.isArray(queue?.drafts) ? queue.drafts : [];
@@ -443,10 +519,10 @@ function posNextActionText(diagnostics, queue) {
   const pendingDraft = drafts.find((draft) => draft?.approval === "pending") || null;
   if (counts.invalid > 0) return posUiText("pos.nextFixInvalidDrafts", "Fix {{count}} invalid draft{{plural}}", { count: counts.invalid, plural: counts.invalid === 1 ? "" : "s" });
   if (posText(diagnostics?.state) === "blocked") {
-    return posText(diagnostics?.nextAction, posUiText("pos.nextFixBlocking", "Fix blocking diagnostics before continuing."));
+    return posLanguageText(posText(diagnostics?.nextAction, posUiText("pos.nextFixBlocking", "Fix blocking diagnostics before continuing.")));
   }
   if (storageWarning) {
-    return posUiText("pos.nextSystemStorage", "System storage: {{detail}}", { detail: posText(storageWarning.detail, posUiText("pos.lowDiskSpace", "Low disk space.")) });
+    return posUiText("pos.nextSystemStorage", "System storage: {{detail}}", { detail: posLanguageText(posText(storageWarning.detail, posUiText("pos.lowDiskSpace", "Low disk space."))) });
   }
   if (counts.pending > 0) {
     const title = pendingDraft ? posText(pendingDraft.title || pendingDraft.path, posUiText("pos.pendingDraftFallback", "Pending draft")) : posUiText("pos.pendingDraftFallback", "Pending draft");
@@ -454,7 +530,7 @@ function posNextActionText(diagnostics, queue) {
       ? posUiText("pos.nextReviewTitle", "Review: {{title}}", { title })
       : posUiText("pos.nextReviewCount", "Review {{count}} pending drafts", { count: counts.pending });
   }
-  return posText(diagnostics?.nextAction, posUiText("pos.nextContinueContext", "Continue with context browsing or Code Loop."));
+  return posLanguageText(posText(diagnostics?.nextAction, posUiText("pos.nextContinueContext", "Continue with context browsing or Code Loop.")));
 }
 
 function posStateLabel(value) {
@@ -483,6 +559,24 @@ function posNextCardAction(queue, diagnostics = null) {
   if (posNextDraftPath(queue)) return "open-draft";
   if (counts.pending > 0) return "load-pending";
   return "";
+}
+
+function posDraftStatusText(approval) {
+  const state = posText(approval).toLowerCase();
+  if (state === "pending" || state === "review") return posUiText("pos.draftStatusPending", "Needs review");
+  if (state === "approved") return posUiText("pos.draftStatusApproved", "Approved");
+  if (state === "rejected") return posUiText("pos.draftStatusRejected", "Rejected");
+  if (state === "conflict") return posUiText("pos.draftStatusConflict", "Needs repair");
+  if (state === "missing") return posUiText("pos.draftStatusMissing", "Incomplete");
+  return posUiText("pos.draftStatusUnknown", "Unknown state");
+}
+
+function focusPersonalOsContextSearch() {
+  const panel = document.querySelector(".pos-query-panel");
+  const input = document.getElementById("pos-tag-input") || document.getElementById("pos-area-input");
+  if (panel && panel.tagName === "DETAILS") panel.open = true;
+  panel?.scrollIntoView({ behavior: "smooth", block: "start" });
+  setTimeout(() => input?.focus(), 180);
 }
 
 function loadPersonalOsQueueFilter(approval = "pending") {
@@ -546,125 +640,130 @@ function renderPersonalOsStatus(status, queue, diagnostics = null) {
   const approvedSub = posUiText("pos.subReadyNoAutoApply", "Ready / No auto-apply");
   const rejectedSub = posUiText("pos.subSupersededClosed", "Superseded / Closed");
   const invalidSub = posUiText("pos.subQueueErrors", "Queue Errors");
+  const pendingWord = pending === 1 ? posUiText("pos.homeDraftSingular", "draft") : posUiText("pos.homeDraftPlural", "drafts");
+  const connectionStatus = posLanguageText(posText(status?.status, "unknown"));
+  const homeTitle = posIsOfflineDiagnostics(diagnostics)
+    ? posUiText("pos.homeTitleOffline", "Personal OS needs attention")
+    : pending > 0
+      ? posUiText("pos.homeTitlePending", "{{count}} {{word}} waiting", { count: pending, word: pendingWord })
+      : posUiText("pos.homeTitleReady", "Personal OS is clear");
+  const homeSummary = posIsOfflineDiagnostics(diagnostics)
+    ? diagnosticSummary
+    : pending > 0
+      ? posUiText("pos.homeSummaryPending", "Review the open drafts first. Stable memory changes stay protected until you approve them.")
+      : posUiText("pos.homeSummaryReady", "No open review is blocking you. Capture a note, find context, or build the next Lexa step.");
 
   grid.innerHTML = `
-    <div class="info-card">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardHealth", "HEALTH"))}</div>
-      <div class="info-card-value ${posAssistClass(diagnosticState)}">${escapeHtml(posStateLabel(diagnosticState))}</div>
-      <div class="info-card-sub">${escapeHtml(diagnosticSummary)}</div>
-    </div>
-    ${nextCardAction === "open-draft" ? `
-    <button type="button" class="info-card pos-next-card" data-next-draft-path="${escapeHtml(nextDraftPath)}">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardNext", "NEXT"))}</div>
-      <div class="info-card-value ${nextValueClass}">${escapeHtml(nextValue)}</div>
-      <div class="info-card-sub">${escapeHtml(nextAction)}</div>
-    </button>
-    ` : nextCardAction === "load-pending" || nextCardAction === "load-all" ? `
-    <button type="button" class="info-card pos-next-card" data-next-action="${escapeHtml(nextCardAction)}">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardNext", "NEXT"))}</div>
-      <div class="info-card-value ${nextValueClass}">${escapeHtml(nextValue)}</div>
-      <div class="info-card-sub">${escapeHtml(nextAction)}</div>
-    </button>
-    ` : `
-    <div class="info-card">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardNext", "NEXT"))}</div>
-      <div class="info-card-value ${nextValueClass}">${escapeHtml(nextValue)}</div>
-      <div class="info-card-sub">${escapeHtml(nextAction)}</div>
-    </div>
-    `}
-    <div class="info-card">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardMcp", "MCP"))}</div>
-      <div class="info-card-value ${posStatusClass(status?.status)}">${escapeHtml(posText(status?.status, "unknown"))}</div>
-      <div class="info-card-sub">${escapeHtml(posText(status?.server, "personal_os"))}</div>
-    </div>
-    <div class="info-card">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardSync", "SYNC"))}</div>
-      <div class="info-card-value pos-good">${escapeHtml(posStateLabel("live"))}</div>
-      <div class="info-card-sub">${escapeHtml(refreshLabel)}</div>
-    </div>
-    <div class="info-card">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardTools", "TOOLS"))}</div>
-      <div class="info-card-value">${toolsCount}</div>
-      <div class="info-card-sub">${escapeHtml(posUiText("pos.subCapabilitiesReady", "{{reviewReady}} - {{readyCount}}/6 caps", { reviewReady, readyCount }))}</div>
-    </div>
-    ${pending ? `
-    <button type="button" class="info-card pos-action-card" data-queue-filter="pending">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardPending", "PENDING"))}</div>
-      <div class="info-card-value ${pending ? "pos-warn" : "pos-good"}">${pending}</div>
-      <div class="info-card-sub">${escapeHtml(draftSub)}</div>
-    </button>
-    ` : `
-    <div class="info-card">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardPending", "PENDING"))}</div>
-      <div class="info-card-value pos-good">${pending}</div>
-      <div class="info-card-sub">${escapeHtml(draftSub)}</div>
-    </div>
-    `}
-    ${approved ? `
-    <button type="button" class="info-card pos-action-card" data-queue-filter="approved">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardApproved", "APPROVED"))}</div>
-      <div class="info-card-value ${approved ? "pos-good" : ""}">${approved}</div>
-      <div class="info-card-sub">${escapeHtml(approvedSub)}</div>
-    </button>
-    ` : `
-    <div class="info-card">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardApproved", "APPROVED"))}</div>
-      <div class="info-card-value">${approved}</div>
-      <div class="info-card-sub">${escapeHtml(approvedSub)}</div>
-    </div>
-    `}
-    ${rejected ? `
-    <button type="button" class="info-card pos-action-card" data-queue-filter="rejected">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardRejected", "REJECTED"))}</div>
-      <div class="info-card-value ${rejected ? "pos-bad" : ""}">${rejected}</div>
-      <div class="info-card-sub">${escapeHtml(rejectedSub)}</div>
-    </button>
-    ` : `
-    <div class="info-card">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardRejected", "REJECTED"))}</div>
-      <div class="info-card-value">${rejected}</div>
-      <div class="info-card-sub">${escapeHtml(rejectedSub)}</div>
-    </div>
-    `}
-    ${invalid ? `
-    <button type="button" class="info-card pos-action-card" data-queue-filter="all">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardInvalid", "INVALID"))}</div>
-      <div class="info-card-value pos-bad">${invalid}</div>
-      <div class="info-card-sub">${escapeHtml(invalidSub)}</div>
-    </button>
-    ` : `
-    <div class="info-card">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardInvalid", "INVALID"))}</div>
-      <div class="info-card-value pos-good">${invalid}</div>
-      <div class="info-card-sub">${escapeHtml(invalidSub)}</div>
-    </div>
-    `}
-    <div class="info-card pos-capability-card">
-      <div class="info-card-label">${escapeHtml(posUiText("pos.cardCapabilities", "CAPABILITIES"))}</div>
-      <div class="pos-capability-grid">
-        ${capabilityRows.map(([label, key, missing]) => {
-          const ok = Boolean(capabilities[key]);
-          const missingText = Array.isArray(missing) && missing.length
-            ? posUiText("pos.capabilityMissingTools", "Missing: {{tools}}", { tools: missing.join(", ") })
-            : posUiText("pos.capabilityReady", "Ready");
-          return `
-            <div class="pos-capability-item" title="${escapeHtml(missingText)}">
-              <span class="pos-history-dot ${ok ? "pos-good" : "pos-bad"}"></span>
-              <span>${escapeHtml(label)}</span>
-            </div>
-          `;
-        }).join("")}
+    <section class="pos-home-card">
+      <div class="pos-home-copy">
+        <div class="pos-kicker">${escapeHtml(posUiText("pos.homeKicker", "Personal OS"))}</div>
+        <h2>${escapeHtml(homeTitle)}</h2>
+        <p>${escapeHtml(homeSummary)}</p>
       </div>
-    </div>
+      <div class="pos-home-actions">
+        <button type="button" class="pos-home-action pos-home-action-primary pos-next-card" data-pos-home-action="review" data-next-draft-path="${escapeHtml(nextDraftPath)}" data-next-action="${escapeHtml(nextCardAction)}">
+          <span>${escapeHtml(pending > 0 ? posUiText("pos.homeActionReview", "Review drafts") : posUiText("pos.homeActionOpenQueue", "Open reviews"))}</span>
+          <small>${escapeHtml(nextAction)}</small>
+        </button>
+        <button type="button" class="pos-home-action" data-pos-home-action="raw">
+          <span>${escapeHtml(posUiText("pos.homeActionCapture", "New note"))}</span>
+          <small>${escapeHtml(posUiText("pos.homeActionCaptureSub", "Capture first, sort later"))}</small>
+        </button>
+        <button type="button" class="pos-home-action" data-pos-home-action="search">
+          <span>${escapeHtml(posUiText("pos.homeActionFind", "Find context"))}</span>
+          <small>${escapeHtml(posUiText("pos.homeActionFindSub", "Search by area or topic"))}</small>
+        </button>
+        <button type="button" class="pos-home-action" data-pos-home-action="lexa">
+          <span>${escapeHtml(posUiText("pos.homeActionLexa", "Continue Lexa"))}</span>
+          <small>${escapeHtml(posUiText("pos.homeActionLexaSub", "Build the next plan"))}</small>
+        </button>
+      </div>
+      <div class="pos-home-status">
+        <span class="${posAssistClass(diagnosticState)}">${escapeHtml(posStateLabel(diagnosticState))}</span>
+        <span>${escapeHtml(refreshLabel)}</span>
+        <span>${escapeHtml(posUiText("pos.homeStatusDrafts", "{{pending}} open / {{approved}} approved / {{rejected}} closed", { pending, approved, rejected }))}</span>
+      </div>
+      <details class="pos-technical-details">
+        <summary>${escapeHtml(posUiText("pos.showTechnicalDetails", "Technical details"))}</summary>
+        <div class="pos-technical-grid">
+          <div class="info-card">
+            <div class="info-card-label">${escapeHtml(posUiText("pos.cardHealth", "HEALTH"))}</div>
+            <div class="info-card-value ${posAssistClass(diagnosticState)}">${escapeHtml(posStateLabel(diagnosticState))}</div>
+            <div class="info-card-sub">${escapeHtml(diagnosticSummary)}</div>
+          </div>
+          <div class="info-card">
+            <div class="info-card-label">${escapeHtml(posUiText("pos.cardNext", "NEXT"))}</div>
+            <div class="info-card-value ${nextValueClass}">${escapeHtml(nextValue)}</div>
+            <div class="info-card-sub">${escapeHtml(nextAction)}</div>
+          </div>
+          <div class="info-card">
+            <div class="info-card-label">${escapeHtml(posUiText("pos.cardMcp", "MCP"))}</div>
+            <div class="info-card-value ${posStatusClass(status?.status)}">${escapeHtml(connectionStatus)}</div>
+            <div class="info-card-sub">${escapeHtml(posText(status?.server, "personal_os"))}</div>
+          </div>
+          <div class="info-card">
+            <div class="info-card-label">${escapeHtml(posUiText("pos.cardSync", "SYNC"))}</div>
+            <div class="info-card-value pos-good">${escapeHtml(posStateLabel("live"))}</div>
+            <div class="info-card-sub">${escapeHtml(refreshLabel)}</div>
+          </div>
+          <div class="info-card">
+            <div class="info-card-label">${escapeHtml(posUiText("pos.cardTools", "TOOLS"))}</div>
+            <div class="info-card-value">${toolsCount}</div>
+            <div class="info-card-sub">${escapeHtml(posUiText("pos.subCapabilitiesReady", "{{reviewReady}} - {{readyCount}}/6 caps", { reviewReady, readyCount }))}</div>
+          </div>
+          <button type="button" class="info-card pos-action-card" data-queue-filter="pending">
+            <div class="info-card-label">${escapeHtml(posUiText("pos.cardPending", "PENDING"))}</div>
+            <div class="info-card-value ${pending ? "pos-warn" : "pos-good"}">${pending}</div>
+            <div class="info-card-sub">${escapeHtml(draftSub)}</div>
+          </button>
+          <button type="button" class="info-card pos-action-card" data-queue-filter="approved">
+            <div class="info-card-label">${escapeHtml(posUiText("pos.cardApproved", "APPROVED"))}</div>
+            <div class="info-card-value ${approved ? "pos-good" : ""}">${approved}</div>
+            <div class="info-card-sub">${escapeHtml(approvedSub)}</div>
+          </button>
+          <button type="button" class="info-card pos-action-card" data-queue-filter="rejected">
+            <div class="info-card-label">${escapeHtml(posUiText("pos.cardRejected", "REJECTED"))}</div>
+            <div class="info-card-value ${rejected ? "pos-bad" : ""}">${rejected}</div>
+            <div class="info-card-sub">${escapeHtml(rejectedSub)}</div>
+          </button>
+          <button type="button" class="info-card pos-action-card" data-queue-filter="all">
+            <div class="info-card-label">${escapeHtml(posUiText("pos.cardInvalid", "INVALID"))}</div>
+            <div class="info-card-value ${invalid ? "pos-bad" : "pos-good"}">${invalid}</div>
+            <div class="info-card-sub">${escapeHtml(invalidSub)}</div>
+          </button>
+        </div>
+        <div class="pos-capability-grid">
+          ${capabilityRows.map(([label, key, missing]) => {
+            const ok = Boolean(capabilities[key]);
+            const missingText = Array.isArray(missing) && missing.length
+              ? posUiText("pos.capabilityMissingTools", "Missing: {{tools}}", { tools: missing.join(", ") })
+              : posUiText("pos.capabilityReady", "Ready");
+            return `
+              <div class="pos-capability-item" title="${escapeHtml(missingText)}">
+                <span class="pos-history-dot ${ok ? "pos-good" : "pos-bad"}"></span>
+                <span>${escapeHtml(label)}</span>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </details>
+    </section>
   `;
 
-  grid.querySelector("[data-next-draft-path]")?.addEventListener("click", (event) => {
-    const path = event.currentTarget?.dataset?.nextDraftPath;
-    if (path) selectPersonalOsDraft(path);
-  });
-  grid.querySelector("[data-next-action]")?.addEventListener("click", (event) => {
-    const action = event.currentTarget?.dataset?.nextAction;
-    loadPersonalOsQueueFilter(action === "load-all" ? "all" : "pending");
+  grid.querySelectorAll("[data-pos-home-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = button.dataset.posHomeAction;
+      if (action === "review") {
+        if (nextCardAction === "open-draft" && nextDraftPath) selectPersonalOsDraft(nextDraftPath);
+        else loadPersonalOsQueueFilter(nextCardAction === "load-all" ? "all" : "pending");
+      } else if (action === "raw") {
+        submitPersonalOsRawInbox();
+      } else if (action === "search") {
+        focusPersonalOsContextSearch();
+      } else if (action === "lexa") {
+        personalOsLoadCodeLoop();
+      }
+    });
   });
   grid.querySelectorAll("[data-queue-filter]").forEach((card) => {
     card.addEventListener("click", () => {
@@ -711,7 +810,7 @@ function renderPersonalOsDraftList(payload) {
     row.innerHTML = `
       <span class="pos-draft-main">
         <span class="pos-draft-title">${escapeHtml(posText(draft.title, posUiText("pos.untitledDraft", "Untitled Draft")))}</span>
-        <span class="pos-draft-path">${escapeHtml(posText(draft.path))}</span>
+        <span class="pos-draft-subtitle">${escapeHtml(posDraftStatusText(draft.approval))}</span>
       </span>
       <span class="pos-pill ${posStatusClass(draft.approval)}">${escapeHtml(posText(draft.approval, "unknown"))}</span>
     `;
@@ -970,42 +1069,48 @@ function renderPersonalOsDetail(payload, review = null) {
   chatReviewBtn.disabled = !review;
 
   detail.innerHTML = `
-    <div class="pos-detail-meta">
-      <span class="pos-pill ${posStatusClass(approval)}">${escapeHtml(approval)}</span>
-      <span>${escapeHtml(posText(fm.memory_level, "unknown"))}</span>
-      <span>${escapeHtml(posText(fm.source, "unknown"))}</span>
-      <span>${escapeHtml(posText(fm.confidence, "unknown"))}</span>
-    </div>
-    <div class="pos-detail-path">${escapeHtml(posText(payload.path))}</div>
-    <div class="pos-detail-grid">
-      <div>
-        <div class="pos-label">${escapeHtml(posUiText("pos.labelTags", "Tags"))}</div>
-        <div class="pos-code">${escapeHtml(tags || "-")}</div>
-      </div>
-      <div>
-        <div class="pos-label">${escapeHtml(posUiText("pos.labelRelated", "Related"))}</div>
-        <pre class="pos-code">${escapeHtml(related || "-")}</pre>
-      </div>
+    <div class="pos-detail-meta pos-detail-meta-friendly">
+      <span class="pos-pill ${posStatusClass(approval)}">${escapeHtml(posDraftStatusText(approval))}</span>
+      <span>${escapeHtml(posUiText("pos.memoryChangeProtected", "Stable memory stays protected until approval."))}</span>
     </div>
     ${review ? `
       ${renderPosAssist(review)}
-      ${renderPosPromptHint(payload, review)}
-      ${renderPosApplyHint(review)}
-      ${renderPosChecklist(review, approval)}
-      <div class="pos-review-section">
-        <div class="pos-label">${escapeHtml(posUiText("pos.labelHistory", "History"))}</div>
-        ${renderPosHistory(review)}
-      </div>
-      <div class="pos-review-section">
-        <div class="pos-label">${escapeHtml(posUiText("pos.labelTargetReview", "Target Review"))}</div>
-        ${renderPosTargetReview(review)}
-      </div>
-      <div class="pos-review-section">
-        <div class="pos-label">${escapeHtml(posUiText("pos.labelRelatedContext", "Related Context"))}</div>
-        ${renderPosRelated(review)}
-      </div>
     ` : ""}
-    <pre class="pos-markdown">${escapeHtml(body)}</pre>
+    <div class="pos-review-section pos-review-section-main">
+      <div class="pos-label">${escapeHtml(posUiText("pos.labelDraftBodyUser", "Proposal"))}</div>
+      <pre class="pos-markdown">${escapeHtml(body)}</pre>
+    </div>
+    <details class="pos-technical-details pos-draft-technical">
+      <summary>${escapeHtml(posUiText("pos.showTechnicalDetails", "Technical details"))}</summary>
+      <div class="pos-detail-path">${escapeHtml(posText(payload.path))}</div>
+      <div class="pos-detail-grid">
+        <div>
+          <div class="pos-label">${escapeHtml(posUiText("pos.labelTags", "Tags"))}</div>
+          <div class="pos-code">${escapeHtml(tags || "-")}</div>
+        </div>
+        <div>
+          <div class="pos-label">${escapeHtml(posUiText("pos.labelRelated", "Related"))}</div>
+          <pre class="pos-code">${escapeHtml(related || "-")}</pre>
+        </div>
+      </div>
+      ${review ? `
+        ${renderPosPromptHint(payload, review)}
+        ${renderPosApplyHint(review)}
+        ${renderPosChecklist(review, approval)}
+        <div class="pos-review-section">
+          <div class="pos-label">${escapeHtml(posUiText("pos.labelHistory", "History"))}</div>
+          ${renderPosHistory(review)}
+        </div>
+        <div class="pos-review-section">
+          <div class="pos-label">${escapeHtml(posUiText("pos.labelTargetReview", "Target Review"))}</div>
+          ${renderPosTargetReview(review)}
+        </div>
+        <div class="pos-review-section">
+          <div class="pos-label">${escapeHtml(posUiText("pos.labelRelatedContext", "Related Context"))}</div>
+          ${renderPosRelated(review)}
+        </div>
+      ` : ""}
+    </details>
   `;
   attachPosReviewHandlers(detail);
 }
@@ -1143,6 +1248,126 @@ function renderPersonalOsContextPack(payload) {
       if (path) personalOsReadContextFile(path);
     });
   });
+}
+
+function personalOsObsidianPrompt(payload) {
+  const vault = payload?.vault || {};
+  const counts = payload?.counts || {};
+  const product = payload?.lexaProductContract || {};
+  const inventory = payload?.lexaInventory || {};
+  const quickFind = Array.isArray(inventory.quickFind) ? inventory.quickFind.slice(0, 12) : [];
+  const surfaces = Array.isArray(inventory.surfaces) ? inventory.surfaces.slice(0, 8) : [];
+  const files = Array.isArray(payload?.files) ? payload.files.slice(0, 5) : [];
+  const rows = [
+    posUiText("pos.obsidianPromptIntro", "Use this Obsidian/Personal OS context map as source material:"),
+    "",
+    `${posUiText("pos.promptTopicLabel", "Topic")}: ${posText(payload?.topic, "-")}`,
+    `${posUiText("pos.promptVaultLabel", "Vault")}: ${posText(vault.root, "-")}`,
+    `${posUiText("pos.promptProviderModeLabel", "Provider mode")}: ${posText(product.providerMode, "api-backed")}`,
+    `${posUiText("pos.promptLoadedAllLabel", "Loaded all files")}: ${vault.loadedAll === true ? "true" : "false"}`,
+    `${posUiText("pos.promptBootstrapLabel", "Bootstrap")}: ${posCount(counts.bootstrapAvailable)}`,
+    `${posUiText("pos.promptAreaIndexesLabel", "Area indexes")}: ${posCount(counts.areaIndexes)}`,
+    "",
+    "Product contract:",
+    `- ${posText(product.rule, "Lexa uses configured provider APIs for model intelligence.")}`,
+    "",
+    "Quick find:",
+    quickFind.length ? quickFind.map((item) => `- ${posText(item.need, "Context")}: ${posText(item.goTo, "-")}`).join("\n") : "-",
+    "",
+    "Context surfaces:",
+    surfaces.length ? surfaces.map((surface) => `- ${posText(surface.id)}: ${posText(surface.purpose)} (${posCount(surface.fileCountApprox)} files)`).join("\n") : "-",
+    "",
+    "Selected OS context:",
+    files.length ? files.map((file) => [
+      `## ${posText(file.title, file.path)}`,
+      `${posUiText("pos.promptPathLabel", "Path")}: ${posText(file.path)}`,
+      `${posUiText("pos.promptMemoryLevelLabel", "Memory-Level")}: ${posText(file.memory_level, "unknown")}`,
+      `${posUiText("pos.promptTagsLabel", "Tags")}: ${Array.isArray(file.tags) ? file.tags.join(", ") : "-"}`,
+      "",
+      posClip(file.bodyPreview, 500),
+    ].join("\n")).join("\n\n") : "-",
+    "",
+    posUiText("pos.promptQuestionBlank", "My question: "),
+  ];
+  return posClipChatPrompt(rows.join("\n"));
+}
+
+function renderPersonalOsObsidianContext(payload) {
+  const target = document.getElementById("pos-query-results");
+  if (!target) return;
+
+  if (!payload || payload.error || payload.detail || payload.ok === false) {
+    clearPersonalOsQuerySelection();
+    target.innerHTML = `<div class="empty-state">${escapeHtml(posErrorMessage(payload, posUiText("pos.obsidianContextFailed", "Obsidian context failed")))}</div>`;
+    return;
+  }
+
+  const vault = payload.vault || {};
+  const counts = payload.counts || {};
+  const product = payload.lexaProductContract || {};
+  const inventory = payload.lexaInventory || {};
+  const quickFind = Array.isArray(inventory.quickFind) ? inventory.quickFind : [];
+  const surfaces = Array.isArray(inventory.surfaces) ? inventory.surfaces : [];
+  const files = Array.isArray(payload.files) ? payload.files : [];
+  clearPersonalOsQuerySelection();
+  PersonalOSState.selectedObsidianContext = payload;
+
+  target.innerHTML = `
+    <div class="pos-query-read-header">
+      <div>
+        <div class="pos-draft-title">${escapeHtml(posUiText("pos.titleObsidianContext", "Obsidian Context"))}</div>
+        <div class="pos-draft-path">${escapeHtml(posText(vault.root, "-"))}</div>
+      </div>
+      <div class="pos-query-actions">
+        <span class="pos-pill">${escapeHtml(posText(product.providerMode, "api-backed"))}</span>
+        <button type="button" class="action-btn action-btn-sm" data-action="personalOsSendObsidianContextToChat">${escapeHtml(posUiText("pos.actionChat", "Chat"))}</button>
+      </div>
+    </div>
+    <div class="pos-review-strip">
+      <div class="pos-review-card">
+        <div class="pos-label">${escapeHtml(posUiText("pos.metricBootstrap", "Bootstrap"))}</div>
+        <div class="pos-review-value pos-good">${posCount(counts.bootstrapAvailable)}</div>
+      </div>
+      <div class="pos-review-card">
+        <div class="pos-label">${escapeHtml(posUiText("pos.metricAreaIndexes", "Area indexes"))}</div>
+        <div class="pos-review-value pos-good">${posCount(counts.areaIndexes)}</div>
+      </div>
+      <div class="pos-review-card">
+        <div class="pos-label">${escapeHtml(posUiText("pos.metricQuickFind", "Quick Find"))}</div>
+        <div class="pos-review-value pos-good">${quickFind.length}</div>
+      </div>
+      <div class="pos-review-card">
+        <div class="pos-label">${escapeHtml(posUiText("pos.metricLoadedAll", "Loaded all"))}</div>
+        <div class="pos-review-value ${vault.loadedAll ? "pos-warn" : "pos-good"}">${vault.loadedAll ? "true" : "false"}</div>
+      </div>
+    </div>
+    <div class="pos-code">${escapeHtml(posText(product.rule, "Lexa uses configured provider APIs for model intelligence."))}</div>
+    <div class="pos-related-list">
+      ${quickFind.slice(0, 10).map((item) => `
+        <div class="pos-related-row">
+          <span class="pos-draft-main">
+            <span class="pos-draft-title">${escapeHtml(posText(item.need, "Context"))}</span>
+            <span class="pos-draft-path">${escapeHtml(posText(item.goTo, "-"))}</span>
+          </span>
+        </div>
+      `).join("")}
+    </div>
+    <div class="pos-review-strip">
+      ${surfaces.slice(0, 8).map((surface) => `
+        <div class="pos-review-card">
+          <div class="pos-label">${escapeHtml(posText(surface.id, "surface"))}</div>
+          <div class="pos-review-value">${posCount(surface.fileCountApprox)}</div>
+        </div>
+      `).join("")}
+    </div>
+    ${files.length ? `<pre class="pos-markdown pos-query-markdown">${escapeHtml(files.map((file) => [
+      `## ${posText(file.title, file.path)}`,
+      `Path: ${posText(file.path)}`,
+      `Tags: ${Array.isArray(file.tags) ? file.tags.join(", ") : "-"}`,
+      "",
+      posText(file.bodyPreview),
+    ].join("\n")).join("\n\n"))}</pre>` : `<div class="empty-state">${escapeHtml(posUiText("pos.noObsidianContextFiles", "No selected OS context files."))}</div>`}
+  `;
 }
 
 function renderPersonalOsCodeLoop(payload) {
@@ -1675,6 +1900,29 @@ async function personalOsLoadContextPack() {
   }
 }
 
+async function personalOsLoadObsidianContext() {
+  const area = document.getElementById("pos-area-input")?.value?.trim() || "08_Lexa";
+  const tagFilter = posTagFilter(document.getElementById("pos-tag-input")?.value);
+  const target = document.getElementById("pos-query-results");
+  if (tagFilter.invalid) {
+    renderPersonalOsObsidianContext({ ok: false, error: posUiText("pos.invalidTag", "Tag is invalid.") });
+    return;
+  }
+  const topic = [area, tagFilter.tag, "lexa hermes obsidian"].filter(Boolean).join(" ");
+  if (target) target.innerHTML = `<div class="empty-state">${escapeHtml(posUiText("pos.buildingObsidianContext", "Building Obsidian context..."))}</div>`;
+  try {
+    const payload = await window.lexa.personalOsObsidianContext({
+      topic,
+      maxFiles: 5,
+      bodyChars: 600,
+      includePreviews: true,
+    });
+    renderPersonalOsObsidianContext(payload);
+  } catch (e) {
+    renderPersonalOsObsidianContext({ ok: false, error: e.message || String(e) });
+  }
+}
+
 async function personalOsLoadCodeLoop() {
   const area = document.getElementById("pos-area-input")?.value?.trim() || "00_System";
   const tagFilter = posTagFilter(document.getElementById("pos-tag-input")?.value);
@@ -1721,7 +1969,7 @@ function personalOsSendContextToChat() {
   const fm = payload.frontmatter || {};
   const body = posText(payload.body);
   const bodyLimit = 2200;
-  const clippedBody = body.length > bodyLimit ? `${body.slice(0, bodyLimit)}\n\n${posUiText("pos.promptTruncatedMarker", "[gekuerzt]")}` : body;
+  const clippedBody = body.length > bodyLimit ? `${body.slice(0, bodyLimit)}\n\n${posUiText("pos.promptTruncatedMarker", "[gekürzt]")}` : body;
   const prompt = [
     posUiText("pos.contextPromptIntro", "Nutze diesen Personal-OS-Kontext als Quelle:"),
     "",
@@ -1774,6 +2022,17 @@ function personalOsSendContextPackToChat() {
   personalOsPlacePromptInChat(prompt, posUiText("pos.contextPackPromptReady", "Context Pack is ready in chat."));
 }
 
+function personalOsSendObsidianContextToChat() {
+  const payload = PersonalOSState.selectedObsidianContext;
+  const prompt = personalOsObsidianPrompt(payload);
+  if (!payload?.ok || !prompt) {
+    showToast(posUiText("pos.noObsidianContextSelected", "No Obsidian context selected."), "warning");
+    return;
+  }
+
+  personalOsPlacePromptInChat(prompt, posUiText("pos.obsidianContextPromptReady", "Obsidian context is ready in chat."), posUiText("pos.noObsidianContextSelected", "No Obsidian context selected."));
+}
+
 function personalOsSendCodeLoopToChat() {
   const payload = PersonalOSState.selectedCodeLoop;
   const prompt = personalOsCodeLoopPrompt(payload);
@@ -1813,7 +2072,7 @@ function personalOsReviewPrompt(draft, review) {
     posUiText("pos.reviewPromptImportant", "Wichtig:"),
     `- ${posUiText("pos.reviewPromptNoAutoDecision", "Triff keine Approval-, Reject- oder Apply-Entscheidung automatisch.")}`,
     `- ${posUiText("pos.reviewPromptDraftAsProposal", "Behandle den Draft als Vorschlag, nicht als kanonische Wahrheit.")}`,
-    `- ${posUiText("pos.reviewPromptRiskRecommendation", "Nenne Risiken, fehlende Evidenz und eine knappe Empfehlung fuer die menschliche Entscheidung.")}`,
+    `- ${posUiText("pos.reviewPromptRiskRecommendation", "Nenne Risiken, fehlende Evidenz und eine knappe Empfehlung für die menschliche Entscheidung.")}`,
     "",
     `## ${posUiText("pos.promptDraftHeading", "Draft")}`,
     `${posUiText("pos.promptPathLabel", "Pfad")}: ${posText(draft?.path)}`,

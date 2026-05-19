@@ -28,9 +28,13 @@ async function refreshDashboard() {
   }
 
   // Fetch all dashboard data in parallel (9 requests -> single round-trip)
-  const [sysRes, aiRes, memRes, routRes, todosRes, pomoRes, focusRes, modelsRes, weeklyRes] = await Promise.allSettled([
-    window.lexa.execute("system_info"),
+  const systemInfo = typeof window.requestSystemInfoCached === "function"
+    ? window.requestSystemInfoCached({ maxAgeMs: 12000 })
+    : window.lexa.execute("system_info");
+  const [sysRes, aiRes, healthRes, memRes, routRes, todosRes, pomoRes, focusRes, modelsRes, weeklyRes] = await Promise.allSettled([
+    systemInfo,
     window.lexa.aiStatus(),
+    window.lexa.health(),
     window.lexa.memoryStats(),
     window.lexa.routines(),
     window.lexa.todos("open"),
@@ -83,6 +87,7 @@ async function refreshDashboard() {
         ["groq", "Groq"],
         ["openai", "OpenAI"],
         ["gemini", "Gemini"],
+        ["anthropic", "Claude"],
       ];
       const activeLabel = providers.find(([key]) => key === ai.active_provider)?.[1] || escapeHtml(String(ai.active_provider || t("dashboard.unknownProvider")));
       const rows = providers.map(([key, label]) => {
@@ -90,8 +95,20 @@ async function refreshDashboard() {
         const dot = ok ? '<span class="dash-dot active"></span>' : '<span class="dash-dot"></span>';
         return `<div class="dash-ai-row">${dot} ${label} <span class="dash-ai-tag">${ok ? t("dashboard.aiReady") : t("dashboard.aiOffline")}</span></div>`;
       }).join("");
+      const fallbackCount = Array.isArray(ai.fallback_available) ? ai.fallback_available.length : 0;
+      const fallbackRow = ai.fallback_enabled
+        ? `<div class="dash-ai-row">${fallbackCount ? '<span class="dash-dot active"></span>' : '<span class="dash-dot"></span>'} ${escapeHtml(t("dashboard.aiFallback"))} <span class="dash-ai-tag">${fallbackCount ? escapeHtml(t("dashboard.aiReady")) : escapeHtml(t("dashboard.aiOffline"))}</span></div>`
+        : "";
+      const hermes = healthRes.status === "fulfilled" ? healthRes.value?.hermes : null;
+      const hermesReady = Boolean(hermes?.can_run_tasks);
+      const hermesState = hermes?.state || "unknown";
+      const hermesRow = hermes
+        ? `<div class="dash-ai-row">${hermesReady ? '<span class="dash-dot active"></span>' : '<span class="dash-dot"></span>'} Hermes <span class="dash-ai-tag">${escapeHtml(hermesState === "ready" ? t("dashboard.aiReady") : hermesState === "attention" ? t("dashboard.needsAttention") : t("dashboard.aiOffline"))}</span></div>`
+        : "";
       aiEl.innerHTML = `
         ${rows}
+        ${fallbackRow}
+        ${hermesRow}
         <div class="dash-ai-provider">${t("dashboard.aiActive")}: <strong>${activeLabel}</strong></div>
       `;
     }

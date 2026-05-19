@@ -1,20 +1,332 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 const API = "http://127.0.0.1:8000";
+const LOCAL_AUTH_HEADER = "X-Lexa-Local-Token";
+let localAuthTokenPromise = null;
+
+function isLocalLexaBackendUrl(url) {
+  try {
+    const parsed = new URL(String(url), API);
+    const api = new URL(API);
+    return parsed.protocol === api.protocol
+      && parsed.port === api.port
+      && ["127.0.0.1", "localhost"].includes(parsed.hostname);
+  } catch (_error) {
+    return false;
+  }
+}
+
+function getLocalAuthToken() {
+  if (!localAuthTokenPromise) {
+    localAuthTokenPromise = ipcRenderer.invoke("local-auth-token").catch(() => "");
+  }
+  return localAuthTokenPromise;
+}
+
+async function withLocalAuthHeader(url, options = {}) {
+  const requestOptions = { ...options };
+  if (!isLocalLexaBackendUrl(url)) return requestOptions;
+  const token = await getLocalAuthToken();
+  if (!token) return requestOptions;
+  const headers = new Headers(requestOptions.headers || {});
+  headers.set(LOCAL_AUTH_HEADER, token);
+  requestOptions.headers = headers;
+  return requestOptions;
+}
+
+if (process.env.LEXA_ELECTRON_SMOKE_MOCK === "1") {
+  let nextConversationId = 1000;
+  const conversations = [
+    { id: 1, title: "Smoke Test Chat", message_count: 2, last_message: "Mocked local data" },
+  ];
+  const conversationMessages = new Map([
+    [1, [
+      { role: "user", content: "Hallo Lexa" },
+      { role: "assistant", content: "Bereit." },
+    ]],
+  ]);
+  const systemInfo = {
+    cpu_percent: 12,
+    cpu_cores: 8,
+    cpu_freq_mhz: 3200,
+    ram_percent: 42,
+    ram_used_gb: 6.2,
+    ram_total_gb: 16,
+    disk_percent: 58,
+    disk_used_gb: 180,
+    disk_total_gb: 512,
+    battery_percent: 88,
+    battery_plugged: true,
+  };
+  const ok = (extra = {}) => ({ success: true, ok: true, ...extra });
+  const emptyPersonalOs = () => ({
+    ok: true,
+    status: "ready",
+    summary: "Mocked Personal OS",
+    counts: {},
+    drafts: [],
+    files: [],
+    tools: [],
+    checks: [],
+  });
+  const findConversation = (id) => conversations.find((c) => String(c.id) === String(id));
+
+  contextBridge.exposeInMainWorld("lexa", {
+    API_BASE: "mock://lexa-smoke",
+    loadI18n: (lang) => ipcRenderer.invoke("i18n-load", lang),
+    minimize: () => {},
+    maximize: () => {},
+    close: () => {},
+    notify: () => {},
+    onSwitchView: () => {},
+    onUpdateAvailable: () => {},
+    health: async () => ({
+      status: "ok",
+      version: "smoke",
+      hermes: {
+        state: "ready",
+        available: true,
+        can_run_tasks: true,
+        telegram_configured: true,
+        summary: "Hermes mock ready.",
+      },
+    }),
+    startupHealth: async () => ({
+      ok: true,
+      status: "ok",
+      state: "ready",
+      summary: "Startup und Runtime-Basis sind bereit.",
+      counts: { ok: 11, warn: 0, blocked: 0 },
+      safeForCockpit: true,
+    }),
+    commands: async () => ({ commands: {}, total: 0 }),
+    execute: async (command) => command === "system_info"
+      ? ok({ data: systemInfo })
+      : ok({ data: {}, message: "mocked" }),
+    prepareCompanionExecute: async (command, params = {}) => ok({
+      requires_confirmation: true,
+      confirmation_id: "smoke-confirmation",
+      command_hash: "smoke-hash",
+      action_scope: "confirmation_required",
+      summary: { command, action_scope: "confirmation_required", param_keys: Object.keys(params || {}) },
+    }),
+    executeWithConfirmation: async () => ok({ data: {}, message: "mocked confirmed" }),
+    executeBatch: async (commands = []) => ({ results: commands.map((command) => ok({ command })) }),
+    companionAuditRecent: async () => ({ ok: true, entries: [], count: 0, skipped_noise: 0 }),
+    timers: async () => ({ timers: [] }),
+    timersAcknowledge: async () => ok(),
+    pomodoroAcknowledge: async () => ok(),
+    chat: async (message) => ({ response: `Mock: ${message || ""}`.trim() }),
+    chatFile: async () => ({ response: "Mock file response" }),
+    generateTitle: async (message = "") => ({ title: String(message || "Smoke Test").slice(0, 40) }),
+    aiStatus: async () => ({
+      active_provider: "groq",
+      groq: { available: true },
+      openai: { available: true },
+      gemini: { available: true },
+      anthropic: { available: true },
+      fallback_enabled: true,
+      fallback_available: ["openai:gpt-4o"],
+    }),
+    aiModels: async () => ({ current: "smoke-model", current_name: "Smoke Model", available: {} }),
+    setAiModel: async () => ok(),
+    memoryStats: async () => ({ notes: 0, memories: 0, interactions: 0, routines: 0 }),
+    memoryAdd: async () => ok(),
+    memoryCleanup: async () => ok(),
+    notes: async () => ({ notes: [] }),
+    noteGet: async () => null,
+    noteUpdate: async () => ok(),
+    snippets: async () => ({ snippets: [] }),
+    snippetCreate: async () => ok(),
+    snippetDelete: async () => ok(),
+    routines: async () => ({ routines: [] }),
+    todos: async () => ({ todos: [] }),
+    todoCreate: async () => ok(),
+    todoUpdate: async () => ok(),
+    todoComplete: async () => ok(),
+    todoDelete: async () => ok(),
+    pomodoroStatus: async () => ({ running: false }),
+    pomodoroStart: async () => ok({ running: true }),
+    pomodoroStop: async () => ok({ running: false }),
+    focusStatus: async () => ({ active: false }),
+    focusOn: async () => ok({ active: true }),
+    focusOff: async () => ok({ active: false }),
+    weeklyStats: async () => ({ days: [] }),
+    productivityStats: async () => ({}),
+    habits: async () => ({ habits: [] }),
+    habitCreate: async () => ok(),
+    habitLog: async () => ok(),
+    habitDelete: async () => ok(),
+    timeTracking: async () => ({ entries: [] }),
+    timeTrackingStart: async () => ok(),
+    timeTrackingStop: async () => ok(),
+    timeTrackingReport: async () => ({ entries: [], total_seconds: 0 }),
+    clipboardHistory: async () => ({ items: [] }),
+    clipboardAdd: async () => ok(),
+    clipboardClear: async () => ok(),
+    conversations: async () => ({ conversations: conversations.slice() }),
+    conversationCreate: async (title = "Neuer Chat") => {
+      const id = ++nextConversationId;
+      const conversation = { id, title, message_count: 0, last_message: "" };
+      conversations.unshift(conversation);
+      conversationMessages.set(id, []);
+      return { id, title, conversation };
+    },
+    conversationGet: async (id) => {
+      const conversation = findConversation(id);
+      if (!conversation) return { detail: "not found" };
+      return { ...conversation, messages: conversationMessages.get(conversation.id) || [] };
+    },
+    conversationUpdate: async (id, data = {}) => {
+      let conversation = findConversation(id);
+      if (!conversation) {
+        conversation = { id, title: data.title || "Smoke Test Chat", message_count: 0, last_message: "" };
+        conversations.unshift(conversation);
+      }
+      if (data.title) conversation.title = data.title;
+      if (Array.isArray(data.messages)) {
+        conversationMessages.set(conversation.id, data.messages);
+        conversation.message_count = data.messages.length;
+        conversation.last_message = data.messages.at(-1)?.content || "";
+      }
+      return ok({ conversation });
+    },
+    conversationDelete: async (id) => {
+      const index = conversations.findIndex((c) => String(c.id) === String(id));
+      if (index >= 0) conversations.splice(index, 1);
+      conversationMessages.delete(Number(id));
+      return ok();
+    },
+    conversationLoad: async () => ok(),
+    conversationExport: async (id) => ({ text: `# Conversation ${id}\n\nMock export.` }),
+    historyClear: async () => ok(),
+    search: async () => ({ conversations: [], notes: [], memories: [] }),
+    ftsSearch: async () => ({ results: [] }),
+    rebuildFts: async () => ok(),
+    diagnostics: async () => ({
+      ok: true,
+      hermes: {
+        health_state: "ready",
+        summary: "Hermes mock ready.",
+        can_run_tasks: true,
+        gateway: { configured: true, can_start: true },
+      },
+    }),
+    hermesGatewayAutostartStatus: async () => ({
+      status: "ok",
+      supported: true,
+      enabled: false,
+      can_enable: true,
+      telegram_configured: true,
+      missing: [],
+      nextAction: "",
+    }),
+    hermesGatewayAutostartSet: async (enabled) => ok({
+      status: enabled ? "enabled" : "disabled",
+      autostart: {
+        status: "ok",
+        supported: true,
+        enabled: Boolean(enabled),
+        can_enable: true,
+        telegram_configured: true,
+        missing: [],
+        nextAction: "",
+      },
+    }),
+    hermesOverview: async () => ({
+      ok: true,
+      healthState: "ready",
+      summary: "Lexa/Hermes/OS ist arbeitsfaehig: Hermes ready, Telegram bereit, Autostart an, Drafts 0 pending, 11 approved, 3 rejected, Logs ok.",
+      nextAction: "Build visible OS/Hermes cockpit",
+      checks: [
+        { id: "backend", label: "Lexa backend", state: "ok", detail: "Backend route is live." },
+        { id: "hermes", label: "Hermes", state: "ok", detail: "Hermes mock ready." },
+        { id: "telegram", label: "Telegram", state: "ok", detail: "configured" },
+      ],
+      counts: {
+        drafts: { pending: 0, approved: 11, rejected: 3 },
+        contextFiles: 5,
+      },
+      contextFiles: [
+        { title: "Current AI Brief", path: "05_Memory/Rollups/Current_AI_Brief.md" },
+        { title: "Hermes Capabilities", path: "08_Lexa/Architecture/Hermes_Capabilities.md" },
+      ],
+      nextTasks: ["Build visible OS/Hermes cockpit"],
+      safeMode: true,
+    }),
+    healthTools: async () => ({ ok: true, available: [], missing: [] }),
+    mcpServers: async () => ({ servers: [] }),
+    getAutostart: () => false,
+    setAutostart: () => {},
+    setProfile: async () => ok(),
+    licenseGet: async () => ({ valid: true }),
+    licenseSet: async () => ok(),
+    licenseValidate: async () => ok({ valid: true }),
+    backupListDb: async () => ({ backups: [] }),
+    backupCreateDb: async () => ok(),
+    backupRestoreDb: async () => ok(),
+    voiceStatus: async () => ({ ok: true, state: "ready", wakeword: { active: false, ready: true } }),
+    voiceDiagnostics: async () => ({ ok: true, state: "ready" }),
+    voiceRealtimeStart: async () => ({ ok: false, can_start: false, session_state: "blocked", blockers: ["smoke mock"] }),
+    voiceRealtimeStop: async () => ({ ok: true, session_state: "stopped" }),
+    wakewordStart: async () => ({ status: "started", active: true, ready: true }),
+    wakewordStop: async () => ({ status: "stopped", active: false, ready: true }),
+    wakewordStatus: async () => ({ active: false, ready: true }),
+    wakewordEvents: async () => ({ events: [] }),
+    tts: async () => null,
+    stt: async () => ({ text: "" }),
+    sttModels: async () => ({ models: [] }),
+    sttSetEngine: async () => ok(),
+    sttSetModel: async () => ok(),
+    elevenlabsVoices: async () => ({ voices: [] }),
+    elevenlabsToggle: async () => ok(),
+    elevenlabsSetKey: async () => ok(),
+    elevenlabsSetVoice: async () => ok(),
+    elevenlabsSetModel: async () => ok(),
+    elevenlabsSetSettings: async () => ok(),
+    deepgramSetKey: async () => ok(),
+    deepgramDeleteKey: async () => ok(),
+    cartesiaSetKey: async () => ok(),
+    cartesiaDeleteKey: async () => ok(),
+    visionAnalyze: async () => ({ text: "" }),
+    personalOsDiagnostics: async () => emptyPersonalOs(),
+    personalOsDrafts: async () => emptyPersonalOs(),
+    personalOsDraftView: async () => emptyPersonalOs(),
+    personalOsDraftReview: async () => emptyPersonalOs(),
+    personalOsDraftDecision: async () => emptyPersonalOs(),
+    personalOsDraftApply: async () => emptyPersonalOs(),
+    personalOsGraph: async () => emptyPersonalOs(),
+    personalOsQuery: async () => emptyPersonalOs(),
+    personalOsContextPack: async () => emptyPersonalOs(),
+    personalOsObsidianContext: async () => emptyPersonalOs(),
+    personalOsReadFile: async () => emptyPersonalOs(),
+    personalOsRawStatus: async () => emptyPersonalOs(),
+    personalOsRawSubmit: async () => emptyPersonalOs(),
+    personalOsCodeLoop: async () => emptyPersonalOs(),
+    agentRun: async () => ({
+      ok: true,
+      summary: "Smoke mock completed",
+      steps: [],
+      counts: { found: 0, changed: 0, done: 1, blocked: 0, failed: 0 },
+    }),
+  });
+  return;
+}
 
 // Fetch wrapper with AbortController timeout (default 30s)
 async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
+    const requestOptions = await withLocalAuthHeader(url, options);
+    const res = await fetch(url, { ...requestOptions, signal: controller.signal });
     return res;
   } finally {
     clearTimeout(id);
   }
 }
 
-function personalOsErrorText(value) {
+function apiErrorText(value) {
   if (!value) return "";
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
@@ -32,12 +344,20 @@ function personalOsErrorText(value) {
   return String(value);
 }
 
-async function personalOsJson(res, fallback = "Personal OS request failed") {
-  let data = null;
-  let jsonError = null;
-  const requestId = typeof res?.headers?.get === "function"
+function personalOsErrorText(value) {
+  return apiErrorText(value);
+}
+
+function apiRequestId(res) {
+  return typeof res?.headers?.get === "function"
     ? (res.headers.get("x-request-id") || res.headers.get("X-Request-ID") || "")
     : "";
+}
+
+async function apiJson(res, fallback = "Lexa request failed") {
+  let data = null;
+  let jsonError = null;
+  const requestId = apiRequestId(res);
   try {
     data = await res.json();
   } catch (e) {
@@ -51,16 +371,18 @@ async function personalOsJson(res, fallback = "Personal OS request failed") {
         ok: false,
         httpStatus: res.status,
         requestId,
+        errorCode: "invalid_json",
         error: `${fallback}: invalid JSON response`,
+        message: `${fallback}: invalid JSON response`,
       };
     }
     return data || {};
   }
 
   const objectData = data && typeof data === "object" && !Array.isArray(data) ? data : {};
-  const message = personalOsErrorText(objectData.detail)
-    || personalOsErrorText(objectData.error)
-    || personalOsErrorText(objectData.message)
+  const message = apiErrorText(objectData.error)
+    || apiErrorText(objectData.message)
+    || apiErrorText(objectData.detail)
     || `${fallback} (HTTP ${res.status})`;
 
   return {
@@ -68,8 +390,14 @@ async function personalOsJson(res, fallback = "Personal OS request failed") {
     ok: false,
     httpStatus: res.status,
     requestId: objectData.requestId || objectData.request_id || requestId,
+    errorCode: objectData.errorCode || objectData.error_code || `http_${res.status}`,
     error: message,
+    message,
   };
+}
+
+async function personalOsJson(res, fallback = "Personal OS request failed") {
+  return apiJson(res, fallback);
 }
 
 function personalOsRetryDelayMs(res, fallbackMs = 1200) {
@@ -157,12 +485,35 @@ contextBridge.exposeInMainWorld("lexa", {
 
   // Companion API
   execute: async (command, params = {}, confirmed = false) => {
+    void confirmed; // Legacy UI hint only; never sent as security approval.
     const res = await fetchWithTimeout(`${API}/companion/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ command, params, confirmed }),
+      body: JSON.stringify({ command, params }),
     });
     return res.json();
+  },
+  prepareCompanionExecute: async (command, params = {}) => {
+    const res = await fetchWithTimeout(`${API}/companion/execute/prepare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command, params }),
+    });
+    return apiJson(res, "Command confirmation prepare failed");
+  },
+  executeWithConfirmation: async (command, params = {}, confirmation = {}) => {
+    const res = await fetchWithTimeout(`${API}/companion/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        command,
+        params,
+        confirmation_id: confirmation.confirmation_id || "",
+        command_hash: confirmation.command_hash || "",
+        action_scope: confirmation.action_scope || "",
+      }),
+    });
+    return apiJson(res, "Confirmed command execution failed");
   },
   companionAuditRecent: async (limit = 20, hideNoise = true) => {
     try {
@@ -416,10 +767,29 @@ contextBridge.exposeInMainWorld("lexa", {
   health: async () => {
     try {
       const res = await fetchWithTimeout(`${API}/health`);
-      return res.json();
+      return apiJson(res, "Backend health not reachable");
     } catch (e) {
       console.warn("[Preload] health check failed:", e.message || e);
       return { status: "offline" };
+    }
+  },
+  startupHealth: async ({ probeVoice = false } = {}) => {
+    try {
+      const params = new URLSearchParams();
+      if (probeVoice) params.set("probeVoice", "true");
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetchWithTimeout(`${API}/health/startup${suffix}`);
+      return apiJson(res, "Startup health not reachable");
+    } catch (e) {
+      console.warn("[Preload] startupHealth failed:", e.message || e);
+      return {
+        ok: false,
+        status: "offline",
+        state: "blocked",
+        checks: [],
+        counts: { ok: 0, warn: 0, blocked: 1 },
+        error: "Startup Health nicht erreichbar",
+      };
     }
   },
 
@@ -896,12 +1266,55 @@ contextBridge.exposeInMainWorld("lexa", {
   // Diagnostics
   diagnostics: async () => {
     const res = await fetchWithTimeout(`${API}/diagnostics`);
-    return res.json();
+    return apiJson(res, "Diagnostics not reachable");
+  },
+  hermesGatewayAutostartStatus: async () => {
+    try {
+      const res = await fetchWithTimeout(`${API}/hermes/gateway/autostart`);
+      return apiJson(res, "Hermes Gateway Autostart nicht erreichbar");
+    } catch (e) {
+      console.warn("[Preload] hermesGatewayAutostartStatus failed:", e.message || e);
+      return {
+        status: "error",
+        supported: false,
+        enabled: false,
+        can_enable: false,
+        error: "Hermes Gateway Autostart nicht erreichbar",
+      };
+    }
+  },
+  hermesGatewayAutostartSet: async (enabled) => {
+    const res = await fetchWithTimeout(`${API}/hermes/gateway/autostart`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: Boolean(enabled) }),
+    });
+    return apiJson(res, "Hermes Gateway Autostart nicht erreichbar");
+  },
+  hermesOverview: async ({ includeContext = true } = {}) => {
+    try {
+      const params = new URLSearchParams();
+      params.set("includeContext", includeContext ? "true" : "false");
+      const res = await fetchWithTimeout(`${API}/hermes/overview?${params.toString()}`);
+      return apiJson(res, "Hermes Overview nicht erreichbar");
+    } catch (e) {
+      console.warn("[Preload] hermesOverview failed:", e.message || e);
+      return {
+        ok: false,
+        healthState: "offline",
+        summary: "Lexa/Hermes Overview nicht erreichbar",
+        checks: [],
+        counts: {},
+        contextFiles: [],
+        nextTasks: [],
+        error: "Hermes Overview nicht erreichbar",
+      };
+    }
   },
   healthTools: async () => {
     try {
       const res = await fetchWithTimeout(`${API}/health/tools`);
-      return res.json();
+      return apiJson(res, "Tool health not reachable");
     } catch (e) {
       console.warn("[Preload] healthTools failed:", e.message || e);
       return { tools: {}, available_count: 0, total_count: 0, health_pct: 0 };
@@ -1208,6 +1621,15 @@ contextBridge.exposeInMainWorld("lexa", {
     params.set("hideSmoke", hideSmoke ? "true" : "false");
     const r = await fetchWithTimeout(`${API}/personal-os/context-pack?${params.toString()}`);
     return personalOsJson(r, "Personal OS context pack failed");
+  },
+  personalOsObsidianContext: async ({ topic = "", maxFiles = 5, bodyChars = 600, includePreviews = true } = {}) => {
+    const params = new URLSearchParams();
+    if (topic) params.set("topic", topic);
+    params.set("maxFiles", String(maxFiles || 5));
+    params.set("bodyChars", String(bodyChars || 600));
+    params.set("includePreviews", includePreviews ? "true" : "false");
+    const r = await fetchWithTimeout(`${API}/personal-os/obsidian-context?${params.toString()}`);
+    return personalOsJson(r, "Personal OS Obsidian context failed");
   },
   personalOsCodeLoop: async ({ areaPath = "00_System", tag = "lexa", maxFiles = 5, bodyChars = 650, includeGraph = true, hideSmoke = true } = {}) => {
     const params = new URLSearchParams();

@@ -30,6 +30,14 @@ function extractFn(source, name) {
   throw new Error(`No closing brace for '${name}'`);
 }
 
+function extractConstArray(source, name) {
+  const start = source.indexOf(`const ${name} = [`);
+  if (start === -1) throw new Error(`'${name}' not found`);
+  const end = source.indexOf("];", start);
+  if (end === -1) throw new Error(`No closing array for '${name}'`);
+  return source.slice(start, end + 2);
+}
+
 const sandbox = new Function(`
   "use strict";
   let inputValue = "";
@@ -50,17 +58,58 @@ const sandbox = new Function(`
     },
   };
   function showToast(message, type) { events.push(["toast", message, type]); }
-  function t(key, values = {}) { return key + ":" + (values.max || ""); }
+  function t(key, values = {}) {
+    if (String(key).startsWith("composer.")) return key;
+    return key + ":" + (values.max || "");
+  }
   async function sendAgentMessage(text) { events.push(["agent", text]); }
   ${extractFn(src, "chatInputMetrics")}
+  ${extractFn(src, "getMessagePersistText")}
+  ${extractFn(src, "setMessagePersistText")}
+  ${extractConstArray(src, "LEXA_COMPOSER_COMMANDS")}
+  ${extractFn(src, "composerCommandText")}
+  ${extractFn(src, "composerCommandLabel")}
+  ${extractFn(src, "composerCommandDesc")}
+  ${extractFn(src, "composerCommandPrefix")}
+  ${extractFn(src, "composerCommandAliases")}
+  ${extractFn(src, "composerCommandAliasKey")}
+  ${extractFn(src, "composerCommandHintText")}
+  ${extractFn(src, "composerCommandAliasValues")}
+  ${extractFn(src, "composerCommandMatches")}
+  ${extractFn(src, "composerCommandScore")}
+  ${extractFn(src, "composerCommandSearchItems")}
+  ${extractFn(src, "composerCommandForAlias")}
+  ${extractFn(src, "expandComposerSlashAlias")}
+  ${extractFn(src, "workspaceDraftPromptFromText")}
+  ${extractFn(src, "continuePromptFromText")}
+  ${extractFn(src, "verifyAnswerPromptFromText")}
+  ${extractFn(src, "messageExportMarkdownFromText")}
+  ${extractFn(src, "messageExportFilename")}
+  ${extractConstArray(src, "_AGENT_PATTERNS")}
+  ${extractFn(src, "_needsAgentMode")}
   ${extractFn(src, "sendMessage")}
   return {
     chatInputMetrics,
+    getMessagePersistText,
+    setMessagePersistText,
+    composerCommandAliasKey,
+    composerCommandSearchItems,
+    composerCommandForAlias,
+    composerCommandHintText,
+    composerCommands: LEXA_COMPOSER_COMMANDS,
+    expandComposerSlashAlias,
+    workspaceDraftPromptFromText,
+    continuePromptFromText,
+    verifyAnswerPromptFromText,
+    messageExportMarkdownFromText,
+    messageExportFilename,
+    _needsAgentMode,
     sendMessage,
     setInput(value) { inputValue = value; },
+    setMaxLength(value) { LexaConfig.MAX_CHAT_INPUT_LENGTH = Number(value); },
     setBackendOnline(value) { backendOnline = Boolean(value); },
     state() { return { loading, events: events.slice() }; },
-    reset() { events.length = 0; loading = false; backendOnline = true; inputValue = ""; },
+    reset() { events.length = 0; loading = false; backendOnline = true; inputValue = ""; LexaConfig.MAX_CHAT_INPUT_LENGTH = 10; },
   };
 `)();
 
@@ -116,6 +165,211 @@ function assert(desc, ok, detail = "") {
   assert("agent mode has user stop control", agentSource.includes("agent-stop-btn") && agentSource.includes("agentStoppedByUser") && agentSource.includes("agent_stream_stopped"));
   assert("agent stop cancels stream reader", agentSource.includes("await agentReader.cancel()") && agentSource.includes('t("chat.agentStopped")'));
   assert("agent stop uses translated tooltip", agentSource.includes('t("chat.agentStopTooltip")') && deI18n.includes('"chat.agentStopTooltip"') && enI18n.includes('"chat.agentStopTooltip"'));
+  assert("agent handoff can use compact visible user text", agentSource.includes("const agentText = String(text || \"\").trim()") && agentSource.includes("const displayText = String(options?.displayText || agentText).trim()") && agentSource.includes("addMessage(displayText, \"user\")") && agentSource.includes("window.lexa.agentRun(agentText)"));
+  assert("agent run exposes busy live status", agentSource.includes('msgEl.setAttribute("aria-busy", "true")') && agentSource.includes('summaryEl.setAttribute("role", "status")') && agentSource.includes('summaryEl.setAttribute("aria-live", "polite")') && agentSource.includes('t("chat.agentStarting")') && agentSource.includes('t("chat.agentWorking")') && agentSource.includes('t("chat.agentCompleted")') && agentSource.includes('msgEl.removeAttribute("aria-busy")') && deI18n.includes('"chat.agentStarting"') && enI18n.includes('"chat.agentStarting"'));
+  assert("agent steps expose list semantics", agentSource.includes('stepsContainer.setAttribute("role", "list")') && agentSource.includes('stepsContainer.setAttribute("aria-label", t("chat.agentStepsLabel"))') && agentSource.includes('stepEl.setAttribute("role", "listitem")') && agentSource.includes('stepEl.setAttribute("aria-label", `${readableLabel}. ${technicalLabel}`)') && deI18n.includes('"chat.agentStepsLabel"') && enI18n.includes('"chat.agentStepsLabel"'));
+  assert("agent steps keep readable labels separate from technical titles", src.includes("function agentStepDisplayLabel") && src.includes("function agentStepTechnicalLabel") && src.includes("function agentStepActionLabel") && src.includes('label.textContent = readableLabel') && src.includes("stepEl.title = technicalLabel") && src.includes('"chat.agentStepWithDetail"') && deI18n.includes('"chat.agentStepPersonalOs"') && enI18n.includes('"chat.agentStepPersonalOs"'));
+  assert("agent steps add outcome badges", src.includes("function agentStepOutcomeKind") && src.includes("function renderAgentStepOutcome") && agentSource.includes("renderAgentStepOutcome(stepEl, step)") && src.includes("chat.agentOutcome${suffix}") && deI18n.includes('"chat.agentOutcomeFound"') && enI18n.includes('"chat.agentOutcomeFound"') && deI18n.includes('"chat.agentOutcomeBlocked"') && enI18n.includes('"chat.agentOutcomeFailed"'));
+  assert("agent runs add aggregate outcome summary", src.includes("function agentRunOutcomeCounts") && src.includes("function renderAgentOutcomeSummary") && agentSource.includes('outcomeSummaryEl.className = "agent-outcome-summary"') && agentSource.includes("recordAgentStepOutcome(step, agentOutcomeCounts, agentStepOutcomes)") && agentSource.includes("renderAgentOutcomeSummary(outcomeSummaryEl, agentOutcomeCounts)") && agentSource.includes("const finalOutcomeCounts = Array.isArray(run.steps) && run.steps.length") && agentSource.includes("renderAgentOutcomeSummary(outcomeSummaryEl, finalOutcomeCounts)") && deI18n.includes('"chat.agentOutcomeSummaryLabel"') && enI18n.includes('"chat.agentOutcomeSummaryLabel"'));
+  assert("agent runs add structured completion panel", src.includes("function renderAgentCompletionPanel") && src.includes("function agentOutcomeTotal") && agentSource.includes('completionEl.setAttribute("role", "group")') && agentSource.includes("renderAgentCompletionPanel(completionEl, finalOutcomeCounts") && deI18n.includes('"chat.agentCompletionReached"') && enI18n.includes('"chat.agentCompletionNext"'));
+  assert("agent runs can draft continuation prompts", src.includes("function agentCompletionContinuePrompt") && src.includes("function startAgentCompletionContinue") && agentSource.includes("agentCompletionContinuePrompt(run, finalOutcomeCounts") && src.includes('continueButton.className = "agent-completion-continue-btn"') && src.includes("continueButton._lexaAgentContinuePrompt = options.continuePrompt.text") && src.includes("chatInput.setSelectionRange(cursorStart, cursorStart)") && src.includes('flashIconButton(btn, "\\u2713", "\\u21AA", 1500, t("chat.agentCompletionContinueStarted"))') && deI18n.includes('"chat.agentCompletionContinueButton"') && enI18n.includes('"chat.agentCompletionContinueBoundary"'));
+  assert("agent-mode detector routes research briefs", sandbox._needsAgentMode("erstelle einen quellenbasierten research brief zu Lexa"));
+  assert("agent-mode detector routes source-backed analyses", sandbox._needsAgentMode("erstelle eine analyse mit quellen und belegen zu Lexa"));
+  assert("agent-mode detector routes workspace drafts", sandbox._needsAgentMode("baue einen workspace draft als markdown kontext"));
+  assert("agent-mode detector routes reversed workspace drafts", sandbox._needsAgentMode("erstelle einen markdown entwurf als workspace fuer Lexa"));
+  assert("agent-mode detector routes context packs", sandbox._needsAgentMode("erstelle ein Personal OS Context Pack fuer Lexa"));
+  assert("agent-mode detector routes draft reviews", sandbox._needsAgentMode("pruefe die pending drafts zur freigabe"));
+  assert("agent-mode detector routes skill drafts", sandbox._needsAgentMode("entwirf einen Lexa Skill als Markdown Vorlage"));
+  assert("agent-mode detector routes deep think decisions", sandbox._needsAgentMode("erstelle einen entscheidungsbrief mit optionen und risiken"));
+  assert("agent-mode detector routes ship checks", sandbox._needsAgentMode("release check fuer Lexa vor dem publish"));
+  assert("composer slash alias expands research workflow", sandbox.expandComposerSlashAlias("/research Lexa").includes("source-backed research brief") && sandbox.expandComposerSlashAlias("/research Lexa").includes("Lexa"));
+  assert("composer short alias expands research workflow", sandbox.expandComposerSlashAlias("/rb Lexa").includes("source-backed research brief") && sandbox.expandComposerSlashAlias("/rb Lexa").includes("Lexa"));
+  assert("composer dashed alias expands research workflow", sandbox.expandComposerSlashAlias("/deep-research Lexa").includes("source-backed research brief") && sandbox.expandComposerSlashAlias("/deep_research Lexa").includes("Lexa"));
+  assert("composer unique prefix alias expands research workflow", sandbox.expandComposerSlashAlias("/deep-res Lexa").includes("source-backed research brief") && sandbox.expandComposerSlashAlias("/deep_res Lexa").includes("Lexa"));
+  assert("composer slash alias expands workspace workflow", sandbox.expandComposerSlashAlias("/workspace Lexa roadmap").includes("workspace draft") && sandbox.expandComposerSlashAlias("/workspace Lexa roadmap").includes("Lexa roadmap"));
+  assert("composer short alias expands workspace workflow", sandbox.expandComposerSlashAlias("/ws Lexa roadmap").includes("workspace draft") && sandbox.expandComposerSlashAlias("/ws Lexa roadmap").includes("Lexa roadmap"));
+  assert("composer unique prefix alias expands workspace workflow", sandbox.expandComposerSlashAlias("/work Lexa roadmap").includes("workspace draft") && sandbox.expandComposerSlashAlias("/work Lexa roadmap").includes("Lexa roadmap"));
+  assert("workspace handoff prompt wraps answers as artifacts", sandbox.workspaceDraftPromptFromText("Alpha answer").includes("workspace draft") && sandbox.workspaceDraftPromptFromText("Alpha answer").includes("Source answer:\nAlpha answer"));
+  assert("workspace handoff prompt clips long answers", sandbox.workspaceDraftPromptFromText("x".repeat(8100)).includes("[Source clipped for chat handoff.]"));
+  sandbox.setMaxLength(4000);
+  const continuePrompt = sandbox.continuePromptFromText("Alpha answer");
+  assert("continue-from-answer prompt preserves source and cursor", continuePrompt.text.includes("chat.continueFromAnswerPrefix") && continuePrompt.text.includes("chat.continueFromAnswerNextRequest") && continuePrompt.text.includes("chat.continueFromAnswerSourceLabel:\nAlpha answer") && continuePrompt.cursorStart > 0);
+  sandbox.setMaxLength(1200);
+  const clippedContinuePrompt = sandbox.continuePromptFromText("x".repeat(12000));
+  assert("continue-from-answer prompt clips long source context", clippedContinuePrompt.text.includes("chat.continueFromAnswerClipMarker") && clippedContinuePrompt.text.length <= 984);
+  sandbox.setMaxLength(10);
+  const verifyPrompt = sandbox.verifyAnswerPromptFromText("Alpha answer");
+  assert("verify-answer prompt wraps answers as source-backed research", verifyPrompt.includes("source-backed research") && verifyPrompt.includes("checkable claims") && verifyPrompt.includes("Source answer:") && verifyPrompt.includes("Alpha answer"));
+  assert("verify-answer prompt clips long answers", sandbox.verifyAnswerPromptFromText("x".repeat(8100)).includes("chat.verifyAnswerClipMarker"));
+  const exportedMarkdown = sandbox.messageExportMarkdownFromText("Alpha answer", { title: "Lexa Note", exportedAt: "2026-05-18T04:58:14.627Z" });
+  assert("message markdown export keeps source and metadata", exportedMarkdown.includes("# Lexa Note") && exportedMarkdown.includes("Exported: 2026-05-18T04:58:14.627Z") && exportedMarkdown.includes("Source: Lexa chat") && exportedMarkdown.endsWith("Alpha answer\n"));
+  assert("message markdown export uses stable filename", sandbox.messageExportFilename(new Date("2026-05-18T04:58:14.627Z")) === "lexa-answer-2026-05-18T04-58-14-627Z.md");
+  const persistedMessage = { dataset: { persistText: "**Bold**\\n\\n```js\\nconst x = 1;\\n```" }, querySelector() { return { textContent: "rendered fallback" }; } };
+  assert("message text helper prefers raw persisted markdown", sandbox.getMessagePersistText(persistedMessage).includes("```js") && !sandbox.getMessagePersistText(persistedMessage).includes("rendered fallback"));
+  const messageToStore = { dataset: {}, querySelector() { return null; } };
+  sandbox.setMessagePersistText(messageToStore, "  ## Stored markdown  ");
+  assert("message text helper stores trimmed raw markdown", messageToStore.dataset.persistText === "## Stored markdown" && sandbox.getMessagePersistText(messageToStore) === "## Stored markdown");
+  assert("composer slash alias expands context workflow", sandbox.expandComposerSlashAlias("/context Lexa roadmap").includes("context pack") && sandbox.expandComposerSlashAlias("/context Lexa roadmap").includes("Lexa roadmap"));
+  assert("composer short alias expands context workflow", sandbox.expandComposerSlashAlias("/ctx Lexa roadmap").includes("context pack") && sandbox.expandComposerSlashAlias("/ctx Lexa roadmap").includes("Lexa roadmap"));
+  assert("composer slash alias expands draft review workflow", sandbox.expandComposerSlashAlias("/review Lexa drafts").includes("pending drafts") && sandbox.expandComposerSlashAlias("/review Lexa drafts").includes("Lexa drafts"));
+  assert("composer short alias expands draft review workflow", sandbox.expandComposerSlashAlias("/rv Lexa drafts").includes("pending drafts") && sandbox.expandComposerSlashAlias("/rv Lexa drafts").includes("Lexa drafts"));
+  assert("composer slash alias expands skill workflow", sandbox.expandComposerSlashAlias("/skill research").includes("Lexa Skill") && sandbox.expandComposerSlashAlias("/skill research").includes("research"));
+  assert("composer short alias expands skill workflow", sandbox.expandComposerSlashAlias("/sk research").includes("Lexa Skill") && sandbox.expandComposerSlashAlias("/sk research").includes("research"));
+  assert("composer slash alias expands deep think workflow", sandbox.expandComposerSlashAlias("/think roadmap").includes("Deep Think") && sandbox.expandComposerSlashAlias("/think roadmap").includes("roadmap"));
+  assert("composer short alias expands deep think workflow", sandbox.expandComposerSlashAlias("/dt roadmap").includes("Deep Think") && sandbox.expandComposerSlashAlias("/dt roadmap").includes("roadmap"));
+  assert("composer slash alias expands ship check workflow", sandbox.expandComposerSlashAlias("/ship Lexa").includes("Ship Check") && sandbox.expandComposerSlashAlias("/ship Lexa").includes("Lexa"));
+  assert("composer short alias expands ship check workflow", sandbox.expandComposerSlashAlias("/rl Lexa").includes("Ship Check") && sandbox.expandComposerSlashAlias("/rl Lexa").includes("Lexa"));
+  assert("composer ambiguous prefix alias stays unexpanded", sandbox.composerCommandForAlias("re", { allowPrefix: true }) === null);
+  assert("composer alias key normalizes separators and umlauts", sandbox.composerCommandAliasKey("Mehr-Schritt") === "mehrschritt" && sandbox.composerCommandAliasKey("deep_research") === "deepresearch");
+  const researchCommand = sandbox.composerCommands.find((command) => command.id === "research");
+  const workspaceCommand = sandbox.composerCommands.find((command) => command.id === "workspace");
+  const contextCommand = sandbox.composerCommands.find((command) => command.id === "context");
+  const reviewCommand = sandbox.composerCommands.find((command) => command.id === "review");
+  const skillCommand = sandbox.composerCommands.find((command) => command.id === "skill");
+  const thinkCommand = sandbox.composerCommands.find((command) => command.id === "think");
+  const shipCommand = sandbox.composerCommands.find((command) => command.id === "ship");
+  assert("composer hint shows research short alias", sandbox.composerCommandHintText(researchCommand) === "/research /rb");
+  assert("composer hint shows workspace short alias", sandbox.composerCommandHintText(workspaceCommand) === "/workspace /ws");
+  assert("composer hint shows context short alias", sandbox.composerCommandHintText(contextCommand) === "/context /ctx");
+  assert("composer hint shows draft review short alias", sandbox.composerCommandHintText(reviewCommand) === "/review /rv");
+  assert("composer hint shows skill short alias", sandbox.composerCommandHintText(skillCommand) === "/skill /sk");
+  assert("composer hint shows deep think short alias", sandbox.composerCommandHintText(thinkCommand) === "/think /dt");
+  assert("composer hint shows ship check short alias", sandbox.composerCommandHintText(shipCommand) === "/ship /rl");
+  assert("composer search ranks research alias first", sandbox.composerCommandSearchItems("r")[0]?.id === "research");
+  assert("composer search ranks workspace alias first", sandbox.composerCommandSearchItems("w")[0]?.id === "workspace");
+  assert("composer search ranks context alias first", sandbox.composerCommandSearchItems("c")[0]?.id === "context");
+  assert("composer search ranks draft review alias first", sandbox.composerCommandSearchItems("rv")[0]?.id === "review");
+  assert("composer search ranks skill alias first", sandbox.composerCommandSearchItems("sk")[0]?.id === "skill");
+  assert("composer search ranks deep think alias first", sandbox.composerCommandSearchItems("dt")[0]?.id === "think");
+  assert("composer search ranks ship alias first", sandbox.composerCommandSearchItems("rl")[0]?.id === "ship");
+  assert("composer search ranks screen alias first", sandbox.composerCommandSearchItems("s")[0]?.id === "screen");
+  assert("composer search ranks voice alias first", sandbox.composerCommandSearchItems("v")[0]?.id === "voice");
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("erstelle einen quellenbasierten research brief zu Lexa");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("natural research prompt routes to agent before loading", state.loading === false && state.events.some((event) => event[0] === "agent"));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("erstelle eine analyse mit quellen und belegen zu Lexa");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("natural source analysis prompt routes to agent before loading", state.loading === false && state.events.some((event) => event[0] === "agent"));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("/research Lexa");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("slash research alias routes expanded workflow to agent", state.loading === false && state.events.some((event) => event[0] === "agent" && event[1].includes("source-backed research brief") && event[1].includes("Lexa")));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("/rb Lexa");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("short research alias routes expanded workflow to agent", state.loading === false && state.events.some((event) => event[0] === "agent" && event[1].includes("source-backed research brief") && event[1].includes("Lexa")));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("baue einen workspace draft als markdown kontext");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("natural workspace prompt routes to agent before loading", state.loading === false && state.events.some((event) => event[0] === "agent"));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("erstelle einen markdown entwurf als workspace fuer Lexa");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("natural reversed workspace prompt routes to agent before loading", state.loading === false && state.events.some((event) => event[0] === "agent"));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("/workspace Lexa roadmap");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("slash workspace alias routes expanded workflow to agent", state.loading === false && state.events.some((event) => event[0] === "agent" && event[1].includes("workspace draft") && event[1].includes("Lexa roadmap")));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("/ws Lexa roadmap");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("short workspace alias routes expanded workflow to agent", state.loading === false && state.events.some((event) => event[0] === "agent" && event[1].includes("workspace draft") && event[1].includes("Lexa roadmap")));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("erstelle ein Personal OS Context Pack fuer Lexa");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("natural context pack prompt routes to agent before loading", state.loading === false && state.events.some((event) => event[0] === "agent"));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("/ctx Lexa roadmap");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("short context alias routes expanded workflow to agent", state.loading === false && state.events.some((event) => event[0] === "agent" && event[1].includes("context pack") && event[1].includes("Lexa roadmap")));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("pruefe die pending drafts zur freigabe");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("natural draft review prompt routes to agent before loading", state.loading === false && state.events.some((event) => event[0] === "agent"));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("/rv Lexa drafts");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("short draft review alias routes expanded workflow to agent", state.loading === false && state.events.some((event) => event[0] === "agent" && event[1].includes("pending drafts") && event[1].includes("Lexa drafts")));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("entwirf einen Lexa Skill als Markdown Vorlage");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("natural skill draft prompt routes to agent before loading", state.loading === false && state.events.some((event) => event[0] === "agent"));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("/sk research");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("short skill alias routes expanded workflow to agent", state.loading === false && state.events.some((event) => event[0] === "agent" && event[1].includes("Lexa Skill") && event[1].includes("research")));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("erstelle einen entscheidungsbrief mit optionen und risiken");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("natural deep think prompt routes to agent before loading", state.loading === false && state.events.some((event) => event[0] === "agent"));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("/dt roadmap");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("short deep think alias routes expanded workflow to agent", state.loading === false && state.events.some((event) => event[0] === "agent" && event[1].includes("Deep Think") && event[1].includes("roadmap")));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("release check fuer Lexa vor dem publish");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("natural ship check prompt routes to agent before loading", state.loading === false && state.events.some((event) => event[0] === "agent"));
+
+  sandbox.reset();
+  sandbox.setMaxLength(500);
+  sandbox.setInput("/rl Lexa");
+  await sandbox.sendMessage();
+  state = sandbox.state();
+  assert("short ship alias routes expanded workflow to agent", state.loading === false && state.events.some((event) => event[0] === "agent" && event[1].includes("Ship Check") && event[1].includes("Lexa")));
 
   const showTypingSource = extractFn(src, "showTyping");
   const sendSource = extractFn(src, "sendMessage");
@@ -123,6 +377,7 @@ function assert(desc, ok, detail = "") {
   assert("normal chat stream distinguishes stop from timeout", sendSource.includes("streamStoppedByUser") && sendSource.includes('t("chat.responseStopped")') && sendSource.includes('_lexaStreamAbortReason = "timeout"'));
   assert("normal chat stop labels are translated", deI18n.includes('"chat.stopResponseButton"') && enI18n.includes('"chat.stopResponseButton"') && deI18n.includes('"chat.responseStopped"') && enI18n.includes('"chat.responseStopped"'));
   assert("normal chat HTTP error clears stream timeout", sendSource.includes("clearTimeout(_streamTimeout);") && sendSource.includes("window._lexaStreamAbort = null"));
+  assert("normal chat HTTP errors persist and re-enable answer actions", sendSource.includes("setMessagePersistText(msgEl, errMsg);") && sendSource.includes("copyBtn.disabled = false;\n      memoryBtn.disabled = false;\n      workspaceBtn.disabled = false;\n      continueBtn.disabled = false;\n      verifyBtn.disabled = false;\n      exportBtn.disabled = false;\n      regenBtn.disabled = false;") && sendSource.includes("saveChatHistory();\n      saveCurrentConversation();\n      return;"));
 
   const voiceStartStatusSource = extractFn(src, "voiceStart");
   const voiceProcessStatusSource = extractFn(src, "voiceProcess");
@@ -136,18 +391,20 @@ function assert(desc, ok, detail = "") {
   const voiceTtsChunkSource = extractFn(src, "voiceTTSChunkText");
   const voiceTtsFlushSource = extractFn(src, "voiceTTSFlushBuffer");
   assert("voice status bar helper updates shared UI", src.includes("function voiceStatusBarUpdate") && src.includes("VoiceStatusBar.show()"));
+  assert("orb voice surface hides status chrome and drives the orb", src.includes("function voiceUsesOrbSurface") && src.includes("function voiceEndOrbSurface") && src.includes("window.__lexaOrbVoiceActive") && src.includes("voiceSetOrbConversationState(safeState") && src.includes("voiceHideStatusBar()"));
+  assert("voice status reset ends the orb-only surface", voiceStatusResetSource.includes("window.__lexaOrbVoiceActive") && voiceStatusResetSource.includes("voiceEndOrbSurface()"));
   assert("voice status bar reset clears stale transcript chrome", voiceStatusResetSource.includes('setTranscript("")') && voiceStatusResetSource.includes('setProvider("")') && voiceStatusResetSource.includes("setLatency(0)"));
   assert("voice status reset waits for pending speech", voiceSpeechPendingSource.includes('LexaState.get("ttsEnabled")') && voiceSpeechPendingSource.includes("Voice.ttsPlaying") && voiceSpeechPendingSource.includes("Voice.ttsQueue.length") && voiceResetIfNoSpeechSource.includes("if (!voiceSpeechPending()) voiceStatusBarReset()"));
   assert("voice recording sets localized listening provider", voiceStartStatusSource.includes('state: "listening"') && voiceStartStatusSource.includes('voiceUiText("chat.voiceProviderRecording"') && deI18n.includes('"chat.voiceProviderRecording"') && enI18n.includes('"chat.voiceProviderRecording"'));
-  assert("voice processing exposes localized STT status", voiceProcessStatusSource.includes('provider: "STT"') && voiceProcessStatusSource.includes('voiceUiText("chat.voiceTranscribing"'));
-  assert("voice stream exposes AI status and resets when no TTS will speak", voiceStreamChatStatusSource.includes('provider: "AI"') && voiceStreamChatStatusSource.includes("voiceStatusBarResetIfNoSpeechPending()"));
+  assert("voice processing exposes localized processing status", voiceProcessStatusSource.includes('voiceUiText("chat.voiceProviderProcessing"') && voiceProcessStatusSource.includes('voiceUiText("chat.voiceTranscribing"'));
+  assert("voice stream exposes response status and resets when no TTS will speak", voiceStreamChatStatusSource.includes('voiceUiText("chat.voiceProviderResponse"') && voiceStreamChatStatusSource.includes("voiceStatusBarResetIfNoSpeechPending()"));
   assert("voice stream uses configured API base and cleans up timeout/reader", src.includes("function voiceApiBase()") && voiceStreamChatStatusSource.includes("const API = voiceApiBase()") && voiceStreamChatStatusSource.includes("let timeout = null") && voiceStreamChatStatusSource.includes("let reader = null") && voiceStreamChatStatusSource.includes("finally") && voiceStreamChatStatusSource.includes("await reader.cancel()"));
   assert("voice stream flushes TTS through bounded chunker", src.includes("VOICE_TTS_MAX_CHUNK_CHARS") && voiceStreamChatStatusSource.includes("voiceTTSFlushBuffer(ttsBuf)") && voiceStreamChatStatusSource.includes("voiceTTSFlushBuffer(ttsBuf, true)") && voiceTtsFlushSource.includes("voiceTTSEnqueue(speakable.trim())"));
   assert("voice stream flushes final TTS buffer after reader close", voiceStreamChatStatusSource.includes("ttsBuf = voiceTTSFlushBuffer(ttsBuf, true);\n    if (timeout)"));
   const ttsChunkSandbox = new Function(`${voiceTtsFindSplitSource}\n${voiceTtsChunkSource}\nreturn { voiceTTSChunkText };`)();
   const longTtsChunks = ttsChunkSandbox.voiceTTSChunkText("Alpha ".repeat(80), 80);
   assert("voice TTS chunker bounds long speech segments", longTtsChunks.length > 1 && longTtsChunks.every((chunk) => chunk.length <= 80 && chunk === chunk.trim()));
-  assert("voice TTS exposes speaking status without visible status chrome", voiceTTSNextStatusSource.includes('state: "speaking"') && voiceTTSNextStatusSource.includes('voiceUiText("chat.voiceProviderSpeech"') && voiceTTSNextStatusSource.includes('voiceUiText("chat.voiceSpeakingResponse"') && src.includes('state === "speaking"') && src.includes("voiceStatusBarReset({ hide: true })") && src.includes("VOICE_TTS_PLAYBACK_RATE"));
+  assert("voice TTS exposes speaking status without visible status chrome", voiceTTSNextStatusSource.includes('state: "speaking"') && voiceTTSNextStatusSource.includes('voiceUiText("chat.voiceProviderSpeech"') && voiceTTSNextStatusSource.includes('voiceUiText("chat.voiceSpeakingResponse"') && src.includes('safeState === "speaking"') && src.includes("voiceStatusBarReset({ hide: true })") && src.includes("VOICE_TTS_PLAYBACK_RATE"));
   assert("voice TTS drives the main orb speaking state", src.includes("function voiceSetOrbConversationState") && voiceTTSNextStatusSource.includes('voiceSetOrbConversationState("speaking")') && voiceTTSNextStatusSource.includes("voiceSetOrbConversationState(null)"));
 
   const persistTextSource = extractFn(src, "getMessagePersistText");
@@ -155,25 +412,58 @@ function assert(desc, ok, detail = "") {
   const saveChatSource = extractFn(src, "saveChatHistory");
   const autoSaveSource = extractFn(src, "autoSaveConversation");
   const saveCurrentSource = extractFn(src, "saveCurrentConversation");
+  const loadHistorySource = extractFn(src, "loadChatHistory");
   const clearChatSource = extractFn(src, "clearChat");
   const trimChatSource = extractFn(src, "trimChatMessages");
   const newConversationSource = extractFn(src, "newConversation");
   const switchSource = extractFn(src, "switchConversation");
+  const renderConversationSource = extractFn(src, "renderConversationList");
   const refreshSidebarSource = extractFn(src, "refreshConversationSidebar");
   const loadConversationsSource = extractFn(src, "loadConversations");
-  assert("chat persistence reads agent summaries", persistTextSource.includes('querySelector(".agent-summary")'));
+  const deleteConversationSource = extractFn(src, "deleteConversation");
+  const autoTitleSource = extractFn(src, "autoTitleConversation");
+  assert("chat persistence prefers raw markdown before rendered text", persistTextSource.includes("dataset?.persistText") && persistTextSource.includes('querySelector(".agent-summary")'));
+  assert("chat messages store raw markdown for reuse", src.includes("setMessagePersistText(msg, text)") && src.includes("setMessagePersistText(msgEl, fullText || textEl.textContent)") && src.includes("setMessagePersistText(msgEl, run.summary)"));
+  assert("agent run metadata survives reload without entering backend messages", src.includes("function normalizeAgentRunMeta") && src.includes("function setMessageAgentRunMeta") && src.includes("function saveAgentRunMetaForConversation") && src.includes("function createAgentRunMetaResolver") && src.includes("function renderPersistedConversationMessages") && src.includes("renderPersistedAgentRunMeta(body, agentRunMeta, text)") && saveChatSource.includes("getMessageAgentRunMeta(msg)") && saveChatSource.includes("messages.push(meta ? { text, type, meta } : { text, type })") && saveCurrentSource.includes("const convId = LexaState.get(\"currentConversationId\")") && saveCurrentSource.includes("saveAgentRunMetaForConversation(convId)") && autoSaveSource.includes("const convId = LexaState.get(\"currentConversationId\")") && autoSaveSource.includes("saveAgentRunMetaForConversation(convId)") && saveCurrentSource.includes("messages.push({ role, content: text })") && !saveCurrentSource.includes("meta }"));
   assert("chat persistence skips only transient typing messages", persistableSource.includes("typing-message"));
   assert("local chat cache uses shared persisted text helper", saveChatSource.includes("getMessagePersistText(msg)"));
-  assert("conversation autosave uses shared persisted text helper", autoSaveSource.includes("getMessagePersistText(msg)") && saveCurrentSource.includes("getMessagePersistText(msg)"));
+  assert("conversation autosave uses shared persisted text helper and stable conversation id", autoSaveSource.includes("const convId = LexaState.get(\"currentConversationId\")") && autoSaveSource.includes("getMessagePersistText(msg)") && autoSaveSource.includes("await window.lexa.conversationUpdate(convId, { messages })") && saveCurrentSource.includes("getMessagePersistText(msg)"));
+  assert("conversation autosave pauses during conversation switching", src.includes("let _conversationSwitchInFlight = 0") && autoSaveSource.includes("if (_conversationSwitchInFlight > 0) return") && switchSource.includes("_conversationSwitchInFlight += 1") && switchSource.includes("_conversationSwitchInFlight = Math.max(0, _conversationSwitchInFlight - 1)"));
+  assert("auto title updates local sidebar title by stable string id", src.includes("function updateConversationTitleLocally") && src.includes("String(conv?.id) !== String(convId)") && src.includes("LexaState.set(\"conversationsList\", next)") && autoTitleSource.includes("String(userMessage || \"\").trim()") && autoTitleSource.includes("const generatedTitle = String(result?.title || \"\").trim()") && autoTitleSource.includes("updateConversationTitleLocally(convId, title)"));
+  assert("manual conversation changes warn when pre-change save fails", saveCurrentSource.includes("options = null") && saveCurrentSource.includes("const opts = options || {}") && saveCurrentSource.includes("return true") && saveCurrentSource.includes('if (opts.notifyFailure) showToast(t("toast.conversationSaveFailed"), "warning"') && saveCurrentSource.includes("return false") && switchSource.includes("await saveCurrentConversation({ notifyFailure: notify })") && newConversationSource.includes("await saveCurrentConversation({ notifyFailure: true })") && deI18n.includes('"toast.conversationSaveFailed"') && enI18n.includes('"toast.conversationSaveFailed"'));
+  assert("conversation save separates update success from sidebar refresh failure", saveCurrentSource.includes("await window.lexa.conversationUpdate(convId, { messages })") && saveCurrentSource.includes("console.warn(\"[Chat] Saved conversation but failed to refresh sidebar:\"") && saveCurrentSource.includes('showToast(t("toast.conversationRefreshFailed"), "warning"') && saveCurrentSource.includes("return true") && deI18n.includes('"toast.conversationRefreshFailed"') && enI18n.includes('"toast.conversationRefreshFailed"'));
+  assert("persisted conversation reloads use shared renderer", src.includes("function renderPersistedConversationMessages") && src.includes("const text = msg?.content ?? msg?.text ?? \"\"") && src.includes("msg?.meta || (agentMetaForMessage ? agentMetaForMessage(msg?.role || \"assistant\", text) : null)") && src.includes("const activeConvId = conv.id || convId") && src.includes("renderPersistedConversationMessages(conv.messages, activeConvId)") && src.includes("saveAgentRunMetaForConversation(activeConvId)") && src.includes("renderPersistedConversationMessages(messages, convId)") && src.includes("if (convId) saveAgentRunMetaForConversation(convId)") && switchSource.includes("renderPersistedConversationMessages(messages, convId)") && switchSource.includes("saveAgentRunMetaForConversation(convId)"));
+  assert("conversation reload clears old rendered messages before hydrating", src.includes("function clearRenderedChatMessages") && src.includes("querySelectorAll(\".message\").forEach((msg) => msg.remove())") && loadHistorySource.includes("if (conv && !conv.detail && Array.isArray(conv.messages))") && loadHistorySource.includes("clearRenderedChatMessages();\n        LexaState.set(\"currentConversationId\", activeConvId)") && loadHistorySource.includes("if (!Array.isArray(messages)) return;") && loadHistorySource.includes("clearRenderedChatMessages();\n    renderPersistedConversationMessages(messages, convId)") && !loadHistorySource.includes("messages.length === 0"));
+  assert("failed conversation switch restores previous active selection", src.includes("function restoreActiveConversationSelection") && src.includes('localStorage.removeItem("lexa-active-conversation")') && src.includes('localStorage.setItem("lexa-active-conversation", activeConversationValue)') && switchSource.includes('const previousConvId = LexaState.get("currentConversationId")') && switchSource.includes('const previousActiveConversation = localStorage.getItem("lexa-active-conversation")') && switchSource.includes("restoreActiveConversationSelection(previousConvId, previousActiveConversation)") && switchSource.includes('showToast(t("toast.convNotFound")') && switchSource.includes('console.warn("[Chat] Failed to switch conversation:'));
+  assert("conversation switch ignores stale async loads", src.includes("let _conversationSwitchSeq = 0") && switchSource.includes("const switchSeq = ++_conversationSwitchSeq") && switchSource.includes("await saveCurrentConversation({ notifyFailure: notify })") && switchSource.includes("if (switchSeq !== _conversationSwitchSeq) return false") && switchSource.includes("const conv = await window.lexa.conversationGet(convId)") && switchSource.includes("await window.lexa.conversationLoad(convId)") && switchSource.includes("restoreActiveConversationSelection(previousConvId, previousActiveConversation)"));
   assert("chat persistence no longer skips first real message", !saveChatSource.includes("i === 0") && !autoSaveSource.includes("i === 0") && !saveCurrentSource.includes("i === 0"));
   assert("clear and switch remove all existing chat messages", clearChatSource.includes("msgs.forEach((m) => m.remove())") && switchSource.includes("msgs.forEach((m) => m.remove())"));
+  assert("clear and delete remove local agent attention state", src.includes("function clearAgentRunLocalStateForConversation") && src.includes("localStorage.removeItem(agentRunMetaCacheKey(convId))") && src.includes("localStorage.removeItem(agentRunAttentionResolvedCacheKey(convId))") && src.includes("String(item.convId) !== String(convId)") && clearChatSource.includes("clearAgentRunLocalStateForConversation(convId);\n    markConversationClearedLocally(convId);\n    renderConversationList();") && deleteConversationSource.includes("await window.lexa.conversationDelete(convId)") && deleteConversationSource.includes("clearAgentRunLocalStateForConversation(convId)"));
   assert("new chat removes all existing chat messages", newConversationSource.includes("msgs.forEach((m) => m.remove())"));
+  assert("new chat blocks duplicate creates while busy", src.includes("let _newConversationInFlight = false") && src.includes("function setNewConversationControlsBusy") && newConversationSource.includes("if (_newConversationInFlight) return false") && newConversationSource.includes("setNewConversationControlsBusy(true)") && newConversationSource.includes("} finally {") && newConversationSource.includes("setNewConversationControlsBusy(false)") && newConversationSource.includes("return true"));
+  assert("new chat separates create success from setup and refresh failures", newConversationSource.includes("result = await window.lexa.conversationCreate(title)") && newConversationSource.includes("upsertConversationLocally({ id: result.id") && newConversationSource.includes('showToast(t("toast.createError"), "error")') && newConversationSource.includes("await window.lexa.historyClear()") && newConversationSource.includes('showToast(t("toast.newChatHistoryClearFailed"), "warning"') && newConversationSource.includes("await refreshConversationSidebar()") && newConversationSource.includes('showToast(t("toast.newChatRefreshFailed"), "warning"') && src.includes("function upsertConversationLocally") && src.includes("updateConversationCount(next.length)") && deI18n.includes('"toast.newChatHistoryClearFailed"') && enI18n.includes('"toast.newChatRefreshFailed"'));
+  assert("conversation list surfaces blocked or failed agent runs", src.includes("function agentRunAttentionForConversation") && src.includes("function renderAgentAttentionPanel") && src.includes('panel.className = "agent-attention-panel"') && renderConversationSource.includes("renderAgentAttentionPanel(container, convList)") && src.includes("btn.addEventListener(\"click\", () => switchConversation(item.convId))") && deI18n.includes('"chat.agentAttentionCounts"') && enI18n.includes('"chat.agentAttentionOpenLabel"'));
+  assert("conversation list can filter blocked or failed agent runs", src.includes("function agentRunAttentionListForConversations") && src.includes("function updateAgentAttentionFilterButton") && src.includes("function toggleAgentAttentionFilter") && src.includes('document.getElementById("agent-attention-filter-btn")') && src.includes('btn.setAttribute("aria-pressed"') && src.includes('LexaState.set("conversationAttentionOnly", next)') && renderConversationSource.includes("const attentionById = new Map") && renderConversationSource.includes("if (attentionOnly && attentionList.length === 0)") && renderConversationSource.includes('LexaState.set("conversationAttentionOnly", false)') && renderConversationSource.includes("const visibleConversations = attentionOnly ? convList.filter") && renderConversationSource.includes('renderAgentAttentionFilterNote(container, attentionList.length)') && renderConversationSource.includes('badge.className = "conv-agent-attention-badge"') && deI18n.includes('"chat.agentAttentionFilterClear"') && enI18n.includes('"chat.agentAttentionShortCounts"'));
+  assert("conversation list can resolve attention without deleting agent metadata", src.includes("function agentRunAttentionResolvedCacheKey") && src.includes("function agentRunAttentionRecordKey") && src.includes("function agentRunAttentionResolvedKeys") && src.includes("function saveAgentRunAttentionResolvedKeys") && src.includes("if (resolved.has(key)) return") && src.includes("function resolveAgentAttentionForConversation") && src.includes("attention.keys.forEach((key) => resolved.add(key))") && src.includes("saveAgentRunAttentionResolvedKeys(convId, resolved)") && src.includes('resolveBtn.className = "agent-attention-resolve-btn"') && renderConversationSource.includes('resolveBtn.className = "conv-action-btn conv-agent-resolve-btn"') && deI18n.includes('"chat.agentAttentionResolved"') && enI18n.includes('"chat.agentAttentionResolveLabel"'));
+  assert("conversation list can restore recently resolved attention", src.includes("function agentRunAttentionResolvedHistoryCacheKey") && src.includes("function saveAgentRunAttentionResolvedHistory") && src.includes("function agentRunAttentionResolvedHistoryForConversations") && src.includes("function recordAgentAttentionResolution") && src.includes("function removeAgentAttentionResolution") && src.includes("function restoreAgentAttentionHistoryItem") && src.includes("recordAgentAttentionResolution(attention)") && src.includes("removeAgentAttentionResolution(convId, [key])") && renderConversationSource.includes("renderAgentResolvedHistoryPanel(container, convList)") && src.includes('restoreBtn.className = "agent-resolved-restore-btn"') && deI18n.includes('"chat.agentResolvedCounts"') && enI18n.includes('"chat.agentResolvedOpenLabel"'));
+  assert("conversation list prunes old or orphaned resolved attention history", src.includes("function agentRunAttentionResolvedHistoryMaxAgeMs") && src.includes("function agentRunAttentionResolvedHistoryItemHasEvidence") && src.includes("const resolved = agentRunAttentionResolvedKeys(item.convId)") && src.includes("const recordKeys = new Set(records.map((record, index) => agentRunAttentionRecordKey(record, index)))") && src.includes("function pruneAgentRunAttentionResolvedHistoryItems") && src.includes("now - item.resolved_at > maxAgeMs") && src.includes("slice(0, agentRunAttentionResolvedHistoryLimit())") && src.includes("saveAgentRunAttentionResolvedHistory(pruned)"));
+  assert("conversation list filters resolved attention history to visible conversations", src.includes("function agentRunAttentionResolvedHistoryForConversations") && src.includes("const ids = new Set((Array.isArray(convList) ? convList : [])") && src.includes("const visible = history.filter((item) => ids.has(String(item.convId)))") && src.includes("if (visible.length !== history.length) saveAgentRunAttentionResolvedHistory(visible)") && src.includes("renderAgentResolvedHistoryPanel(container, convList)"));
+  assert("conversation list updates compact agent attention header summary", src.includes("function updateAgentAttentionHeaderSummary") && src.includes('document.getElementById("agent-attention-summary")') && src.includes("const openCount = Array.isArray(attentionList) ? attentionList.length : 0") && src.includes("const resolvedCount = agentRunAttentionResolvedHistoryForConversations(convList).length") && src.includes("const hasConversations = Array.isArray(convList) && convList.length > 0") && src.includes('clear.className = "agent-attention-summary-chip clear"') && src.includes('summary.classList.add("hidden")') && renderConversationSource.includes("updateAgentAttentionHeaderSummary(attentionList, convList)") && deI18n.includes('"chat.agentAttentionHeaderClearLabel"') && enI18n.includes('"chat.agentAttentionHeaderLabel"'));
   assert("chat DOM trimming no longer preserves stale first message", trimChatSource.includes("MAX_DOM_MESSAGES") && trimChatSource.includes("for (let i = 0; i < toRemove; i++)"));
   assert("first-message edit removes the edited message too", !src.includes("Keep greeting (index 0)") && !src.includes("if (i > 0) allMsgs[i].remove()"));
+  assert("edit and delete persist only after transcript DOM mutation", src.includes("function persistChatAfterDomMutation") && src.includes("persistChatAfterDomMutation();\n      }\n      showToast(t(\"chat.editLoaded\")") && src.includes("msg.remove();\n        persistChatAfterDomMutation();") && !src.includes("setTimeout(() => msg.remove(), 200);\n      saveChatHistory();"));
+  assert("regenerate has guarded prompt recovery and user feedback", src.includes("function previousUserPromptForMessage") && src.includes("async function startRegenerateMessage") && src.includes('showToast(t("chat.uploadBusy"), "warning")') && src.includes('showToast(t("chat.regenerateMissingPrompt"), "warning", 2200)') && src.includes('regenBtn.addEventListener("click", () => startRegenerateMessage(regenBtn, msg))') && src.includes('regenBtn.addEventListener("click", () => startRegenerateMessage(regenBtn, msgEl, text))') && deI18n.includes('"chat.regenerateMissingPrompt"') && enI18n.includes('"chat.regenerateMissingPrompt"'));
+  assert("loaded chat messages put copy before assistant actions", src.includes("header.appendChild(timeSpan);\n  header.appendChild(copyBtn);\n\n  if (!isUser)") && src.includes("header.appendChild(createContinueFromMessageButton())") && src.includes("header.appendChild(createVerifyAnswerButton())") && src.includes("header.appendChild(createMessageActionOverflowMenu(moreActions))"));
+  assert("streaming assistant answers enable full action set after completion", src.includes("copyBtn.disabled = true") && src.includes("memoryBtn.disabled = true") && src.includes("const workspaceBtn = createWorkspaceHandoffButton();\n  workspaceBtn.disabled = true") && src.includes("const continueBtn = createContinueFromMessageButton(true)") && src.includes("const verifyBtn = createVerifyAnswerButton(true)") && src.includes("const exportBtn = createMessageExportButton(true)") && src.includes("header.appendChild(createMessageActionOverflowMenu([memoryBtn, workspaceBtn, regenBtn]))") && src.includes("if (getMessagePersistText(msgEl))") && src.includes("verifyBtn.disabled = false;\n      exportBtn.disabled = false;\n      regenBtn.disabled = false;"));
+  assert("agent summaries enable copy, memory, continue, and verify actions after completion", src.includes('memoryBtn.addEventListener("click", () => saveMessageAsMemory(memoryBtn, msgEl))') && src.includes("const continueBtn = createContinueFromMessageButton(true)") && src.includes("const verifyBtn = createVerifyAnswerButton(true)") && src.includes("header.appendChild(createMessageActionOverflowMenu([memoryBtn, workspaceBtn]))") && src.includes("copyBtn.disabled = false;\n            memoryBtn.disabled = false;") && src.includes("continueBtn.disabled = false;\n            verifyBtn.disabled = false;") && src.includes("copyBtn.disabled = false;\n    memoryBtn.disabled = false;") && src.includes("setMessagePersistText(msgEl, summaryEl.textContent);\n      copyBtn.disabled = false;"));
+  assert("agent completion resolve uses local attention keys", src.includes("function startAgentCompletionResolve") && src.includes("agentCompletionAttentionKeyFromText(text)") && src.includes("getMessageAgentRunMeta(msg)") && src.includes("const hasAttention = Number(counts?.failed || 0) > 0 || Number(counts?.blocked || 0) > 0") && src.includes("saveAgentRunMetaForConversation(convId)") && src.includes("resolved.add(key)") && src.includes("markAgentCompletionResolveButtonDone(btn)") && src.includes('resolveButton.className = "agent-completion-resolve-btn"') && src.includes("attentionResolved: isAgentCompletionAttentionResolved") && deI18n.includes('"chat.agentCompletionResolveDone"') && enI18n.includes('"chat.agentCompletionResolveTooltip"'));
+  assert("agent completion resolve can be undone locally", src.includes("function undoAgentCompletionResolve") && src.includes("resolved.delete(key)") && src.includes("markAgentCompletionResolveButtonOpen(btn)") && src.includes('if (btn?.dataset?.resolved === "true") return undoAgentCompletionResolve(btn)') && src.includes('btn.dataset.resolved = "true"') && src.includes('btn.dataset.resolved = "false"') && src.includes('showToast(t("chat.agentAttentionRestored")') && deI18n.includes('"chat.agentCompletionResolveUndoTooltip"') && enI18n.includes('"chat.agentCompletionResolveUndoButton"'));
   assert("conversation sidebar refresh is shared", refreshSidebarSource.includes("window.lexa.conversations()") && refreshSidebarSource.includes("renderConversationList()"));
   assert("saved conversations refresh sidebar counts", saveCurrentSource.includes("await refreshConversationSidebar()"));
-  assert("cleared conversations refresh sidebar counts", clearChatSource.includes(".then(() => refreshConversationSidebar())"));
+  assert("cleared conversations refresh sidebar counts", src.includes("function markConversationClearedLocally") && src.includes("return { ...conv, message_count: 0, last_message: \"\", messages: [] }") && clearChatSource.includes("markConversationClearedLocally(convId);\n    renderConversationList();") && clearChatSource.includes(".then(() => refreshConversationSidebar())") && clearChatSource.includes('showToast(t("toast.chatClearSyncFailed"), "warning"') && deI18n.includes('"toast.chatClearSyncFailed"') && enI18n.includes('"toast.chatClearSyncFailed"'));
   assert("initial conversation loading uses shared sidebar refresh", loadConversationsSource.includes("await refreshConversationSidebar()"));
+  assert("conversation delete blocks duplicate clicks and restores on failure", renderConversationSource.includes("deleteConversation(c.id, delBtn)") && deleteConversationSource.includes('triggerBtn?.getAttribute("aria-busy") === "true"') && deleteConversationSource.includes('triggerBtn.setAttribute("aria-busy", "true")') && deleteConversationSource.includes("finally") && deleteConversationSource.includes("triggerBtn.removeAttribute(\"aria-busy\")"));
+  assert("conversation delete separates backend delete from sidebar refresh failure", src.includes("function removeConversationLocally") && src.includes("updateConversationCount(next.length)") && deleteConversationSource.includes("let convList = removeConversationLocally(convId)") && deleteConversationSource.includes("await refreshConversationSidebar()") && deleteConversationSource.includes('showToast(t("toast.deleteRefreshFailed"), "warning"') && deleteConversationSource.includes('showToast(t("toast.deleteError"), "error")') && deI18n.includes('"toast.deleteRefreshFailed"') && enI18n.includes('"toast.deleteRefreshFailed"'));
 
   const uploadSource = extractFn(src, "handleFileUpload");
   const uploadMessageSource = extractFn(src, "addFileUploadMessage");

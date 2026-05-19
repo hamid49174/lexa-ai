@@ -72,10 +72,8 @@ class TestExecuteCommand:
         tc, mock_comp, mock_allowed = client
         mock_allowed.return_value = "confirmation_required"
         res = tc.post("/companion/execute", json={"command": "shutdown"})
-        assert res.status_code == 200
-        data = res.json()
-        assert data["success"] is False
-        assert data["requires_confirmation"] is True
+        assert res.status_code == 403
+        assert res.json()["detail"]["code"] == "confirmation_required"
         mock_comp.execute.assert_not_called()
 
     def test_execute_confirmation_required_with_confirm(self, client):
@@ -85,19 +83,16 @@ class TestExecuteCommand:
             "command": "shutdown",
             "confirmed": True,
         })
-        assert res.status_code == 200
-        data = res.json()
-        assert data["success"] is True
-        mock_comp.execute.assert_called_once()
+        assert res.status_code == 403
+        assert res.json()["detail"]["code"] == "confirmation_required"
+        mock_comp.execute.assert_not_called()
 
     def test_execute_unknown_requires_confirmation(self, client):
         tc, mock_comp, mock_allowed = client
         mock_allowed.return_value = "unknown"
         res = tc.post("/companion/execute", json={"command": "mystery_cmd"})
-        assert res.status_code == 200
-        data = res.json()
-        assert data["success"] is False
-        assert data["requires_confirmation"] is True
+        assert res.status_code == 400
+        assert res.json()["detail"]["code"] == "unknown_command"
 
     def test_execute_unknown_with_confirm(self, client):
         tc, mock_comp, mock_allowed = client
@@ -106,8 +101,8 @@ class TestExecuteCommand:
             "command": "mystery_cmd",
             "confirmed": True,
         })
-        assert res.status_code == 200
-        assert res.json()["success"] is True
+        assert res.status_code == 400
+        assert res.json()["detail"]["code"] == "unknown_command"
 
     def test_dry_run(self, client):
         tc, mock_comp, _ = client

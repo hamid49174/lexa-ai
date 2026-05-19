@@ -202,7 +202,11 @@ let _wakeWordPollInterval = null;
 let _wakeWordNextStatusCheck = 0;
 let _wakeWordRestartTimer = null;
 let _wakeWordRestartAttempts = 0;
+let _wakeWordStartPromise = null;
 let _orbRealtimeVoiceActive = false;
+let _systemInfoPromise = null;
+let _systemInfoCache = { ts: 0, res: null };
+window.__lexaOrbVoiceActive = Boolean(window.__lexaOrbVoiceActive);
 
 const VIEW_KEYS = ["dashboard", "chat", "system", "commands", "productivity", "memory", "personal-os", "settings"];
 
@@ -411,16 +415,13 @@ async function init() {
 
     console.log("Lexa UI fully initialized.");
 
-    // Rotate chat input placeholder hints every 8 seconds
+    // Keep the default composer calm; advanced workflows remain in the slash palette.
     const PLACEHOLDERS = [
       () => window.ctrlEnterMode ? t("app.placeholderCtrlEnter") : t("app.placeholderDefault"),
-      () => t("app.placeholderSpotify"),
-      () => t("app.placeholderBattery"),
-      () => t("app.placeholderScreenshot"),
-      () => t("app.placeholderTodo"),
-      () => t("app.placeholderPomodoro"),
-      () => t("app.placeholderTime"),
-      () => t("app.placeholderGit"),
+      () => t("app.placeholderSimpleWrite"),
+      () => t("app.placeholderSimpleResearch"),
+      () => t("app.placeholderSimplePlan"),
+      () => t("app.placeholderSimpleScreen"),
     ];
     let _phIdx = 0;
     LexaState.setInterval("placeholder", () => {
@@ -800,11 +801,35 @@ function handleOffline() {
   }
 }
 
+async function requestSystemInfoCached(options = {}) {
+  const maxAgeMs = Math.max(1000, Number(options.maxAgeMs || 8000));
+  const force = Boolean(options.force);
+  const now = Date.now();
+  if (!force && _systemInfoCache.res && now - _systemInfoCache.ts < maxAgeMs) {
+    return _systemInfoCache.res;
+  }
+  if (_systemInfoPromise) return _systemInfoPromise;
+  _systemInfoPromise = window.lexa.execute("system_info")
+    .then((res) => {
+      if (res?.success && res.data) {
+        _systemInfoCache = { ts: Date.now(), res };
+      }
+      return res;
+    })
+    .finally(() => {
+      _systemInfoPromise = null;
+    });
+  return _systemInfoPromise;
+}
+window.requestSystemInfoCached = requestSystemInfoCached;
+
 // ── SYSTEM STATS ─────────────────────────────────
 async function updateSystemStats() {
   if (!LexaState.get("backendOnline")) return;
+  const view = LexaState.get("currentView");
+  if (view !== "dashboard" && view !== "system") return;
   try {
-    const res = await window.lexa.execute("system_info");
+    const res = await requestSystemInfoCached({ maxAgeMs: 12000 });
     if (res.success && res.data) {
       const d = res.data;
 
@@ -936,7 +961,7 @@ function _clearWakeWordRestart() {
 async function _ensureWakeWordRunning(reason = "") {
   if (!_wakeWordPreferenceOn() || LexaState.get("wakeWordActive") || !LexaState.get("backendOnline")) return false;
   try {
-    const res = await window.lexa.wakewordStart();
+    const res = await _startWakeWordOnce();
     if (_wakeWordStartOk(res)) {
       _wakeWordRestartAttempts = 0;
       _clearWakeWordRestart();
@@ -970,6 +995,26 @@ function _wakeWordStartOk(res) {
   return Boolean(res && !res.error && res.status !== "failed" && res.active !== false && res.ready !== false);
 }
 
+async function _startWakeWordOnce() {
+  if (_wakeWordStartPromise) return _wakeWordStartPromise;
+  _wakeWordStartPromise = (async () => {
+    try {
+      const status = typeof window.lexa?.wakewordStatus === "function"
+        ? await window.lexa.wakewordStatus()
+        : null;
+      if (_wakeWordStartOk(status) && status?.active !== false) {
+        return { status: "already_running", ...status };
+      }
+    } catch (e) {
+      console.warn("[WakeWord] Status check before start failed:", e.message || e);
+    }
+    return window.lexa.wakewordStart();
+  })().finally(() => {
+    _wakeWordStartPromise = null;
+  });
+  return _wakeWordStartPromise;
+}
+
 function _wakeWordErrorText(res) {
   return res?.error || res?.detail || res?.message || "unbekannt";
 }
@@ -996,7 +1041,7 @@ async function toggleWakeWord() {
       showToast(t("toast.wakewordDisabled"), "info", 2000);
     } else {
       _setWakeWordPreference(true);
-      const res = await window.lexa.wakewordStart();
+      const res = await _startWakeWordOnce();
       if (!_wakeWordStartOk(res)) {
         _markWakeWordInactive("", { keepPreference: true, autoRestart: true });
         showToast(t("toast.wakewordError", {error: _wakeWordErrorText(res)}), "error");
@@ -1077,12 +1122,12 @@ async function _pollWakeWordEvents() {
           // Wake word heard — show listening on orb
           if (LexaState.get("currentView") !== "chat") switchView("chat");
           _setOrbConversationState("listening");
-          _voiceStatusBarEventUpdate({ state: "listening", provider: "Wake Word", transcript: _voiceText("app.voiceWakeHeard", "Wake word heard.") });
+          _voiceStatusBarEventUpdate({ state: "listening", provider: _voiceWakeProviderLabel(), transcript: _voiceText("app.voiceWakeHeard", "Wake word heard.") });
           break;
         case "command":
           // User's command captured
           _setOrbConversationState("processing");
-          _voiceStatusBarEventUpdate({ state: "processing", provider: "STT -> AI", transcript: evt.text || _voiceText("app.voiceCommandProcessing", "Processing command.") });
+          _voiceStatusBarEventUpdate({ state: "processing", provider: _voiceProcessingProviderLabel(), transcript: evt.text || _voiceText("app.voiceCommandProcessing", "Processing command.") });
           if (evt.text) {
             if (LexaState.get("currentView") !== "chat") switchView("chat");
             if (!window._chatViewOpen && typeof toggleChatView === "function") toggleChatView();
@@ -1094,7 +1139,7 @@ async function _pollWakeWordEvents() {
           // AI response ready
           _voiceStatusBarEventUpdate({
             state: evt.tts_handled ? "speaking" : "processing",
-            provider: evt.tts_handled ? _voiceSpeechProviderLabel() : "AI",
+            provider: evt.tts_handled ? _voiceSpeechProviderLabel() : _voiceResponseProviderLabel(),
             transcript: evt.tts_handled ? _voiceSpeakingResponseLabel() : (evt.text || ""),
           });
           if (evt.text) {
@@ -1109,7 +1154,7 @@ async function _pollWakeWordEvents() {
           // Listening for speech
           if (LexaState.get("currentView") !== "chat") switchView("chat");
           _setOrbConversationState("listening");
-          _voiceStatusBarEventUpdate({ state: "listening", provider: "Wake Word", transcript: _voiceText("app.voiceListeningForCommand", "Listening for command.") });
+          _voiceStatusBarEventUpdate({ state: "listening", provider: _voiceWakeProviderLabel(), transcript: _voiceText("app.voiceListeningForCommand", "Listening for command.") });
           break;
         case "wake_timeout":
           _setOrbConversationState(null);
@@ -1121,7 +1166,7 @@ async function _pollWakeWordEvents() {
           // conversation mode active
           _updateConversationModeUI(true);
           _setOrbConversationState("listening");
-          _voiceStatusBarEventUpdate({ state: "listening", provider: "Conversation", transcript: _voiceText("app.voiceConversationActive", "Conversation mode active.") });
+          _voiceStatusBarEventUpdate({ state: "listening", provider: _voiceConversationProviderLabel(), transcript: _voiceText("app.voiceConversationActive", "Conversation mode active.") });
           _stopWakeWordPolling();
           _wakeWordPollInterval = setInterval(_pollWakeWordEvents, LexaConfig.WAKEWORD_FAST_POLL_INTERVAL);
           break;
@@ -1151,12 +1196,12 @@ async function _pollWakeWordEvents() {
           // User interrupted Lexa
           _setOrbConversationState("listening");
           showOrbListening(true);
-          _voiceStatusBarEventUpdate({ state: "bargein", provider: "Wake Word", transcript: evt.text || _voiceText("app.voiceInterruptedListening", "Interrupted, listening.") });
+          _voiceStatusBarEventUpdate({ state: "bargein", provider: _voiceWakeProviderLabel(), transcript: evt.text || _voiceText("app.voiceInterruptedListening", "Interrupted, listening.") });
           break;
         case "error":
           showOrbListening(false);
           _setOrbConversationState(null);
-          _voiceStatusBarEventUpdate({ state: "error", provider: "Wake Word", transcript: evt.text || _voiceText("app.voiceWakeError", "Wake word error.") });
+          _voiceStatusBarEventUpdate({ state: "error", provider: _voiceWakeProviderLabel(), transcript: evt.text || _voiceText("app.voiceWakeError", "Wake word error.") });
           _scheduleWakeWordRestart(evt.text || "wake word event error");
           showToast(t("toast.wakewordError", {error: evt.text || "unbekannt"}), "error");
           break;
@@ -1205,6 +1250,22 @@ function _voiceText(key, fallback, values = {}) {
 
 function _voiceSpeechProviderLabel() {
   return _voiceText("app.voiceProviderSpeech", "Voice");
+}
+
+function _voiceWakeProviderLabel() {
+  return _voiceText("app.voiceProviderWake", "Lexa");
+}
+
+function _voiceProcessingProviderLabel() {
+  return _voiceText("app.voiceProviderProcessing", "Verarbeitung");
+}
+
+function _voiceResponseProviderLabel() {
+  return _voiceText("app.voiceProviderResponse", "Antwort");
+}
+
+function _voiceConversationProviderLabel() {
+  return _voiceText("app.voiceProviderConversation", "Gespraech");
 }
 
 function _voiceSpeakingResponseLabel() {
@@ -1314,7 +1375,7 @@ async function _initWakeWord() {
     // Try up to 3 times with delay (backend may still be starting)
     for (let attempt = 1; attempt <= LexaConfig.WAKEWORD_MAX_RETRIES; attempt++) {
       try {
-        const res = await window.lexa.wakewordStart();
+        const res = await _startWakeWordOnce();
         if (_wakeWordStartOk(res)) {
           LexaState.set("wakeWordActive", true);
           _startWakeWordPolling();
@@ -1346,8 +1407,8 @@ async function _initWakeWord() {
 // ── DIRECT CONVERSATION (Orb Click → same as Mic Button) ────────
 // Orb click → start/stop voice recording
 function _voicePathLabel(path) {
-  if (path === "cascaded_stt_llm_tts") return "STT -> AI -> TTS";
-  return path || "Voice";
+  if (path === "cascaded_stt_llm_tts") return _voiceProcessingProviderLabel();
+  return path ? _voiceText("app.voiceProviderVoiceMode", "Stimme") : _voiceSpeechProviderLabel();
 }
 
 function _voiceRealtimeStarted(res) {
@@ -1361,31 +1422,66 @@ function _voiceRealtimeStarted(res) {
   );
 }
 
+function _setOrbVoiceSurfaceActive(active) {
+  window.__lexaOrbVoiceActive = Boolean(active);
+  if (active) {
+    if (typeof VoiceStatusBar !== "undefined") VoiceStatusBar.hide();
+  } else {
+    showOrbListening(false);
+    _setOrbConversationState(null);
+  }
+}
+
+function _updateOrbVoiceSurfaceStatus(state) {
+  if (!window.__lexaOrbVoiceActive) return false;
+  showOrbListening(false);
+  _setOrbConversationState(state || null);
+  if (typeof VoiceStatusBar !== "undefined") VoiceStatusBar.hide();
+  return true;
+}
+
 async function _primeOrbRealtimeBoundary() {
-  if (typeof VoiceStatusBar === "undefined" || typeof window.lexa?.voiceRealtimeStart !== "function") return false;
-  VoiceStatusBar.show();
-  VoiceStatusBar.setState("processing");
-  VoiceStatusBar.setProvider(_voiceText("app.voiceRealtimeChecking", "Realtime check"));
+  if (typeof window.lexa?.voiceRealtimeStart !== "function") return false;
+  const orbSurface = Boolean(window.__lexaOrbVoiceActive);
+  if (orbSurface) {
+    _updateOrbVoiceSurfaceStatus("processing");
+  } else if (typeof VoiceStatusBar !== "undefined") {
+    VoiceStatusBar.show();
+    VoiceStatusBar.setState("processing");
+    VoiceStatusBar.setProvider(_voiceText("app.voiceRealtimeChecking", "Pruefe Stimme"));
+  }
   try {
     const res = await window.lexa.voiceRealtimeStart();
     const blockers = Array.isArray(res?.blockers) ? res.blockers : [];
-    VoiceStatusBar.setProvider(_voicePathLabel(res?.active_path));
+    if (!orbSurface && typeof VoiceStatusBar !== "undefined") VoiceStatusBar.setProvider(_voicePathLabel(res?.active_path));
     if (_voiceRealtimeStarted(res)) {
       _orbRealtimeVoiceActive = true;
       _updateOrbActionA11y(true);
-      VoiceStatusBar.setState("listening");
-      VoiceStatusBar.setTranscript(_voiceText("app.voiceRealtimeReady", "Realtime voice session ready."));
+      if (orbSurface) {
+        _updateOrbVoiceSurfaceStatus("listening");
+      } else if (typeof VoiceStatusBar !== "undefined") {
+        VoiceStatusBar.setState("listening");
+        VoiceStatusBar.setTranscript(_voiceText("app.voiceRealtimeReady", "Ich hoere zu."));
+      }
       return true;
     } else {
-      const blocker = blockers[0] || _voiceText("app.voiceClassicFallbackActive", "Classic voice fallback active.");
-      VoiceStatusBar.setTranscript(_voiceText("app.voiceClassicFallback", "Classic voice active: {{reason}}", { reason: blocker }));
+      const blocker = blockers[0] || _voiceText("app.voiceClassicFallbackActive", "Ich nutze den stabilen Sprachweg.");
+      if (orbSurface) {
+        _updateOrbVoiceSurfaceStatus("listening");
+      } else if (typeof VoiceStatusBar !== "undefined") {
+        VoiceStatusBar.setTranscript(_voiceText("app.voiceClassicFallback", "Ich nutze den stabilen Sprachweg: {{reason}}", { reason: blocker }));
+      }
     }
   } catch (e) {
-    VoiceStatusBar.setProvider("STT -> AI -> TTS");
-    VoiceStatusBar.setTranscript(_voiceText("app.voiceClassicFallbackActive", "Classic voice fallback active."));
+    if (orbSurface) {
+      _updateOrbVoiceSurfaceStatus("listening");
+    } else if (typeof VoiceStatusBar !== "undefined") {
+      VoiceStatusBar.setProvider(_voiceProcessingProviderLabel());
+      VoiceStatusBar.setTranscript(_voiceText("app.voiceClassicFallbackActive", "Ich nutze den stabilen Sprachweg."));
+    }
   }
   _orbRealtimeVoiceActive = false;
-  _updateOrbActionA11y(false);
+  if (!orbSurface) _updateOrbActionA11y(false);
   return false;
 }
 
@@ -1394,43 +1490,56 @@ async function startOrbConversation() {
     await stopOrbConversation();
     return;
   }
+  _setOrbVoiceSurfaceActive(true);
+  _updateOrbVoiceSurfaceStatus("processing");
   const isRecording = typeof Voice !== "undefined" && Voice.recording;
   if (!isRecording) {
     const realtimeStarted = await _primeOrbRealtimeBoundary();
     if (realtimeStarted) return;
   }
   if (typeof voiceToggle === "function") voiceToggle();
-  else showToast("Voice nicht verfuegbar", "error");
+  else {
+    _setOrbVoiceSurfaceActive(false);
+    showToast("Voice nicht verfuegbar", "error");
+  }
 }
 async function stopOrbConversation() {
   if (typeof voiceStop === "function" && typeof Voice !== "undefined" && Voice.recording) {
     voiceStop();
     return;
   }
-  if (!_orbRealtimeVoiceActive || typeof window.lexa?.voiceRealtimeStop !== "function") return;
+  if (!_orbRealtimeVoiceActive || typeof window.lexa?.voiceRealtimeStop !== "function") {
+    _setOrbVoiceSurfaceActive(false);
+    _updateOrbActionA11y(false);
+    return;
+  }
   try {
-    if (typeof VoiceStatusBar !== "undefined") {
+    if (window.__lexaOrbVoiceActive) {
+      _updateOrbVoiceSurfaceStatus("processing");
+    } else if (typeof VoiceStatusBar !== "undefined") {
       VoiceStatusBar.show();
       VoiceStatusBar.setState("processing");
-      VoiceStatusBar.setProvider("Realtime");
-      VoiceStatusBar.setTranscript(_voiceText("app.voiceRealtimeStopping", "Stopping realtime voice session."));
+      VoiceStatusBar.setProvider(_voiceText("app.voiceProviderVoiceMode", "Stimme"));
+      VoiceStatusBar.setTranscript(_voiceText("app.voiceRealtimeStopping", "Ich beende den Sprachmodus."));
     }
     const res = await window.lexa.voiceRealtimeStop();
     _orbRealtimeVoiceActive = false;
+    _setOrbVoiceSurfaceActive(false);
     _updateOrbActionA11y(false);
-    if (typeof VoiceStatusBar !== "undefined") {
+    if (!window.__lexaOrbVoiceActive && typeof VoiceStatusBar !== "undefined") {
       VoiceStatusBar.setState("idle");
       VoiceStatusBar.setProvider("");
       VoiceStatusBar.setTranscript(res?.session_state === "stopped"
-        ? _voiceText("app.voiceRealtimeStopped", "Realtime voice stopped.")
+        ? _voiceText("app.voiceRealtimeStopped", "Sprachmodus beendet.")
         : _voiceText("app.voiceStopped", "Voice stopped."));
     }
   } catch (e) {
     _orbRealtimeVoiceActive = false;
+    _setOrbVoiceSurfaceActive(false);
     _updateOrbActionA11y(false);
     if (typeof VoiceStatusBar !== "undefined") {
       VoiceStatusBar.setState("error");
-      VoiceStatusBar.setTranscript(_voiceText("app.voiceRealtimeStopFailed", "Realtime stop failed: {{error}}", { error: e.message || e }));
+      VoiceStatusBar.setTranscript(_voiceText("app.voiceRealtimeStopFailed", "Sprachmodus konnte nicht beendet werden: {{error}}", { error: e.message || e }));
     }
   }
 }

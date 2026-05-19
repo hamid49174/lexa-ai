@@ -56,7 +56,7 @@ def _get_calendar_service():
 
     if not creds or not creds.valid:
         if not os.path.exists(_CLIENT_SECRET_FILE):
-            logger.error("Client secret file not found at %s", _CLIENT_SECRET_FILE)
+            logger.debug("Google Calendar client secret not configured at %s", _CLIENT_SECRET_FILE)
             return None
         try:
             flow = InstalledAppFlow.from_client_secrets_file(_CLIENT_SECRET_FILE, _SCOPES)

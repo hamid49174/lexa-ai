@@ -131,11 +131,18 @@
         "personal_os_read_file",
         "personal_os_graph",
         "personal_os_context_pack",
+        "personal_os_obsidian_context",
         "personal_os_lexa_code_loop",
         "personal_os_list_drafts",
         "personal_os_view_draft",
         "personal_os_review_draft",
-        "personal_os_draft_history"
+        "personal_os_draft_history",
+        "hermes_status",
+        "hermes_telegram_status",
+        "hermes_gateway_autostart_status",
+        "os_agent_status",
+        "os_agent_list_tasks",
+        "os_agent_task_status"
       ]
     },
     "confirmation_required": {
@@ -184,7 +191,13 @@
         "calendar_create",
         "calendar_delete",
         "reminder_delete",
-        "file_copy"
+        "file_copy",
+        "hermes_telegram_configure",
+        "hermes_gateway_autostart_set",
+        "hermes_run",
+        "hermes_improve_lexa",
+        "os_agent_start_task",
+        "os_agent_create_review_draft"
       ]
     },
     "always_blocked": {

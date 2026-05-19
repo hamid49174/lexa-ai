@@ -142,8 +142,9 @@
   "calendar.connectError": "Kalender-Verbindung fehlgeschlagen: {{error}}",
   "calendar.searchResults": "{{count}} Termine gefunden für '{{query}}'",
 
-  "ai.streamDisconnected": "\n\n[Verbindung unterbrochen — Antwort möglicherweise unvollständig]",
-  "ai.providerUnavailable": "Der aktive KI-Provider ist gerade nicht erreichbar. Bitte prüfe deine API-Keys in den Einstellungen.",
+  "ai.streamDisconnected": "\n\n[Die Verbindung war kurz weg. Die Antwort kann unvollstaendig sein.]",
+  "ai.providerUnavailable": "Ich komme gerade nicht stabil durch. Pruefe bitte kurz die KI-Verbindung in den Einstellungen.",
+  "ai.emptyResponse": "Ich habe gerade keine nutzbare Antwort bekommen. Versuch es bitte nochmal oder pruefe kurz die Verbindung.",
   "ai.titlePrompt": "Generiere einen kurzen Titel (max 5 Wörter, Deutsch) für diese Chat-Nachricht. Antworte NUR mit dem Titel, kein Markdown, keine Anführungszeichen.",
   "ai.noHistory": "- {{count}} frühere Nachrichten ausgetauscht (keine spezifischen Aktionen)",
   "ai.checkWlan": "Prüfe WLAN-Status...",

@@ -39,6 +39,8 @@ assert("caps backend health response body", src.includes("HEALTH_CHECK_BODY_LIMI
 assert("uses named backend health timeout", src.includes("HEALTH_CHECK_TIMEOUT_MS") && src.includes("req.setTimeout(HEALTH_CHECK_TIMEOUT_MS"));
 assert("settles backend health checks once", src.includes("let settled = false") && src.includes("if (settled) return;"));
 assert("recognizes tokenless Lexa backends", src.includes("EXTERNAL_LEXA_BACKEND") && src.includes('data.service === "lexa-ai"'));
+assert("does not trust leaked health instance tokens", !src.includes("data.instance_token"));
+assert("sends local auth token as health header", src.includes('"X-Lexa-Local-Token": INSTANCE_TOKEN'));
 assert("reuses tokenless Lexa backend on occupied port", src.includes("without instance token") && src.includes("token === EXTERNAL_LEXA_BACKEND"));
 assert("treats tokenless Lexa health as backend-ready", src.includes("token === INSTANCE_TOKEN || token === EXTERNAL_LEXA_BACKEND"));
 assert("captures spawned backend child", src.includes("const child = backendProcess;"));
@@ -53,9 +55,19 @@ assert("does not keep mojibake tray text", !src.includes("Lexa AI \u00e2\u20ac\u
 
 console.log("\nElectron backend log labels:");
 assert("uses ASCII backend reuse log", src.includes("Our backend already running - reusing"));
-assert("uses ASCII external backend reuse log", src.includes("another Lexa instance - reusing"));
+assert("uses ASCII secured backend mismatch log", src.includes("another secured Lexa instance - cannot authenticate"));
 assert("uses ASCII non-Lexa port warning", src.includes("non-Lexa process - backend may not work"));
 assert("uses ASCII backend ready log", src.includes("Health check passed - backend is ready"));
+
+console.log("\nElectron broken pipe logging:");
+assert("detects broken pipe console errors", src.includes("function isBrokenPipeError") && src.includes('error?.code === "EPIPE"') && src.includes("broken pipe"));
+assert("installs pipe guard before Electron can register its error dialog", src.indexOf("installPreElectronPipeGuard();") >= 0 && src.indexOf("installPreElectronPipeGuard();") < src.indexOf('const electron = require("electron")') && src.includes("lexaIsBrokenPipeError"));
+assert("patches stdout and stderr writes below console", src.includes("function installSafeStreamWrite") && src.includes("__lexaSafeWriteInstalled") && src.includes("stream.write = (...args)") && src.includes("return originalWrite(...args)") && src.includes("installSafeProcessStreams();"));
+assert("patches low-level stream writers so cached Electron console paths cannot throw", src.includes("markBrokenPipe(stream)") && src.includes("stream.__lexaBrokenPipe") && src.includes("originalChunkWrite") && src.includes("stream._write = (chunk, encoding, callback)") && src.includes("originalVectorWrite") && src.includes("stream._writev = (chunks, callback)"));
+assert("patches stdio socket prototype for Electron cached console writers", src.includes('const net = require("net")') && src.includes("net.Socket.prototype._write") && src.includes("isStdioSocket") && src.includes("socket?.fd === 1") && src.includes("socket?.fd === 2"));
+assert("wraps main process console methods safely", src.includes("function installSafeConsole()") && src.includes('console.warn = (...args) => safeCall("warn", args)') && src.includes('console.error = (...args) => safeCall("error", args)'));
+assert("swallows uncaught EPIPE exceptions before Electron dialog listeners", src.includes("process.emit = (eventName, ...args)") && src.includes('eventName === "uncaughtException"') && src.includes("return true") && src.includes('process.on("uncaughtException"') && src.includes("if (isBrokenPipeError(error)) return"));
+assert("prevents renderer console forwarding from using Electron default pipe writer", src.includes("function installRendererConsoleGuard") && src.includes('webContents.on("console-message"') && src.includes("event.preventDefault?.()") && src.includes("installRendererConsoleGuard(mainWindow.webContents);") && src.indexOf("installRendererConsoleGuard(mainWindow.webContents);") < src.indexOf("mainWindow.loadFile"));
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

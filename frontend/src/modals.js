@@ -78,11 +78,37 @@ const _notifHistory = [];
 let _notifCenterOpen = false;
 let _unreadNotifs = 0;
 let _notifCenterRestoreFocusEl = null;
+let _notifCenterPositionBound = false;
+
+function positionNotifCenter(panel, anchor) {
+  if (!panel) return;
+  const viewportWidth = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
+  const viewportHeight = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
+  const compact = viewportWidth <= 560;
+  const shortViewport = viewportHeight <= 420;
+  const hasAnchor = Boolean(anchor && typeof anchor.getBoundingClientRect === "function");
+  panel.classList.toggle("notif-center-compact", compact);
+  panel.classList.toggle("notif-center-short", shortViewport);
+  panel.classList.toggle("notif-center-anchored", hasAnchor);
+}
+
+function bindNotifCenterPositioning() {
+  if (_notifCenterPositionBound) return;
+  _notifCenterPositionBound = true;
+  window.addEventListener("resize", () => {
+    if (!_notifCenterOpen) return;
+    positionNotifCenter(
+      document.getElementById("notif-center"),
+      document.getElementById("notif-bell-btn")
+    );
+  });
+}
 
 function ensureNotifCenterA11y(panel) {
   if (!panel || panel.dataset.a11yBound === "true") return;
   panel.dataset.a11yBound = "true";
   panel.setAttribute("tabindex", "-1");
+  bindNotifCenterPositioning();
   panel.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -103,6 +129,7 @@ function setNotifCenterOpen(open, options = {}) {
     if (active && active !== document.body && !panel.contains(active)) {
       _notifCenterRestoreFocusEl = active;
     }
+    positionNotifCenter(panel, btn);
     panel.classList.remove("hidden");
     panel.setAttribute("aria-hidden", "false");
     _unreadNotifs = 0;

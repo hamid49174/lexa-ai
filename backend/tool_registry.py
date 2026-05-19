@@ -396,6 +396,12 @@ def _register_personal_os_tools() -> list[dict]:
             _param("includeGraph", "boolean", "Context-Map-Summary einbeziehen, Standard: true"),
             _param("hideSmoke", "boolean", "Smoke-Test-Artefakte ausblenden, Standard: true"),
         ]),
+        _tool("personal_os_obsidian_context", "Baut einen bounded Obsidian-/Personal-OS-Kontext-Bootstrap fuer Lexa und Hermes. Read-only, laedt nie den ganzen Vault.", [
+            _param("topic", "string", "Optionaler Fokus, z.B. 'lexa hermes obsidian context'"),
+            _param("maxFiles", "integer", "Maximale Bootstrap-Dateien, Standard: 8"),
+            _param("bodyChars", "integer", "Maximale Preview-Zeichen pro Datei, Standard: 800"),
+            _param("includePreviews", "boolean", "Datei-Previews einbeziehen, Standard: true"),
+        ]),
         _tool("personal_os_lexa_code_loop", "Baut einen read-only Personal-OS-Briefing-Prompt fuer den naechsten kleinen Lexa-Code-Verbesserungsschritt.", [
             _param("areaPath", "string", "OS-relativer Bereich fuer Lexa-Kontext, Standard: '00_System'"),
             _param("tag", "string", "Optionaler exakter Tag-Filter, Standard: 'lexa'; '#lexa' und 'tag:lexa' werden normalisiert"),
@@ -426,6 +432,56 @@ def _register_personal_os_tools() -> list[dict]:
             _param("hideSmoke", "boolean", "Smoke-Test-Drafts beim Query-Resolve ausblenden, Standard: true"),
             _param("maxEvents", "integer", "Maximale Event-Anzahl, Standard: 50"),
         ]),
+    ]
+
+def _register_hermes_tools() -> list[dict]:
+    """Hermes Agent bridge tools."""
+    return [
+        _tool("hermes_status", "Prueft, ob Hermes Agent lokal in Lexa verfuegbar ist und welche Lexa-/OS-/Workspace-Pfade genutzt werden."),
+        _tool("hermes_telegram_status", "Prueft, ob Hermes Telegram lokal vorbereitet ist, welche Werte fehlen und welcher lokale Hermes-Home-Pfad genutzt wird."),
+        _tool("hermes_gateway_autostart_status", "Prueft read-only, ob der Hermes Telegram Gateway beim Windows-Login automatisch startet."),
+        _tool("hermes_telegram_configure", "Speichert Telegram-Bot-Token und optionale Chat-ID lokal in Lexas Hermes-Config. Tokens werden nicht ausgegeben.", [
+            _param("botToken", "string", "BotFather-Token fuer den Telegram-Bot", required=True),
+            _param("homeChannel", "string", "Optionale Telegram Chat-ID/User-ID fuer Antworten"),
+            _param("homeChannelName", "string", "Anzeigename fuer den Home-Chat, Standard: Lexa"),
+        ], confirmation_required=True),
+        _tool("hermes_gateway_autostart_set", "Aktiviert oder deaktiviert den Hermes Telegram Gateway im Windows-Startup-Ordner.", [
+            _param("enabled", "boolean", "true aktiviert Autostart, false deaktiviert ihn", required=True),
+        ], confirmation_required=True),
+        _tool("hermes_run", "Startet Hermes Agent fuer eine kontrollierte Hintergrundaufgabe im Lexa-Workspace. OS bleibt draft-geschuetzt.", [
+            _param("message", "string", "Aufgabe fuer Hermes", required=True),
+            _param("mode", "string", "Modus: general, lexa_improve oder os_context", enum=["general", "lexa_improve", "os_context"]),
+            _param("timeout", "integer", "Timeout in Sekunden, Standard: 120"),
+        ], confirmation_required=True),
+        _tool("hermes_improve_lexa", "Laesst Hermes eine fokussierte Lexa-Verbesserung vorbereiten oder ausfuehren, mit OS-Draft-Grenze und Verifikation.", [
+            _param("focus", "string", "Optionaler Fokus, z.B. Backend, OS, Tests oder UX"),
+            _param("timeout", "integer", "Timeout in Sekunden, Standard: 180"),
+        ], confirmation_required=True),
+    ]
+
+
+def _register_os_agent_tools() -> list[dict]:
+    """Lexa OS agent runtime tools."""
+    return [
+        _tool("os_agent_status", "Zeigt Lexas OS-Agent-Runtime: Lexa als Kontrollschicht, Personal OS als Kontext/Approval und Hermes als Worker."),
+        _tool("os_agent_list_tasks", "Listet Lexa OS-Agent-Aufgaben mit Status, Evidence und Review-Drafts.", [
+            _param("limit", "integer", "Maximale Anzahl Aufgaben, Standard: 30"),
+            _param("status", "string", "Optionaler Status-Filter: queued, running, completed, failed oder blocked"),
+        ]),
+        _tool("os_agent_task_status", "Zeigt eine einzelne Lexa OS-Agent-Aufgabe mit Evidence und Ergebnis.", [
+            _param("task_id", "string", "Task-ID der OS-Agent-Aufgabe", required=True),
+        ]),
+        _tool("os_agent_start_task", "Startet eine kontrollierte Lexa OS-Agent-Aufgabe. Lexa bleibt Kontrollschicht, Hermes arbeitet als Worker, OS-Aenderungen nur als Draft.", [
+            _param("title", "string", "Kurzer Titel der Aufgabe", required=True),
+            _param("instructions", "string", "Konkrete Aufgabe fuer den OS-Agent-Worker", required=True),
+            _param("agent", "string", "Worker-Agent, aktuell hermes", enum=["hermes"]),
+            _param("mode", "string", "Modus: general, lexa_improve oder os_context", enum=["general", "lexa_improve", "os_context"]),
+            _param("timeout", "integer", "Timeout in Sekunden, Standard: 180"),
+            _param("createReviewDraft", "boolean", "Nach erfolgreicher Aufgabe Review-Draft im Personal OS erzeugen"),
+        ], confirmation_required=True),
+        _tool("os_agent_create_review_draft", "Erstellt fuer eine vorhandene OS-Agent-Aufgabe einen Review-Draft im Personal OS.", [
+            _param("task_id", "string", "Task-ID der OS-Agent-Aufgabe", required=True),
+        ], confirmation_required=True),
     ]
 
 
@@ -725,6 +781,8 @@ def register_all_tools() -> None:
     tools.extend(_register_communication_tools()) # 5
     tools.extend(_register_memory_tools())        # 11
     tools.extend(_register_personal_os_tools())   # 11
+    tools.extend(_register_hermes_tools())        # 5
+    tools.extend(_register_os_agent_tools())      # 5
     tools.extend(_register_productivity_tools())  # 17
     tools.extend(_register_pc_control_tools())    # 24
     tools.extend(_register_dev_tools())           # 25
@@ -786,7 +844,11 @@ _CATEGORY_KEYWORDS: dict[str, list[str]] = {
               "helligkeit", "wifi", "wlan", "batterie", "akku", "fenster",
               "shutdown", "neustart", "restart", "herunterfahren"],
     "browser": ["youtube", "browser", "seite", "website", "web", "url",
-                "suche", "google", "scrape", "preis", "price", "online"],
+                "suche", "google", "scrape", "preis", "price", "online",
+                "research", "recherche", "recherchiere", "quellen",
+                "quellenrecherche", "source", "sources", "citation",
+                "citations", "zitat", "zitate", "fundstelle",
+                "fundstellen", "belege", "evidence", "report"],
     "dateien": ["datei", "file", "zip", "archiv", "backup", "ordner", "pdf",
                 "bild", "image", "duplikat", "umbenennen", "rename", "download",
                 "temp", "entpack", "konvertier", "resize", "skalier", "disk"],
@@ -803,7 +865,28 @@ _CATEGORY_KEYWORDS: dict[str, list[str]] = {
                     "reminder", "erinnerung", "weck"],
     "personal_os": ["personal", "os", "markdown", "frontmatter", "graph",
                     "draft", "drafts", "index", "lexa", "kontext",
-                    "context", "tag", "tags", "manifest"],
+                    "context", "tag", "tags", "manifest", "workspace",
+                    "arbeitsentwurf", "arbeitsdokument", "arbeitsbereich",
+                    "artifact", "artefakt", "canvas", "obsidian", "vault", "contextpack",
+                    "kontextpaket", "briefing", "projektbriefing",
+                    "entwurf", "entwuerfe", "review", "approval",
+                    "freigabe", "pruefung", "pruefe", "ueberpruefe",
+                    "genehmigen", "ablehnen", "skill", "skills", "gem",
+                    "gems", "customassistant", "customgpt", "assistentenprofil",
+                    "spezialist", "template", "vorlage", "instructions",
+                    "instruktionen", "decision", "entscheidung",
+                    "entscheidungsbrief", "entscheiden", "tradeoff",
+                    "tradeoffs", "abwägen", "abwaegen", "risiko", "risiken",
+                    "optionen", "alternativen", "reversibilitaet",
+                    "ship", "shipping", "release", "launch", "publish",
+                    "veroeffentlichen", "produktreif", "readiness"],
+    "hermes": ["hermes", "agent", "agents", "agenten", "worker",
+               "background", "hintergrund", "selfimprove", "self-improve",
+               "nousresearch", "nous", "telegram", "botfather", "gateway"],
+    "os_agent": ["osagent", "agentruntime", "agent-runtime", "runtime",
+                 "worker", "agenten", "subagent", "subagents",
+                 "hintergrundaufgabe", "hintergrundaufgaben",
+                 "taskqueue", "task-queue"],
     "produktivitaet": ["todo", "aufgabe", "task", "pomodoro", "gewohnheit",
                        "habit", "fokus", "focus", "zeiterfassung", "tracking",
                        "produktiv", "erledigt"],
@@ -814,7 +897,12 @@ _CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "entwickler": ["git", "commit", "push", "pull", "branch", "diff",
                    "docker", "container", "image", "api", "http", "request",
                    "server", "log", "json", "regex", "base64", "hash",
-                   "uuid", "timestamp", "deploy", "code", "debug"],
+                   "uuid", "timestamp", "deploy", "code", "debug",
+                   "release", "ship", "shipping", "launch", "publish",
+                   "qa", "test", "tests", "regression", "rollback",
+                   "produktreif", "veroeffentlichen", "readiness",
+                   "privacy", "security", "accessibility", "a11y",
+                   "performance"],
     "kalender": ["kalender", "calendar", "termin", "termine", "event",
                  "meeting", "besprechung", "verabredung", "agenda",
                  "woche", "heute", "morgen", "übermorgen"],
@@ -840,6 +928,8 @@ _CATEGORY_TOOL_PREFIXES: dict[str, list[str]] = {
     "kommunikation": ["email_", "telegram_", "discord_"],
     "gedaechtnis": ["note_", "memory_", "summarize", "routine_", "reminder_"],
     "personal_os": ["personal_os_"],
+    "hermes": ["hermes_"],
+    "os_agent": ["os_agent_"],
     "produktivitaet": ["todo_", "pomodoro_", "habit_", "time_tracking_", "focus_mode_"],
     "pc_kontrolle": ["window_move", "window_resize", "window_min", "window_max",
                      "window_layout", "autostart_", "service_", "env_",
@@ -851,6 +941,23 @@ _CATEGORY_TOOL_PREFIXES: dict[str, list[str]] = {
     "kalender": ["calendar_"],
     "wetter": ["weather_"],
     "vision": ["screen_analyze", "screen_read_text", "screen_ocr"],
+}
+
+_CATEGORY_SELECTION_PRIORITY: dict[str, int] = {
+    "os_agent": 0,
+    "hermes": 1,
+    "personal_os": 2,
+    "entwickler": 3,
+    "browser": 4,
+    "dateien": 5,
+    "media": 6,
+    "kommunikation": 7,
+    "gedaechtnis": 8,
+    "produktivitaet": 9,
+    "pc_kontrolle": 10,
+    "kalender": 11,
+    "wetter": 12,
+    "vision": 13,
 }
 
 
@@ -901,16 +1008,11 @@ def get_tools_for_context(user_message: str, max_tools: int = 45) -> list[dict]:
         # Always include: basis + the first N tools
         return all_tools[:max_tools]
 
-    # Collect tool names from matched categories (PRIORITIZED)
-    matched_names: set[str] = set()
-    for cat in matched_categories[:4]:  # Max 4 categories
-        prefixes = _CATEGORY_TOOL_PREFIXES.get(cat, [])
-        for tool_def in all_tools:
-            fname = tool_def["function"]["name"]
-            for prefix in prefixes:
-                if fname.startswith(prefix) or fname == prefix:
-                    matched_names.add(fname)
-                    break
+    specific_categories = [cat for cat in matched_categories if cat != "basis"]
+    specific_categories.sort(
+        key=lambda cat: (_CATEGORY_SELECTION_PRIORITY.get(cat, 50), matched_categories.index(cat))
+    )
+    selected_categories = specific_categories[:4]
 
     # Basis tools (always included, but lower priority than matched)
     basis_names: set[str] = set()
@@ -925,12 +1027,16 @@ def get_tools_for_context(user_message: str, max_tools: int = 45) -> list[dict]:
     seen: set[str] = set()
     filtered: list[dict] = []
 
-    # 1. Matched tools first (what the user actually asked about)
-    for t in all_tools:
-        fname = t["function"]["name"]
-        if fname in matched_names and fname not in seen:
-            seen.add(fname)
-            filtered.append(t)
+    # 1. Specific matched categories first (what the user actually asked about).
+    for cat in selected_categories:
+        prefixes = _CATEGORY_TOOL_PREFIXES.get(cat, [])
+        for t in all_tools:
+            fname = t["function"]["name"]
+            for prefix in prefixes:
+                if (fname.startswith(prefix) or fname == prefix) and fname not in seen:
+                    seen.add(fname)
+                    filtered.append(t)
+                    break
 
     # 2. Basis tools (core functionality)
     for t in all_tools:

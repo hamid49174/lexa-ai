@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from backend.obsidian_context import build_obsidian_context_payload, format_obsidian_context_for_prompt
 from backend.router_personal_os import (
     _build_lexa_code_loop_payload,
     _build_personal_os_diagnostics,
@@ -30,6 +31,7 @@ PERSONAL_OS_ACTIONS = frozenset({
     "personal_os_read_file",
     "personal_os_graph",
     "personal_os_context_pack",
+    "personal_os_obsidian_context",
     "personal_os_lexa_code_loop",
     "personal_os_list_drafts",
     "personal_os_view_draft",
@@ -353,6 +355,10 @@ def _format_context_pack(payload: dict) -> str:
     return _trim("\n".join(rows).strip(), 6000)
 
 
+def _format_obsidian_context(payload: dict) -> str:
+    return _trim(format_obsidian_context_for_prompt(payload, limit=6000), 6000)
+
+
 def _format_lexa_code_loop(payload: dict) -> str:
     prompt = str(payload.get("prompt") or "").strip()
     if prompt:
@@ -428,6 +434,8 @@ def _format_payload(command: str, payload: dict) -> str:
         return _format_graph(payload)
     if command == "personal_os_context_pack":
         return _format_context_pack(payload)
+    if command == "personal_os_obsidian_context":
+        return _format_obsidian_context(payload)
     if command == "personal_os_lexa_code_loop":
         return _format_lexa_code_loop(payload)
     if command == "personal_os_list_drafts":
@@ -503,6 +511,14 @@ async def execute_personal_os_action(command: str, params: dict[str, Any] | None
                 hide_smoke=_as_bool(params.get("hideSmoke"), True),
                 agent_name="LexaChat",
                 reason_prefix="Lexa Chat Personal OS context pack",
+            )
+
+        elif command == "personal_os_obsidian_context":
+            payload = build_obsidian_context_payload(
+                topic=str(params.get("topic") or ""),
+                max_files=_as_int(params.get("maxFiles"), 8, 1, 14),
+                body_chars=_as_int(params.get("bodyChars"), 800, 160, 1800),
+                include_previews=_as_bool(params.get("includePreviews"), True),
             )
 
         elif command == "personal_os_lexa_code_loop":

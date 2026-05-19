@@ -43,6 +43,8 @@ screenshots/
 recordings/
 *.wav
 *.webm
+hermes_workspace/
+vendor/hermes-agent/venv/
 
 # Build output
 backend-dist/

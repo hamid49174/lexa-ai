@@ -20,6 +20,7 @@ Plugin-Format:
 import importlib.util
 import logging
 import os
+import re
 from pathlib import Path
 
 from backend.i18n import t
@@ -36,13 +37,15 @@ _FORBIDDEN_PATTERNS = [
     "eval(",
     "exec(",
     "__import__(",
-    "compile(",
     "open(",          # Datei-IO direkt
     "socket.",        # Netzwerk direkt
     "shutil.rmtree",  # Destructive ops
     "subprocess.Popen",
     "subprocess.run",
     "subprocess.call",
+]
+_FORBIDDEN_REGEX_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("compile(", re.compile(r"(?<![\w.])compile\s*\(")),
 ]
 
 # In packaged builds, use LEXA_DATA_DIR/plugins so users can still add plugins.
@@ -76,6 +79,9 @@ def _validate_plugin(plugin_path: Path) -> list[str]:
         for pattern in _FORBIDDEN_PATTERNS:
             if pattern in code:
                 warnings.append(f"Verbotenes Muster gefunden: '{pattern}'")
+        for label, pattern in _FORBIDDEN_REGEX_PATTERNS:
+            if pattern.search(code):
+                warnings.append(f"Verbotenes Muster gefunden: '{label}'")
     except Exception as e:
         warnings.append(f"Plugin-Code nicht lesbar: {e}")
 

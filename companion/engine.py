@@ -51,6 +51,8 @@ from companion import tool_health
 
 # Upgrade 3: Smart Reminders
 from backend import reminders
+from backend import hermes_adapter
+from backend import os_agent_runtime
 
 # Weather Module
 from companion import weather
@@ -229,6 +231,18 @@ class CompanionEngine:
             "hash_text": devtools.hash_text,
             "generate_uuid": devtools.generate_uuid,
             "timestamp_convert": devtools.timestamp_convert,
+            "hermes_status": hermes_adapter.get_hermes_status,
+            "hermes_telegram_status": hermes_adapter.get_hermes_telegram_status,
+            "hermes_telegram_configure": hermes_adapter.configure_hermes_telegram,
+            "hermes_gateway_autostart_status": hermes_adapter.get_hermes_gateway_autostart_status,
+            "hermes_gateway_autostart_set": hermes_adapter.set_hermes_gateway_autostart,
+            "hermes_run": hermes_adapter.run_hermes_task,
+            "hermes_improve_lexa": hermes_adapter.improve_lexa_with_hermes,
+            "os_agent_status": os_agent_runtime.get_os_agent_registry,
+            "os_agent_list_tasks": os_agent_runtime.list_os_agent_tasks,
+            "os_agent_task_status": os_agent_runtime.get_os_agent_task,
+            "os_agent_start_task": os_agent_runtime.start_os_agent_task,
+            "os_agent_create_review_draft": os_agent_runtime.create_os_agent_review_draft,
             # ── Phase 47: Google Calendar ──
             "calendar_today": calendar_int.calendar_today,
             "calendar_week": calendar_int.calendar_week,

@@ -112,6 +112,35 @@ def test_raw_inbox_status_returns_worker_processors(monkeypatch):
     assert data["processors"][1]["status"] == "disabled"
 
 
+def test_obsidian_context_endpoint_returns_bounded_payload(monkeypatch):
+    import backend.router_personal_os as router_personal_os
+
+    calls = []
+
+    def fake_context(**kwargs):
+        calls.append(kwargs)
+        return {
+            "ok": True,
+            "vault": {"loadedAll": False},
+            "files": [{"path": "OS_MANIFEST.md"}],
+        }
+
+    monkeypatch.setattr(router_personal_os, "build_obsidian_context_payload", fake_context)
+
+    res = _client(monkeypatch).get("/personal-os/obsidian-context?topic=lexa%20hermes&maxFiles=3&bodyChars=400")
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert data["vault"]["loadedAll"] is False
+    assert calls == [{
+        "topic": "lexa hermes",
+        "max_files": 3,
+        "body_chars": 400,
+        "include_previews": True,
+    }]
+
+
 def test_personal_os_status_reports_review_tools(monkeypatch):
     import backend.router_personal_os as router_personal_os
 

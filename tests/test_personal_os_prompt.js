@@ -22,6 +22,10 @@ const overridesCss = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "css", "overrides.css"),
   "utf8"
 );
+const preload = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "preload.js"),
+  "utf8"
+);
 const i18nDe = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "i18n", "de.json"),
   "utf8"
@@ -70,6 +74,8 @@ const sandbox = new Function(`
   ${extractFn(src, "posVisibleDrafts")}
   ${extractFn(src, "posRawProcessorOptions")}
   ${extractFn(src, "posRawStatusSummary")}
+  ${extractFn(src, "posUiLanguage")}
+  ${extractFn(src, "posLanguageText")}
   ${extractFn(src, "posDiagnosticHeadline")}
   ${extractFn(src, "posOfflineDiagnostics")}
   ${extractFn(src, "posIsOfflineDiagnostics")}
@@ -78,6 +84,7 @@ const sandbox = new Function(`
   ${extractFn(src, "posNextCardAction")}
   ${extractFn(src, "personalOsReviewPrompt")}
   ${extractFn(src, "personalOsReviewPromptMeta")}
+  ${extractFn(src, "personalOsObsidianPrompt")}
   ${extractFn(src, "personalOsCodeLoopPrompt")}
   ${extractFn(src, "personalOsCodeLoopAgentPrompt")}
   ${extractFn(src, "personalOsCodeLoopPromptMeta")}
@@ -94,7 +101,7 @@ const sandbox = new Function(`
   ${extractFn(src, "posGraphHealth")}
   ${extractFn(src, "posTargetSummary")}
   ${extractFn(src, "posMeterWidthClass")}
-  return { PersonalOSState, posClip, posErrorDetailText, posErrorMessage, posRefreshLabel, posChatPromptLimit, posClipChatPrompt, personalOsCanAutoRefresh, clearPersonalOsQuerySelection, posQueueCounts, posRefreshOptions, posDraftSelectionAfterRefresh, posDraftEmptyMessage, posDraftQueueError, posDraftMatchesSearch, posVisibleDrafts, posRawProcessorOptions, posRawStatusSummary, posDiagnosticHeadline, posOfflineDiagnostics, posIsOfflineDiagnostics, posNextActionText, posNextDraftPath, posNextCardAction, personalOsReviewPrompt, personalOsReviewPromptMeta, personalOsCodeLoopPrompt, personalOsCodeLoopAgentPrompt, personalOsCodeLoopPromptMeta, posCodeLoopEvidenceCounts, posCodeLoopDraftRank, posCodeLoopDraftRows, posNormalizeTagQuery, posTagFilter, posGraphDisplayName, posGraphTagQuery, posGraphDegreeMap, posGraphRankedNodes, posGraphHealth, posTargetSummary, posMeterWidthClass };
+  return { PersonalOSState, posClip, posErrorDetailText, posErrorMessage, posRefreshLabel, posChatPromptLimit, posClipChatPrompt, personalOsCanAutoRefresh, clearPersonalOsQuerySelection, posQueueCounts, posRefreshOptions, posDraftSelectionAfterRefresh, posDraftEmptyMessage, posDraftQueueError, posDraftMatchesSearch, posVisibleDrafts, posRawProcessorOptions, posRawStatusSummary, posUiLanguage, posLanguageText, posDiagnosticHeadline, posOfflineDiagnostics, posIsOfflineDiagnostics, posNextActionText, posNextDraftPath, posNextCardAction, personalOsReviewPrompt, personalOsReviewPromptMeta, personalOsObsidianPrompt, personalOsCodeLoopPrompt, personalOsCodeLoopAgentPrompt, personalOsCodeLoopPromptMeta, posCodeLoopEvidenceCounts, posCodeLoopDraftRank, posCodeLoopDraftRows, posNormalizeTagQuery, posTagFilter, posGraphDisplayName, posGraphTagQuery, posGraphDegreeMap, posGraphRankedNodes, posGraphHealth, posTargetSummary, posMeterWidthClass };
 `);
 
 let PersonalOSState;
@@ -115,6 +122,8 @@ let posDraftMatchesSearch;
 let posVisibleDrafts;
 let posRawProcessorOptions;
 let posRawStatusSummary;
+let posUiLanguage;
+let posLanguageText;
 let posDiagnosticHeadline;
 let posOfflineDiagnostics;
 let posIsOfflineDiagnostics;
@@ -123,6 +132,7 @@ let posNextDraftPath;
 let posNextCardAction;
 let personalOsReviewPrompt;
 let personalOsReviewPromptMeta;
+let personalOsObsidianPrompt;
 let personalOsCodeLoopPrompt;
 let personalOsCodeLoopAgentPrompt;
 let personalOsCodeLoopPromptMeta;
@@ -139,7 +149,7 @@ let posGraphHealth;
 let posTargetSummary;
 let posMeterWidthClass;
 try {
-  ({ PersonalOSState, posClip, posErrorDetailText, posErrorMessage, posRefreshLabel, posChatPromptLimit, posClipChatPrompt, personalOsCanAutoRefresh, clearPersonalOsQuerySelection, posQueueCounts, posRefreshOptions, posDraftSelectionAfterRefresh, posDraftEmptyMessage, posDraftQueueError, posDraftMatchesSearch, posVisibleDrafts, posRawProcessorOptions, posRawStatusSummary, posDiagnosticHeadline, posOfflineDiagnostics, posIsOfflineDiagnostics, posNextActionText, posNextDraftPath, posNextCardAction, personalOsReviewPrompt, personalOsReviewPromptMeta, personalOsCodeLoopPrompt, personalOsCodeLoopAgentPrompt, personalOsCodeLoopPromptMeta, posCodeLoopEvidenceCounts, posCodeLoopDraftRank, posCodeLoopDraftRows, posNormalizeTagQuery, posTagFilter, posGraphDisplayName, posGraphTagQuery, posGraphDegreeMap, posGraphRankedNodes, posGraphHealth, posTargetSummary, posMeterWidthClass } = sandbox());
+  ({ PersonalOSState, posClip, posErrorDetailText, posErrorMessage, posRefreshLabel, posChatPromptLimit, posClipChatPrompt, personalOsCanAutoRefresh, clearPersonalOsQuerySelection, posQueueCounts, posRefreshOptions, posDraftSelectionAfterRefresh, posDraftEmptyMessage, posDraftQueueError, posDraftMatchesSearch, posVisibleDrafts, posRawProcessorOptions, posRawStatusSummary, posUiLanguage, posLanguageText, posDiagnosticHeadline, posOfflineDiagnostics, posIsOfflineDiagnostics, posNextActionText, posNextDraftPath, posNextCardAction, personalOsReviewPrompt, personalOsReviewPromptMeta, personalOsObsidianPrompt, personalOsCodeLoopPrompt, personalOsCodeLoopAgentPrompt, personalOsCodeLoopPromptMeta, posCodeLoopEvidenceCounts, posCodeLoopDraftRank, posCodeLoopDraftRows, posNormalizeTagQuery, posTagFilter, posGraphDisplayName, posGraphTagQuery, posGraphDegreeMap, posGraphRankedNodes, posGraphHealth, posTargetSummary, posMeterWidthClass } = sandbox());
 } catch (e) {
   console.error("Sandbox setup failed:", e.message);
   process.exit(1);
@@ -298,6 +308,26 @@ assert("offline diagnostics mark Personal OS blocked", offlineDiagnostics.state 
 assert("offline diagnostics surface refresh recovery", offlineDiagnostics.nextAction.includes("refresh") && offlineDiagnostics.counts.invalid === 1);
 assert("detects offline diagnostics", posIsOfflineDiagnostics(offlineDiagnostics) === true);
 assert("diagnostic headline falls back to summary", posDiagnosticHeadline({ summary: "Ready.", checks: [] }) === "Ready.");
+const originalLexaI18n = globalThis.LexaI18n;
+globalThis.LexaI18n = { getCurrentLanguage: () => "de" };
+assert("detects German Personal OS UI language", posUiLanguage() === "de");
+assert(
+  "translates backend next-action copy for German OS UI",
+  posLanguageText("Continue with context browsing, Context Map review, or new controlled draft intake.") === "Kontext suchen, Kontextkarte prüfen oder neue Notiz ablegen."
+);
+assert(
+  "translates backend diagnostic summaries for German OS UI",
+  posDiagnosticHeadline({ summary: "Personal OS integration is connected and the review queue is clear.", checks: [] }) === "Personal OS ist verbunden. Keine Prüfung offen."
+);
+assert(
+  "translates backend next actions for German OS UI",
+  posNextActionText({ nextAction: "Continue with context browsing or Code Loop." }, { counts: { pending: 0, invalid: 0 } }) === "Kontext suchen oder Lexa-Plan starten."
+);
+if (originalLexaI18n === undefined) {
+  delete globalThis.LexaI18n;
+} else {
+  globalThis.LexaI18n = originalLexaI18n;
+}
 assert("offline next action prioritizes reconnect over invalid count", posNextActionText(offlineDiagnostics, { counts: offlineDiagnostics.counts }) === "Reconnect Personal OS and refresh the cockpit.");
 assert("next action names one pending draft", posNextActionText({ nextAction: "Review pending drafts." }, {
   counts: { pending: 1, invalid: 0 },
@@ -362,6 +392,7 @@ assert("actionable Personal OS cards reset native button chrome", css.includes("
 assert("status metric cards can switch draft filters", src.includes('data-queue-filter="pending"') && src.includes('data-queue-filter="approved"') && src.includes('data-queue-filter="rejected"') && src.includes('data-queue-filter="all"') && src.includes("loadPersonalOsQueueFilter"));
 assert("active draft rows expose current selection", src.includes('row.setAttribute("aria-current"') && css.includes(".pos-draft-row.active") && css.includes("inset 3px 0 0 rgba(165, 154, 255, 0.9)"));
 assert("Personal OS cockpit uses calmer product surfaces", css.includes("#personal-os-view .info-card") && css.includes("box-shadow: none") && css.includes(".pos-panel") && css.includes("background: rgba(12, 12, 20, 0.7)") && css.includes("border-radius: 8px"));
+assert("Personal OS context search stays out of the default path", html.includes('class="pos-panel pos-query-panel pos-collapsible-panel"') && html.includes('class="pos-panel-summary"') && html.includes("Nur öffnen, wenn du Wissen aus dem OS brauchst.") && src.includes('panel.tagName === "DETAILS") panel.open = true') && overridesCss.includes(".pos-collapsible-panel") && overridesCss.includes(".pos-panel-summary::after"));
 assert("empty draft states clear stale detail controls", src.includes("function clearPersonalOsDraftDetail") && src.includes('posUiText("pos.draftTitle"') && src.includes("button.disabled = true"));
 assert("Personal OS draft detail fallbacks are localized", src.includes("function posUiText") && src.includes('posUiText("pos.noDraftSelected"') && src.includes('posUiText("pos.draftLoadFailed"') && src.includes('posUiText("pos.applyApprovedOnly"') && src.includes('posUiText("pos.applyApprovedTitle"') && i18nDe.includes('"pos.noDraftSelected"') && i18nEn.includes('"pos.noDraftSelected"') && i18nDe.includes('"pos.applyApprovedTitle"') && i18nEn.includes('"pos.applyApprovedTitle"'));
 assert("empty draft detail messages are escaped", src.includes("escapeHtml(emptyMessage)") && !src.includes("${message}</div>") && !src.includes("${emptyMessage}</div>"));
@@ -423,6 +454,46 @@ assert("configured code loop prompt respects chat headroom", configuredCodeLoopP
 assert("configured code loop agent prompt respects chat headroom", configuredCodeLoopAgentPrompt.length <= posChatPromptLimit(), `len=${configuredCodeLoopAgentPrompt.length} limit=${posChatPromptLimit()}`);
 assert("configured code loop meta reports chat headroom", configuredCodeLoopMeta.limit === posChatPromptLimit(), `limit=${configuredCodeLoopMeta.limit}`);
 globalThis.LexaConfig = originalLexaConfig;
+
+console.log("\npersonalOsObsidianPrompt():");
+const obsidianPayload = {
+  ok: true,
+  topic: "lexa hermes obsidian",
+  vault: { root: "C:\\Users\\admin\\OneDrive\\Desktop\\OS", loadedAll: false },
+  counts: { bootstrapAvailable: 7, areaIndexes: 15 },
+  lexaProductContract: {
+    providerMode: "api-backed",
+    rule: "Lexa uses configured provider APIs for model intelligence.",
+  },
+  lexaInventory: {
+    quickFind: [
+      { need: "Hermes bridge", goTo: "backend/hermes_adapter.py" },
+      { need: "Obsidian context", goTo: "backend/obsidian_context.py" },
+    ],
+    surfaces: [
+      { id: "backend-api", purpose: "FastAPI routers", fileCountApprox: 63 },
+      { id: "hermes-vendor", purpose: "Telegram gateway", fileCountApprox: 4 },
+    ],
+  },
+  files: [
+    {
+      title: "Lexa Context Index",
+      path: "08_Lexa/Architecture/Lexa_Context_Index.md",
+      memory_level: "working",
+      tags: ["lexa", "obsidian"],
+      bodyPreview: huge,
+    },
+  ],
+};
+const obsidianPrompt = personalOsObsidianPrompt(obsidianPayload);
+assert("builds Obsidian prompt with provider mode", obsidianPrompt.includes("Provider mode: api-backed"));
+assert("builds Obsidian prompt with quick-find routes", obsidianPrompt.includes("backend/hermes_adapter.py") && obsidianPrompt.includes("backend/obsidian_context.py"));
+assert("keeps Obsidian prompt under chat limit", obsidianPrompt.length <= posChatPromptLimit(), `len=${obsidianPrompt.length}`);
+assert("personal OS view exposes Obsidian context action", html.includes('data-action="personalOsLoadObsidianContext"') && src.includes("function personalOsLoadObsidianContext") && src.includes("personalOsObsidianContext"));
+assert("preload exposes Obsidian context endpoint", preload.includes("personalOsObsidianContext") && preload.includes("/personal-os/obsidian-context"));
+assert("renders Obsidian context card and chat handoff", src.includes("function renderPersonalOsObsidianContext") && src.includes("personalOsSendObsidianContextToChat") && src.includes("selectedObsidianContext"));
+assert("i18n includes Obsidian context labels", i18nDe.includes('"pos.titleObsidianContext"') && i18nEn.includes('"pos.obsidianContextPromptReady"'));
+
 const codeLoopCounts = posCodeLoopEvidenceCounts({
   diagnostics: { counts: { pending: "0", approved: "2", rejected: "3", invalid: null } },
   contextPack: {

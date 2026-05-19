@@ -268,10 +268,11 @@ def process_ai_response(
 
     # Sanitize params with per-field size limits
     params = parsed.get("params", {})
-    if isinstance(params, dict):
-        parsed["params"] = _sanitize_params(params)
+    if not isinstance(params, dict):
+        params = {}
+    parsed["params"] = _sanitize_params(params)
 
-    param_count = len(parsed.get("params", {}))
+    param_count = len(parsed["params"])
     logger.info(f"Extracted action: {action_name} (params={param_count})")
 
     # Validate output safety
@@ -351,6 +352,8 @@ def process_tool_call(
         return t("command.invalidNameFromAi"), None, False
 
     # Sanitize params
+    if not isinstance(params, dict):
+        params = {}
     if isinstance(params, dict):
         params = _sanitize_params(params)
 

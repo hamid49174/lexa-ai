@@ -9,8 +9,11 @@ BLOCKERS = {
     "unsafe-inline": re.compile(r"unsafe-inline"),
     "style tag": re.compile(r"<style\b", re.IGNORECASE),
     "inline style attribute": re.compile(r"\sstyle\s*=", re.IGNORECASE),
-    "inline event handler": re.compile(r"\son[a-z]+\s*=", re.IGNORECASE),
+    "inline event handler": re.compile(r"<[^>\n]*\s+on[a-z]{2,}\s*=", re.IGNORECASE),
     "direct style write": re.compile(r"\.style\b|cssText|setAttribute\([^)]*['\"]style['\"]", re.IGNORECASE),
+    "eval": re.compile(r"\beval\s*\(", re.IGNORECASE),
+    "new Function": re.compile(r"\bnew\s+Function\s*\(", re.IGNORECASE),
+    "script injection": re.compile(r"createElement\(\s*['\"]script['\"]\s*\)|appendChild\([^)]*\bscript\b", re.IGNORECASE),
 }
 
 

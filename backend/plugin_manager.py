@@ -57,12 +57,14 @@ _FORBIDDEN_PATTERNS = [
     "eval(",
     "exec(",
     "__import__(",
-    "compile(",
     "shutil.rmtree",
     "subprocess.Popen",
     "subprocess.run",
     "subprocess.call",
     "ctypes.",
+]
+_FORBIDDEN_REGEX_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("compile(", re.compile(r"(?<![\w.])compile\s*\(")),
 ]
 
 # Erlaubte YAML Action-Typen
@@ -244,6 +246,10 @@ class PluginManager:
         for pattern in _FORBIDDEN_PATTERNS:
             if pattern in code:
                 logger.warning(f"Plugin '{path.name}' enthaelt verbotenes Muster: '{pattern}' -- nicht geladen")
+                return None
+        for label, pattern in _FORBIDDEN_REGEX_PATTERNS:
+            if pattern.search(code):
+                logger.warning(f"Plugin '{path.name}' enthaelt verbotenes Muster: '{label}' -- nicht geladen")
                 return None
 
         # Dynamischer Import

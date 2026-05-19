@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from backend.config import MAX_TEXT_CHARS, MCP_CALL_TIMEOUT, MCP_ENABLED
 from backend.mcp_registry import MCPError, mcp_registry
+from backend.obsidian_context import build_obsidian_context_payload
 from backend.security import audit_log, check_rate_limit
 
 logger = logging.getLogger("lexa.router_personal_os")
@@ -1469,6 +1470,27 @@ async def lexa_code_loop_os(
         hide_smoke=hideSmoke,
         agent_name="LexaPersonalOS",
         reason_prefix="Lexa Personal OS code loop",
+    )
+
+
+@router.get("/obsidian-context")
+async def obsidian_context_os(
+    topic: str = Query(default="", max_length=240),
+    maxFiles: int = Query(default=8, ge=1, le=14),
+    bodyChars: int = Query(default=800, ge=160, le=1800),
+    includePreviews: bool = Query(default=True),
+):
+    """Build a bounded read-only Obsidian/Personal OS context bootstrap."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
+
+    audit_log("personal_os", "obsidian_context", f"topic={topic[:120]}")
+    return await asyncio.to_thread(
+        build_obsidian_context_payload,
+        topic=topic,
+        max_files=maxFiles,
+        body_chars=bodyChars,
+        include_previews=includePreviews,
     )
 
 

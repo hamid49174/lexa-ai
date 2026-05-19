@@ -1,3 +1,101 @@
+// Install this before Electron registers its own main-process exception dialog.
+// Broken stdio pipes are not app crashes; they happen when a launcher/test shell closes.
+function lexaIsBrokenPipeError(error) {
+  const message = String(error?.message || error || "");
+  return error?.code === "EPIPE" || /EPIPE|broken pipe/i.test(message);
+}
+
+function installPreElectronPipeGuard() {
+  const mark = (stream) => {
+    try { stream.__lexaBrokenPipe = true; } catch (_error) {}
+  };
+  const guardStream = (stream) => {
+    if (!stream || stream.__lexaEarlyPipeGuardInstalled || typeof stream.write !== "function") return;
+    try { stream.__lexaEarlyPipeGuardInstalled = true; } catch (_error) {}
+    const originalWrite = stream.write.bind(stream);
+    stream.write = (...args) => {
+      if (stream.__lexaBrokenPipe) return false;
+      try {
+        return originalWrite(...args);
+      } catch (error) {
+        if (lexaIsBrokenPipeError(error)) {
+          mark(stream);
+          return false;
+        }
+        throw error;
+      }
+    };
+    stream.on?.("error", (error) => {
+      if (lexaIsBrokenPipeError(error)) {
+        mark(stream);
+        return;
+      }
+      throw error;
+    });
+  };
+
+  guardStream(process.stdout);
+  guardStream(process.stderr);
+
+  const net = require("net");
+  if (!net.Socket.prototype.__lexaStdioWriteGuardInstalled) {
+    Object.defineProperty(net.Socket.prototype, "__lexaStdioWriteGuardInstalled", {
+      value: true,
+      enumerable: false,
+      configurable: false,
+    });
+    const originalSocketWrite = net.Socket.prototype._write;
+    const originalSocketWritev = net.Socket.prototype._writev;
+    const isStdioSocket = (socket) => socket === process.stdout || socket === process.stderr || socket?.fd === 1 || socket?.fd === 2;
+    net.Socket.prototype._write = function guardedSocketWrite(chunk, encoding, callback) {
+      if (isStdioSocket(this) && this.__lexaBrokenPipe) {
+        if (typeof callback === "function") callback();
+        return;
+      }
+      try {
+        return originalSocketWrite.call(this, chunk, encoding, callback);
+      } catch (error) {
+        if (isStdioSocket(this) && lexaIsBrokenPipeError(error)) {
+          mark(this);
+          if (typeof callback === "function") callback();
+          return;
+        }
+        throw error;
+      }
+    };
+    if (typeof originalSocketWritev === "function") {
+      net.Socket.prototype._writev = function guardedSocketWritev(chunks, callback) {
+        if (isStdioSocket(this) && this.__lexaBrokenPipe) {
+          if (typeof callback === "function") callback();
+          return;
+        }
+        try {
+          return originalSocketWritev.call(this, chunks, callback);
+        } catch (error) {
+          if (isStdioSocket(this) && lexaIsBrokenPipeError(error)) {
+            mark(this);
+            if (typeof callback === "function") callback();
+            return;
+          }
+          throw error;
+        }
+      };
+    }
+  }
+
+  const originalEmit = process.emit.bind(process);
+  process.emit = (eventName, ...args) => {
+    if ((eventName === "uncaughtException" || eventName === "uncaughtExceptionMonitor") && lexaIsBrokenPipeError(args[0])) {
+      mark(process.stdout);
+      mark(process.stderr);
+      return true;
+    }
+    return originalEmit(eventName, ...args);
+  };
+}
+
+installPreElectronPipeGuard();
+
 const electron = require("electron");
 
 if (!electron || typeof electron === "string" || !electron.app) {
@@ -14,14 +112,144 @@ const path = require("path");
 const fs = require("fs");
 const https = require("https");
 
-// Suppress EPIPE errors when stdout pipe is closed (e.g. launched via start.bat)
-process.stdout?.on("error", () => {});
-process.stderr?.on("error", () => {});
+// Suppress broken stdout/stderr pipes when launched from transient shells or tests.
+function isBrokenPipeError(error) {
+  return lexaIsBrokenPipeError(error);
+}
+
+function markBrokenPipe(stream) {
+  try {
+    Object.defineProperty(stream, "__lexaBrokenPipe", {
+      value: true,
+      enumerable: false,
+      configurable: true,
+    });
+  } catch (_error) {
+    try { stream.__lexaBrokenPipe = true; } catch (_ignored) {}
+  }
+}
+
+function installSafeStreamWrite(stream) {
+  if (!stream || stream.__lexaSafeWriteInstalled || typeof stream.write !== "function") return;
+  const originalWrite = stream.write.bind(stream);
+  const originalChunkWrite = typeof stream._write === "function" ? stream._write.bind(stream) : null;
+  const originalVectorWrite = typeof stream._writev === "function" ? stream._writev.bind(stream) : null;
+  Object.defineProperty(stream, "__lexaSafeWriteInstalled", {
+    value: true,
+    enumerable: false,
+    configurable: false,
+  });
+  stream.write = (...args) => {
+    if (stream.__lexaBrokenPipe) return false;
+    try {
+      return originalWrite(...args);
+    } catch (error) {
+      if (isBrokenPipeError(error)) {
+        markBrokenPipe(stream);
+        return false;
+      }
+      throw error;
+    }
+  };
+  if (originalChunkWrite) {
+    stream._write = (chunk, encoding, callback) => {
+      if (stream.__lexaBrokenPipe) {
+        if (typeof callback === "function") callback();
+        return;
+      }
+      try {
+        return originalChunkWrite(chunk, encoding, callback);
+      } catch (error) {
+        if (isBrokenPipeError(error)) {
+          markBrokenPipe(stream);
+          if (typeof callback === "function") callback();
+          return;
+        }
+        throw error;
+      }
+    };
+  }
+  if (originalVectorWrite) {
+    stream._writev = (chunks, callback) => {
+      if (stream.__lexaBrokenPipe) {
+        if (typeof callback === "function") callback();
+        return;
+      }
+      try {
+        return originalVectorWrite(chunks, callback);
+      } catch (error) {
+        if (isBrokenPipeError(error)) {
+          markBrokenPipe(stream);
+          if (typeof callback === "function") callback();
+          return;
+        }
+        throw error;
+      }
+    };
+  }
+  stream.on?.("error", (error) => {
+    if (isBrokenPipeError(error)) {
+      markBrokenPipe(stream);
+      return;
+    }
+    throw error;
+  });
+}
+
+function installSafeProcessStreams() {
+  installSafeStreamWrite(process.stdout);
+  installSafeStreamWrite(process.stderr);
+}
+
+function installSafeConsole() {
+  const original = {
+    log: console.log.bind(console),
+    info: console.info.bind(console),
+    warn: console.warn.bind(console),
+    error: console.error.bind(console),
+  };
+  const safeCall = (method, args) => {
+    try {
+      original[method](...args);
+    } catch (error) {
+      if (!isBrokenPipeError(error)) throw error;
+    }
+  };
+  console.log = (...args) => safeCall("log", args);
+  console.info = (...args) => safeCall("info", args);
+  console.warn = (...args) => safeCall("warn", args);
+  console.error = (...args) => safeCall("error", args);
+}
+
+installSafeProcessStreams();
+installSafeConsole();
+process.on("uncaughtException", (error) => {
+  if (isBrokenPipeError(error)) return;
+  try { console.error("[Main] Uncaught exception:", error); } catch (_e) {}
+  app.exit(1);
+});
+
+function installRendererConsoleGuard(webContents) {
+  if (!webContents || webContents.__lexaConsoleGuardInstalled) return;
+  Object.defineProperty(webContents, "__lexaConsoleGuardInstalled", {
+    value: true,
+    enumerable: false,
+    configurable: false,
+  });
+  webContents.on("console-message", (event, level, message, line, sourceId) => {
+    event.preventDefault?.();
+    if (process.stdout?.__lexaBrokenPipe || process.stderr?.__lexaBrokenPipe) return;
+    const prefix = `[Renderer:${level}]`;
+    const location = sourceId ? ` ${sourceId}:${line || 0}` : "";
+    try { console.log(prefix, String(message || "").trim(), location); } catch (_error) {}
+  });
+}
 
 // ── BACKEND PROCESS MANAGEMENT ──────────────────
 let backendProcess = null;
 const BACKEND_RESTART_DELAY_MS = 1500;
 const EXTERNAL_LEXA_BACKEND = "__external_lexa_backend__";
+const AUTH_MISMATCH_LEXA_BACKEND = "__auth_mismatch_lexa_backend__";
 const HEALTH_CHECK_BODY_LIMIT = 64 * 1024;
 const HEALTH_CHECK_TIMEOUT_MS = 2000;
 const INSTANCE_TOKEN = crypto.randomBytes(16).toString("hex");
@@ -57,7 +285,9 @@ function _healthCheck() {
       settled = true;
       resolve(value);
     };
-    const req = http.get("http://127.0.0.1:8000/health", (res) => {
+    const req = http.get("http://127.0.0.1:8000/health", {
+      headers: { "X-Lexa-Local-Token": INSTANCE_TOKEN },
+    }, (res) => {
       let body = "";
       res.on("data", (c) => {
         body += c;
@@ -69,8 +299,10 @@ function _healthCheck() {
       res.on("end", () => {
         try {
           const data = JSON.parse(body);
-          if (data.instance_token) {
-            finish(data.instance_token);
+          if (data.service === "lexa-ai" && data.instance_authenticated === true) {
+            finish(INSTANCE_TOKEN);
+          } else if (data.service === "lexa-ai" && data.auth_required === true) {
+            finish(AUTH_MISMATCH_LEXA_BACKEND);
           } else if (data.service === "lexa-ai") {
             finish(EXTERNAL_LEXA_BACKEND);
           } else {
@@ -106,9 +338,8 @@ async function startBackend() {
       console.warn("[Backend] Port 8000 occupied by Lexa backend without instance token - reusing (dev mode)");
       return;
     }
-    if (token) {
-      // It's a Lexa backend from a different instance; in dev mode this is OK
-      console.warn("[Backend] Port 8000 occupied by another Lexa instance - reusing (dev mode)");
+    if (token === AUTH_MISMATCH_LEXA_BACKEND) {
+      console.warn("[Backend] Port 8000 occupied by another secured Lexa instance - cannot authenticate");
       return;
     }
     console.warn("[Backend] Port 8000 occupied by non-Lexa process - backend may not work");
@@ -205,6 +436,7 @@ function createWindow() {
     ...(fs.existsSync(path.join(__dirname, "src", "icon.png")) ? { icon: path.join(__dirname, "src", "icon.png") } : {}),
   });
 
+  installRendererConsoleGuard(mainWindow.webContents);
   mainWindow.loadFile(path.join(__dirname, "src", "index.html"));
   setupFrontendAutoReload();
 
@@ -410,6 +642,8 @@ ipcMain.handle("i18n-load", (_, lang) => {
 });
 
 // ── NOTIFICATIONS ────────────────────────────────
+ipcMain.handle("local-auth-token", () => INSTANCE_TOKEN);
+
 ipcMain.on("show-notification", (_, data) => {
   if (Notification.isSupported()) {
     const notif = new Notification({

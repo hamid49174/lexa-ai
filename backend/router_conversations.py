@@ -22,6 +22,21 @@ logger = logging.getLogger("lexa.conversations")
 router = APIRouter(tags=["conversations"])
 
 
+def _normalize_conversation_messages(messages: list) -> list[dict]:
+    normalized: list[dict] = []
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            raise HTTPException(status_code=400, detail=f"messages[{index}] must be an object")
+        role = str(message.get("role", "")).strip().lower()
+        if role not in {"user", "assistant", "system"}:
+            raise HTTPException(status_code=400, detail=f"messages[{index}].role is invalid")
+        content = str(message.get("content", "")).strip()
+        if not content:
+            raise HTTPException(status_code=400, detail=f"messages[{index}].content is required")
+        normalized.append({"role": role, "content": content})
+    return normalized
+
+
 @router.get("/conversations")
 async def list_conversations():
     return {"status": "ok", "conversations": await asyncio.to_thread(memory.conversation_list)}
@@ -57,6 +72,7 @@ async def update_conversation(conv_id: int, req: Request):
             raise HTTPException(status_code=400, detail="messages must be a list")
         if len(messages) > MAX_CONVERSATION_MESSAGES:
             raise HTTPException(status_code=400, detail=f"Too many messages (max {MAX_CONVERSATION_MESSAGES})")
+        messages = _normalize_conversation_messages(messages)
     result = await asyncio.to_thread(memory.conversation_update, conv_id, title=title, messages=messages)
     return {"status": result}
 

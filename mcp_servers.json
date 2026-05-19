@@ -3,7 +3,7 @@
     "personal_os": {
       "command": "node",
       "args": [
-        "C:\\Users\\admin\\OneDrive\\Desktop\\OS\\11_Integrations\\MCP\\os-mcp-server\\dist\\index.js"
+        "C:\\Users\\admin\\OneDrive\\Desktop\\lexa\\lexa-ai\\personal_os\\11_Integrations\\MCP\\os-mcp-server\\dist\\index.js"
       ],
       "enabled": true
     },

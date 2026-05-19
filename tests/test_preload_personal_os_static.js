@@ -31,6 +31,9 @@ function extractFn(source, name) {
 
 const sandbox = new Function(`
   "use strict";
+  ${extractFn(src, "apiErrorText")}
+  ${extractFn(src, "apiRequestId")}
+  ${extractFn(src, "apiJson")}
   ${extractFn(src, "personalOsErrorText")}
   ${extractFn(src, "personalOsJson")}
   ${extractFn(src, "personalOsRetryDelayMs")}
@@ -55,6 +58,7 @@ const sandbox = new Function(`
   }
   return {
     personalOsErrorText,
+    apiJson,
     personalOsJson,
     personalOsRetryDelayMs,
     personalOsFetchJsonWithRetry,
@@ -66,6 +70,7 @@ const sandbox = new Function(`
 
 const {
   personalOsErrorText,
+  apiJson,
   personalOsJson,
   personalOsRetryDelayMs,
   personalOsFetchJsonWithRetry,
@@ -136,6 +141,25 @@ function responseWithHeaders({ ok, status, payload, headers = {} }) {
   assert("turns HTTP error JSON into ok false", errorPayload.ok === false && errorPayload.httpStatus === 400);
   assert("keeps backend error text", errorPayload.error === "Invalid tag filter", errorPayload.error);
   assert("keeps backend request id", errorPayload.requestId === "req-123", errorPayload.requestId);
+
+  const canonicalPayload = await apiJson(response({
+    ok: false,
+    status: 429,
+    payload: {
+      ok: false,
+      status: "error",
+      error: "Zu viele Anfragen.",
+      message: "Zu viele Anfragen.",
+      errorCode: "rate_limited",
+      httpStatus: 429,
+      requestId: "req-body",
+      retryable: true,
+    },
+    requestId: "req-header",
+  }), "Request failed");
+  assert("keeps canonical backend error code", canonicalPayload.errorCode === "rate_limited", canonicalPayload.errorCode);
+  assert("prefers canonical body request id", canonicalPayload.requestId === "req-body", canonicalPayload.requestId);
+  assert("keeps retryable flag from canonical payload", canonicalPayload.retryable === true);
 
   const detailPayload = await personalOsJson(response({ ok: false, status: 502, payload: { detail: { message: "MCP disconnected" } } }), "Tool failed");
   assert("extracts structured detail messages", detailPayload.error === "MCP disconnected", detailPayload.error);

@@ -252,6 +252,54 @@ def test_personal_os_context_pack_action_is_bounded_and_formatted(monkeypatch):
     }]
 
 
+def test_personal_os_obsidian_context_action_is_read_only_and_formatted(monkeypatch):
+    import backend.personal_os_actions as actions
+
+    calls = []
+
+    def fake_obsidian_context(**kwargs):
+        calls.append(kwargs)
+        return {
+            "ok": True,
+            "vault": {
+                "root": "C:/OS",
+                "type": "obsidian-compatible-markdown",
+                "obsidianConfigPresent": False,
+                "loadedAll": False,
+            },
+            "policy": {"readMode": "bounded-index-routed", "stableWrites": "draft-approval-only"},
+            "counts": {"bootstrapAvailable": 2, "areaIndexes": 1},
+            "files": [
+                {
+                    "title": "Manifest",
+                    "path": "OS_MANIFEST.md",
+                    "memory_level": "core",
+                    "tags": ["os"],
+                    "bodyPreview": "Canonical OS rules.",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(actions, "build_obsidian_context_payload", fake_obsidian_context)
+
+    result = _run(actions.execute_personal_os_action("personal_os_obsidian_context", {
+        "topic": "lexa hermes",
+        "maxFiles": 3,
+        "bodyChars": 400,
+    }))
+
+    assert result["success"] is True
+    assert "Obsidian/Personal OS Context Layer" in result["data"]
+    assert "Loaded all vault files: False" in result["data"]
+    assert "Canonical OS rules" in result["data"]
+    assert calls == [{
+        "topic": "lexa hermes",
+        "max_files": 3,
+        "body_chars": 400,
+        "include_previews": True,
+    }]
+
+
 def test_personal_os_lexa_code_loop_action_returns_read_only_prompt(monkeypatch):
     import backend.personal_os_actions as actions
 

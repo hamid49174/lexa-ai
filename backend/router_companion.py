@@ -5,10 +5,15 @@ API Endpoints für PC-Kontrolle (async-safe via to_thread)
 import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from companion.engine import companion
+from backend.companion_confirmation import (
+    ConfirmationError,
+    audit_details as confirmation_audit_details,
+    consume_confirmation,
+    create_confirmation,
+)
 from backend.security import is_command_allowed, check_rate_limit, audit_log, validate_params, read_recent_audit_entries
 from backend.i18n import t
 from backend.personal_os_actions import execute_personal_os_action, is_personal_os_action
@@ -22,6 +27,14 @@ class CommandRequest(BaseModel):
     params: dict = {}
     confirmed: bool = False
     dry_run: bool = False
+    confirmation_id: str | None = None
+    command_hash: str | None = None
+    action_scope: str | None = None
+
+
+class PrepareCommandRequest(BaseModel):
+    command: str
+    params: dict = {}
 
 
 class CommandResponse(BaseModel):
@@ -30,6 +43,27 @@ class CommandResponse(BaseModel):
     error: str | None = None
     requires_confirmation: bool = False
     dry_run: bool = False
+
+
+def _safe_command_name(command: str) -> str:
+    return str(command or "").strip()
+
+
+def _is_registered_command(command: str) -> bool:
+    return is_personal_os_action(command) or command in getattr(companion, "commands", {})
+
+
+def _permission_scope(permission: str) -> str:
+    if permission == "confirmation_required":
+        return "confirmation_required"
+    if permission == "always_allowed":
+        return "always_allowed"
+    return str(permission or "unknown")
+
+
+def _raise_confirmation_error(command: str, exc: ConfirmationError) -> None:
+    audit_log(command, "confirmation_denied", f"reason={exc.code}")
+    raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)})
 
 
 def _validate_result(result) -> dict:
@@ -51,63 +85,94 @@ def _validate_result(result) -> dict:
     return normalized
 
 
+@router.post("/execute/prepare")
+async def prepare_command(req: PrepareCommandRequest):
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+    command = _safe_command_name(req.command)
+    permission = is_command_allowed(command)
+
+    if permission == "blocked":
+        audit_log(command, "prepare_blocked")
+        raise HTTPException(status_code=400, detail={"code": "command_blocked", "message": t("command.blockedRouter", command=command)})
+    if permission == "unknown" or not _is_registered_command(command):
+        audit_log(command, "prepare_unknown")
+        raise HTTPException(status_code=400, detail={"code": "unknown_command", "message": t("command.needsConfirmation", command=command)})
+
+    try:
+        safe_params = validate_params(command, req.params)
+    except ValueError as e:
+        audit_log(command, "prepare_param_blocked", str(e))
+        raise HTTPException(status_code=400, detail={"code": "invalid_params", "message": str(e)})
+
+    action_scope = _permission_scope(permission)
+    confirmation = create_confirmation(command, safe_params, action_scope)
+    audit_log(command, "confirmation_prepared", confirmation_audit_details(confirmation))
+    return confirmation
+
+
 @router.post("/execute", response_model=CommandResponse)
 async def execute_command(req: CommandRequest):
     if not check_rate_limit("execute"):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
-    permission = is_command_allowed(req.command)
+    command = _safe_command_name(req.command)
+    permission = is_command_allowed(command)
 
     if permission == "blocked":
-        audit_log(req.command, "blocked")
-        return CommandResponse(success=False, error=t("command.blockedRouter", command=req.command))
+        audit_log(command, "blocked")
+        return CommandResponse(success=False, error=t("command.blockedRouter", command=command))
 
     # Unknown commands (not in whitelist at all) require confirmation — deny by default
-    if permission == "unknown" and not req.confirmed:
-        audit_log(req.command, "unknown_awaiting_confirmation")
-        return CommandResponse(
-            success=False,
-            requires_confirmation=True,
-            error=t("command.needsConfirmation", command=req.command),
-        )
+    if permission == "unknown" or not _is_registered_command(command):
+        audit_log(command, "unknown_blocked")
+        raise HTTPException(status_code=400, detail={"code": "unknown_command", "message": t("command.needsConfirmation", command=command)})
 
-    if permission == "confirmation_required" and not req.confirmed:
-        audit_log(req.command, "awaiting_confirmation")
-        return CommandResponse(
-            success=False,
-            requires_confirmation=True,
-            error=t("command.confirmRequired", command=req.command),
-        )
+    action_scope = _permission_scope(permission)
 
     # Validate params for safety
     try:
-        safe_params = validate_params(req.command, req.params)
+        safe_params = validate_params(command, req.params)
     except ValueError as e:
-        audit_log(req.command, "param_blocked", str(e))
+        audit_log(command, "param_blocked", str(e))
         return CommandResponse(success=False, error=str(e))
+
+    if permission == "confirmation_required":
+        try:
+            record = consume_confirmation(
+                req.confirmation_id,
+                command=command,
+                params=safe_params,
+                action_scope=req.action_scope or action_scope,
+                command_hash=req.command_hash,
+            )
+            audit_log(command, "confirmation_consumed", confirmation_audit_details(record))
+        except ConfirmationError as exc:
+            _raise_confirmation_error(command, exc)
 
     # Dry-run mode: validate command without executing
     if req.dry_run:
-        audit_log(req.command, "dry_run")
+        audit_log(command, "dry_run")
         return CommandResponse(
             success=True,
             dry_run=True,
-            data=t("command.valid", command=req.command),
+            data=t("command.valid", command=command),
         )
 
-    if is_personal_os_action(req.command):
-        result = await execute_personal_os_action(req.command, safe_params)
+    if is_personal_os_action(command):
+        result = await execute_personal_os_action(command, safe_params)
         validated = _validate_result(result)
         return CommandResponse(**validated, dry_run=False)
 
     # Execute in thread pool to avoid blocking the event loop
     try:
-        result = await asyncio.to_thread(companion.execute, req.command, safe_params)
+        result = await asyncio.to_thread(companion.execute, command, safe_params)
         validated = _validate_result(result)
         return CommandResponse(**validated, dry_run=False)
     except Exception as e:
-        logger.error(f"companion.execute() failed for '{req.command}': {e}", exc_info=True)
-        audit_log(req.command, "execution_error", str(e))
+        logger.error(f"companion.execute() failed for '{command}': {e}", exc_info=True)
+        audit_log(command, "execution_error", str(e))
         return CommandResponse(success=False, error=f"Ausführungsfehler: {str(e)}")
 
 

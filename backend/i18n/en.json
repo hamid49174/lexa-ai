@@ -142,8 +142,9 @@
   "calendar.connectError": "Calendar connection failed: {{error}}",
   "calendar.searchResults": "{{count}} events found for '{{query}}'",
 
-  "ai.streamDisconnected": "\n\n[Connection interrupted — response may be incomplete]",
-  "ai.providerUnavailable": "The active AI provider is currently unreachable. Please check your API keys in the settings.",
+  "ai.streamDisconnected": "\n\n[The connection dropped briefly. The answer may be incomplete.]",
+  "ai.providerUnavailable": "I cannot connect reliably right now. Please check the AI connection in Settings.",
+  "ai.emptyResponse": "I did not get a usable answer. Please try again or quickly check the connection.",
   "ai.titlePrompt": "Generate a short title (max 5 words, English) for this chat message. Reply ONLY with the title, no markdown, no quotes.",
   "ai.noHistory": "- {{count}} previous messages exchanged (no specific actions)",
   "ai.checkWlan": "Checking WiFi status...",

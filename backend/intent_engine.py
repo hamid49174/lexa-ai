@@ -1069,7 +1069,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         return {
             "action": None,
             "params": {},
-            "message": "Ich bin Lexa, dein lokaler KI-Assistent. Ich kann deinen PC steuern, "
+            "message": "Ich bin Lexa, deine API-gestuetzte Windows-Assistentin. Ich kann deinen PC steuern, "
                        "deinen Alltag organisieren, Dateien verwalten, Musik steuern und "
                        "dir ueber Sprache, Chat und lokale Arbeitsablaeufe helfen.",
         }
@@ -1141,7 +1141,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         return {
             "action": None,
             "params": {},
-            "message": "Ich bin eine lokale KI-App aus diesem Projekt. Mein Wissen und meine Faehigkeiten haengen von den konfigurierten Modellen, Tools und lokalen Integrationen ab.",
+            "message": "Ich bin eine API-gestuetzte KI-App aus diesem Projekt. Mein Wissen und meine Faehigkeiten haengen von den konfigurierten APIs, Modellen, Tools und lokalen Integrationen ab.",
         }
 
     # --- Bored ---

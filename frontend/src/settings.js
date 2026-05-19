@@ -21,6 +21,7 @@ async function refreshSettingsView() {
 
   if (!LexaState.get("backendOnline")) {
     renderVoiceDiagnostics({ ok: false, state: "blocked", summary: "Backend offline.", checks: [] });
+    renderHermesGatewayAutostart({ supported: false, enabled: false, can_enable: false, error: "Backend offline." });
     renderSystemReadiness({
       ok: false,
       state: "blocked",
@@ -29,10 +30,11 @@ async function refreshSettingsView() {
       cards: [],
       checks: [{ label: "Backend", state: "blocked", detail: "Lokaler API-Dienst antwortet nicht." }],
     });
+    setupHermesGatewayAutostartControls();
     return;
   }
 
-  const [aiRes, voiceRes, healthRes, memRes, cmdsRes, toolHealthRes, mcpRes, diagnosticsRes] = await Promise.allSettled([
+  const [aiRes, voiceRes, healthRes, memRes, cmdsRes, toolHealthRes, mcpRes, diagnosticsRes, hermesAutostartRes] = await Promise.allSettled([
     window.lexa.aiStatus(),
     window.lexa.voiceStatus(),
     window.lexa.health(),
@@ -41,16 +43,21 @@ async function refreshSettingsView() {
     window.lexa.healthTools(),
     window.lexa.mcpServers(),
     window.lexa.diagnostics(),
+    window.lexa.hermesGatewayAutostartStatus?.(),
   ]);
 
-  const ai = aiRes.status === "fulfilled" ? aiRes.value : { groq: {}, openai: {}, gemini: {} };
+  const ai = aiRes.status === "fulfilled" ? aiRes.value : { groq: {}, openai: {}, gemini: {}, anthropic: {} };
   const voice = voiceRes.status === "fulfilled" ? voiceRes.value : { tts: {}, stt: {} };
   const health = healthRes.status === "fulfilled" ? healthRes.value : {};
   const mem = memRes.status === "fulfilled" ? memRes.value : {};
   const toolHealth = toolHealthRes.status === "fulfilled" ? toolHealthRes.value : { tools: {}, available_count: 0, total_count: 0, health_pct: 0 };
   const mcp = mcpRes.status === "fulfilled" ? mcpRes.value : { enabled: false, servers: [] };
   const diagnostics = diagnosticsRes.status === "fulfilled" ? diagnosticsRes.value : {};
+  const hermesAutostart = hermesAutostartRes.status === "fulfilled"
+    ? hermesAutostartRes.value
+    : { supported: false, enabled: false, can_enable: false, error: "Autostart status nicht verfuegbar." };
   renderVoiceDiagnostics(voice);
+  renderHermesGatewayAutostart(hermesAutostart);
   renderSystemReadiness(buildSystemReadinessModel({
     ai,
     voice,
@@ -65,9 +72,11 @@ async function refreshSettingsView() {
   const groqEl = document.getElementById("groq-status");
   const openaiEl = document.getElementById("openai-status");
   const geminiEl = document.getElementById("gemini-status");
+  const anthropicEl = document.getElementById("anthropic-status");
   if (groqEl) { groqEl.textContent = ai.groq?.available ? t("settings.connected") : t("settings.offline"); groqEl.className = "setting-status" + (ai.groq?.available ? "" : " offline"); }
   if (openaiEl) { openaiEl.textContent = ai.openai?.available ? t("settings.connected") : t("settings.offline"); openaiEl.className = "setting-status" + (ai.openai?.available ? "" : " offline"); }
   if (geminiEl) { geminiEl.textContent = ai.gemini?.available ? t("settings.connected") : t("settings.offline"); geminiEl.className = "setting-status" + (ai.gemini?.available ? "" : " offline"); }
+  if (anthropicEl) { anthropicEl.textContent = ai.anthropic?.available ? t("settings.connected") : t("settings.offline"); anthropicEl.className = "setting-status" + (ai.anthropic?.available ? "" : " offline"); }
 
   // TTS Status — Cartesia (Primary) + ElevenLabs (Fallback)
   const cartesiaStatusEl = document.getElementById("cartesia-status");
@@ -131,6 +140,7 @@ async function refreshSettingsView() {
   loadElevenLabsSettings(voice);
 
   // Wire backup controls
+  setupHermesGatewayAutostartControls();
   setupBackupControls();
 }
 
@@ -158,6 +168,24 @@ function diagnosticsCountWhere(items, predicate) {
   return Array.isArray(items) ? items.filter(predicate).length : 0;
 }
 
+function hermesReadinessSignal(diagnostics, health) {
+  const full = diagnostics?.hermes && typeof diagnostics.hermes === "object" ? diagnostics.hermes : {};
+  const compact = health?.hermes && typeof health.hermes === "object" ? health.hermes : {};
+  const rawState = full.health_state || compact.state || "unknown";
+  const state = rawState === "ready" ? "ready" : rawState === "blocked" ? "blocked" : "attention";
+  const summary = diagnosticsClipLines(full.summary || compact.summary || "Hermes status nicht verfuegbar.", 2);
+  const canRun = Boolean(full.can_run_tasks ?? compact.can_run_tasks);
+  const gateway = full.gateway && typeof full.gateway === "object" ? full.gateway : {};
+  const telegramConfigured = Boolean(gateway.configured ?? compact.telegram_configured);
+  return {
+    state,
+    summary,
+    canRun,
+    telegramConfigured,
+    checkState: state === "blocked" ? "attention" : state,
+  };
+}
+
 function readinessSummaryFromState(state, blockers, warnings) {
   if (state === "blocked") {
     return blockers[0] || "Kritische Konfiguration fehlt. Kernpfade sind noch nicht produktionsreif.";
@@ -169,9 +197,11 @@ function readinessSummaryFromState(state, blockers, warnings) {
 }
 
 function buildSystemReadinessModel({ ai, voice, health, mem, toolHealth, mcp, diagnostics, commandsTotal }) {
-  const providers = ["groq", "openai", "gemini"];
+  const providers = ["groq", "openai", "gemini", "anthropic"];
   const aiReadyCount = diagnosticsCountWhere(providers, (name) => ai?.[name]?.available);
   const aiReady = aiReadyCount > 0;
+  const fallbackAvailable = Array.isArray(ai?.fallback_available) ? ai.fallback_available.length : 0;
+  const hermes = hermesReadinessSignal(diagnostics, health);
   const voiceReady = voiceDiagnosticDisplayState(voice) === "ready";
   const voiceAttention = voiceDiagnosticDisplayState(voice) === "attention";
   const toolPct = diagnosticsPct(toolHealth?.health_pct);
@@ -193,7 +223,12 @@ function buildSystemReadinessModel({ ai, voice, health, mem, toolHealth, mcp, di
   checks.push({
     label: "AI providers",
     state: aiReady ? (aiReadyCount >= 2 ? "ready" : "attention") : "blocked",
-    detail: `${aiReadyCount}/3 Provider verfuegbar. Aktiv: ${ai?.active_provider || ai?.selected_provider || "unknown"}.`,
+    detail: `${aiReadyCount}/4 Provider verfuegbar. Aktiv: ${ai?.active_provider || ai?.selected_provider || "unknown"}. Fallbacks: ${fallbackAvailable}.`,
+  });
+  checks.push({
+    label: "Hermes",
+    state: hermes.checkState,
+    detail: `${hermes.summary} Tasks: ${hermes.canRun ? "bereit" : "nicht bereit"}. Telegram: ${hermes.telegramConfigured ? "konfiguriert" : "offen"}.`,
   });
   checks.push({
     label: "Voice path",
@@ -223,6 +258,7 @@ function buildSystemReadinessModel({ ai, voice, health, mem, toolHealth, mcp, di
   const scoreParts = [
     health?.status === "ok" ? 22 : 0,
     aiReadyCount * 10,
+    hermes.state === "ready" ? 8 : hermes.state === "attention" ? 4 : 2,
     voiceReady ? 20 : voiceAttention ? 10 : 0,
     toolsReady ? 18 : toolsAttention ? 8 : 0,
     memoryReady ? 12 : 0,
@@ -241,9 +277,15 @@ function buildSystemReadinessModel({ ai, voice, health, mem, toolHealth, mcp, di
     },
     {
       label: "AI",
-      value: `${aiReadyCount}/3`,
-      meta: ai?.active_provider ? `Aktiv ${ai.active_provider}` : "Kein aktiver Provider",
+      value: `${aiReadyCount}/4`,
+      meta: ai?.active_provider ? `Aktiv ${ai.active_provider}, Fallbacks ${fallbackAvailable}` : "Kein aktiver Provider",
       state: aiReady ? (aiReadyCount >= 2 ? "ready" : "attention") : "blocked",
+    },
+    {
+      label: "Hermes",
+      value: diagnosticsLabel(hermes.state),
+      meta: hermes.summary,
+      state: hermes.state,
     },
     {
       label: "Voice",
@@ -340,6 +382,87 @@ function renderSystemReadiness(model) {
     (model?.checks || []).forEach((check) => {
       appendVoiceDiagnosticRow(checksEl, check);
     });
+  }
+}
+
+function normalizeHermesGatewayAutostart(payload) {
+  const status = payload?.autostart && typeof payload.autostart === "object" ? payload.autostart : (payload || {});
+  return {
+    supported: Boolean(status.supported),
+    enabled: Boolean(status.enabled),
+    canEnable: Boolean(status.can_enable),
+    missing: Array.isArray(status.missing) ? status.missing : [],
+    nextAction: status.nextAction || payload?.error || status.error || "",
+    path: status.startup_path || "",
+  };
+}
+
+function renderHermesGatewayAutostart(payload) {
+  const state = normalizeHermesGatewayAutostart(payload);
+  const statusEl = document.getElementById("hermes-gateway-autostart-status");
+  const toggle = document.getElementById("hermes-gateway-autostart-toggle");
+  const canToggle = state.supported && (state.enabled || state.canEnable);
+  const title = state.nextAction || state.path || (state.missing.length ? state.missing.join(", ") : "");
+
+  if (toggle) {
+    toggle.checked = state.enabled;
+    toggle.disabled = !canToggle;
+    toggle.title = title;
+    toggle.setAttribute("aria-disabled", toggle.disabled ? "true" : "false");
+  }
+
+  if (statusEl) {
+    if (!state.supported) {
+      statusEl.textContent = t("settings.unsupported");
+      statusEl.className = "setting-status offline";
+    } else if (state.enabled) {
+      statusEl.textContent = t("settings.enabled");
+      statusEl.className = "setting-status";
+    } else if (state.canEnable) {
+      statusEl.textContent = t("settings.ready");
+      statusEl.className = "setting-status warning";
+    } else {
+      statusEl.textContent = t("settings.blocked");
+      statusEl.className = "setting-status offline";
+    }
+    statusEl.title = title;
+  }
+}
+
+function setupHermesGatewayAutostartControls() {
+  const toggle = document.getElementById("hermes-gateway-autostart-toggle");
+  if (!toggle || toggle._lexaHermesGatewayBound) return;
+  toggle._lexaHermesGatewayBound = true;
+  toggle.addEventListener("change", () => {
+    toggleHermesGatewayAutostart(toggle.checked);
+  });
+}
+
+async function toggleHermesGatewayAutostart(enabled) {
+  const toggle = document.getElementById("hermes-gateway-autostart-toggle");
+  const previous = !Boolean(enabled);
+  if (!LexaState.get("backendOnline") || !window.lexa?.hermesGatewayAutostartSet) {
+    if (toggle) toggle.checked = previous;
+    renderHermesGatewayAutostart({ supported: false, enabled: false, can_enable: false, error: "Backend offline." });
+    showToast(t("settings.hermesGatewayAutostartBlocked"), "error");
+    return;
+  }
+
+  if (toggle) toggle.disabled = true;
+  try {
+    const result = await window.lexa.hermesGatewayAutostartSet(Boolean(enabled));
+    renderHermesGatewayAutostart(result?.autostart || result);
+    if (result?.success) {
+      showToast(enabled ? t("settings.hermesGatewayAutostartOn") : t("settings.hermesGatewayAutostartOff"), enabled ? "success" : "info");
+    } else {
+      showToast(settingsClip(result?.error || result?.autostart?.nextAction || t("settings.errorGeneric"), 160), "error");
+    }
+  } catch (e) {
+    if (toggle) toggle.checked = previous;
+    showToast(t("settings.errorPrefix", {message: e.message || e}), "error");
+    try {
+      renderHermesGatewayAutostart(await window.lexa.hermesGatewayAutostartStatus?.());
+    } catch (_) {}
   }
 }
 

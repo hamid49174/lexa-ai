@@ -140,7 +140,15 @@
         <div class="sidebar-section conversations-section">
           <div class="sidebar-label">
             <span data-i18n="sidebar.chats">CHATS</span>
+            <div id="agent-attention-summary" class="agent-attention-summary hidden" role="status" aria-live="polite" aria-atomic="true"></div>
             <div class="conv-header-actions">
+              <button type="button" id="agent-attention-filter-btn" class="new-chat-btn agent-attention-filter-btn hidden" data-action="toggleAgentAttentionFilter" title="Agent runs need attention" data-i18n-title="chat.agentAttentionFilterLabel" role="button" aria-label="Agent runs need attention" aria-pressed="false" aria-hidden="true">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true">
+                  <path d="M12 3l9 16H3l9-16z" />
+                  <path d="M12 9v4" />
+                  <path d="M12 17h.01" />
+                </svg>
+              </button>
               <button type="button" class="new-chat-btn" data-action="openSearchOverlay" title="Suche (Ctrl+F)" data-i18n-title="nav.searchTooltip" role="button" aria-label="Suche">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                   <circle cx="11" cy="11" r="7" />
@@ -153,7 +161,7 @@
           <div class="conversation-list" id="conversation-list"></div>
         </div>
 
-        <div class="sidebar-section" role="tablist" aria-label="Tools">
+        <div class="sidebar-section" id="sidebar-advanced-tools" role="tablist" aria-label="Tools">
           <div class="sidebar-label" data-i18n="sidebar.tools">TOOLS</div>
           <button type="button" class="sidebar-btn" data-view="productivity" role="tab" aria-label="Produktivit&auml;t">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -292,7 +300,7 @@
               <div class="dash-clock" id="dash-clock">00:00:00</div>
               <div class="dash-date" id="dash-date"></div>
               <div class="dash-greeting-text" id="dash-greeting" data-i18n="dashboard.greetingDefault">Guten Tag.</div>
-              <div class="dash-greeting-sub" id="dash-greeting-sub" data-i18n="dashboard.subtitle">Lexa AI v1.0.0 &mdash; Dein lokaler KI-Assistent
+              <div class="dash-greeting-sub" id="dash-greeting-sub" data-i18n="dashboard.subtitle">Lexa AI v1.0.0 &mdash; API-gestuetzt, lokal kontrolliert
               </div>
               <button type="button" class="dash-chat-btn" data-action="switchView" data-arg="chat" data-i18n="dashboard.openChat">&#9889; Chat &ouml;ffnen</button>
             </div>
@@ -306,6 +314,37 @@
 
           <!-- Uptime & Quick System Info -->
           <div class="prod-stats-bar" id="sys-quick-bar"></div>
+
+          <div class="system-startup-panel" id="startup-health-panel">
+            <div class="system-audit-header">
+              <div>
+                <div class="system-audit-kicker" data-i18n="system.startupHealthKicker">STARTUP</div>
+                <h3 class="section-title" data-i18n="system.startupHealthTitle">Startup Health</h3>
+              </div>
+              <div class="system-overview-actions">
+                <button type="button" class="action-btn action-btn-sm" data-action="refreshStartupHealth" data-i18n="system.refresh">Refresh</button>
+              </div>
+            </div>
+            <div class="system-overview-content system-startup-content" id="startup-health-content" aria-live="polite" aria-busy="false">
+              <div class="system-audit-empty" data-i18n="common.loading">Lade...</div>
+            </div>
+          </div>
+
+          <div class="system-overview-panel" id="hermes-overview-panel">
+            <div class="system-audit-header">
+              <div>
+                <div class="system-audit-kicker" data-i18n="system.hermesCockpitKicker">OS/HERMES</div>
+                <h3 class="section-title" data-i18n="system.hermesCockpitTitle">Lexa Cockpit</h3>
+              </div>
+              <div class="system-overview-actions">
+                <button type="button" class="action-btn action-btn-sm" data-action="hermesOverviewAskInChat" data-i18n="system.hermesAskChat">Chat</button>
+                <button type="button" class="action-btn action-btn-sm" data-action="refreshHermesOverview" data-i18n="system.refresh">Refresh</button>
+              </div>
+            </div>
+            <div class="system-overview-content" id="hermes-overview-content" aria-live="polite" aria-busy="false">
+              <div class="system-audit-empty" data-i18n="common.loading">Lade...</div>
+            </div>
+          </div>
 
           <div class="system-audit-panel">
             <div class="system-audit-header">
@@ -491,7 +530,7 @@
           </div>
 
         <!-- Chat View (default) -->
-        <div class="chat-container active" id="chat-container">
+        <div class="chat-container active animated-ai-chat" id="chat-container">
           <!-- Drop Zone Overlay -->
           <div class="drop-zone-overlay" id="drop-zone-overlay">
             <div class="drop-zone-content">
@@ -519,8 +558,8 @@
 
           <!-- Greeting -->
           <div class="sleek-greeting" id="sleek-greeting">
-            <h1 class="greeting-title" id="app-title">Ich bin Lexa.</h1>
-            <p class="greeting-subtitle">Dein lokaler KI-Assistent. Sprich mit mir oder tippe eine Nachricht.</p>
+            <h1 class="greeting-title" id="app-title" data-i18n="chat.heroTitle">Wie kann ich helfen?</h1>
+            <p class="greeting-subtitle" data-i18n="chat.heroSubtitle">Schreib einfach los.</p>
             <div class="greeting-stats">
               <span class="stat-pill" id="greeting-cmd-count">162 Befehle bereit</span>
               <span class="stat-pill" id="greeting-conv-count">0 Chats gespeichert</span>
@@ -564,18 +603,21 @@
               <div class="input-wrapper sleek-pill">
                 <!-- Hidden file input for attachments -->
                 <input type="file" id="file-input" class="hidden" aria-label="Datei anhängen" data-i18n-aria-label="chat.attachFile">
-                <button type="button" id="attach-btn" class="hidden" aria-label="Datei anhängen" data-i18n-aria-label="chat.attachFile"></button>
+                <button type="button" id="attach-btn" class="sleek-icon-btn attach-btn" aria-label="Datei anhaengen" title="Datei anhaengen" data-i18n-aria-label="chat.attachFile" data-i18n-title="chat.attachFile">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 1 1 5.66 5.66l-9.2 9.19a2 2 0 1 1-2.83-2.83l8.49-8.48"/>
+                  </svg>
+                </button>
 
                 <button class="sleek-icon-btn composer-command-btn" id="composer-command-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="composer-command-palette" aria-label="Befehle" title="Befehle und Workflows" data-i18n-aria-label="composer.buttonLabel" data-i18n-title="composer.buttonTitle" data-action="toggleComposerCommandPalette">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M18 6 6 18"/>
-                    <path d="m8 6 4 6-4 6"/>
-                    <path d="M14 18h4"/>
+                    <path d="M12 3l1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3Z"/>
+                    <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"/>
                   </svg>
                 </button>
 
                 <label for="chat-input" class="sr-only" data-i18n="chat.enterMessage">Nachricht eingeben</label>
-                <textarea id="chat-input" rows="1" placeholder="Frag mich was... (Enter zum Senden)" data-i18n-placeholder="chat.inputPlaceholder" autofocus aria-label="Nachricht eingeben" data-i18n-aria-label="chat.enterMessage" aria-controls="composer-command-palette" aria-expanded="false" aria-autocomplete="list"></textarea>
+                <textarea id="chat-input" rows="1" placeholder="Frag Lexa etwas..." data-i18n-placeholder="chat.inputPlaceholder" autofocus aria-label="Nachricht eingeben" data-i18n-aria-label="chat.enterMessage" aria-controls="composer-command-palette" aria-expanded="false" aria-autocomplete="list"></textarea>
                 <span id="char-counter" class="char-counter hidden"></span>
 
                 <div class="sleek-actions-right">
@@ -604,6 +646,7 @@
                       <line x1="22" y1="2" x2="11" y2="13" />
                       <polygon points="22 2 15 22 11 13 2 9 22 2" />
                     </svg>
+                    <span class="send-btn-label" data-i18n="chat.send">Senden</span>
                   </button>
                 </div>
               </div>
@@ -731,73 +774,90 @@
 
         <!-- Personal OS View -->
         <div class="tool-view" id="personal-os-view">
-          <div class="view-title" role="heading" aria-level="2">Personal <span>OS</span></div>
+          <div class="view-title" role="heading" aria-level="2">OS <span>Start</span></div>
           <div class="info-grid" id="pos-status-grid"></div>
 
-          <section class="pos-panel pos-query-panel" aria-label="Personal OS Context Query">
-            <div class="section-header">
-              <h3>Context Browser</h3>
-              <div class="flex-row">
-                <button type="button" class="action-btn" data-action="personalOsOpenIndex">Open Index</button>
-                <button type="button" class="action-btn" data-action="personalOsSearchTag">Search Tag</button>
-                <button type="button" class="action-btn" data-action="personalOsLoadGraph">Context Map</button>
-                <button type="button" class="action-btn" data-action="personalOsLoadContextPack">Context Pack</button>
-                <button type="button" class="action-btn" data-action="personalOsLoadCodeLoop">Code Loop</button>
+          <details class="pos-panel pos-query-panel pos-collapsible-panel" aria-label="Personal OS Kontext finden">
+            <summary class="pos-panel-summary">
+              <span>
+                <strong>Kontext suchen</strong>
+                <small>Nur öffnen, wenn du Wissen aus dem OS brauchst.</small>
+              </span>
+            </summary>
+            <div class="pos-collapsible-body">
+              <div class="section-header">
+                <h3>Suche</h3>
+              <details class="pos-inline-tools">
+                <summary>Werkzeuge</summary>
+                <div class="flex-row">
+                  <button type="button" class="action-btn" data-action="personalOsOpenIndex">Start öffnen</button>
+                  <button type="button" class="action-btn" data-action="personalOsSearchTag">Thema suchen</button>
+                  <button type="button" class="action-btn" data-action="personalOsLoadGraph">Karte<span hidden>Context Map</span></button>
+                  <button type="button" class="action-btn" data-action="personalOsLoadContextPack">In Chat legen</button>
+                  <button type="button" class="action-btn" data-action="personalOsLoadObsidianContext">Obsidian</button>
+                  <button type="button" class="action-btn" data-action="personalOsLoadCodeLoop">Lexa Plan</button>
+                </div>
+                </details>
+              </div>
+              <div class="pos-query-controls">
+                <label class="pos-query-field">
+                  <span>Bereich</span>
+                  <input type="text" id="pos-area-input" class="settings-input" value="00_System" placeholder="00_System">
+                </label>
+                <label class="pos-query-field">
+                  <span>Thema</span>
+                  <input type="text" id="pos-tag-input" class="settings-input" value="lexa" placeholder="lexa">
+                </label>
+              </div>
+              <div id="pos-query-results" class="pos-query-results">
+                <div class="empty-state">Wähle einen Bereich oder suche ein Thema.</div>
+              </div>
+              <div id="pos-graph-summary" class="pos-graph-summary"></div>
+              <div id="pos-graph-stage" class="pos-graph-stage">
+                <div class="empty-state">Keine Karte geladen.</div>
               </div>
             </div>
-            <div class="pos-query-controls">
-              <label class="pos-query-field">
-                <span>Area</span>
-                <input type="text" id="pos-area-input" class="settings-input" value="00_System" placeholder="00_System">
-              </label>
-              <label class="pos-query-field">
-                <span>Tag</span>
-                <input type="text" id="pos-tag-input" class="settings-input" value="lexa" placeholder="lexa">
-              </label>
-            </div>
-            <div id="pos-query-results" class="pos-query-results">
-              <div class="empty-state">Index &ouml;ffnen oder Tag suchen.</div>
-            </div>
-            <div id="pos-graph-summary" class="pos-graph-summary"></div>
-            <div id="pos-graph-stage" class="pos-graph-stage">
-              <div class="empty-state">Keine Context Map geladen.</div>
-            </div>
-          </section>
+          </details>
 
           <div class="pos-shell">
-            <section class="pos-panel pos-queue-panel" aria-label="Draft Queue">
+            <section class="pos-panel pos-queue-panel" aria-label="Entwürfe prüfen">
               <div class="section-header">
-                <h3>Draft Queue</h3>
+                <h3>Zu prüfen</h3>
                 <div class="flex-row">
-                  <select id="pos-approval-filter" class="settings-select pos-filter" aria-label="Approval Filter">
-                    <option value="pending" selected>Pending</option>
-                    <option value="approved">Approved</option>
-                    <option value="rejected">Rejected</option>
-                    <option value="conflict">Conflict</option>
-                    <option value="missing">Missing</option>
-                    <option value="all">All</option>
-                  </select>
-                  <input type="text" id="pos-draft-search" class="settings-input pos-draft-search" placeholder="Search drafts" aria-label="Search Drafts">
-                  <button type="button" class="action-btn" data-action="findPersonalOsDraft">Find</button>
-                  <button type="button" class="action-btn" data-action="submitPersonalOsRawInbox">New Raw</button>
-                  <button type="button" class="action-btn" data-action="refreshPersonalOsView">Refresh</button>
+                  <button type="button" class="action-btn" data-action="submitPersonalOsRawInbox">Neue Notiz</button>
+                  <button type="button" class="action-btn" data-action="refreshPersonalOsView">Aktualisieren</button>
                 </div>
               </div>
+              <details class="pos-inline-tools pos-queue-tools">
+                <summary>Suchen und filtern</summary>
+                <div class="flex-row">
+                  <select id="pos-approval-filter" class="settings-select pos-filter" aria-label="Entwurfsfilter">
+                    <option value="pending" selected>Offen</option>
+                    <option value="approved">Freigegeben</option>
+                    <option value="rejected">Abgelehnt</option>
+                    <option value="conflict">Konflikt</option>
+                    <option value="missing">Unvollständig</option>
+                    <option value="all">Alle</option>
+                  </select>
+                  <input type="text" id="pos-draft-search" class="settings-input pos-draft-search" placeholder="Entwurf suchen" aria-label="Entwurf suchen">
+                  <button type="button" class="action-btn" data-action="findPersonalOsDraft">Suchen</button>
+                </div>
+              </details>
               <div id="pos-draft-list" class="pos-draft-list"></div>
             </section>
 
-            <section class="pos-panel pos-detail-panel" aria-label="Draft Detail">
+            <section class="pos-panel pos-detail-panel" aria-label="Entwurf prüfen">
               <div class="section-header">
-                <h3 id="pos-detail-title">Draft</h3>
+                <h3 id="pos-detail-title">Entwurf</h3>
                 <div class="pos-detail-actions">
-                  <button type="button" class="action-btn" id="pos-approve-btn" disabled>Approve</button>
-                  <button type="button" class="action-btn action-btn-danger" id="pos-reject-btn" disabled>Reject</button>
-                  <button type="button" class="action-btn" id="pos-apply-btn" disabled>Apply</button>
-                  <button type="button" class="action-btn" id="pos-chat-review-btn" data-action="personalOsSendReviewToChat" disabled>Chat Review</button>
+                  <button type="button" class="action-btn" id="pos-approve-btn" disabled>Freigeben</button>
+                  <button type="button" class="action-btn action-btn-danger" id="pos-reject-btn" disabled>Ablehnen</button>
+                  <button type="button" class="action-btn" id="pos-apply-btn" disabled>Anwenden</button>
+                  <button type="button" class="action-btn" id="pos-chat-review-btn" data-action="personalOsSendReviewToChat" disabled>Mit Lexa prüfen</button>
                 </div>
               </div>
               <div id="pos-draft-detail" class="pos-draft-detail">
-                <div class="empty-state">Kein Draft ausgew&auml;hlt.</div>
+                <div class="empty-state">Kein Entwurf ausgewählt.</div>
               </div>
             </section>
           </div>
@@ -848,6 +908,13 @@
                 <div class="setting-desc" data-i18n="settings.geminiDesc">F&uuml;r Gemini 2.5 Flash, Flash-Lite und Pro</div>
               </div>
               <div class="setting-status" id="gemini-status" data-i18n="settings.checkingStatus">Pr&uuml;fe...</div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.anthropicApiKey">Anthropic API Key</div>
+                <div class="setting-desc" data-i18n="settings.anthropicDesc">F&uuml;r Claude als Fallback-Modell</div>
+              </div>
+              <div class="setting-status" id="anthropic-status" data-i18n="settings.checkingStatus">Pr&uuml;fe...</div>
             </div>
             <div class="setting-item">
               <div class="setting-info">
@@ -1067,7 +1134,7 @@
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name">STT Modell (Lokal)</div>
-                <div class="setting-desc">Fallback-Modell fuer Offline-Nutzung</div>
+                <div class="setting-desc">Fallback-Modell für Offline-Nutzung</div>
               </div>
               <select id="stt-model-select" class="settings-select" data-action="changeSttModel" aria-label="STT Modell" data-i18n-aria-label="settings.sttModel">
                 <option value="" data-i18n="common.loading">Laden...</option>
@@ -1101,6 +1168,19 @@
                 <input type="checkbox" id="autostart-toggle" data-action="toggleAutostart">
                 <span class="toggle-slider"></span>
               </label>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="settings.hermesGatewayAutostart">Hermes Gateway Autostart</div>
+                <div class="setting-desc" data-i18n="settings.hermesGatewayAutostartDesc">Telegram-Gateway beim Windows-Login starten</div>
+              </div>
+              <div class="setting-actions">
+                <div class="setting-status offline" id="hermes-gateway-autostart-status" data-i18n="settings.checkingStatus">Pr&uuml;fe...</div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="hermes-gateway-autostart-toggle">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
             </div>
             <div class="setting-item">
               <div class="setting-info">

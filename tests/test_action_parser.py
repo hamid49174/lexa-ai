@@ -112,6 +112,31 @@ class TestPermissionHandling(unittest.TestCase):
             f"Expected warning in reply, got: {reply}",
         )
 
+    def test_json_action_null_params_becomes_empty_dict(self):
+        """Providers can emit null params; execution code expects a dict."""
+        ai_resp = '{"action": "system_info", "params": null, "message": "ok"}'
+        with patch.object(ap, "is_command_allowed", return_value="allowed"), \
+             patch.object(ap, "validate_command_output", return_value=None), \
+             patch.object(ap, "audit_log"):
+            _, action, requires_conf = ap.process_ai_response(ai_resp, source="chat")
+        self.assertIsNotNone(action)
+        self.assertFalse(requires_conf)
+        self.assertEqual(action["params"], {})
+
+    def test_native_tool_call_null_arguments_becomes_empty_dict(self):
+        """Native tool calls can carry null arguments; keep parser defensive."""
+        with patch.object(ap, "is_command_allowed", return_value="allowed"), \
+             patch.object(ap, "validate_command_output", return_value=None), \
+             patch.object(ap, "audit_log"):
+            _, action, requires_conf = ap.process_tool_call(
+                [{"id": "x", "name": "system_info", "arguments": None}],
+                ai_message="",
+                source="chat_stream",
+            )
+        self.assertIsNotNone(action)
+        self.assertFalse(requires_conf)
+        self.assertEqual(action["params"], {})
+
 
 class TestJsonExtraction(unittest.TestCase):
     """Verify robust JSON extraction from various AI response formats."""

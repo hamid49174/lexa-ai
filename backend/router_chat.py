@@ -34,6 +34,8 @@ from backend.ai_engine import chat, chat_stream
 from backend.action_parser import process_ai_response, process_chat_result, update_history
 from backend.i18n import t
 from backend.intent_engine import try_local_intent
+from backend.lexa_system_answer import try_lexa_system_answer
+from backend.lexa_voice import lexa_user_error
 from backend.security import (
     sanitize_input,
     check_rate_limit,
@@ -161,6 +163,13 @@ async def chat_endpoint(req: ChatRequest):
         async with _history_lock:
             update_history(conversation_history, sanitized, reply, MAX_HISTORY)
         return ChatResponse(reply=reply, action=pending, requires_confirmation=False)
+
+    system_reply = await try_lexa_system_answer(sanitized)
+    if system_reply:
+        audit_log("chat", "lexa_system_answer", f"MSG={sanitized[:100]}")
+        async with _history_lock:
+            update_history(conversation_history, sanitized, system_reply, MAX_HISTORY)
+        return ChatResponse(reply=system_reply, action=None, requires_confirmation=False)
 
     # Fast path: try local intent recognition first (avoids AI API call)
     local_result = try_local_intent(sanitized)
@@ -390,6 +399,22 @@ async def chat_stream_endpoint(req: ChatRequest):
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
+    system_reply = await try_lexa_system_answer(sanitized)
+    if system_reply:
+        audit_log("chat_stream", "lexa_system_answer", f"MSG={sanitized[:100]}")
+        async with _history_lock:
+            update_history(conversation_history, sanitized, system_reply, MAX_HISTORY)
+
+        async def system_stream():
+            yield f"data: {json.dumps({'c': system_reply})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'action': None, 'rc': False})}\n\n"
+
+        return StreamingResponse(
+            system_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     # Fast path: local intent -> execute server-side, return result immediately
     local_result = try_local_intent(sanitized)
     if local_result is not None:
@@ -475,7 +500,7 @@ async def chat_stream_endpoint(req: ChatRequest):
                 gen = chat_stream(sanitized, history_snapshot)
             except Exception as e:
                 logger.exception("chat_stream() generator creation failed")
-                yield f"data: {json.dumps({'error': 'KI-Service nicht verfügbar.'})}\n\n"
+                yield f"data: {json.dumps({'error': lexa_user_error('ai_unavailable')})}\n\n"
                 return
 
             while True:
@@ -599,6 +624,11 @@ async def chat_stream_endpoint(req: ChatRequest):
                 audit_log("chat_stream", "done", f"LEN={len(full_text)}")
                 yield f"data: {json.dumps({'done': True, 'action': action, 'rc': requires_confirmation})}\n\n"
             else:
+                fallback = lexa_user_error("empty_response")
+                async with _history_lock:
+                    update_history(conversation_history, sanitized, fallback, MAX_HISTORY)
+                audit_log("chat_stream", "empty_response", "no chunks returned")
+                yield f"data: {json.dumps({'c': fallback})}\n\n"
                 yield f"data: {json.dumps({'done': True, 'action': None, 'rc': False})}\n\n"
         except asyncio.CancelledError:
             logger.info(f"Stream cancelled by client (partial LEN={len(full_text)})")

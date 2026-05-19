@@ -2,7 +2,7 @@
 Smoke tests for PowerShell argument sanitization in system_tools.py.
 Run with: python -m pytest tests/test_ps_escaping.py -v
 """
-import types, pathlib, importlib.util, unittest
+import subprocess, types, pathlib, importlib.util, unittest
 
 spec = importlib.util.spec_from_file_location(
     "companion.system_tools",
@@ -12,7 +12,10 @@ st = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(st)
 
 # Keep this smoke test hermetic without poisoning sys.modules for the rest of pytest.
-st.subprocess.run = lambda *a, **kw: types.SimpleNamespace(returncode=0, stdout="", stderr="")
+st.subprocess = types.SimpleNamespace(
+    run=lambda *a, **kw: types.SimpleNamespace(returncode=0, stdout="", stderr=""),
+    TimeoutExpired=subprocess.TimeoutExpired,
+)
 
 
 class TestSanitizePsArg(unittest.TestCase):

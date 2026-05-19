@@ -94,6 +94,76 @@ class TestToolContextSelection:
         names = [t["function"]["name"] for t in tools]
         assert any("git" in n for n in names)
 
+    def test_research_selects_browser_tools(self):
+        """A source-backed research request should include web tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("erstelle einen quellenbasierten research brief")
+        names = [t["function"]["name"] for t in tools]
+        assert any(n.startswith("web_") for n in names)
+
+    def test_citation_analysis_selects_browser_tools(self):
+        """Citation/source analysis requests should include web tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("create an analysis with citations and evidence")
+        names = [t["function"]["name"] for t in tools]
+        assert any(n.startswith("web_") for n in names)
+
+    def test_workspace_draft_selects_personal_os_tools(self):
+        """Workspace-draft requests should include read-only Personal OS tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("baue einen workspace draft als markdown kontext")
+        names = [t["function"]["name"] for t in tools]
+        assert "personal_os_context_pack" in names
+        assert "personal_os_review_draft" in names
+
+    def test_working_document_selects_personal_os_tools(self):
+        """Lexa working-document requests should include read-only Personal OS tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("baue ein arbeitsdokument fuer Lexa")
+        names = [t["function"]["name"] for t in tools]
+        assert "personal_os_context_pack" in names
+        assert "personal_os_review_draft" in names
+
+    def test_context_pack_selects_personal_os_tools(self):
+        """Context-pack requests should include read-only Personal OS tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("erstelle ein kontextpaket briefing fuer Lexa")
+        names = [t["function"]["name"] for t in tools]
+        assert "personal_os_context_pack" in names
+        assert "personal_os_review_draft" in names
+
+    def test_draft_review_selects_personal_os_tools(self):
+        """Draft-review requests should include read-only Personal OS tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("pruefe die pending drafts zur freigabe")
+        names = [t["function"]["name"] for t in tools]
+        assert "personal_os_list_drafts" in names
+        assert "personal_os_review_draft" in names
+
+    def test_skill_draft_selects_personal_os_tools(self):
+        """Skill-draft requests should include read-only Personal OS tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("entwirf einen Lexa Skill als Markdown Vorlage")
+        names = [t["function"]["name"] for t in tools]
+        assert "personal_os_context_pack" in names
+        assert "personal_os_review_draft" in names
+
+    def test_decision_brief_selects_personal_os_tools(self):
+        """Decision-brief requests should include read-only Personal OS tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("erstelle einen entscheidungsbrief mit optionen und risiken")
+        names = [t["function"]["name"] for t in tools]
+        assert "personal_os_context_pack" in names
+        assert "personal_os_review_draft" in names
+
+    def test_ship_check_selects_dev_and_personal_os_tools(self):
+        """Ship-check requests should include code and context review tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("release check fuer Lexa vor dem publish")
+        names = [t["function"]["name"] for t in tools]
+        assert "git_status" in names
+        assert "personal_os_context_pack" in names
+
     def test_personal_os_selects_os_tools(self):
         """A Personal OS request should include read-only OS tools."""
         from backend.tool_registry import get_tools_for_context
@@ -107,6 +177,23 @@ class TestToolContextSelection:
         assert "personal_os_lexa_code_loop" in names
         assert "personal_os_review_draft" in names
         assert "personal_os_draft_history" in names
+
+    def test_hermes_selects_hermes_tools(self):
+        """Hermes requests should include the Hermes Agent bridge tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("nutze hermes agent um lexa im hintergrund zu verbessern")
+        names = [t["function"]["name"] for t in tools]
+        assert "hermes_status" in names
+        assert "hermes_improve_lexa" in names
+        assert "hermes_telegram_status" in names
+
+    def test_os_agent_runtime_selects_os_agent_tools(self):
+        """OS agent-runtime requests should include Lexa OS worker tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("starte eine os agent runtime hintergrundaufgabe fuer lexa")
+        names = [t["function"]["name"] for t in tools]
+        assert "os_agent_status" in names
+        assert "os_agent_start_task" in names
 
     def test_max_tools_limit(self):
         """Context selection should not exceed TOOL_USE_MAX_TOOLS + padding allowance."""
@@ -198,6 +285,19 @@ class TestModelSelection:
         finally:
             ai_engine.set_ai_model(original)
 
+    def test_set_ai_model_accepts_anthropic_ids(self):
+        from backend import ai_engine
+
+        original = ai_engine.get_ai_models()["current"]
+        try:
+            result = ai_engine.set_ai_model("anthropic:claude-sonnet-4-20250514")
+            current = ai_engine.get_ai_models()
+            assert "Claude" in result
+            assert current["current"] == "anthropic:claude-sonnet-4-20250514"
+            assert current["current_provider"] == "anthropic"
+        finally:
+            ai_engine.set_ai_model(original)
+
     def test_get_ai_models_returns_grouped_provider_data(self):
         from backend.ai_engine import get_ai_models
 
@@ -205,7 +305,9 @@ class TestModelSelection:
         assert "grouped" in models
         assert "openai" in models["grouped"]
         assert "gemini" in models["grouped"]
+        assert "anthropic" in models["grouped"]
         assert models["grouped"]["openai"]["models"]
+        assert models["grouped"]["anthropic"]["models"]
 
 
 class TestProviderStatus:
@@ -218,13 +320,183 @@ class TestProviderStatus:
             monkeypatch.setattr(ai_engine, "_get_groq_client", lambda: object())
             monkeypatch.setattr(ai_engine, "_get_openai_client", lambda: object())
             monkeypatch.setattr(ai_engine, "_get_gemini_client", lambda: object())
+            monkeypatch.setattr(ai_engine, "_get_anthropic_api_key", lambda: "anthropic-key")
 
             status = ai_engine.get_ai_status()
             assert status["groq"]["available"] is True
             assert status["openai"]["available"] is True
             assert status["gemini"]["available"] is True
+            assert status["anthropic"]["available"] is True
             # ollama removed in Phase 40+ (no longer a separate status entry)
             assert status["selected_provider"] == "gemini"
             assert status["active_provider"] == "gemini"
+            assert status["fallback_enabled"] is True
+            assert "fallback_order" in status
         finally:
             ai_engine.set_ai_model(original)
+
+
+class TestProviderFallback:
+    def test_503_is_temporary_model_error(self):
+        from backend import ai_engine
+
+        err = RuntimeError("503 Service Unavailable: model overloaded")
+
+        assert ai_engine._categorize_error(err) == ai_engine._ErrorCategory.MODEL_ERROR
+
+    def test_chat_fallback_tries_configured_provider_after_selected_failure(self, monkeypatch):
+        from backend import ai_engine
+
+        selected = ai_engine.AI_MODEL_REGISTRY["gemini:gemini-2.5-flash"]
+        calls = []
+
+        def fake_chat(messages, selected_model=None, tools=None):
+            calls.append(selected_model["id"])
+            if selected_model["provider"] == "openai":
+                return {"type": "text", "content": "Fallback antwortet."}
+            return None
+
+        monkeypatch.setattr(ai_engine, "_provider_available_for_fallback", lambda provider: provider == "openai")
+        monkeypatch.setattr(ai_engine, "_chat_with_selected_provider", fake_chat)
+
+        result = ai_engine._chat_with_provider_fallbacks(
+            [{"role": "user", "content": "ping"}],
+            selected,
+            tools=None,
+        )
+
+        assert result == {"type": "text", "content": "Fallback antwortet."}
+        assert calls == ["openai:gpt-4o"]
+
+    def test_stream_fallback_returns_first_configured_stream(self, monkeypatch):
+        from backend import ai_engine
+
+        selected = ai_engine.AI_MODEL_REGISTRY["gemini:gemini-2.5-flash"]
+
+        def fake_stream(messages, selected_model=None, tools=None):
+            if selected_model["provider"] == "openai":
+                return iter(["ok"])
+            return None
+
+        monkeypatch.setattr(ai_engine, "_provider_available_for_fallback", lambda provider: provider == "openai")
+        monkeypatch.setattr(ai_engine, "_stream_with_selected_provider", fake_stream)
+
+        stream, meta = ai_engine._stream_with_provider_fallbacks(
+            [{"role": "user", "content": "ping"}],
+            selected,
+            tools=None,
+        )
+
+        assert meta["id"] == "openai:gpt-4o"
+        assert list(stream) == ["ok"]
+
+
+class TestAnthropicProvider:
+    def test_anthropic_message_conversion_splits_system_and_messages(self):
+        from backend.ai_engine import _anthropic_convert_messages
+
+        system, messages = _anthropic_convert_messages([
+            {"role": "system", "content": "Du bist Lexa."},
+            {"role": "user", "content": "Hallo"},
+            {"role": "assistant", "content": "Hi"},
+            {"role": "user", "content": "Was kannst du?"},
+        ])
+
+        assert system == "Du bist Lexa."
+        assert messages == [
+            {"role": "user", "content": "Hallo"},
+            {"role": "assistant", "content": "Hi"},
+            {"role": "user", "content": "Was kannst du?"},
+        ]
+
+    def test_anthropic_tool_conversion_uses_input_schema(self):
+        from backend.ai_engine import _anthropic_convert_tools
+
+        tools = _anthropic_convert_tools([
+            {
+                "type": "function",
+                "function": {
+                    "name": "timer_set",
+                    "description": "Set a timer",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"minutes": {"type": "number"}},
+                        "required": ["minutes"],
+                    },
+                },
+            }
+        ])
+
+        assert tools == [
+            {
+                "name": "timer_set",
+                "description": "Set a timer",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"minutes": {"type": "number"}},
+                    "required": ["minutes"],
+                },
+            }
+        ]
+
+    def test_anthropic_response_processing_supports_text_and_tools(self):
+        from backend.ai_engine import _process_anthropic_response
+
+        text = _process_anthropic_response({
+            "content": [{"type": "text", "text": "Hallo von Claude"}]
+        })
+        tool = _process_anthropic_response({
+            "content": [
+                {"type": "text", "text": "Ich stelle den Timer."},
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "timer_set",
+                    "input": {"minutes": 25},
+                },
+            ]
+        })
+
+        assert text == {"type": "text", "content": "Hallo von Claude"}
+        assert tool["type"] == "tool_call"
+        assert tool["tool_calls"][0] == {
+            "id": "toolu_1",
+            "name": "timer_set",
+            "arguments": {"minutes": 25},
+        }
+
+    def test_anthropic_chat_routes_through_unified_provider(self, monkeypatch):
+        from backend import ai_engine
+
+        monkeypatch.setattr(
+            ai_engine,
+            "_anthropic_with_retry",
+            lambda messages, model, stream=False, tools=None: {
+                "content": [{"type": "text", "text": "Claude ist verbunden."}]
+            },
+        )
+
+        result = ai_engine._chat_with_selected_provider(
+            [{"role": "user", "content": "ping"}],
+            {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
+            tools=None,
+        )
+
+        assert result == {"type": "text", "content": "Claude ist verbunden."}
+
+    def test_anthropic_stream_adapter_yields_text_and_tool_chunks(self):
+        from backend.ai_engine import _anthropic_stream_to_openai_chunks
+
+        lines = [
+            'event: content_block_delta',
+            'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}',
+            'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"timer_set","input":{}}}',
+            'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"minutes\\":25}"}}',
+        ]
+
+        chunks = list(_anthropic_stream_to_openai_chunks(lines))
+        assert chunks[0].choices[0].delta.content == "Hi"
+        tool_delta = chunks[1].choices[0].delta.tool_calls[0]
+        assert tool_delta.id == "toolu_1"
+        assert tool_delta.function.name == "timer_set"
+        assert chunks[2].choices[0].delta.tool_calls[0].function.arguments == '{"minutes":25}'

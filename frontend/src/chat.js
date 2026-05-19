@@ -36,12 +36,584 @@ function bindKeyboardAction(el, handler, options = {}) {
 // localStorage = session cache only (max CHAT_HISTORY_LOCAL_MAX messages).
 // saveChatHistory() writes to localStorage as a fast local cache.
 // loadChatHistory() tries backend conversation first, falls back to localStorage.
+let _newConversationInFlight = false;
+let _conversationSwitchSeq = 0;
+let _conversationSwitchInFlight = 0;
+
+function setNewConversationControlsBusy(busy) {
+  document.querySelectorAll('[data-action="newConversation"]').forEach((btn) => {
+    if (!(btn instanceof HTMLButtonElement)) return;
+    btn.disabled = Boolean(busy);
+    if (busy) btn.setAttribute("aria-busy", "true");
+    else btn.removeAttribute("aria-busy");
+  });
+}
+
 function getMessagePersistText(msg) {
+  if (!msg) return "";
+  const stored = msg.dataset?.persistText || "";
+  if (stored.trim()) return stored.trim();
   return (
     msg.querySelector(".msg-text")?.textContent
     || msg.querySelector(".agent-summary")?.textContent
     || ""
   ).trim();
+}
+
+function setMessagePersistText(msg, text) {
+  if (!msg) return;
+  const source = String(text || "").trim();
+  if (source) msg.dataset.persistText = source;
+  else delete msg.dataset.persistText;
+}
+
+function lexaStringHash(value) {
+  const text = String(value || "");
+  let hash = 5381;
+  for (let i = 0; i < text.length; i += 1) hash = ((hash << 5) + hash) ^ text.charCodeAt(i);
+  return (hash >>> 0).toString(36);
+}
+
+function normalizeAgentRunMeta(meta) {
+  if (!meta || typeof meta !== "object") return null;
+  const steps = Array.isArray(meta.steps)
+    ? meta.steps.slice(0, 80).map((step, index) => ({
+        index: step?.index ?? index,
+        action: String(step?.action || "").slice(0, 120),
+        status: String(step?.status || "").slice(0, 40),
+        params: step?.params && typeof step.params === "object" ? step.params : {},
+        duration_ms: Number(step?.duration_ms || 0) || 0,
+      }))
+    : [];
+  const counts = meta.counts && typeof meta.counts === "object"
+    ? ["found", "changed", "done", "blocked", "failed"].reduce((acc, kind) => {
+        acc[kind] = Math.max(0, Number(meta.counts[kind] || 0));
+        return acc;
+      }, createAgentOutcomeCounts())
+    : agentRunOutcomeCounts(steps);
+  const summary = String(meta.summary || "").trim();
+  const totalDurationMs = Math.max(0, Number(meta.total_duration_ms || meta.totalDurationMs || 0));
+  if (!summary && !steps.length && !agentOutcomeTotal(counts)) return null;
+  return { type: "agent_run", summary, steps, counts, total_duration_ms: totalDurationMs };
+}
+
+function getMessageAgentRunMeta(msg) {
+  const raw = msg?.dataset?.agentRunMeta || "";
+  if (!raw) return null;
+  try {
+    return normalizeAgentRunMeta(JSON.parse(raw));
+  } catch (_e) {
+    return null;
+  }
+}
+
+function setMessageAgentRunMeta(msg, meta) {
+  if (!msg) return null;
+  const normalized = normalizeAgentRunMeta(meta);
+  if (!normalized) {
+    delete msg.dataset.agentRunMeta;
+    msg.classList.remove("agent-message");
+    return null;
+  }
+  msg.dataset.agentRunMeta = JSON.stringify(normalized);
+  msg.classList.add("agent-message");
+  return normalized;
+}
+
+function agentRunMetaMessageKey(role, content) {
+  return `${String(role || "assistant")}:${lexaStringHash(content)}`;
+}
+
+function agentRunMetaCacheKey(convId) {
+  return `lexa-agent-run-meta:${String(convId || "local")}`;
+}
+
+function agentRunAttentionResolvedCacheKey(convId) {
+  return `lexa-agent-run-attention-resolved:${String(convId || "local")}`;
+}
+
+function agentRunAttentionResolvedHistoryCacheKey() {
+  return "lexa-agent-run-attention-resolved-history";
+}
+
+function agentRunAttentionResolvedHistoryLimit() {
+  return 12;
+}
+
+function agentRunAttentionResolvedHistoryMaxAgeMs() {
+  return 14 * 24 * 60 * 60 * 1000;
+}
+
+function agentRunAttentionRecordKey(record, index = 0) {
+  if (record?.key) return String(record.key);
+  return `record:${index}:${lexaStringHash(JSON.stringify(record?.meta || {}))}`;
+}
+
+function agentRunAttentionResolvedKeys(convId) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(agentRunAttentionResolvedCacheKey(convId)) || "[]");
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch (_e) {
+    return new Set();
+  }
+}
+
+function saveAgentRunAttentionResolvedKeys(convId, keys) {
+  const list = Array.from(keys || []).map(String).filter(Boolean);
+  try {
+    if (list.length) localStorage.setItem(agentRunAttentionResolvedCacheKey(convId), JSON.stringify(list));
+    else localStorage.removeItem(agentRunAttentionResolvedCacheKey(convId));
+  } catch (e) {
+    console.warn("[Chat] Failed to save resolved Agent attention:", e.message || e);
+  }
+}
+
+function normalizeAgentRunAttentionResolvedHistoryItems(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      convId: item?.convId,
+      title: String(item?.title || t("chat.newChatTitle")).slice(0, 120),
+      failed: Math.max(0, Number(item?.failed || 0)),
+      blocked: Math.max(0, Number(item?.blocked || 0)),
+      keys: Array.isArray(item?.keys) ? item.keys.map(String).filter(Boolean) : [],
+      resolved_at: Math.max(0, Number(item?.resolved_at || 0)),
+    }))
+    .filter((item) => item.convId && item.keys.length);
+}
+
+function agentRunAttentionResolvedHistoryItemHasEvidence(item) {
+  const keys = Array.isArray(item?.keys) ? item.keys.map(String).filter(Boolean) : [];
+  if (!item?.convId || !keys.length) return false;
+  const resolved = agentRunAttentionResolvedKeys(item.convId);
+  const stillResolved = keys.filter((key) => resolved.has(key));
+  if (!stillResolved.length) return false;
+  let records = [];
+  try {
+    records = JSON.parse(localStorage.getItem(agentRunMetaCacheKey(item.convId)) || "[]");
+  } catch (_e) {
+    records = [];
+  }
+  if (!Array.isArray(records) || !records.length) return false;
+  const recordKeys = new Set(records.map((record, index) => agentRunAttentionRecordKey(record, index)));
+  return stillResolved.some((key) => recordKeys.has(key));
+}
+
+function pruneAgentRunAttentionResolvedHistoryItems(items, now = Date.now()) {
+  const maxAgeMs = agentRunAttentionResolvedHistoryMaxAgeMs();
+  return normalizeAgentRunAttentionResolvedHistoryItems(items)
+    .filter((item) => {
+      if (item.resolved_at && now - item.resolved_at > maxAgeMs) return false;
+      return agentRunAttentionResolvedHistoryItemHasEvidence(item);
+    })
+    .slice(0, agentRunAttentionResolvedHistoryLimit());
+}
+
+function saveAgentRunAttentionResolvedHistory(items) {
+  const list = normalizeAgentRunAttentionResolvedHistoryItems(items)
+    .slice(0, agentRunAttentionResolvedHistoryLimit());
+  try {
+    if (list.length) localStorage.setItem(agentRunAttentionResolvedHistoryCacheKey(), JSON.stringify(list));
+    else localStorage.removeItem(agentRunAttentionResolvedHistoryCacheKey());
+  } catch (e) {
+    console.warn("[Chat] Failed to save Agent attention history:", e.message || e);
+  }
+}
+
+function agentRunAttentionResolvedHistory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(agentRunAttentionResolvedHistoryCacheKey()) || "[]");
+    const normalized = normalizeAgentRunAttentionResolvedHistoryItems(parsed);
+    const pruned = pruneAgentRunAttentionResolvedHistoryItems(normalized);
+    if (JSON.stringify(pruned) !== JSON.stringify(normalized.slice(0, agentRunAttentionResolvedHistoryLimit()))) {
+      saveAgentRunAttentionResolvedHistory(pruned);
+    }
+    return pruned;
+  } catch (_e) {
+    return [];
+  }
+}
+
+function agentRunAttentionResolvedHistoryForConversations(convList) {
+  const history = agentRunAttentionResolvedHistory();
+  const ids = new Set((Array.isArray(convList) ? convList : [])
+    .map((conv) => String(conv?.id || ""))
+    .filter(Boolean));
+  if (!ids.size) return [];
+  const visible = history.filter((item) => ids.has(String(item.convId)));
+  if (visible.length !== history.length) saveAgentRunAttentionResolvedHistory(visible);
+  return visible;
+}
+
+function recordAgentAttentionResolution(item) {
+  const keys = Array.isArray(item?.keys) ? item.keys.map(String).filter(Boolean) : [];
+  if (!item?.convId || !keys.length) return;
+  const signature = `${String(item.convId)}:${keys.slice().sort().join("|")}`;
+  const existing = agentRunAttentionResolvedHistory()
+    .filter((entry) => `${String(entry.convId)}:${entry.keys.slice().sort().join("|")}` !== signature);
+  saveAgentRunAttentionResolvedHistory([{
+    convId: item.convId,
+    title: String(item.title || t("chat.newChatTitle")).slice(0, 120),
+    failed: Math.max(0, Number(item.failed || 0)),
+    blocked: Math.max(0, Number(item.blocked || 0)),
+    keys,
+    resolved_at: Date.now(),
+  }, ...existing]);
+}
+
+function removeAgentAttentionResolution(convId, keys) {
+  const keySet = new Set((Array.isArray(keys) ? keys : [keys]).map(String).filter(Boolean));
+  if (!convId || !keySet.size) return;
+  saveAgentRunAttentionResolvedHistory(agentRunAttentionResolvedHistory().filter((item) =>
+    String(item.convId) !== String(convId) || !item.keys.some((key) => keySet.has(String(key)))
+  ));
+}
+
+function restoreAgentAttentionHistoryItem(item) {
+  const keys = Array.isArray(item?.keys) ? item.keys.map(String).filter(Boolean) : [];
+  if (!item?.convId || !keys.length) return false;
+  const resolved = agentRunAttentionResolvedKeys(item.convId);
+  keys.forEach((key) => resolved.delete(key));
+  saveAgentRunAttentionResolvedKeys(item.convId, resolved);
+  removeAgentAttentionResolution(item.convId, keys);
+  renderConversationList();
+  showToast(t("chat.agentAttentionRestored"), "success", 1800);
+  return true;
+}
+
+function saveAgentRunMetaForConversation(convId) {
+  if (!convId || !chatMessages) return;
+  const records = [];
+  chatMessages.querySelectorAll(".message").forEach((msg) => {
+    const meta = getMessageAgentRunMeta(msg);
+    if (!meta) return;
+    const text = getMessagePersistText(msg);
+    if (!text) return;
+    const role = msg.classList.contains("user-message") ? "user" : "assistant";
+    records.push({ key: agentRunMetaMessageKey(role, text), meta });
+  });
+  try {
+    if (records.length) localStorage.setItem(agentRunMetaCacheKey(convId), JSON.stringify(records));
+    else localStorage.removeItem(agentRunMetaCacheKey(convId));
+  } catch (e) {
+    console.warn("[Chat] Failed to save Agent run metadata:", e.message || e);
+  }
+}
+
+function clearAgentRunLocalStateForConversation(convId) {
+  if (!convId) return;
+  localStorage.removeItem(agentRunMetaCacheKey(convId));
+  localStorage.removeItem(agentRunAttentionResolvedCacheKey(convId));
+  saveAgentRunAttentionResolvedHistory(agentRunAttentionResolvedHistory().filter((item) => String(item.convId) !== String(convId)));
+}
+
+function markConversationClearedLocally(convId) {
+  if (!convId) return false;
+  const convList = LexaState.get("conversationsList");
+  if (!Array.isArray(convList)) return false;
+  let changed = false;
+  const next = convList.map((conv) => {
+    if (String(conv?.id) !== String(convId)) return conv;
+    changed = true;
+    return { ...conv, message_count: 0, last_message: "", messages: [] };
+  });
+  if (changed) LexaState.set("conversationsList", next);
+  return changed;
+}
+
+function removeConversationLocally(convId) {
+  const convList = LexaState.get("conversationsList");
+  const next = (Array.isArray(convList) ? convList : []).filter((conv) => String(conv?.id) !== String(convId));
+  LexaState.set("conversationsList", next);
+  if (typeof updateConversationCount === "function") {
+    updateConversationCount(next.length);
+  }
+  renderConversationList();
+  return next;
+}
+
+function upsertConversationLocally(conv) {
+  if (!conv?.id) return [];
+  const convList = LexaState.get("conversationsList");
+  const existing = Array.isArray(convList) ? convList : [];
+  const normalized = {
+    id: conv.id,
+    title: conv.title || t("chat.newChatTitle"),
+    message_count: Number(conv.message_count || 0),
+    last_message: conv.last_message || "",
+    ...conv,
+  };
+  const next = [normalized, ...existing.filter((item) => String(item?.id) !== String(conv.id))];
+  LexaState.set("conversationsList", next);
+  if (typeof updateConversationCount === "function") {
+    updateConversationCount(next.length);
+  }
+  renderConversationList();
+  return next;
+}
+
+function updateConversationTitleLocally(convId, title) {
+  const nextTitle = String(title || "").trim();
+  if (!convId || !nextTitle) return false;
+  const convList = LexaState.get("conversationsList");
+  if (!Array.isArray(convList)) return false;
+  let changed = false;
+  const next = convList.map((conv) => {
+    if (String(conv?.id) !== String(convId)) return conv;
+    if (conv.title === nextTitle) return conv;
+    changed = true;
+    return { ...conv, title: nextTitle };
+  });
+  if (!changed) return false;
+  LexaState.set("conversationsList", next);
+  renderConversationList();
+  return true;
+}
+
+function createAgentRunMetaResolver(convId) {
+  let records = [];
+  try {
+    records = JSON.parse(localStorage.getItem(agentRunMetaCacheKey(convId)) || "[]");
+  } catch (_e) {
+    records = [];
+  }
+  if (!Array.isArray(records) || !records.length) return () => null;
+  const used = new Set();
+  return (role, content) => {
+    const key = agentRunMetaMessageKey(role, content);
+    const index = records.findIndex((record, idx) => !used.has(idx) && record?.key === key);
+    if (index < 0) return null;
+    used.add(index);
+    return normalizeAgentRunMeta(records[index].meta);
+  };
+}
+
+function agentRunAttentionForConversation(conv) {
+  const convId = conv?.id;
+  if (!convId) return null;
+  let records = [];
+  try {
+    records = JSON.parse(localStorage.getItem(agentRunMetaCacheKey(convId)) || "[]");
+  } catch (_e) {
+    records = [];
+  }
+  if (!Array.isArray(records) || !records.length) return null;
+  const totals = { failed: 0, blocked: 0, runs: 0 };
+  const resolved = agentRunAttentionResolvedKeys(convId);
+  const keys = [];
+  records.forEach((record, index) => {
+    const key = agentRunAttentionRecordKey(record, index);
+    if (resolved.has(key)) return;
+    const meta = normalizeAgentRunMeta(record?.meta);
+    if (!meta) return;
+    const failed = Number(meta.counts?.failed || 0);
+    const blocked = Number(meta.counts?.blocked || 0);
+    if (failed > 0 || blocked > 0) {
+      totals.failed += failed;
+      totals.blocked += blocked;
+      totals.runs += 1;
+      keys.push(key);
+    }
+  });
+  if (!totals.runs) return null;
+  return { convId, title: conv.title || t("chat.newChatTitle"), keys, ...totals };
+}
+
+function agentRunAttentionListForConversations(convList) {
+  return (Array.isArray(convList) ? convList : [])
+    .map(agentRunAttentionForConversation)
+    .filter(Boolean);
+}
+
+function updateAgentAttentionFilterButton(attentionCount, active) {
+  const btn = document.getElementById("agent-attention-filter-btn");
+  if (!btn) return;
+  const hasAttention = Number(attentionCount) > 0;
+  btn.hidden = !hasAttention;
+  btn.disabled = !hasAttention;
+  btn.classList.toggle("hidden", !hasAttention);
+  btn.classList.toggle("active", Boolean(active && hasAttention));
+  btn.setAttribute("aria-hidden", hasAttention ? "false" : "true");
+  btn.setAttribute("aria-pressed", active && hasAttention ? "true" : "false");
+  const label = active && hasAttention
+    ? t("chat.agentAttentionFilterClear", { count: attentionCount })
+    : t("chat.agentAttentionFilterLabel", { count: attentionCount });
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
+}
+
+function updateAgentAttentionHeaderSummary(attentionList, convList) {
+  const summary = document.getElementById("agent-attention-summary");
+  if (!summary) return;
+  const openCount = Array.isArray(attentionList) ? attentionList.length : 0;
+  const resolvedCount = agentRunAttentionResolvedHistoryForConversations(convList).length;
+  const hasConversations = Array.isArray(convList) && convList.length > 0;
+  if (!openCount && !resolvedCount) {
+    summary.textContent = "";
+    if (hasConversations) {
+      summary.hidden = false;
+      summary.classList.remove("hidden");
+      summary.title = t("chat.agentAttentionHeaderClearLabel");
+      summary.setAttribute("aria-label", summary.title);
+      const clear = document.createElement("span");
+      clear.className = "agent-attention-summary-chip clear";
+      clear.textContent = t("chat.agentAttentionHeaderClear");
+      summary.appendChild(clear);
+      return;
+    }
+    summary.hidden = true;
+    summary.classList.add("hidden");
+    summary.removeAttribute("title");
+    summary.removeAttribute("aria-label");
+    return;
+  }
+  summary.hidden = false;
+  summary.classList.remove("hidden");
+  summary.textContent = "";
+  summary.title = t("chat.agentAttentionHeaderLabel", { open: openCount, resolved: resolvedCount });
+  summary.setAttribute("aria-label", summary.title);
+  if (openCount) {
+    const open = document.createElement("span");
+    open.className = "agent-attention-summary-chip open";
+    open.textContent = t("chat.agentAttentionHeaderOpen", { count: openCount });
+    summary.appendChild(open);
+  }
+  if (resolvedCount) {
+    const resolved = document.createElement("span");
+    resolved.className = "agent-attention-summary-chip resolved";
+    resolved.textContent = t("chat.agentAttentionHeaderResolved", { count: resolvedCount });
+    summary.appendChild(resolved);
+  }
+}
+
+function toggleAgentAttentionFilter() {
+  const attentionCount = agentRunAttentionListForConversations(LexaState.get("conversationsList") || []).length;
+  const next = attentionCount > 0 && !LexaState.get("conversationAttentionOnly");
+  LexaState.set("conversationAttentionOnly", next);
+  renderConversationList();
+}
+
+function resolveAgentAttentionForConversation(convId, title = "") {
+  const attention = agentRunAttentionForConversation({ id: convId, title });
+  if (!attention?.keys?.length) return false;
+  const resolved = agentRunAttentionResolvedKeys(convId);
+  attention.keys.forEach((key) => resolved.add(key));
+  saveAgentRunAttentionResolvedKeys(convId, resolved);
+  recordAgentAttentionResolution(attention);
+  renderConversationList();
+  showToast(t("chat.agentAttentionResolved"), "success", 1800);
+  return true;
+}
+
+function renderAgentAttentionPanel(container, convList) {
+  if (!container) return 0;
+  const attention = agentRunAttentionListForConversations(convList).slice(0, 4);
+  if (!attention.length) return 0;
+  const panel = document.createElement("div");
+  panel.className = "agent-attention-panel";
+  panel.setAttribute("role", "region");
+  panel.setAttribute("aria-label", t("chat.agentAttentionTitle"));
+  const title = document.createElement("div");
+  title.className = "agent-attention-title";
+  title.textContent = t("chat.agentAttentionTitle");
+  const list = document.createElement("div");
+  list.className = "agent-attention-list";
+  list.setAttribute("role", "list");
+  attention.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "agent-attention-row";
+    row.setAttribute("role", "listitem");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "agent-attention-item";
+    btn.setAttribute("aria-label", t("chat.agentAttentionOpenLabel", {
+      title: item.title,
+      failed: item.failed,
+      blocked: item.blocked,
+    }));
+    const label = document.createElement("span");
+    label.className = "agent-attention-conv";
+    label.textContent = item.title;
+    const count = document.createElement("span");
+    count.className = "agent-attention-count";
+    count.textContent = t("chat.agentAttentionCounts", { failed: item.failed, blocked: item.blocked });
+    btn.appendChild(label);
+    btn.appendChild(count);
+    btn.addEventListener("click", () => switchConversation(item.convId));
+    const resolveBtn = document.createElement("button");
+    resolveBtn.type = "button";
+    resolveBtn.className = "agent-attention-resolve-btn";
+    resolveBtn.title = t("chat.agentAttentionResolveLabel", { title: item.title });
+    resolveBtn.setAttribute("aria-label", t("chat.agentAttentionResolveLabel", { title: item.title }));
+    resolveBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>';
+    resolveBtn.addEventListener("click", () => resolveAgentAttentionForConversation(item.convId, item.title));
+    row.appendChild(btn);
+    row.appendChild(resolveBtn);
+    list.appendChild(row);
+  });
+  panel.appendChild(title);
+  panel.appendChild(list);
+  container.appendChild(panel);
+  return attention.length;
+}
+
+function renderAgentAttentionFilterNote(container, count) {
+  if (!container) return;
+  const note = document.createElement("div");
+  note.className = "agent-attention-filter-note";
+  note.textContent = t("chat.agentAttentionFilterActive", { count });
+  container.appendChild(note);
+}
+
+function renderAgentResolvedHistoryPanel(container, convList) {
+  if (!container) return 0;
+  const items = agentRunAttentionResolvedHistoryForConversations(convList).slice(0, 3);
+  if (!items.length) return 0;
+  const panel = document.createElement("div");
+  panel.className = "agent-resolved-panel";
+  panel.setAttribute("role", "region");
+  panel.setAttribute("aria-label", t("chat.agentResolvedTitle"));
+  const title = document.createElement("div");
+  title.className = "agent-resolved-title";
+  title.textContent = t("chat.agentResolvedTitle");
+  const list = document.createElement("div");
+  list.className = "agent-resolved-list";
+  list.setAttribute("role", "list");
+  items.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "agent-resolved-row";
+    row.setAttribute("role", "listitem");
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "agent-resolved-item";
+    openBtn.setAttribute("aria-label", t("chat.agentResolvedOpenLabel", {
+      title: item.title,
+      failed: item.failed,
+      blocked: item.blocked,
+    }));
+    const label = document.createElement("span");
+    label.className = "agent-resolved-conv";
+    label.textContent = item.title;
+    const count = document.createElement("span");
+    count.className = "agent-resolved-count";
+    count.textContent = t("chat.agentResolvedCounts", { failed: item.failed, blocked: item.blocked });
+    openBtn.appendChild(label);
+    openBtn.appendChild(count);
+    openBtn.addEventListener("click", () => switchConversation(item.convId));
+    const restoreBtn = document.createElement("button");
+    restoreBtn.type = "button";
+    restoreBtn.className = "agent-resolved-restore-btn";
+    restoreBtn.title = t("chat.agentResolvedRestoreLabel", { title: item.title });
+    restoreBtn.setAttribute("aria-label", t("chat.agentResolvedRestoreLabel", { title: item.title }));
+    restoreBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>';
+    restoreBtn.addEventListener("click", () => restoreAgentAttentionHistoryItem(item));
+    row.appendChild(openBtn);
+    row.appendChild(restoreBtn);
+    list.appendChild(row);
+  });
+  panel.appendChild(title);
+  panel.appendChild(list);
+  container.appendChild(panel);
+  return items.length;
 }
 
 function isPersistableChatMessage(msg) {
@@ -55,7 +627,10 @@ function saveChatHistory() {
     if (!isPersistableChatMessage(msg)) return;
     const text = getMessagePersistText(msg);
     const type = msg.classList.contains("user-message") ? "user" : "system";
-    if (text) messages.push({ text, type });
+    if (text) {
+      const meta = getMessageAgentRunMeta(msg);
+      messages.push(meta ? { text, type, meta } : { text, type });
+    }
   });
   const toSave = messages.slice(-(LexaConfig.CHAT_HISTORY_LOCAL_MAX));
   try {
@@ -63,10 +638,23 @@ function saveChatHistory() {
   } catch (e) { console.warn("[Chat] Failed to save chat history to localStorage:", e.message || e); }
 }
 
+function persistChatAfterDomMutation() {
+  saveChatHistory();
+  saveCurrentConversation();
+}
+
+function clearRenderedChatMessages() {
+  if (!chatMessages) return;
+  chatMessages.querySelectorAll(".message").forEach((msg) => msg.remove());
+}
+
 // ── AUTO-SAVE CONVERSATION ────────────────────────
 async function autoSaveConversation() {
-  if (!LexaState.get("currentConversationId") || !LexaState.get("backendOnline") || !chatMessages) return;
+  const convId = LexaState.get("currentConversationId");
+  if (_conversationSwitchInFlight > 0) return;
+  if (!convId || !LexaState.get("backendOnline") || !chatMessages) return;
   try {
+    saveAgentRunMetaForConversation(convId);
     const messages = [];
     chatMessages.querySelectorAll(".message").forEach((msg) => {
       if (!isPersistableChatMessage(msg)) return;
@@ -75,7 +663,7 @@ async function autoSaveConversation() {
       if (text) messages.push({ role, content: text });
     });
     if (messages.length === 0) return;
-    await window.lexa.conversationUpdate(LexaState.get("currentConversationId"), { messages });
+    await window.lexa.conversationUpdate(convId, { messages });
   } catch (e) { console.warn("[Chat] Auto-save conversation failed:", e.message || e); }
 }
 
@@ -138,17 +726,32 @@ async function checkTimers() {
   } catch (e) { console.warn("[Chat] Pomodoro check failed:", e.message || e); }
 }
 
+function renderPersistedConversationMessages(messages, convId = null) {
+  const items = Array.isArray(messages) ? messages : [];
+  const agentMetaForMessage = convId ? createAgentRunMetaResolver(convId) : null;
+  items.forEach((msg) => {
+    const text = msg?.content ?? msg?.text ?? "";
+    if (!String(text).trim()) return;
+    const type = msg?.role === "user" || msg?.type === "user" ? "user" : "system";
+    const meta = type === "system"
+      ? (msg?.meta || (agentMetaForMessage ? agentMetaForMessage(msg?.role || "assistant", text) : null))
+      : null;
+    addMessage(text, type, null, false, true, { agentRunMeta: meta });
+  });
+}
+
 async function loadChatHistory() {
   // Try loading from backend conversation (SQLite = source of truth)
   const convId = LexaState.get("currentConversationId") || localStorage.getItem("lexa-active-conversation");
   if (convId && LexaState.get("backendOnline")) {
     try {
       const conv = await window.lexa.conversationGet(convId);
-      if (conv && !conv.detail && Array.isArray(conv.messages) && conv.messages.length > 0) {
-        LexaState.set("currentConversationId", conv.id || convId);
-        for (const msg of conv.messages) {
-          addMessage(msg.content, msg.role === "user" ? "user" : "system", null, false, true);
-        }
+      if (conv && !conv.detail && Array.isArray(conv.messages)) {
+        const activeConvId = conv.id || convId;
+        clearRenderedChatMessages();
+        LexaState.set("currentConversationId", activeConvId);
+        renderPersistedConversationMessages(conv.messages, activeConvId);
+        saveAgentRunMetaForConversation(activeConvId);
         return;
       }
     } catch (e) { console.warn("[Chat] Failed to load conversation from backend, falling back to localStorage:", e.message || e); }
@@ -158,8 +761,10 @@ async function loadChatHistory() {
     const saved = localStorage.getItem("lexa-chat-history");
     if (!saved) return;
     const messages = JSON.parse(saved);
-    if (!Array.isArray(messages) || messages.length === 0) return;
-    messages.forEach((m) => { addMessage(m.text, m.type, null, false, true); });
+    if (!Array.isArray(messages)) return;
+    clearRenderedChatMessages();
+    renderPersistedConversationMessages(messages, convId);
+    if (convId) saveAgentRunMetaForConversation(convId);
   } catch (e) { console.warn("[Chat] Failed to load chat history from localStorage:", e.message || e); }
 }
 
@@ -168,10 +773,19 @@ function clearChat() {
   const msgs = chatMessages.querySelectorAll(".message");
   msgs.forEach((m) => m.remove());
   localStorage.removeItem("lexa-chat-history");
-  if (LexaState.get("currentConversationId")) {
-    window.lexa.conversationUpdate(LexaState.get("currentConversationId"), { messages: [] })
+  const convId = LexaState.get("currentConversationId");
+  if (convId) {
+    clearAgentRunLocalStateForConversation(convId);
+    markConversationClearedLocally(convId);
+    renderConversationList();
+  }
+  if (convId) {
+    window.lexa.conversationUpdate(convId, { messages: [] })
       .then(() => refreshConversationSidebar())
-      .catch(() => { });
+      .catch((e) => {
+        console.warn("[Chat] Failed to sync cleared conversation:", e.message || e);
+        showToast(t("toast.chatClearSyncFailed"), "warning", 3500);
+      });
   }
   // Restore hero greeting view — orb always stays visible
   const sleekGreeting = document.getElementById("sleek-greeting");
@@ -211,7 +825,682 @@ function setIconButton(button, icon, label) {
   button.setAttribute("aria-label", label);
 }
 
-function addMessage(text, type = "system", action = null, requiresConfirmation = false, silent = false) {
+function setMessageActionMenuOpen(menu, open) {
+  if (!menu) return;
+  menu.classList.toggle("open", Boolean(open));
+  const trigger = menu.querySelector(".msg-more-btn");
+  if (trigger) trigger.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function closeMessageActionMenus(except = null) {
+  document.querySelectorAll(".msg-more-actions.open").forEach((menu) => {
+    if (menu !== except) setMessageActionMenuOpen(menu, false);
+  });
+}
+
+let _messageActionMenuDismissBound = false;
+function ensureMessageActionMenuDismiss() {
+  if (_messageActionMenuDismissBound) return;
+  _messageActionMenuDismissBound = true;
+  document.addEventListener("click", (event) => {
+    if (event.target?.closest?.(".msg-more-actions")) return;
+    closeMessageActionMenus();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeMessageActionMenus();
+  });
+}
+
+function createMessageActionOverflowMenu(actions) {
+  const actionButtons = (actions || []).filter(Boolean);
+  if (!actionButtons.length) return null;
+  ensureMessageActionMenuDismiss();
+  const wrap = document.createElement("div");
+  wrap.className = "msg-more-actions";
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "msg-action-btn msg-more-btn";
+  setIconButton(trigger, "\u22EF", t("chat.moreActionsTooltip"));
+  trigger.setAttribute("aria-haspopup", "menu");
+  trigger.setAttribute("aria-expanded", "false");
+  const menu = document.createElement("div");
+  menu.className = "msg-more-menu";
+  menu.setAttribute("role", "menu");
+  actionButtons.forEach((button) => {
+    button.classList.add("msg-more-item");
+    button.setAttribute("role", "menuitem");
+    menu.appendChild(button);
+  });
+  trigger.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const shouldOpen = !wrap.classList.contains("open");
+    closeMessageActionMenus(wrap);
+    setMessageActionMenuOpen(wrap, shouldOpen);
+    if (shouldOpen) {
+      const firstEnabled = menu.querySelector("button:not(:disabled)");
+      if (firstEnabled && window.matchMedia?.("(hover: none), (pointer: coarse)")?.matches) firstEnabled.focus();
+    }
+  });
+  wrap.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      setMessageActionMenuOpen(wrap, false);
+      trigger.focus();
+    }
+  });
+  menu.addEventListener("click", (event) => {
+    const actionButton = event.target?.closest?.("button");
+    if (!actionButton || !menu.contains(actionButton)) return;
+    setMessageActionMenuOpen(wrap, false);
+    const rect = trigger.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) trigger.focus();
+  });
+  wrap.appendChild(trigger);
+  wrap.appendChild(menu);
+  return wrap;
+}
+
+function clipAgentStepText(value, limit = 64) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > limit ? `${text.slice(0, Math.max(0, limit - 1))}...` : text;
+}
+
+function agentStepParamSummary(params) {
+  if (!params || typeof params !== "object") return "";
+  const preferredKeys = ["url", "query", "path", "file_path", "dir_path", "title", "name", "command", "message", "prompt"];
+  for (const key of preferredKeys) {
+    const value = params[key];
+    if (value === undefined || value === null || value === "") continue;
+    if (key === "url") {
+      try {
+        const parsed = new URL(String(value));
+        return clipAgentStepText(parsed.hostname || value, 54);
+      } catch (_e) {
+        return clipAgentStepText(value, 54);
+      }
+    }
+    return clipAgentStepText(value, 54);
+  }
+  const first = Object.values(params).find((value) => ["string", "number", "boolean"].includes(typeof value));
+  return first === undefined ? "" : clipAgentStepText(first, 54);
+}
+
+function agentStepActionLabel(action) {
+  const name = String(action || "").trim();
+  if (!name) return t("chat.agentStepUnknown");
+  const commandKey = `cmd.desc.${name}`;
+  const commandLabel = t(commandKey);
+  if (commandLabel && commandLabel !== commandKey) return commandLabel;
+  if (name.startsWith("personal_os_")) return t("chat.agentStepPersonalOs");
+  if (name.startsWith("web_") || name.startsWith("browser_")) return t("chat.agentStepWeb");
+  if (name.startsWith("file_") || name.includes("_file") || name.includes("pdf")) return t("chat.agentStepFile");
+  if (name.startsWith("git_")) return t("chat.agentStepGit");
+  if (name.startsWith("memory_") || name.startsWith("note_") || name.startsWith("todo_") || name.startsWith("routine_")) return t("chat.agentStepKnowledge");
+  if (name.startsWith("email_") || name.startsWith("calendar_") || name.startsWith("telegram_") || name.startsWith("discord_")) return t("chat.agentStepComms");
+  if (name.startsWith("app_") || name.startsWith("system_") || name.startsWith("process_") || name.startsWith("window_") || name.startsWith("volume_") || name.startsWith("brightness_") || name.startsWith("wifi_") || name.startsWith("battery_") || name === "screenshot") return t("chat.agentStepSystem");
+  return t("chat.agentStepTool");
+}
+
+function agentStepDisplayLabel(step) {
+  const label = agentStepActionLabel(step?.action);
+  const detail = agentStepParamSummary(step?.params);
+  return detail ? t("chat.agentStepWithDetail", { label, detail }) : label;
+}
+
+function agentStepTechnicalLabel(step) {
+  const action = String(step?.action || "").trim() || t("chat.agentStepUnknown");
+  const params = step?.params && typeof step.params === "object" ? step.params : {};
+  const parts = Object.entries(params)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .slice(0, 4)
+    .map(([key, value]) => `${key}: ${clipAgentStepText(value, 80)}`);
+  return parts.length ? `${action}(${parts.join(", ")})` : action;
+}
+
+function agentStepOutcomeKind(step) {
+  const status = String(step?.status || "").toLowerCase();
+  const action = String(step?.action || "").toLowerCase();
+  if (status === "failed") return "failed";
+  if (status === "blocked" || status === "needs_confirmation") return "blocked";
+  if (status && status !== "success") return "done";
+  if (
+    action.startsWith("web_") ||
+    action.startsWith("browser_") ||
+    action.startsWith("personal_os_") ||
+    action.endsWith("_list") ||
+    action.endsWith("_read") ||
+    action.endsWith("_search") ||
+    action.includes("_status") ||
+    action.includes("_info") ||
+    action.includes("_graph") ||
+    action.includes("_view") ||
+    action.includes("_history") ||
+    action.includes("_diff") ||
+    action.includes("_log")
+  ) return "found";
+  if (
+    action.includes("_add") ||
+    action.includes("_create") ||
+    action.includes("_update") ||
+    action.includes("_delete") ||
+    action.includes("_write") ||
+    action.includes("_set") ||
+    action.includes("_toggle") ||
+    action.includes("_move") ||
+    action.includes("_resize") ||
+    action.includes("_rename") ||
+    action.includes("_clean") ||
+    action.includes("_organize") ||
+    action.includes("_merge") ||
+    action.includes("_split") ||
+    action.includes("_convert") ||
+    action.includes("_send") ||
+    action.includes("_commit") ||
+    action.includes("_push") ||
+    action.includes("_pull")
+  ) return "changed";
+  return "done";
+}
+
+function agentStepOutcomeLabel(kind) {
+  const normalized = String(kind || "done").replace(/[^a-z_]/gi, "");
+  const suffix = normalized ? normalized[0].toUpperCase() + normalized.slice(1) : "Done";
+  const key = `chat.agentOutcome${suffix}`;
+  const label = t(key);
+  return label === key ? t("chat.agentOutcomeDone") : label;
+}
+
+function createAgentOutcomeCounts() {
+  return { found: 0, changed: 0, done: 0, blocked: 0, failed: 0 };
+}
+
+function agentRunOutcomeCounts(steps) {
+  const counts = createAgentOutcomeCounts();
+  (Array.isArray(steps) ? steps : []).forEach((step) => {
+    const kind = agentStepOutcomeKind(step);
+    counts[kind] = (counts[kind] || 0) + 1;
+  });
+  return counts;
+}
+
+function recordAgentStepOutcome(step, counts, stepOutcomes) {
+  if (!counts || !stepOutcomes) return;
+  const key = step?.index !== undefined && step?.index !== null
+    ? String(step.index)
+    : agentStepTechnicalLabel(step);
+  const previous = stepOutcomes.get(key);
+  if (previous && counts[previous] > 0) counts[previous] -= 1;
+  const next = agentStepOutcomeKind(step);
+  counts[next] = (counts[next] || 0) + 1;
+  stepOutcomes.set(key, next);
+}
+
+function renderAgentOutcomeSummary(summaryEl, counts) {
+  if (!summaryEl) return;
+  summaryEl.textContent = "";
+  const entries = ["found", "changed", "done", "blocked", "failed"]
+    .map((kind) => ({ kind, count: Number(counts?.[kind] || 0) }))
+    .filter((entry) => entry.count > 0);
+  summaryEl.hidden = entries.length === 0;
+  if (!entries.length) return;
+  entries.forEach(({ kind, count }) => {
+    const chip = document.createElement("span");
+    chip.className = `agent-outcome-chip ${kind}`;
+    chip.setAttribute("role", "listitem");
+    chip.textContent = `${agentStepOutcomeLabel(kind)} ${count}`;
+    summaryEl.appendChild(chip);
+  });
+  const ariaParts = entries.map(({ kind, count }) => `${agentStepOutcomeLabel(kind)} ${count}`);
+  summaryEl.setAttribute("aria-label", `${t("chat.agentOutcomeSummaryLabel")}: ${ariaParts.join(", ")}`);
+}
+
+function agentOutcomeTotal(counts) {
+  return ["found", "changed", "done", "blocked", "failed"]
+    .reduce((total, kind) => total + Number(counts?.[kind] || 0), 0);
+}
+
+function agentCompletionOutcomeSummary(counts) {
+  return ["found", "changed", "done", "blocked", "failed"]
+    .map((kind) => ({ kind, count: Number(counts?.[kind] || 0) }))
+    .filter((entry) => entry.count > 0)
+    .map(({ kind, count }) => `${agentStepOutcomeLabel(kind)} ${count}`)
+    .join(", ");
+}
+
+function agentCompletionContinuePrompt(run, counts, summaryText) {
+  const agentCommand = LEXA_COMPOSER_COMMANDS.find((command) => command.id === "agent");
+  const prefix = composerCommandPrefix(agentCommand);
+  const steps = Array.isArray(run?.steps) ? run.steps : [];
+  const unresolved = steps
+    .filter((step) => ["failed", "blocked", "needs_confirmation"].includes(String(step?.status || "").toLowerCase()) || ["failed", "blocked"].includes(agentStepOutcomeKind(step)))
+    .slice(0, 8);
+  const stepLines = unresolved.map((step) => `- ${agentStepDisplayLabel(step)} | ${agentStepOutcomeLabel(agentStepOutcomeKind(step))} | ${agentStepTechnicalLabel(step)}`);
+  const outcomeLine = agentCompletionOutcomeSummary(counts) || t("chat.agentCompletionContinueNoOutcomes");
+  const rawSummary = String(summaryText || run?.summary || "").trim();
+  const lead = `${prefix}${t("chat.agentCompletionContinuePromptIntro")}\n\n${t("chat.agentCompletionContinueNextRequest")} `;
+  const source = [
+    `${t("chat.agentCompletionContinueOutcomes")}: ${outcomeLine}`,
+    `${t("chat.agentCompletionContinueUnresolved")}:\n${stepLines.length ? stepLines.join("\n") : t("chat.agentCompletionContinueNoUnresolved")}`,
+    rawSummary ? `${t("chat.agentCompletionContinuePriorSummary")}:\n${rawSummary}` : "",
+    t("chat.agentCompletionContinueBoundary"),
+  ].filter(Boolean).join("\n\n");
+  const clipMarker = `\n\n${t("chat.agentCompletionContinueClipMarker")}`;
+  const maxInput = Math.max(1, Number(LexaConfig?.MAX_CHAT_INPUT_LENGTH) || 12000);
+  const targetMax = Math.max(1, maxInput - 300);
+  const sourceBudget = Math.max(0, targetMax - lead.length);
+  const marker = source.length > sourceBudget && clipMarker.length < sourceBudget ? clipMarker : "";
+  const sourceLimit = Math.max(0, sourceBudget - marker.length);
+  const boundedSource = source.length > sourceLimit ? `${source.slice(0, sourceLimit)}${marker}` : source;
+  const text = `${lead}\n\n${boundedSource}`.slice(0, targetMax);
+  return { text, cursorStart: Math.min(lead.length, text.length) };
+}
+
+function startAgentCompletionContinue(btn) {
+  if (btn?.disabled) return;
+  const prompt = String(btn?._lexaAgentContinuePrompt || "").trim();
+  if (!prompt) { showToast(t("chat.agentCompletionContinueEmpty"), "warning", 2000); return; }
+  chatInput.value = prompt;
+  syncChatInputSize();
+  localStorage.setItem("lexa-chat-draft", prompt);
+  chatInput.focus();
+  const cursorStart = Math.max(0, Number(btn?._lexaAgentContinueCursor || 0));
+  if (typeof chatInput.setSelectionRange === "function") {
+    chatInput.setSelectionRange(cursorStart, cursorStart);
+  }
+  flashIconButton(btn, "\u2713", "\u21AA", 1500, t("chat.agentCompletionContinueStarted"));
+  showToast(t("chat.agentCompletionContinueStarted"), "success", 1600);
+}
+
+function agentCompletionAttentionKeyFromText(text) {
+  const source = String(text || "").trim();
+  return source ? agentRunMetaMessageKey("assistant", source) : "";
+}
+
+function isAgentCompletionAttentionResolved(text) {
+  const convId = LexaState.get("currentConversationId");
+  const key = agentCompletionAttentionKeyFromText(text);
+  return Boolean(convId && key && agentRunAttentionResolvedKeys(convId).has(key));
+}
+
+function markAgentCompletionResolveButtonDone(btn) {
+  if (!btn) return;
+  btn.classList.add("is-resolved");
+  btn.dataset.resolved = "true";
+  btn.textContent = t("chat.agentCompletionResolveUndoButton");
+  btn.title = t("chat.agentCompletionResolveUndoTooltip");
+  btn.setAttribute("aria-label", t("chat.agentCompletionResolveUndoTooltip"));
+}
+
+function markAgentCompletionResolveButtonOpen(btn) {
+  if (!btn) return;
+  btn.classList.remove("is-resolved");
+  btn.dataset.resolved = "false";
+  btn.textContent = t("chat.agentCompletionResolveButton");
+  btn.title = t("chat.agentCompletionResolveTooltip");
+  btn.setAttribute("aria-label", t("chat.agentCompletionResolveTooltip"));
+}
+
+function undoAgentCompletionResolve(btn) {
+  const convId = LexaState.get("currentConversationId");
+  const msg = btn?.closest?.(".message");
+  const key = agentCompletionAttentionKeyFromText(getMessagePersistText(msg));
+  if (!convId || !key) {
+    showToast(t("chat.agentCompletionResolveEmpty"), "warning", 1800);
+    return false;
+  }
+  const resolved = agentRunAttentionResolvedKeys(convId);
+  resolved.delete(key);
+  saveAgentRunAttentionResolvedKeys(convId, resolved);
+  removeAgentAttentionResolution(convId, [key]);
+  markAgentCompletionResolveButtonOpen(btn);
+  renderConversationList();
+  showToast(t("chat.agentAttentionRestored"), "success", 1800);
+  return true;
+}
+
+function startAgentCompletionResolve(btn) {
+  if (btn?.disabled) return false;
+  if (btn?.dataset?.resolved === "true") return undoAgentCompletionResolve(btn);
+  const convId = LexaState.get("currentConversationId");
+  const msg = btn?.closest?.(".message");
+  const text = getMessagePersistText(msg);
+  const meta = getMessageAgentRunMeta(msg);
+  const counts = meta?.counts || agentRunOutcomeCounts(meta?.steps);
+  const key = agentCompletionAttentionKeyFromText(text);
+  const hasAttention = Number(counts?.failed || 0) > 0 || Number(counts?.blocked || 0) > 0;
+  if (!convId || !msg || !key || !hasAttention) {
+    showToast(t("chat.agentCompletionResolveEmpty"), "warning", 1800);
+    return false;
+  }
+  saveAgentRunMetaForConversation(convId);
+  const resolved = agentRunAttentionResolvedKeys(convId);
+  resolved.add(key);
+  saveAgentRunAttentionResolvedKeys(convId, resolved);
+  recordAgentAttentionResolution({
+    convId,
+    title: (LexaState.get("conversationsList") || []).find((conv) => String(conv.id) === String(convId))?.title || t("chat.newChatTitle"),
+    failed: Number(counts?.failed || 0),
+    blocked: Number(counts?.blocked || 0),
+    keys: [key],
+  });
+  markAgentCompletionResolveButtonDone(btn);
+  renderConversationList();
+  showToast(t("chat.agentAttentionResolved"), "success", 1800);
+  return true;
+}
+
+function renderAgentCompletionPanel(panel, counts, options = {}) {
+  if (!panel) return;
+  const failed = Number(counts?.failed || 0);
+  const blocked = Number(counts?.blocked || 0);
+  const total = agentOutcomeTotal(counts);
+  const state = failed > 0
+    ? { kind: "failed", label: t("chat.agentCompletionFailed"), next: t("chat.agentCompletionNextFailed") }
+    : blocked > 0
+      ? { kind: "blocked", label: t("chat.agentCompletionBlocked"), next: t("chat.agentCompletionNextBlocked") }
+      : { kind: "complete", label: t("chat.agentCompletionComplete"), next: t("chat.agentCompletionNextComplete") };
+  const needsYou = failed > 0 && blocked > 0
+    ? t("chat.agentCompletionNeedsBoth", { failed, blocked })
+    : failed > 0
+      ? t("chat.agentCompletionNeedsFailed", { count: failed })
+      : blocked > 0
+        ? t("chat.agentCompletionNeedsBlocked", { count: blocked })
+        : t("chat.agentCompletionNeedsClear");
+
+  panel.hidden = false;
+  panel.className = `agent-completion-panel ${state.kind}`;
+  panel.textContent = "";
+  const stateEl = document.createElement("div");
+  stateEl.className = "agent-completion-state";
+  stateEl.textContent = state.label;
+  const grid = document.createElement("div");
+  grid.className = "agent-completion-grid";
+  grid.setAttribute("role", "list");
+  [
+    [t("chat.agentCompletionReached"), t("chat.agentCompletionReachedValue", { count: total })],
+    [t("chat.agentCompletionNeedsYou"), needsYou],
+    [t("chat.agentCompletionNext"), state.next],
+  ].forEach(([label, value]) => {
+    const item = document.createElement("div");
+    item.className = "agent-completion-item";
+    item.setAttribute("role", "listitem");
+    const labelEl = document.createElement("span");
+    labelEl.className = "agent-completion-label";
+    labelEl.textContent = label;
+    const valueEl = document.createElement("span");
+    valueEl.className = "agent-completion-value";
+    valueEl.textContent = value;
+    item.appendChild(labelEl);
+    item.appendChild(valueEl);
+    grid.appendChild(item);
+  });
+  panel.appendChild(stateEl);
+  panel.appendChild(grid);
+  if (failed > 0 || blocked > 0) {
+    const actions = document.createElement("div");
+    actions.className = "agent-completion-actions";
+    if (options?.continuePrompt?.text) {
+      const continueButton = document.createElement("button");
+      continueButton.type = "button";
+      continueButton.className = "agent-completion-continue-btn";
+      continueButton.dataset.icon = "\u21AA";
+      continueButton.textContent = t("chat.agentCompletionContinueButton");
+      continueButton.title = t("chat.agentCompletionContinueTooltip");
+      continueButton.setAttribute("aria-label", t("chat.agentCompletionContinueTooltip"));
+      continueButton._lexaAgentContinuePrompt = options.continuePrompt.text;
+      continueButton._lexaAgentContinueCursor = options.continuePrompt.cursorStart;
+      continueButton.addEventListener("click", () => startAgentCompletionContinue(continueButton));
+      actions.appendChild(continueButton);
+    }
+    const resolveButton = document.createElement("button");
+    resolveButton.type = "button";
+    resolveButton.className = "agent-completion-resolve-btn";
+    resolveButton.dataset.icon = "\u2713";
+    resolveButton.textContent = t("chat.agentCompletionResolveButton");
+    resolveButton.title = t("chat.agentCompletionResolveTooltip");
+    resolveButton.setAttribute("aria-label", t("chat.agentCompletionResolveTooltip"));
+    resolveButton.addEventListener("click", () => startAgentCompletionResolve(resolveButton));
+    if (options?.attentionResolved) markAgentCompletionResolveButtonDone(resolveButton);
+    actions.appendChild(resolveButton);
+    panel.appendChild(actions);
+  }
+  panel.setAttribute("aria-label", `${t("chat.agentCompletionLabel")}: ${state.label}. ${needsYou}. ${state.next}`);
+}
+
+function renderAgentStepOutcome(stepEl, step) {
+  if (!stepEl) return;
+  stepEl.querySelector(".agent-step-outcome")?.remove();
+  const kind = agentStepOutcomeKind(step);
+  const badge = document.createElement("span");
+  badge.className = `agent-step-outcome ${kind}`;
+  badge.textContent = agentStepOutcomeLabel(kind);
+  const duration = stepEl.querySelector(".agent-step-duration");
+  if (duration) stepEl.insertBefore(badge, duration);
+  else stepEl.appendChild(badge);
+  const visibleLabel = stepEl.querySelector(".agent-step-label")?.textContent || t("chat.agentStepUnknown");
+  const technicalLabel = stepEl.title || agentStepTechnicalLabel(step);
+  stepEl.setAttribute("aria-label", `${visibleLabel}. ${badge.textContent}. ${technicalLabel}`);
+}
+
+function renderPersistedAgentRunMeta(body, meta, summaryText) {
+  const normalized = normalizeAgentRunMeta(meta);
+  if (!body || !normalized) return;
+  const counts = normalized.counts || agentRunOutcomeCounts(normalized.steps);
+  const run = { steps: normalized.steps, summary: normalized.summary || summaryText, total_duration_ms: normalized.total_duration_ms };
+
+  const completionEl = document.createElement("div");
+  completionEl.className = "agent-completion-panel";
+  completionEl.setAttribute("role", "group");
+  completionEl.setAttribute("aria-label", t("chat.agentCompletionLabel"));
+  renderAgentCompletionPanel(completionEl, counts, {
+    continuePrompt: agentCompletionContinuePrompt(run, counts, normalized.summary || summaryText),
+    attentionResolved: isAgentCompletionAttentionResolved(summaryText || normalized.summary),
+  });
+  body.appendChild(completionEl);
+
+  const outcomeSummaryEl = document.createElement("div");
+  outcomeSummaryEl.className = "agent-outcome-summary";
+  outcomeSummaryEl.setAttribute("role", "list");
+  outcomeSummaryEl.setAttribute("aria-label", t("chat.agentOutcomeSummaryLabel"));
+  renderAgentOutcomeSummary(outcomeSummaryEl, counts);
+  if (!outcomeSummaryEl.hidden) body.appendChild(outcomeSummaryEl);
+}
+
+function workspaceDraftPromptFromText(sourceText) {
+  const source = String(sourceText || "").trim();
+  if (!source) return "";
+  const workspaceCommand = LEXA_COMPOSER_COMMANDS.find((command) => command.id === "workspace");
+  const prefix = composerCommandPrefix(workspaceCommand);
+  const limit = 8000;
+  const boundedSource = source.length > limit
+    ? `${source.slice(0, limit)}\n\n[Source clipped for chat handoff.]`
+    : source;
+  return `${prefix}Turn the following Lexa answer into a clean reusable workspace artifact. Preserve useful nuance, mark claims that need verification, and keep facts, assumptions, ideas, decisions, evidence, risks, open questions, and tasks separate.\n\nSource answer:\n${boundedSource}`.trim();
+}
+
+async function startWorkspaceDraftFromMessage(btn) {
+  if (btn?.disabled) return;
+  if (LexaState.get("isLoading")) { showToast(t("chat.uploadBusy"), "warning"); return; }
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  const prompt = workspaceDraftPromptFromText(getMessagePersistText(btn?.closest(".message")));
+  if (!prompt) { showToast(t("chat.workspaceHandoffEmpty"), "warning"); return; }
+  showToast(t("chat.workspaceHandoffStarted"), "info", 1800);
+  flashIconButton(btn, "\u2713", "\u25A3", 1800, t("chat.workspaceHandoffStarted"));
+  if (btn) {
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+  }
+  try {
+    await sendAgentMessage(prompt, { displayText: t("chat.workspaceHandoffUserMessage") });
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+    }
+  }
+}
+
+function createWorkspaceHandoffButton() {
+  const workspaceBtn = document.createElement("button");
+  workspaceBtn.type = "button";
+  workspaceBtn.className = "msg-action-btn msg-workspace-btn";
+  setIconButton(workspaceBtn, "\u25A3", t("chat.workspaceHandoffTooltip"));
+  workspaceBtn.addEventListener("click", () => startWorkspaceDraftFromMessage(workspaceBtn));
+  return workspaceBtn;
+}
+
+function continuePromptFromText(sourceText) {
+  const source = String(sourceText || "").trim();
+  if (!source) return { text: "", cursorStart: 0 };
+  const prefix = `${t("chat.continueFromAnswerPrefix")}\n\n${t("chat.continueFromAnswerNextRequest")} `;
+  const sourceLabel = `\n\n${t("chat.continueFromAnswerSourceLabel")}\n`;
+  const clipMarker = `\n\n${t("chat.continueFromAnswerClipMarker")}`;
+  const maxInput = Math.max(1, Number(LexaConfig?.MAX_CHAT_INPUT_LENGTH) || 12000);
+  const nextRequestHeadroom = Math.min(1600, Math.max(240, Math.floor(maxInput * 0.18)));
+  const targetMax = Math.max(1, maxInput - nextRequestHeadroom);
+  const sourceBudget = Math.max(0, targetMax - prefix.length - sourceLabel.length);
+  const marker = source.length > sourceBudget && clipMarker.length < sourceBudget ? clipMarker : "";
+  const sourceLimit = Math.max(0, sourceBudget - marker.length);
+  const boundedSource = source.length > sourceLimit
+    ? `${source.slice(0, sourceLimit)}${marker}`
+    : source;
+  const text = `${prefix}${sourceLabel}${boundedSource}`.slice(0, targetMax);
+  return { text, cursorStart: Math.min(prefix.length, text.length) };
+}
+
+function startContinueFromMessage(btn) {
+  if (btn?.disabled) return;
+  const prompt = continuePromptFromText(getMessagePersistText(btn?.closest(".message")));
+  if (!prompt.text) { showToast(t("chat.continueFromAnswerEmpty"), "warning", 2000); return; }
+  chatInput.value = prompt.text;
+  syncChatInputSize();
+  localStorage.setItem("lexa-chat-draft", prompt.text);
+  chatInput.focus();
+  if (typeof chatInput.setSelectionRange === "function") {
+    chatInput.setSelectionRange(prompt.cursorStart, prompt.cursorStart);
+  }
+  flashIconButton(btn, "\u2713", "\u21AA", 1500, t("chat.continueFromAnswerStarted"));
+  showToast(t("chat.continueFromAnswerStarted"), "success", 1600);
+}
+
+function createContinueFromMessageButton(disabled = false) {
+  const continueBtn = document.createElement("button");
+  continueBtn.type = "button";
+  continueBtn.className = "msg-action-btn msg-continue-btn";
+  continueBtn.disabled = Boolean(disabled);
+  setIconButton(continueBtn, "\u21AA", t("chat.continueFromAnswerTooltip"));
+  continueBtn.addEventListener("click", () => startContinueFromMessage(continueBtn));
+  return continueBtn;
+}
+
+function verifyAnswerPromptFromText(sourceText) {
+  const source = String(sourceText || "").trim();
+  if (!source) return "";
+  const researchCommand = LEXA_COMPOSER_COMMANDS.find((command) => command.id === "research");
+  const prefix = composerCommandPrefix(researchCommand);
+  const limit = 8000;
+  const boundedSource = source.length > limit
+    ? `${source.slice(0, limit)}\n\n${t("chat.verifyAnswerClipMarker")}`
+    : source;
+  return `${prefix}Verify the following Lexa answer with source-backed research. Extract checkable claims, separate facts, assumptions, ideas, decisions, evidence, risks, unsupported claims, and follow-up tasks. Cite sources where available and mark anything not verified clearly.\n\nSource answer:\n${boundedSource}`.trim();
+}
+
+async function startVerifyAnswerFromMessage(btn) {
+  if (btn?.disabled) return;
+  if (LexaState.get("isLoading")) { showToast(t("chat.uploadBusy"), "warning"); return; }
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  const prompt = verifyAnswerPromptFromText(getMessagePersistText(btn?.closest(".message")));
+  if (!prompt) { showToast(t("chat.verifyAnswerEmpty"), "warning", 2000); return; }
+  showToast(t("chat.verifyAnswerStarted"), "info", 1800);
+  flashIconButton(btn, "\u2713", "?", 1800, t("chat.verifyAnswerStarted"));
+  if (btn) {
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+  }
+  try {
+    await sendAgentMessage(prompt, { displayText: t("chat.verifyAnswerUserMessage") });
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+    }
+  }
+}
+
+function createVerifyAnswerButton(disabled = false) {
+  const verifyBtn = document.createElement("button");
+  verifyBtn.type = "button";
+  verifyBtn.className = "msg-action-btn msg-verify-btn";
+  verifyBtn.disabled = Boolean(disabled);
+  setIconButton(verifyBtn, "?", t("chat.verifyAnswerTooltip"));
+  verifyBtn.addEventListener("click", () => startVerifyAnswerFromMessage(verifyBtn));
+  return verifyBtn;
+}
+
+async function saveMessageAsMemory(btn, msg) {
+  if (btn?.disabled) return;
+  const msgText = getMessagePersistText(msg);
+  const snippet = msgText.substring(0, 200).trim();
+  if (!snippet) return;
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  if (btn) {
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+  }
+  try {
+    await window.lexa.memoryAdd(t("chat.helpfulAnswer", {snippet}), "learned", 5);
+    if (btn) {
+      btn.dataset.icon = "\u2713";
+      btn.setAttribute("aria-label", t("toast.savedAsMemory"));
+      btn.title = t("toast.savedAsMemory");
+      btn.removeAttribute("aria-busy");
+    }
+    showToast(t("toast.savedAsMemory"), "success");
+  } catch (e) {
+    console.warn("[Chat] Save message as memory failed:", e.message || e);
+    if (btn) {
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+    }
+    showToast(t("toast.executionError"), "error", 2200);
+  }
+}
+
+function previousUserPromptForMessage(msg) {
+  const allMsgs = chatMessages?.querySelectorAll(".message") || [];
+  for (let i = allMsgs.length - 1; i >= 0; i--) {
+    if (allMsgs[i] !== msg) continue;
+    for (let j = i - 1; j >= 0; j--) {
+      if (allMsgs[j].classList.contains("user-message")) {
+        return getMessagePersistText(allMsgs[j]);
+      }
+    }
+    break;
+  }
+  return "";
+}
+
+async function startRegenerateMessage(btn, msg, fallbackPrompt = "") {
+  if (btn?.disabled) return;
+  if (LexaState.get("isLoading")) { showToast(t("chat.uploadBusy"), "warning"); return; }
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  const prompt = String(fallbackPrompt || previousUserPromptForMessage(msg)).trim();
+  if (!prompt) { showToast(t("chat.regenerateMissingPrompt"), "warning", 2200); return; }
+  if (btn) {
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+  }
+  try {
+    await regenerateMessage(prompt);
+  } finally {
+    if (btn?.isConnected) {
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+    }
+  }
+}
+
+function addMessage(text, type = "system", action = null, requiresConfirmation = false, silent = false, options = {}) {
   const sleekGreeting = document.getElementById("sleek-greeting");
   if (sleekGreeting && !sleekGreeting.classList.contains("hidden")) sleekGreeting.classList.add("hidden");
   // Orb stays visible — don't hide voice-orb-container
@@ -225,9 +1514,11 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
 
   const msg = document.createElement("div");
   msg.className = `message ${type}-message`;
+  setMessagePersistText(msg, text);
   const isUser = type === "user";
+  const agentRunMeta = !isUser ? setMessageAgentRunMeta(msg, options?.agentRunMeta) : null;
   const avatarClass = isUser ? "user" : "system";
-  const nameText = isUser ? t("chat.userNameYou") : t("chat.systemNameLexa");
+  const nameText = isUser ? t("chat.userNameYou") : (agentRunMeta ? `${t("chat.systemNameLexa")} Agent` : t("chat.systemNameLexa"));
   const timeStr = new Date().toLocaleTimeString(t._locale || "de-DE", { hour: "2-digit", minute: "2-digit" });
 
   const avatar = document.createElement("div");
@@ -241,6 +1532,9 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   const nameSpan = document.createElement("span");
   nameSpan.className = "msg-name";
   nameSpan.textContent = nameText;
+  const agentBadge = document.createElement("span");
+  agentBadge.className = "agent-badge";
+  agentBadge.textContent = t("chat.agentBadge");
   const timeSpan = document.createElement("span");
   timeSpan.className = "msg-time";
   timeSpan.textContent = timeStr;
@@ -250,7 +1544,9 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   setIconButton(copyBtn, "\u2398", t("chat.copyTooltip"));
   copyBtn.addEventListener("click", () => copyMessage(copyBtn));
   header.appendChild(nameSpan);
+  if (agentRunMeta) header.appendChild(agentBadge);
   header.appendChild(timeSpan);
+  header.appendChild(copyBtn);
 
   if (!isUser) {
     // Thumbs-up to save as memory
@@ -258,16 +1554,11 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
     thumbsBtn.type = "button";
     thumbsBtn.className = "msg-thumbs-btn";
     setIconButton(thumbsBtn, "\u2605", t("chat.saveAsMemoryTooltip"));
-    thumbsBtn.addEventListener("click", async () => {
-      const msgText = msgTextEl.textContent || "";
-      const snippet = msgText.substring(0, 200).trim();
-      if (!snippet) return;
-      await window.lexa.memoryAdd(t("chat.helpfulAnswer", {snippet}), "learned", 5);
-      thumbsBtn.dataset.icon = "\u2713";
-      thumbsBtn.disabled = true;
-      showToast(t("toast.savedAsMemory"), "success");
-    });
-    header.appendChild(thumbsBtn);
+    thumbsBtn.addEventListener("click", () => saveMessageAsMemory(thumbsBtn, msg));
+    header.appendChild(createContinueFromMessageButton());
+    header.appendChild(createVerifyAnswerButton());
+    header.appendChild(createMessageExportButton());
+    const moreActions = [thumbsBtn, createWorkspaceHandoffButton()];
 
     // Regenerate button for Lexa messages
     if (!silent) {
@@ -275,26 +1566,10 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
       regenBtn.type = "button";
       regenBtn.className = "msg-action-btn msg-regen-btn";
       setIconButton(regenBtn, "\u21BB", t("chat.regenerateTooltip"));
-      regenBtn.addEventListener("click", () => {
-        // Find the user message right before this one
-        const allMsgs = chatMessages.querySelectorAll(".message");
-        let prevUserText = "";
-        for (let i = allMsgs.length - 1; i >= 0; i--) {
-          if (allMsgs[i] === msg) {
-            // Look backwards for user message
-            for (let j = i - 1; j >= 0; j--) {
-              if (allMsgs[j].classList.contains("user-message")) {
-                prevUserText = allMsgs[j].querySelector(".msg-text")?.textContent || "";
-                break;
-              }
-            }
-            break;
-          }
-        }
-        if (prevUserText) regenerateMessage(prevUserText);
-      });
-      header.appendChild(regenBtn);
+      regenBtn.addEventListener("click", () => startRegenerateMessage(regenBtn, msg));
+      moreActions.push(regenBtn);
     }
+    header.appendChild(createMessageActionOverflowMenu(moreActions));
   }
 
   if (isUser && !silent) {
@@ -304,7 +1579,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
     editBtn.className = "msg-action-btn msg-edit-btn";
     setIconButton(editBtn, "\u270E", t("chat.editTooltip"));
     editBtn.addEventListener("click", () => {
-      const currentText = msgTextEl.textContent || "";
+      const currentText = getMessagePersistText(msg);
       chatInput.value = currentText;
       syncChatInputSize();
       chatInput.focus();
@@ -315,6 +1590,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
         for (let i = allMsgs.length - 1; i >= idx; i--) {
           allMsgs[i].remove();
         }
+        persistChatAfterDomMutation();
       }
       showToast(t("chat.editLoaded"), "info", 2000);
     });
@@ -326,19 +1602,23 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
     delBtn.className = "msg-action-btn msg-del-btn";
     setIconButton(delBtn, "\u00D7", t("chat.deleteTooltip"));
     delBtn.addEventListener("click", () => {
+      if (delBtn.disabled) return;
+      delBtn.disabled = true;
+      delBtn.setAttribute("aria-busy", "true");
       msg.classList.add("msg-deleting");
-      setTimeout(() => msg.remove(), 200);
-      saveChatHistory();
+      setTimeout(() => {
+        msg.remove();
+        persistChatAfterDomMutation();
+      }, 200);
     });
     header.appendChild(delBtn);
   }
-
-  header.appendChild(copyBtn);
 
   const msgTextEl = document.createElement("div");
   msgTextEl.className = "msg-text";
   renderFormattedMessage(msgTextEl, text);
   body.appendChild(header);
+  if (agentRunMeta) renderPersistedAgentRunMeta(body, agentRunMeta, text);
   body.appendChild(msgTextEl);
 
   if (requiresConfirmation && action) {
@@ -376,24 +1656,150 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   if (!silent) saveChatHistory();
 }
 
+function flashIconButton(button, icon, restoreIcon, durationMs, feedbackLabel) {
+  if (!button) return;
+  if (!button._lexaIconTimer) {
+    button._lexaOriginalIcon = restoreIcon || button.dataset.icon || "";
+    button._lexaOriginalText = button.textContent || "";
+    button._lexaOriginalAriaLabel = button.getAttribute("aria-label");
+    button._lexaOriginalTitle = button.getAttribute("title");
+  }
+  const originalIcon = button._lexaOriginalIcon || restoreIcon || "";
+  const originalText = button._lexaOriginalText || "";
+  button.textContent = originalText.trim() ? originalText : "";
+  button.dataset.icon = icon;
+  if (feedbackLabel) {
+    button.setAttribute("aria-label", feedbackLabel);
+    button.title = feedbackLabel;
+  }
+  if (button._lexaIconTimer) clearTimeout(button._lexaIconTimer);
+  button._lexaIconTimer = setTimeout(() => {
+    button.dataset.icon = originalIcon;
+    button.textContent = originalText;
+    if (button._lexaOriginalAriaLabel) button.setAttribute("aria-label", button._lexaOriginalAriaLabel);
+    else button.removeAttribute("aria-label");
+    if (button._lexaOriginalTitle) button.title = button._lexaOriginalTitle;
+    else button.removeAttribute("title");
+    button._lexaIconTimer = null;
+    delete button._lexaOriginalIcon;
+    delete button._lexaOriginalText;
+    delete button._lexaOriginalAriaLabel;
+    delete button._lexaOriginalTitle;
+  }, durationMs || 1500);
+}
+
+async function copyTextToClipboard(text) {
+  const source = String(text ?? "");
+  const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : null;
+  if (clipboard && typeof clipboard.writeText === "function") {
+    try {
+      await clipboard.writeText(source);
+      return true;
+    } catch (e) {
+      console.warn("[Chat] Clipboard API failed, trying fallback:", e.message || e);
+    }
+  }
+  if (typeof document === "undefined" || !document.body || typeof document.execCommand !== "function") {
+    throw new Error("clipboard_unavailable");
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = source;
+  textarea.setAttribute("readonly", "");
+  textarea.className = "clipboard-copy-buffer";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    if (!document.execCommand("copy")) throw new Error("clipboard_copy_failed");
+    return true;
+  } finally {
+    textarea.remove();
+  }
+}
+
 function copyCode(btn) {
   const code = btn.closest(".code-block-wrap")?.querySelector("code")?.textContent || "";
-  navigator.clipboard?.writeText(code).then(() => {
-    btn.textContent = "";
-    btn.dataset.icon = "\u2713";
-    setTimeout(() => { btn.dataset.icon = "\u2398"; }, 1500);
+  copyTextToClipboard(code).then(() => {
+    flashIconButton(btn, "\u2713", "\u2398", 1500, t("toast.clipboardCopied"));
+  }).catch(() => {
+    showToast(t("toast.copyFailed") || "Kopieren fehlgeschlagen", "warning", 2000);
   });
 }
 
 function copyMessage(btn) {
-  const text = btn.closest(".msg-body").querySelector(".msg-text")?.textContent || "";
-  navigator.clipboard.writeText(text).then(() => {
-    btn.textContent = "";
-    btn.dataset.icon = "\u2713";
-    setTimeout(() => { btn.dataset.icon = "\u2398"; }, 1500);
+  const text = getMessagePersistText(btn.closest(".message"));
+  copyTextToClipboard(text).then(() => {
+    flashIconButton(btn, "\u2713", "\u2398", 1500, t("toast.clipboardCopied"));
   }).catch(() => {
     showToast(t("toast.copyFailed") || "Kopieren fehlgeschlagen", "warning", 2000);
   });
+}
+
+function messageExportMarkdownFromText(sourceText, options) {
+  const source = String(sourceText || "").trim();
+  if (!source) return "";
+  const exportOptions = options || {};
+  const title = String(exportOptions.title || "Lexa Answer").trim() || "Lexa Answer";
+  const exportedAt = String(exportOptions.exportedAt || new Date().toISOString());
+  return `# ${title}\n\n- Exported: ${exportedAt}\n- Source: Lexa chat\n\n---\n\n${source}\n`;
+}
+
+function messageExportFilename(date = new Date()) {
+  const stamp = date.toISOString().replace(/[:.]/g, "-");
+  return `lexa-answer-${stamp}.md`;
+}
+
+function exportMessageMarkdown(btn) {
+  if (btn?.disabled) return;
+  const text = getMessagePersistText(btn?.closest(".message"));
+  if (!text) { showToast(t("chat.messageExportEmpty"), "warning", 2000); return; }
+  const markdown = messageExportMarkdownFromText(text);
+  let url = "";
+  let link = null;
+  if (btn) {
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+  }
+  try {
+    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+    url = URL.createObjectURL(blob);
+    link = document.createElement("a");
+    link.href = url;
+    link.download = messageExportFilename();
+    document.body.appendChild(link);
+    link.click();
+    flashIconButton(btn, "\u2713", "\u21E9", 1500, t("chat.messageExported"));
+    showToast(t("chat.messageExported"), "success", 1800);
+    setTimeout(() => {
+      if (url) URL.revokeObjectURL(url);
+    }, 1000);
+    if (btn) {
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.removeAttribute("aria-busy");
+      }, 1500);
+    }
+  } catch (e) {
+    console.warn("[Chat] Message markdown export failed:", e.message || e);
+    if (url) URL.revokeObjectURL(url);
+    if (btn) {
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+    }
+    showToast(t("toast.exportError") || "Export error", "error", 2200);
+  } finally {
+    if (link) link.remove();
+  }
+}
+
+function createMessageExportButton(disabled = false) {
+  const exportBtn = document.createElement("button");
+  exportBtn.type = "button";
+  exportBtn.className = "msg-action-btn msg-export-btn";
+  exportBtn.disabled = Boolean(disabled);
+  setIconButton(exportBtn, "\u21E9", t("chat.exportMessageTooltip"));
+  exportBtn.addEventListener("click", () => exportMessageMarkdown(exportBtn));
+  return exportBtn;
 }
 
 function renderFormattedMessage(target, text) {
@@ -720,7 +2126,8 @@ function hideTyping() {
 // ── SEND MESSAGE (streaming) ─────────────────────
 async function sendMessage() {
   if (LexaState.get("isLoading")) return;
-  const text = chatInput.value.trim();
+  const rawText = chatInput.value.trim();
+  const text = expandComposerSlashAlias(rawText) || rawText;
   if (!text) return;
   if (text.length > LexaConfig.MAX_CHAT_INPUT_LENGTH) { showToast(t("chat.messageTooLong", {max: LexaConfig.MAX_CHAT_INPUT_LENGTH}), "warning"); return; }
   if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
@@ -784,17 +2191,33 @@ async function sendMessage() {
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
   copyBtn.className = "msg-copy-btn";
+  copyBtn.disabled = true;
   setIconButton(copyBtn, "\u2398", t("chat.copyTooltip"));
   copyBtn.addEventListener("click", () => copyMessage(copyBtn));
+  const memoryBtn = document.createElement("button");
+  memoryBtn.type = "button";
+  memoryBtn.className = "msg-thumbs-btn";
+  memoryBtn.disabled = true;
+  setIconButton(memoryBtn, "\u2605", t("chat.saveAsMemoryTooltip"));
+  memoryBtn.addEventListener("click", () => saveMessageAsMemory(memoryBtn, msgEl));
+  const workspaceBtn = createWorkspaceHandoffButton();
+  workspaceBtn.disabled = true;
+  const continueBtn = createContinueFromMessageButton(true);
+  const verifyBtn = createVerifyAnswerButton(true);
+  const exportBtn = createMessageExportButton(true);
   const regenBtn = document.createElement("button");
   regenBtn.type = "button";
   regenBtn.className = "msg-action-btn msg-regen-btn";
+  regenBtn.disabled = true;
   setIconButton(regenBtn, "\u21BB", t("chat.regenerateTooltip"));
-  regenBtn.addEventListener("click", () => regenerateMessage(text));
+  regenBtn.addEventListener("click", () => startRegenerateMessage(regenBtn, msgEl, text));
   header.appendChild(nameSpan);
   header.appendChild(timeSpan);
   header.appendChild(copyBtn);
-  header.appendChild(regenBtn);
+  header.appendChild(continueBtn);
+  header.appendChild(verifyBtn);
+  header.appendChild(exportBtn);
+  header.appendChild(createMessageActionOverflowMenu([memoryBtn, workspaceBtn, regenBtn]));
 
   const textEl = document.createElement("div");
   textEl.className = "msg-text streaming-text";
@@ -867,9 +2290,19 @@ async function sendMessage() {
       else if (response.status === 503) errMsg = t("chat.backendOverloaded");
       else if (response.status >= 500) errMsg = t("common.error") + ` (${response.status})`;
       renderFormattedMessage(textEl, errMsg);
+      setMessagePersistText(msgEl, errMsg);
+      copyBtn.disabled = false;
+      memoryBtn.disabled = false;
+      workspaceBtn.disabled = false;
+      continueBtn.disabled = false;
+      verifyBtn.disabled = false;
+      exportBtn.disabled = false;
+      regenBtn.disabled = false;
       LexaState.set("isLoading", false); sendBtn.disabled = false;
       window._lexaStreamAbort = null;
       window._lexaStreamAbortReason = "";
+      saveChatHistory();
+      saveCurrentConversation();
       return;
     }
 
@@ -932,6 +2365,9 @@ async function sendMessage() {
       textEl.textContent = t("chat.connectionTimeout");
     } else if (streamError) {
       textEl.textContent = t("chat.connectionLostRetry");
+    } else {
+      fullText = t("chat.emptyResponseFallback");
+      renderFormattedMessage(textEl, fullText);
     }
 
     if (actionData) {
@@ -1017,11 +2453,29 @@ async function sendMessage() {
       });
       if (suggestions.length > 0) body.appendChild(suggestDiv);
     }
+    setMessagePersistText(msgEl, fullText || textEl.textContent);
+    if (getMessagePersistText(msgEl)) {
+      copyBtn.disabled = false;
+      memoryBtn.disabled = false;
+      workspaceBtn.disabled = false;
+      continueBtn.disabled = false;
+      verifyBtn.disabled = false;
+      exportBtn.disabled = false;
+      regenBtn.disabled = false;
+    }
     playTTS(actionData?.message || fullText);
   } catch (err) {
     streamRenderActive = false;
     textEl.classList.remove("streaming-text");
     textEl.textContent = t("chat.backendUnreachable");
+    setMessagePersistText(msgEl, textEl.textContent);
+    copyBtn.disabled = false;
+    memoryBtn.disabled = false;
+    workspaceBtn.disabled = false;
+    continueBtn.disabled = false;
+    verifyBtn.disabled = false;
+    exportBtn.disabled = false;
+    regenBtn.disabled = false;
     showToast(t("toast.chatError"), "error");
   }
 
@@ -1055,6 +2509,24 @@ const _AGENT_PATTERNS = [
   // Analysis + action combos
   /\b(finde|suche|pruefe|check)\b.*\b(und|dann)\b.*\b(loesch|entfern|verschieb|kopier|erstell)/i,
   /\b(analysiere?|scanne?)\b.*\bund\b/i,
+  /\b(research|recherche|recherchiere|quellenrecherche|quellenbasiert|source[-\s]?backed|deep research)\b/i,
+  /\b(brief|bericht|report|analyse|analysis|uebersicht|overview)\b.*\b(quellen|sources|citations|belege|evidence)\b/i,
+  /\b(quellen|sources|citations|belege|evidence)\b.*\b(brief|bericht|report|analyse|analysis|uebersicht|overview)\b/i,
+  /\b(fakten|annahmen|evidenz|risiken)\b.*\b(naechste|next|schritte|aktionen)\b/i,
+  /\b(workspace|arbeitsentwurf|arbeitsbereich|artifact|artefakt|canvas)\b.*\b(draft|entwurf|markdown|kontext|context)\b/i,
+  /\b(draft|entwurf|markdown|kontext|context)\b.*\b(workspace|arbeitsentwurf|arbeitsbereich|artifact|artefakt|canvas)\b/i,
+  /\b(context\s*pack|contextpack|kontextpaket|project\s*briefing|projektbriefing)\b/i,
+  /\b(personal\s*os|os)\b.*\b(context|kontext|briefing|pack|paket)\b/i,
+  /\b(context|kontext)\b.*\b(facts|fakten|assumptions|annahmen|decisions|entscheidungen|tasks|aufgaben)\b/i,
+  /\b(review|reviewe|pruef|pruefe|ueberpruef|freigabe|approval)\b.*\b(draft|drafts|entwurf|entwuerfe|queue)\b/i,
+  /\b(personal\s*os|os)\b.*\b(draft|drafts|entwurf|entwuerfe)\b.*\b(review|pruef|freigabe|approval)\b/i,
+  /\b(baue|erstelle|entwirf|design|create|build|design)\b.*\b(lexa\s*)?(skill|skills|gem|gems|custom\s*assistant|custom\s*gpt|assistentenprofil|spezialist)\b/i,
+  /\b(skill|skills|gem|gems|custom\s*assistant|custom\s*gpt|assistentenprofil|spezialist)\b.*\b(draft|entwurf|markdown|template|vorlage|instructions|anleitung)\b/i,
+  /\b(deep\s*think|deepthink|extended\s*thinking|denk\s*tief|tiefer\s*denken|durchdenk|durchdenke|entscheidungsbrief)\b/i,
+  /\b(decision|entscheidung|entscheiden|decide|abw[aä]g|abwaeg)\b.*\b(options?|optionen|alternativen|tradeoffs?|risiken?|risks?|pros?|cons?|pro|contra)\b/i,
+  /\b(options?|optionen|alternativen|tradeoffs?|risiken?|risks?|pros?|cons?|pro|contra)\b.*\b(decision|entscheidung|entscheiden|decide|abw[aä]g|abwaeg)\b/i,
+  /\b(ship|shipping|release|launch|publish|veroeffentlich|veroeffentlichen|produktreif|production[-\s]?ready)\b.*\b(check|audit|qa|test|tests|regression|readiness|freigabe|blocker)\b/i,
+  /\b(check|audit|qa|test|tests|regression|readiness|freigabe|blocker)\b.*\b(ship|shipping|release|launch|publish|veroeffentlich|veroeffentlichen|produktreif|production[-\s]?ready)\b/i,
   // Backup + cleanup combos
   /\bbackup\b.*\bund\b/i,
   /\b(loesch|entfern)\b.*\bduplikat/i,
@@ -1073,8 +2545,12 @@ function _needsAgentMode(text) {
 }
 
 // Triggered by auto-detection or /agent prefix
-async function sendAgentMessage(text) {
-  pushChatHistory(text);
+async function sendAgentMessage(text, options) {
+  const agentText = String(text || "").trim();
+  const displayText = String(options?.displayText || agentText).trim();
+  if (!agentText) return;
+
+  pushChatHistory(displayText);
   chatHistoryIdx = -1;
 
   // Ensure conversation exists
@@ -1091,18 +2567,19 @@ async function sendAgentMessage(text) {
 
   const isFirstMessage = chatMessages.querySelectorAll(".user-message").length === 0;
   if (!window._chatViewOpen) toggleChatView();
-  addMessage(text, "user");
+  addMessage(displayText, "user");
 
   localStorage.setItem("lexa-chat-draft", "");
   chatInput.value = "";
   syncChatInputSize();
   LexaState.set("isLoading", true);
   sendBtn.disabled = true;
-  if (isFirstMessage) autoTitleConversation(text);
+  if (isFirstMessage) autoTitleConversation(displayText);
 
   // Build agent message container
   const msgEl = document.createElement("div");
   msgEl.className = "message system-message agent-message";
+  msgEl.setAttribute("aria-busy", "true");
 
   const avatar = document.createElement("div");
   avatar.className = "msg-avatar system";
@@ -1121,14 +2598,54 @@ async function sendAgentMessage(text) {
   const badge = document.createElement("span");
   badge.className = "agent-badge";
   badge.textContent = t("chat.agentBadge");
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "msg-copy-btn";
+  copyBtn.disabled = true;
+  setIconButton(copyBtn, "\u2398", t("chat.copyTooltip"));
+  copyBtn.addEventListener("click", () => copyMessage(copyBtn));
+  const memoryBtn = document.createElement("button");
+  memoryBtn.type = "button";
+  memoryBtn.className = "msg-thumbs-btn";
+  memoryBtn.disabled = true;
+  setIconButton(memoryBtn, "\u2605", t("chat.saveAsMemoryTooltip"));
+  memoryBtn.addEventListener("click", () => saveMessageAsMemory(memoryBtn, msgEl));
+  const workspaceBtn = createWorkspaceHandoffButton();
+  workspaceBtn.disabled = true;
+  const continueBtn = createContinueFromMessageButton(true);
+  const verifyBtn = createVerifyAnswerButton(true);
+  const exportBtn = createMessageExportButton(true);
   header.appendChild(nameSpan);
   header.appendChild(badge);
+  header.appendChild(copyBtn);
+  header.appendChild(continueBtn);
+  header.appendChild(verifyBtn);
+  header.appendChild(exportBtn);
+  header.appendChild(createMessageActionOverflowMenu([memoryBtn, workspaceBtn]));
 
   const stepsContainer = document.createElement("div");
   stepsContainer.className = "agent-steps";
+  stepsContainer.setAttribute("role", "list");
+  stepsContainer.setAttribute("aria-label", t("chat.agentStepsLabel"));
+
+  const completionEl = document.createElement("div");
+  completionEl.className = "agent-completion-panel";
+  completionEl.setAttribute("role", "group");
+  completionEl.setAttribute("aria-label", t("chat.agentCompletionLabel"));
+  completionEl.hidden = true;
+
+  const outcomeSummaryEl = document.createElement("div");
+  outcomeSummaryEl.className = "agent-outcome-summary";
+  outcomeSummaryEl.setAttribute("role", "list");
+  outcomeSummaryEl.setAttribute("aria-label", t("chat.agentOutcomeSummaryLabel"));
+  outcomeSummaryEl.hidden = true;
 
   const summaryEl = document.createElement("div");
-  summaryEl.className = "agent-summary";
+  summaryEl.className = "agent-summary agent-status";
+  summaryEl.setAttribute("role", "status");
+  summaryEl.setAttribute("aria-live", "polite");
+  summaryEl.setAttribute("aria-atomic", "true");
+  summaryEl.textContent = t("chat.agentStarting");
 
   const stopBtn = document.createElement("button");
   stopBtn.type = "button";
@@ -1140,6 +2657,8 @@ async function sendAgentMessage(text) {
     if (stopBtn.disabled) return;
     agentStoppedByUser = true;
     stopBtn.disabled = true;
+    msgEl.removeAttribute("aria-busy");
+    summaryEl.classList.remove("agent-status");
     summaryEl.textContent = t("chat.agentStopped");
     try {
       if (agentReader) await agentReader.cancel();
@@ -1152,6 +2671,8 @@ async function sendAgentMessage(text) {
   header.appendChild(stopBtn);
 
   body.appendChild(header);
+  body.appendChild(completionEl);
+  body.appendChild(outcomeSummaryEl);
   body.appendChild(stepsContainer);
   body.appendChild(summaryEl);
   msgEl.appendChild(avatar);
@@ -1160,17 +2681,28 @@ async function sendAgentMessage(text) {
   chatMessages.scrollTop = chatMessages.scrollHeight;
 
   try {
-    const response = await window.lexa.agentRun(text);
+    const response = await window.lexa.agentRun(agentText);
     if (agentStoppedByUser) {
       try { await response?.body?.cancel?.(); } catch (e) { console.warn("[Agent] Body cancel failed:", e.message || e); }
       throw new Error("agent_stream_stopped");
     }
     if (!response.ok) {
+      msgEl.removeAttribute("aria-busy");
+      summaryEl.classList.remove("agent-status");
       summaryEl.textContent = t("chat.agentError", {msg: response.statusText || "Unknown"});
+      setMessagePersistText(msgEl, summaryEl.textContent);
+      copyBtn.disabled = false;
+      memoryBtn.disabled = false;
+      workspaceBtn.disabled = false;
+      continueBtn.disabled = false;
+      verifyBtn.disabled = false;
+      exportBtn.disabled = false;
       LexaState.set("isLoading", false);
       sendBtn.disabled = false;
       stopBtn.disabled = true;
       stopBtn.classList.add("is-complete");
+      saveChatHistory();
+      saveCurrentConversation();
       return;
     }
 
@@ -1179,6 +2711,8 @@ async function sendAgentMessage(text) {
     let buffer = "";
     const AGENT_STREAM_TIMEOUT_MS = 120000;
     const agentStreamStartedAt = Date.now();
+    const agentOutcomeCounts = createAgentOutcomeCounts();
+    const agentStepOutcomes = new Map();
 
     while (true) {
       const remainingMs = AGENT_STREAM_TIMEOUT_MS - (Date.now() - agentStreamStartedAt);
@@ -1209,21 +2743,34 @@ async function sendAgentMessage(text) {
           const event = JSON.parse(raw);
 
           if (event.type === "thinking") {
-            renderFormattedMessage(summaryEl, event.message || "");
+            if (event.message) {
+              summaryEl.classList.remove("agent-status");
+              renderFormattedMessage(summaryEl, event.message);
+            } else {
+              summaryEl.classList.add("agent-status");
+              summaryEl.textContent = t("chat.agentWorking");
+            }
             chatMessages.scrollTop = chatMessages.scrollHeight;
           }
 
           if (event.type === "step_start") {
+            summaryEl.classList.add("agent-status");
+            summaryEl.textContent = t("chat.agentWorking");
             const step = event.step || {};
             const stepEl = document.createElement("div");
             stepEl.className = "agent-step running";
             stepEl.id = `agent-step-${step.index}`;
+            stepEl.setAttribute("role", "listitem");
+            const readableLabel = agentStepDisplayLabel(step);
+            const technicalLabel = agentStepTechnicalLabel(step);
             const icon = document.createElement("span");
             icon.className = "agent-step-icon";
             icon.textContent = "\u23F3"; // hourglass
             const label = document.createElement("span");
             label.className = "agent-step-label";
-            label.textContent = `${step.action}(${Object.keys(step.params || {}).join(", ")})`;
+            label.textContent = readableLabel;
+            stepEl.title = technicalLabel;
+            stepEl.setAttribute("aria-label", `${readableLabel}. ${technicalLabel}`);
             stepEl.appendChild(icon);
             stepEl.appendChild(label);
             stepsContainer.appendChild(stepEl);
@@ -1237,13 +2784,17 @@ async function sendAgentMessage(text) {
               stepEl.className = `agent-step ${step.status === "success" ? "success" : "failed"}`;
               const icon = stepEl.querySelector(".agent-step-icon");
               if (icon) icon.textContent = step.status === "success" ? "\u2705" : "\u274C";
+              renderAgentStepOutcome(stepEl, step);
               // Add duration
               if (step.duration_ms) {
                 const dur = document.createElement("span");
                 dur.className = "agent-step-duration";
                 dur.textContent = `${Math.round(step.duration_ms)}ms`;
                 stepEl.appendChild(dur);
+                renderAgentStepOutcome(stepEl, step);
               }
+              recordAgentStepOutcome(step, agentOutcomeCounts, agentStepOutcomes);
+              renderAgentOutcomeSummary(outcomeSummaryEl, agentOutcomeCounts);
             }
           }
 
@@ -1258,14 +2809,43 @@ async function sendAgentMessage(text) {
               note.className = "agent-step-note";
               note.textContent = t("chat.agentNeedsConfirmation");
               stepEl.appendChild(note);
+              renderAgentStepOutcome(stepEl, step);
+              recordAgentStepOutcome(step, agentOutcomeCounts, agentStepOutcomes);
+              renderAgentOutcomeSummary(outcomeSummaryEl, agentOutcomeCounts);
             }
           }
 
           if (event.type === "done") {
             const run = event.run || {};
+            const finalOutcomeCounts = Array.isArray(run.steps) && run.steps.length
+              ? agentRunOutcomeCounts(run.steps)
+              : agentOutcomeCounts;
+            renderAgentOutcomeSummary(outcomeSummaryEl, finalOutcomeCounts);
+            setMessageAgentRunMeta(msgEl, {
+              summary: run.summary || t("chat.agentCompleted"),
+              steps: Array.isArray(run.steps) ? run.steps : [],
+              counts: finalOutcomeCounts,
+              total_duration_ms: run.total_duration_ms,
+            });
+            renderAgentCompletionPanel(completionEl, finalOutcomeCounts, {
+              continuePrompt: agentCompletionContinuePrompt(run, finalOutcomeCounts, run.summary || summaryEl.textContent),
+            });
             if (run.summary) {
+              summaryEl.classList.remove("agent-status");
               renderFormattedMessage(summaryEl, run.summary);
+              setMessagePersistText(msgEl, run.summary);
+            } else {
+              summaryEl.classList.remove("agent-status");
+              summaryEl.textContent = t("chat.agentCompleted");
+              setMessagePersistText(msgEl, summaryEl.textContent);
             }
+            msgEl.removeAttribute("aria-busy");
+            copyBtn.disabled = false;
+            memoryBtn.disabled = false;
+            workspaceBtn.disabled = false;
+            continueBtn.disabled = false;
+            verifyBtn.disabled = false;
+            exportBtn.disabled = false;
             const durEl = document.createElement("div");
             durEl.className = "agent-duration";
             durEl.textContent = t("chat.agentSteps", {count: run.steps?.length || 0, ms: Math.round(run.total_duration_ms || 0)});
@@ -1273,7 +2853,10 @@ async function sendAgentMessage(text) {
           }
 
           if (event.type === "error") {
+            summaryEl.classList.remove("agent-status");
             summaryEl.textContent = event.message || t("chat.agentErrorGeneric");
+            setMessagePersistText(msgEl, summaryEl.textContent);
+            msgEl.removeAttribute("aria-busy");
           }
         } catch (e) {
           console.warn("[Agent] SSE parse error:", e);
@@ -1283,11 +2866,24 @@ async function sendAgentMessage(text) {
   } catch (err) {
     const timedOut = err?.message === "agent_stream_timeout";
     const stopped = err?.message === "agent_stream_stopped" || agentStoppedByUser;
+    summaryEl.classList.remove("agent-status");
     summaryEl.textContent = stopped ? t("chat.agentStopped") : (timedOut ? t("chat.agentTimeout") : t("chat.agentUnreachable"));
+    setMessagePersistText(msgEl, summaryEl.textContent);
+    msgEl.removeAttribute("aria-busy");
     if (!stopped) showToast(timedOut ? t("chat.agentTimeout") : t("chat.agentErrorGeneric"), "error");
   }
 
   agentReader = null;
+  msgEl.removeAttribute("aria-busy");
+  if ((summaryEl.textContent || "").trim()) {
+    if (!msgEl.dataset?.persistText) setMessagePersistText(msgEl, summaryEl.textContent);
+    copyBtn.disabled = false;
+    memoryBtn.disabled = false;
+    workspaceBtn.disabled = false;
+    continueBtn.disabled = false;
+    verifyBtn.disabled = false;
+    exportBtn.disabled = false;
+  }
   stopBtn.disabled = true;
   stopBtn.classList.add("is-complete");
   saveChatHistory();
@@ -1297,13 +2893,17 @@ async function sendAgentMessage(text) {
 }
 
 async function regenerateMessage(originalPrompt) {
-  if (LexaState.get("isLoading") || !LexaState.get("backendOnline")) return;
+  if (LexaState.get("isLoading")) { showToast(t("chat.uploadBusy"), "warning"); return false; }
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return false; }
+  const prompt = String(originalPrompt || "").trim();
+  if (!prompt) { showToast(t("chat.regenerateMissingPrompt"), "warning", 2200); return false; }
   // Remove last system message
   const msgs = chatMessages.querySelectorAll(".message.system-message");
   if (msgs.length > 0) msgs[msgs.length - 1].remove();
   // Re-send the original message
-  chatInput.value = originalPrompt;
+  chatInput.value = prompt;
   await sendMessage();
+  return true;
 }
 
 async function confirmAction(btn, actionStr) {
@@ -1313,7 +2913,26 @@ async function confirmAction(btn, actionStr) {
   // Clear pending confirmation on the backend (user clicked the button)
   try { await fetch(`${window.lexa.API_BASE}/chat/confirm-clear`, { method: "POST" }); } catch (_) {}
   try {
-    const res = await window.lexa.execute(action.action, action.params || {}, true);
+    const prepared = await window.lexa.prepareCompanionExecute(action.action, action.params || {});
+    if (!prepared.success) {
+      addMessage(t("common.error") + ": " + (prepared.error || prepared.message || ""), "system");
+      showToast(t("chat.actionFailed", {action: action.action}), "error");
+      return;
+    }
+    const summary = prepared.summary || {};
+    const paramKeys = Array.isArray(summary.param_keys) ? summary.param_keys.join(", ") : "";
+    const safeSummary = [
+      `Command: ${summary.command || action.action}`,
+      `Scope: ${summary.action_scope || prepared.action_scope || ""}`,
+      paramKeys ? `Params: ${paramKeys}` : "",
+      `Expires: ${prepared.expires_at || ""}`,
+    ].filter(Boolean).join("\n");
+    if (typeof window.confirm === "function" && !window.confirm(safeSummary)) {
+      addMessage(t("chat.denied"), "system");
+      showToast(t("toast.actionCancelled"), "warning");
+      return;
+    }
+    const res = await window.lexa.executeWithConfirmation(action.action, action.params || {}, prepared);
     if (res.success) { addMessage(t("chat.executed", {data: JSON.stringify(res.data).substring(0, 200)}), "system"); showToast(t("chat.actionExecuted", {action: action.action}), "success"); }
     else { addMessage(t("common.error") + ": " + res.error, "system"); showToast(t("chat.actionFailed", {action: action.action}), "error"); }
   } catch (e) { console.error("[Chat] Confirm action execution error:", e.message || e); addMessage(t("chat.executionErrorMsg"), "system"); showToast(t("toast.executionError"), "error"); }
@@ -1400,11 +3019,21 @@ function selectSnippetPopup() {
 function invalidateSnippetCache() { _snippetCache = null; }
 
 const LEXA_COMPOSER_COMMANDS = [
-  { id: "agent", icon: "command", prefixKey: "composer.agent.prefix", labelKey: "composer.agent.label", descKey: "composer.agent.desc", fallbackPrefix: "/agent ", fallbackLabel: "Agent Mode", fallbackDesc: "Plan and execute a multi-step task." },
-  { id: "improve", icon: "spark", prefixKey: "composer.improve.prefix", labelKey: "composer.improve.label", descKey: "composer.improve.desc", fallbackPrefix: "/agent Verbessere Lexa UI/UX mit kleinen sicheren Code-Aenderungen und fuehre passende Tests aus: ", fallbackLabel: "Improve Lexa", fallbackDesc: "Start a professional UI/UX code pass." },
-  { id: "os", icon: "map", prefixKey: "composer.os.prefix", labelKey: "composer.os.label", descKey: "composer.os.desc", fallbackPrefix: "Nutze das Personal OS als Kontext und fasse zusammen: ", fallbackLabel: "Personal OS", fallbackDesc: "Bring OS context into the current chat." },
-  { id: "screen", icon: "image", prefixKey: "composer.screen.prefix", labelKey: "composer.screen.label", descKey: "composer.screen.desc", fallbackPrefix: "Analysiere den Bildschirm und gib mir konkrete UI/UX-Verbesserungen: ", fallbackLabel: "Screen Review", fallbackDesc: "Prepare a visual review prompt." },
-  { id: "voice", icon: "wave", prefixKey: "composer.voice.prefix", labelKey: "composer.voice.label", descKey: "composer.voice.desc", fallbackPrefix: "Pruefe Voice/STT/TTS/Wake-Word-Status und nenne die naechsten echten Blocker: ", fallbackLabel: "Voice Check", fallbackDesc: "Focus on diagnostics instead of demo feel." },
+  { id: "agent", icon: "command", hint: "/agent", aliases: ["a", "plan", "multi", "multi-step", "mehrschritt"], prefixKey: "composer.agent.prefix", labelKey: "composer.agent.label", descKey: "composer.agent.desc", fallbackPrefix: "/agent ", fallbackLabel: "Agent Mode", fallbackDesc: "Plan and execute a multi-step task." },
+  { id: "clone", icon: "image", hint: "/clone", aliases: ["cl", "cloneui", "screenshotui"], prefixKey: "composer.clone.prefix", labelKey: "composer.clone.label", descKey: "composer.clone.desc", fallbackPrefix: "/agent Clone or recreate this UI from the supplied screenshot. Preserve layout intent, accessibility, responsive behavior, and Lexa's product style: ", fallbackLabel: "Clone UI", fallbackDesc: "Generate UI from a screenshot." },
+  { id: "figma", icon: "figma", hint: "/figma", aliases: ["fg", "design"], prefixKey: "composer.figma.prefix", labelKey: "composer.figma.label", descKey: "composer.figma.desc", fallbackPrefix: "/agent Import or translate this Figma design into Lexa-ready UI. Keep components accessible, responsive, and consistent with the existing codebase: ", fallbackLabel: "Import Figma", fallbackDesc: "Turn a design into UI." },
+  { id: "page", icon: "monitor", hint: "/page", aliases: ["p", "seite", "webpage"], prefixKey: "composer.page.prefix", labelKey: "composer.page.label", descKey: "composer.page.desc", fallbackPrefix: "/agent Create a production-ready page or screen for Lexa. Include layout, states, accessibility, responsive behavior, and tests where useful: ", fallbackLabel: "Create Page", fallbackDesc: "Generate a new app page." },
+  { id: "research", icon: "search", hint: "/research", aliases: ["r", "rb", "researchbrief", "recherche", "quellen", "quelle", "citations", "evidence", "brief", "bericht", "deepresearch"], prefixKey: "composer.research.prefix", labelKey: "composer.research.label", descKey: "composer.research.desc", fallbackPrefix: "/agent Create a source-backed research brief: start with a short research plan, use web/file/OS context only when relevant, include a source list, mark unchecked claims clearly, and separate facts, assumptions, evidence, risks, and next actions: ", fallbackLabel: "Research Brief", fallbackDesc: "Plan a source-backed research pass." },
+  { id: "workspace", icon: "doc", hint: "/workspace", aliases: ["w", "ws", "wd", "workdoc", "draft", "entwurf", "arbeitsdokument", "artifact", "artefakt", "canvas", "markdown"], prefixKey: "composer.workspace.prefix", labelKey: "composer.workspace.label", descKey: "composer.workspace.desc", fallbackPrefix: "/agent Build a reusable workspace draft in Markdown with goal, context, working draft, facts, assumptions, ideas, decisions, evidence, open questions, and next actions. Keep it ready for Personal OS draft review, not stable memory writes: ", fallbackLabel: "Workspace Draft", fallbackDesc: "Create an artifact-style working draft." },
+  { id: "context", icon: "layers", hint: "/context", aliases: ["c", "ctx", "cp", "contextpack", "kontext", "kontextpaket", "briefing", "project", "projekt"], prefixKey: "composer.context.prefix", labelKey: "composer.context.label", descKey: "composer.context.desc", fallbackPrefix: "/agent Build a compact Personal OS context pack for this task before answering. Use read-only OS tools when useful, cite relevant file paths, separate facts, assumptions, ideas, decisions, evidence, and tasks, and propose draft updates instead of stable-memory writes: ", fallbackLabel: "Context Pack", fallbackDesc: "Assemble OS context before solving." },
+  { id: "review", icon: "check", hint: "/review", aliases: ["rv", "dr", "draftreview", "reviewdraft", "reviewdrafts", "draftqueue", "approval", "freigabe"], prefixKey: "composer.review.prefix", labelKey: "composer.review.label", descKey: "composer.review.desc", fallbackPrefix: "/agent Review Personal OS pending drafts before any apply. Use read-only draft/review tools, separate facts, assumptions, decisions, evidence, risks, and tasks, recommend approve/reject/defer, and ask for explicit human approval before stable-memory changes: ", fallbackLabel: "Draft Review", fallbackDesc: "Review pending OS drafts safely." },
+  { id: "skill", icon: "wand", hint: "/skill", aliases: ["sk", "gem", "gems", "skills", "preset", "template", "customassistant", "customgpt", "spezialist", "assistentenprofil"], prefixKey: "composer.skill.prefix", labelKey: "composer.skill.label", descKey: "composer.skill.desc", fallbackPrefix: "/agent Design a reusable Lexa Skill as a Markdown draft. Include purpose, trigger phrases, scope, instructions, inputs, outputs, allowed context/tools, safety boundaries, examples, test checklist, and Personal OS draft handoff. Do not write stable memory without review: ", fallbackLabel: "Lexa Skill", fallbackDesc: "Design a reusable assistant skill." },
+  { id: "think", icon: "brain", hint: "/think", aliases: ["dt", "decide", "decision", "entscheid", "entscheidung", "entscheidungsbrief", "deepthink", "extendedthinking", "tradeoff", "abwaegen"], prefixKey: "composer.think.prefix", labelKey: "composer.think.label", descKey: "composer.think.desc", fallbackPrefix: "/agent Create a Deep Think decision brief. Frame the decision, separate facts, assumptions, options, tradeoffs, evidence, risks, reversibility, recommendation, confidence, open questions, and next actions. Use OS/web context only when relevant and provide a concise reasoning summary, not hidden chain-of-thought: ", fallbackLabel: "Deep Think", fallbackDesc: "Compare options and make a decision brief." },
+  { id: "ship", icon: "rocket", hint: "/ship", aliases: ["rl", "release", "launch", "publish", "qa", "shipcheck", "releasecheck", "produktreif", "veroeffentlichen"], prefixKey: "composer.ship.prefix", labelKey: "composer.ship.label", descKey: "composer.ship.desc", fallbackPrefix: "/agent Run a production Ship Check for Lexa. Inspect release readiness, user-facing UX, accessibility, performance, reliability, privacy/security, data-loss risk, docs/onboarding, tests, migration/rollback, launch blockers, and next actions. Separate facts, assumptions, evidence, risks, must-fix before publish, nice-to-have, and verification commands. Do not ship, commit, publish, or write stable OS memory without explicit approval: ", fallbackLabel: "Ship Check", fallbackDesc: "Audit release readiness before publishing." },
+  { id: "improve", icon: "spark", hint: "/improve", aliases: ["i", "fix", "ui", "ux", "produkt", "product", "polish"], prefixKey: "composer.improve.prefix", labelKey: "composer.improve.label", descKey: "composer.improve.desc", fallbackPrefix: "/agent Verbessere Lexa UI/UX mit kleinen sicheren Code-Aenderungen und fuehre passende Tests aus: ", fallbackLabel: "Improve Lexa", fallbackDesc: "Start a professional UI/UX code pass." },
+  { id: "os", icon: "map", hint: "/os", aliases: ["pos", "personalos", "memory"], prefixKey: "composer.os.prefix", labelKey: "composer.os.label", descKey: "composer.os.desc", fallbackPrefix: "Nutze das Personal OS als Kontext und fasse zusammen: ", fallbackLabel: "Personal OS", fallbackDesc: "Bring OS context into the current chat." },
+  { id: "screen", icon: "image", hint: "/screen", aliases: ["s", "screenshot", "bildschirm", "visual"], prefixKey: "composer.screen.prefix", labelKey: "composer.screen.label", descKey: "composer.screen.desc", fallbackPrefix: "Analysiere den Bildschirm und gib mir konkrete UI/UX-Verbesserungen: ", fallbackLabel: "Screen Review", fallbackDesc: "Prepare a visual review prompt." },
+  { id: "voice", icon: "wave", hint: "/voice", aliases: ["v", "stt", "tts", "wakeword", "wake"], prefixKey: "composer.voice.prefix", labelKey: "composer.voice.label", descKey: "composer.voice.desc", fallbackPrefix: "Pruefe Voice/STT/TTS/Wake-Word-Status und nenne die naechsten echten Blocker: ", fallbackLabel: "Voice Check", fallbackDesc: "Focus on diagnostics instead of demo feel." },
 ];
 
 function composerCommandText(command, field) {
@@ -1418,13 +3047,48 @@ function composerCommandText(command, field) {
 function composerCommandLabel(command) { return composerCommandText(command, "label"); }
 function composerCommandDesc(command) { return composerCommandText(command, "desc"); }
 function composerCommandPrefix(command) { return composerCommandText(command, "prefix"); }
+function composerCommandAliases(command) { return Array.isArray(command?.aliases) ? command.aliases : []; }
+function composerCommandAliasKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[ä]/g, "ae")
+    .replace(/[ö]/g, "oe")
+    .replace(/[ü]/g, "ue")
+    .replace(/[ß]/g, "ss")
+    .replace(/[\s_-]+/g, "");
+}
+function composerCommandHintText(command) {
+  const primary = command?.hint || composerCommandPrefix(command).trim().split(/\s+/)[0] || "/";
+  const normalizedPrimary = primary.replace(/^\//, "").toLowerCase();
+  const shortAliases = composerCommandAliases(command)
+    .map((value) => String(value || "").toLowerCase())
+    .filter((value) => value && value.length <= 3 && value !== normalizedPrimary && value !== command?.id);
+  const shortAlias = shortAliases.find((value) => value.length > 1) || shortAliases[0];
+  return shortAlias ? `${primary} /${shortAlias}` : primary;
+}
+function composerCommandAliasValues(command) {
+  const hint = String(command?.hint || "").replace(/^\//, "");
+  return [command?.id, hint, ...composerCommandAliases(command)]
+    .map((value) => composerCommandAliasKey(value))
+    .filter(Boolean);
+}
 
 let _composerCommandOpen = false;
 let _composerCommandIdx = 0;
+let _composerCommandLastQuery = "";
 
 function composerCommandIconSvg(icon) {
   const icons = {
     command: '<path d="M18 6 6 18"/><path d="m8 6 4 6-4 6"/><path d="M14 18h4"/>',
+    figma: '<path d="M8 3h4v6H8a3 3 0 0 1 0-6Z"/><path d="M12 3h4a3 3 0 0 1 0 6h-4V3Z"/><path d="M12 9h4a3 3 0 0 1 0 6h-4V9Z"/><path d="M8 9h4v6H8a3 3 0 0 1 0-6Z"/><path d="M8 15h4v3a3 3 0 1 1-4-3Z"/>',
+    monitor: '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4.5-4.5"/><path d="M8 11h6"/>',
+    doc: '<path d="M6 3h8l4 4v14H6V3Z"/><path d="M14 3v5h5"/><path d="M9 13h6"/><path d="M9 17h5"/>',
+    layers: '<path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 16 9 5 9-5"/>',
+    check: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 12l2 2 4-5"/><path d="M8 7h8"/>',
+    wand: '<path d="M15 4l5 5"/><path d="M14 5l5 5-9 9-5-5 9-9Z"/><path d="M5 4v3"/><path d="M3.5 5.5h3"/><path d="M20 17v3"/><path d="M18.5 18.5h3"/>',
+    brain: '<path d="M9 5a3 3 0 0 0-3 3v1a3 3 0 0 0-1 5.2A3.5 3.5 0 0 0 8.5 19H10V5H9Z"/><path d="M15 5a3 3 0 0 1 3 3v1a3 3 0 0 1 1 5.2A3.5 3.5 0 0 1 15.5 19H14V5h1Z"/><path d="M10 9H7.5"/><path d="M14 9h2.5"/><path d="M10 14H7"/><path d="M14 14h3"/>',
+    rocket: '<path d="M5 19c1.6-.3 3.2-.9 4.4-2.1"/><path d="M4 14l6 6"/><path d="M13 6c2.5-2.5 5.3-3 7-2-.2 2.1-1 4.5-3.1 6.6L10 17l-4-4 7-7Z"/><path d="M15 8h.01"/><path d="M6 13l-2 1 1-4 3-1"/><path d="M11 18l-1 3 4-1 1-2"/>',
     spark: '<path d="M12 2l1.8 6.1L20 10l-6.2 1.9L12 18l-1.8-6.1L4 10l6.2-1.9L12 2Z"/><path d="M19 15l.9 3.1L23 19l-3.1.9L19 23l-.9-3.1L15 19l3.1-.9L19 15Z"/>',
     map: '<path d="M4 6l5-2 6 2 5-2v14l-5 2-6-2-5 2V6Z"/><path d="M9 4v14"/><path d="M15 6v14"/>',
     image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8" cy="10" r="1.5"/><path d="M21 15l-5-5L5 19"/>',
@@ -1440,9 +3104,53 @@ function composerCommandQuery() {
 }
 
 function composerCommandMatches(command, query) {
-  if (!query) return true;
-  const haystack = `${command.id} ${composerCommandPrefix(command)} ${composerCommandLabel(command)} ${composerCommandDesc(command)}`.toLowerCase();
-  return haystack.includes(query);
+  return composerCommandScore(command, query) > 0;
+}
+
+function composerCommandScore(command, query) {
+  const q = composerCommandAliasKey(query);
+  if (!q) return 1;
+  const aliases = composerCommandAliasValues(command);
+  if (aliases.some((alias) => alias === q)) return 100;
+  if (aliases.some((alias) => alias.startsWith(q))) return 90;
+  const label = composerCommandAliasKey(composerCommandLabel(command));
+  if (label.startsWith(q)) return 75;
+  if (label.includes(q)) return 60;
+  const desc = composerCommandAliasKey(composerCommandDesc(command));
+  if (desc.includes(q)) return 35;
+  const prompt = composerCommandAliasKey(composerCommandPrefix(command));
+  if (prompt.includes(q)) return 15;
+  return 0;
+}
+
+function composerCommandSearchItems(query) {
+  return LEXA_COMPOSER_COMMANDS
+    .map((command, index) => ({ command, index, score: composerCommandScore(command, query) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+    .map((item) => item.command);
+}
+
+function composerCommandForAlias(alias, options) {
+  const key = composerCommandAliasKey(alias);
+  const allowPrefix = Boolean(options?.allowPrefix);
+  if (!key) return null;
+  const exact = LEXA_COMPOSER_COMMANDS.find((item) => composerCommandAliasValues(item).includes(key));
+  if (exact || !allowPrefix) return exact || null;
+  const prefixMatches = LEXA_COMPOSER_COMMANDS.filter((item) =>
+    composerCommandAliasValues(item).some((value) => value.startsWith(key))
+  );
+  return prefixMatches.length === 1 ? prefixMatches[0] : null;
+}
+
+function expandComposerSlashAlias(text) {
+  const source = String(text || "").trim();
+  const match = source.match(/^\/([a-z0-9_-]+)(?:\s+([\s\S]*))?$/i);
+  if (!match || match[1].toLowerCase() === "agent") return "";
+  const command = composerCommandForAlias(match[1], { allowPrefix: true });
+  if (!command) return "";
+  const remainder = String(match[2] || "").trim();
+  return `${composerCommandPrefix(command)}${remainder}`.trim();
 }
 
 function updateComposerCommandActiveDescendant() {
@@ -1461,7 +3169,12 @@ function updateComposerCommandActiveDescendant() {
 function renderComposerCommandPalette(query = composerCommandQuery()) {
   const palette = document.getElementById("composer-command-palette");
   if (!palette) return;
-  const items = LEXA_COMPOSER_COMMANDS.filter((command) => composerCommandMatches(command, query));
+  const normalizedQuery = composerCommandAliasKey(query);
+  if (normalizedQuery !== _composerCommandLastQuery) {
+    _composerCommandIdx = 0;
+    _composerCommandLastQuery = normalizedQuery;
+  }
+  const items = composerCommandSearchItems(query);
   if (_composerCommandIdx >= items.length) _composerCommandIdx = 0;
   palette.innerHTML = "";
   if (!items.length) {
@@ -1472,15 +3185,15 @@ function renderComposerCommandPalette(query = composerCommandQuery()) {
   items.forEach((command, index) => {
     const label = composerCommandLabel(command);
     const desc = composerCommandDesc(command);
-    const prefix = composerCommandPrefix(command);
-    const prefixHint = prefix.trim().split(/\s+/)[0] || "/";
+    const prefixHint = composerCommandHintText(command);
     const row = document.createElement("button");
     row.type = "button";
     row.id = `composer-command-option-${command.id}`;
     row.className = "composer-command-item" + (index === _composerCommandIdx ? " selected" : "");
     row.setAttribute("role", "option");
     row.setAttribute("aria-selected", index === _composerCommandIdx ? "true" : "false");
-    row.setAttribute("aria-label", `${label}: ${desc}`);
+    row.setAttribute("aria-label", `${label}: ${desc}. ${prefixHint}`);
+    row.title = `${label}: ${desc} (${prefixHint})`;
     row.dataset.commandId = command.id;
     row.innerHTML = `
       <span class="composer-command-icon" aria-hidden="true">${composerCommandIconSvg(command.icon)}</span>
@@ -1732,9 +3445,39 @@ function voicePreferredMimeType() {
   ].find((type) => MediaRecorder.isTypeSupported(type)) || "";
 }
 
+function voiceUsesOrbSurface(state) {
+  const safeState = String(state || "").toLowerCase();
+  return Boolean(window.__lexaOrbVoiceActive)
+    && ["listening", "processing", "speaking", "bargein", "error"].includes(safeState);
+}
+
+function voiceHideStatusBar() {
+  if (typeof VoiceStatusBar === "undefined") return;
+  if (!VoiceStatusBar._bar && typeof VoiceStatusBar.init === "function") VoiceStatusBar.init();
+  VoiceStatusBar.hide();
+}
+
+function voiceEndOrbSurface() {
+  if (typeof window !== "undefined") window.__lexaOrbVoiceActive = false;
+  showOrbListening(false);
+  voiceSetOrbConversationState(null);
+  voiceHideStatusBar();
+}
+
 function voiceStatusBarUpdate({ state, transcript, provider, latency } = {}) {
   if (typeof VoiceStatusBar === "undefined") return;
-  if (state === "speaking") {
+  const safeState = state ? String(state).toLowerCase() : "";
+  if (voiceUsesOrbSurface(safeState)) {
+    if (safeState === "error") {
+      voiceEndOrbSurface();
+    } else {
+      showOrbListening(false);
+      voiceSetOrbConversationState(safeState === "bargein" ? "listening" : safeState);
+      voiceHideStatusBar();
+    }
+    return;
+  }
+  if (safeState === "speaking") {
     voiceStatusBarReset({ hide: true });
     return;
   }
@@ -1747,6 +3490,10 @@ function voiceStatusBarUpdate({ state, transcript, provider, latency } = {}) {
 
 function voiceStatusBarReset(options) {
   const hide = Boolean(options?.hide);
+  if (typeof window !== "undefined" && window.__lexaOrbVoiceActive) {
+    voiceEndOrbSurface();
+    return;
+  }
   if (typeof VoiceStatusBar === "undefined") return;
   if (!VoiceStatusBar._bar && typeof VoiceStatusBar.init === "function") VoiceStatusBar.init();
   VoiceStatusBar.setState("idle");
@@ -1919,7 +3666,7 @@ function voiceStop() {
   if (mic) mic.classList.remove("recording");
   updateMicProcessingA11y(shouldProcessRecording);
   if (shouldProcessRecording) {
-    voiceStatusBarUpdate({ state: "processing", provider: "STT" });
+    voiceStatusBarUpdate({ state: "processing", provider: voiceUiText("chat.voiceProviderProcessing", "Verarbeitung") });
   } else {
     voiceStatusBarResetIfNoSpeechPending();
   }
@@ -1973,7 +3720,7 @@ async function voiceProcess() {
 
   const mic = document.getElementById("mic-btn");
   updateMicProcessingA11y(true);
-  voiceStatusBarUpdate({ state: "processing", transcript: voiceUiText("chat.voiceTranscribing", "Transcribing speech..."), provider: "STT" });
+  voiceStatusBarUpdate({ state: "processing", transcript: voiceUiText("chat.voiceTranscribing", "Transcribing speech..."), provider: voiceUiText("chat.voiceProviderProcessing", "Verarbeitung") });
 
   // Auto-open chat so user sees results
   if (!window._chatViewOpen && typeof toggleChatView === "function") toggleChatView();
@@ -1985,13 +3732,13 @@ async function voiceProcess() {
     console.log("[Voice] STT result:", stt);
 
     if (!stt.success || !stt.text || !stt.text.trim()) {
-      voiceStatusBarUpdate({ state: "error", transcript: voiceUiText("chat.voiceNotUnderstood", "Could not understand."), provider: stt.engine || "STT" });
+      voiceStatusBarUpdate({ state: "error", transcript: voiceUiText("chat.voiceNotUnderstood", "Could not understand."), provider: voiceUiText("chat.voiceProviderProcessing", "Verarbeitung") });
       showToast(voiceUiText("chat.voiceNotUnderstoodFull", "Could not understand. Please try again."), "warning", 2500);
       updateMicProcessingA11y(false);
       return;
     }
 
-    voiceStatusBarUpdate({ state: "processing", transcript: stt.text, provider: stt.engine || "STT" });
+    voiceStatusBarUpdate({ state: "processing", transcript: stt.text, provider: voiceUiText("chat.voiceProviderProcessing", "Verarbeitung") });
 
     // Show user text in chat
     addMessage(stt.text, "user", null, false, true);
@@ -2021,7 +3768,7 @@ async function voiceStreamChat(text) {
   let reader = null;
 
   try {
-    voiceStatusBarUpdate({ state: "processing", provider: "AI", transcript: text });
+    voiceStatusBarUpdate({ state: "processing", provider: voiceUiText("chat.voiceProviderResponse", "Antwort"), transcript: text });
     const abort = new AbortController();
     timeout = setTimeout(() => abort.abort(), 45000);
 
@@ -2294,6 +4041,7 @@ function handleChatResponse(res, ambient = false) {
             if (msgs.length > 0) {
               const lastMsg = msgs[msgs.length - 1];
               renderFormattedMessage(lastMsg, resultText);
+              setMessagePersistText(lastMsg.closest(".message"), resultText);
             }
           }
           showToast(t("chat.actionDoneToast", {action: res.action.action}), "success", 2500);
@@ -2366,44 +4114,44 @@ function renderConversationStarters() {
   const grid = document.getElementById("starter-grid");
   if (!grid) return;
 
-  const hour = new Date().getHours();
-  const _starters = _getConversationStarters();
-  let starters;
-  if (hour >= 6 && hour < 12) starters = _starters.morning;
-  else if (hour >= 12 && hour < 18) starters = _starters.afternoon;
-  else if (hour >= 18 && hour < 22) starters = _starters.evening;
-  else if (hour >= 22 || hour < 6) starters = _starters.night;
-  else starters = _starters.general;
+  const starterCommandIds = ["workspace", "research", "think", "os"];
+  const starters = starterCommandIds
+    .map((id) => LEXA_COMPOSER_COMMANDS.find((command) => command.id === id))
+    .filter(Boolean);
 
   grid.innerHTML = "";
-  starters.forEach(s => {
+  starters.forEach((command) => {
+    const label = composerCommandLabel(command);
+    const desc = composerCommandDesc(command);
+    const hint = composerCommandHintText(command);
     const card = document.createElement("button");
     card.type = "button";
     card.className = "starter-card";
-    card.setAttribute("aria-label", `${s.title}: ${s.text}`);
+    card.setAttribute("aria-label", `${label}: ${desc}. ${hint}`);
+    card.title = `${label}: ${desc}`;
     const iconEl = document.createElement("span");
     iconEl.className = "starter-icon";
-    iconEl.dataset.icon = s.icon;
-    iconEl.innerHTML = starterIconSvg(s.icon);
+    iconEl.dataset.icon = command.icon || "spark";
+    iconEl.innerHTML = composerCommandIconSvg(command.icon || "spark");
     iconEl.setAttribute("aria-hidden", "true");
     const content = document.createElement("div");
     content.className = "starter-content";
     const titleEl = document.createElement("span");
     titleEl.className = "starter-title";
-    titleEl.textContent = s.title;
+    titleEl.textContent = label;
     const descEl = document.createElement("span");
     descEl.className = "starter-desc";
-    descEl.textContent = s.text;
+    descEl.textContent = desc;
+    const prefixEl = document.createElement("span");
+    prefixEl.className = "starter-prefix";
+    prefixEl.textContent = hint;
     content.appendChild(titleEl);
     content.appendChild(descEl);
+    content.appendChild(prefixEl);
     card.appendChild(iconEl);
     card.appendChild(content);
     card.addEventListener("click", () => {
-      chatInput.value = s.msg;
-      // Hide starters
-      const container = document.getElementById("conversation-starters");
-      if (container) container.classList.add("hidden");
-      sendMessage();
+      selectComposerCommand(command.id);
     });
     grid.appendChild(card);
   });
@@ -2441,21 +4189,49 @@ async function refreshConversationSidebar() {
   renderConversationList();
 }
 
+function restoreActiveConversationSelection(convId, activeConversationValue) {
+  LexaState.set("currentConversationId", convId || null);
+  if (activeConversationValue === null || activeConversationValue === undefined) {
+    localStorage.removeItem("lexa-active-conversation");
+  } else {
+    localStorage.setItem("lexa-active-conversation", activeConversationValue);
+  }
+  renderConversationList();
+}
+
 function renderConversationList() {
   const container = document.getElementById("conversation-list");
   if (!container) return;
   const convList = LexaState.get("conversationsList") || [];
+  const attentionList = agentRunAttentionListForConversations(convList);
+  const attentionById = new Map(attentionList.map((item) => [String(item.convId), item]));
+  let attentionOnly = Boolean(LexaState.get("conversationAttentionOnly"));
+  if (attentionOnly && attentionList.length === 0) {
+    LexaState.set("conversationAttentionOnly", false);
+    attentionOnly = false;
+  }
+  updateAgentAttentionFilterButton(attentionList.length, attentionOnly);
+  updateAgentAttentionHeaderSummary(attentionList, convList);
   if (typeof updateConversationCount === "function") {
     updateConversationCount(convList.length);
   }
   if (convList.length === 0) { container.innerHTML = '<div class="conv-empty">' + escapeHtml(t("chat.noConversations")) + '</div>'; return; }
   container.innerHTML = "";
-  convList.forEach(c => {
+  if (attentionOnly) renderAgentAttentionFilterNote(container, attentionList.length);
+  else renderAgentAttentionPanel(container, convList);
+  renderAgentResolvedHistoryPanel(container, convList);
+  const visibleConversations = attentionOnly ? convList.filter((c) => attentionById.has(String(c.id))) : convList;
+  if (visibleConversations.length === 0) {
+    container.innerHTML = '<div class="conv-empty">' + escapeHtml(t("chat.noAgentAttentionConversations")) + '</div>';
+    return;
+  }
+  visibleConversations.forEach(c => {
+    const attention = attentionById.get(String(c.id));
     const isActive = c.id === LexaState.get("currentConversationId");
     const title = c.title.length > 28 ? c.title.substring(0, 28) + "\u2026" : c.title;
     const count = c.message_count || 0;
     const item = document.createElement("div");
-    item.className = "conv-item" + (isActive ? " active" : "");
+    item.className = "conv-item" + (isActive ? " active" : "") + (attention ? " needs-agent-attention" : "");
     item.dataset.convId = c.id;
     item.title = c.title;
     item.setAttribute("aria-current", isActive ? "page" : "false");
@@ -2469,6 +4245,12 @@ function renderConversationList() {
     const meta = document.createElement("div");
     meta.className = "conv-meta";
     meta.textContent = t("chat.messageCount", {count});
+    if (attention) {
+      const badge = document.createElement("span");
+      badge.className = "conv-agent-attention-badge";
+      badge.textContent = t("chat.agentAttentionShortCounts", { failed: attention.failed, blocked: attention.blocked });
+      meta.appendChild(badge);
+    }
     content.appendChild(meta);
     const actions = document.createElement("div");
     actions.className = "conv-actions";
@@ -2485,74 +4267,145 @@ function renderConversationList() {
     delBtn.title = t("common.delete");
     delBtn.setAttribute("aria-label", t("chat.deleteConversationLabel", { title: c.title }));
     delBtn.textContent = "\u00d7";
-    delBtn.addEventListener("click", (e) => { e.stopPropagation(); deleteConversation(c.id); });
+    delBtn.addEventListener("click", (e) => { e.stopPropagation(); deleteConversation(c.id, delBtn); });
+    if (attention) {
+      const resolveBtn = document.createElement("button");
+      resolveBtn.type = "button";
+      resolveBtn.className = "conv-action-btn conv-agent-resolve-btn";
+      resolveBtn.title = t("chat.agentAttentionResolveLabel", { title: c.title });
+      resolveBtn.setAttribute("aria-label", t("chat.agentAttentionResolveLabel", { title: c.title }));
+      resolveBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>';
+      resolveBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        resolveAgentAttentionForConversation(c.id, c.title);
+      });
+      actions.appendChild(resolveBtn);
+    }
     actions.appendChild(exportBtn);
     actions.appendChild(delBtn);
     item.appendChild(content);
     item.appendChild(actions);
     bindKeyboardAction(item, () => switchConversation(c.id), {
-      label: t("chat.openConversationLabel", { title: c.title, count }),
+      label: t("chat.openConversationLabel", { title: c.title, count }) + (attention ? `. ${t("chat.agentAttentionCounts", { failed: attention.failed, blocked: attention.blocked })}` : ""),
     });
     container.appendChild(item);
   });
 }
 async function newConversation() {
+  if (_newConversationInFlight) return false;
+  _newConversationInFlight = true;
+  setNewConversationControlsBusy(true);
   try {
-    const result = await window.lexa.conversationCreate(t("chat.newChatTitle"));
+    await saveCurrentConversation({ notifyFailure: true });
+    const title = t("chat.newChatTitle");
+    let result = null;
+    try {
+      result = await window.lexa.conversationCreate(title);
+    } catch (e) {
+      console.warn("[Chat] Failed to create new conversation:", e.message || e);
+      showToast(t("toast.createError"), "error");
+      return false;
+    }
+    if (!result?.id) {
+      console.warn("[Chat] Failed to create new conversation: missing id");
+      showToast(t("toast.createError"), "error");
+      return false;
+    }
     LexaState.set("currentConversationId", result.id);
     localStorage.setItem("lexa-active-conversation", result.id);
+    upsertConversationLocally({ id: result.id, title: result.title || title, message_count: 0, last_message: "" });
     const msgs = chatMessages.querySelectorAll(".message");
     msgs.forEach((m) => m.remove());
-    await window.lexa.historyClear();
-    // Restore hero greeting view — orb always stays visible
-    const sleekGreeting = document.getElementById("sleek-greeting");
-    if (sleekGreeting) sleekGreeting.classList.remove("hidden");
-    const floatingCards = document.getElementById("floating-cards-container");
-    if (floatingCards) floatingCards.classList.remove("hidden");
-    const chatMessagesEl = document.getElementById("chat-messages");
-    if (chatMessagesEl) chatMessagesEl.classList.add("hidden");
-    clearOrbTranscript();
-    window._chatViewOpen = false;
-    const chatArrow = document.getElementById("chat-view-arrow");
-    if (chatArrow) chatArrow.classList.remove("flipped");
-    // Show conversation starters again on new chat
-    const startersEl = document.getElementById("conversation-starters");
-    if (startersEl) { startersEl.classList.remove("hidden"); renderConversationStarters(); }
-    const data = await window.lexa.conversations();
-    LexaState.set("conversationsList", data.conversations || []);
-    if (typeof updateConversationCount === "function") {
-      updateConversationCount(LexaState.get("conversationsList").length);
+    try {
+      await window.lexa.historyClear();
+    } catch (e) {
+      console.warn("[Chat] New conversation created but history clear failed:", e.message || e);
+      showToast(t("toast.newChatHistoryClearFailed"), "warning", 3000);
     }
-    renderConversationList();
-    switchView("chat");
-    chatInput.focus();
-    showToast(t("toast.newChatStarted"), "info", 2000);
-  } catch (e) { console.warn("[Chat] Failed to create new conversation:", e.message || e); showToast(t("toast.createError"), "error"); }
+    try {
+      const sleekGreeting = document.getElementById("sleek-greeting");
+      if (sleekGreeting) sleekGreeting.classList.remove("hidden");
+      const floatingCards = document.getElementById("floating-cards-container");
+      if (floatingCards) floatingCards.classList.remove("hidden");
+      const chatMessagesEl = document.getElementById("chat-messages");
+      if (chatMessagesEl) chatMessagesEl.classList.add("hidden");
+      clearOrbTranscript();
+      window._chatViewOpen = false;
+      const chatArrow = document.getElementById("chat-view-arrow");
+      if (chatArrow) chatArrow.classList.remove("flipped");
+      const startersEl = document.getElementById("conversation-starters");
+      if (startersEl) { startersEl.classList.remove("hidden"); renderConversationStarters(); }
+      try {
+        await refreshConversationSidebar();
+      } catch (e) {
+        console.warn("[Chat] New conversation created but sidebar refresh failed:", e.message || e);
+        showToast(t("toast.newChatRefreshFailed"), "warning", 3000);
+        renderConversationList();
+      }
+      switchView("chat");
+      chatInput.focus();
+      showToast(t("toast.newChatStarted"), "info", 2000);
+      return true;
+    } catch (e) {
+      console.warn("[Chat] New conversation created but local setup failed:", e.message || e);
+      showToast(t("toast.loadError"), "warning", 3000);
+      return false;
+    }
+  } finally {
+    _newConversationInFlight = false;
+    setNewConversationControlsBusy(false);
+  }
 }
 async function switchConversation(convId, notify = true) {
   if (convId === LexaState.get("currentConversationId") && notify) return;
-  await saveCurrentConversation();
-  LexaState.set("currentConversationId", convId);
-  localStorage.setItem("lexa-active-conversation", convId);
+  const switchSeq = ++_conversationSwitchSeq;
+  _conversationSwitchInFlight += 1;
   try {
-    const conv = await window.lexa.conversationGet(convId);
-    if (!conv || conv.detail) { if (notify) showToast(t("toast.convNotFound"), "error"); return; }
-    await window.lexa.conversationLoad(convId);
-    const msgs = chatMessages.querySelectorAll(".message");
-    msgs.forEach((m) => m.remove());
-    const messages = conv.messages || [];
-    for (const msg of messages) addMessage(msg.content, msg.role === "user" ? "user" : "system", null, false, true);
-    renderConversationList();
-    if (notify) {
-      switchView("chat");
-      // Open chat view to show loaded conversation
-      if (!window._chatViewOpen && messages.length > 0) toggleChatView();
-      showToast(t("chat.chatLoaded", {title: conv.title}), "info", 1500);
+    const previousConvId = LexaState.get("currentConversationId");
+    const previousActiveConversation = localStorage.getItem("lexa-active-conversation");
+    await saveCurrentConversation({ notifyFailure: notify });
+    if (switchSeq !== _conversationSwitchSeq) return false;
+    LexaState.set("currentConversationId", convId);
+    localStorage.setItem("lexa-active-conversation", convId);
+    try {
+      const conv = await window.lexa.conversationGet(convId);
+      if (switchSeq !== _conversationSwitchSeq) return false;
+      if (!conv || conv.detail) {
+        restoreActiveConversationSelection(previousConvId, previousActiveConversation);
+        if (notify) showToast(t("toast.convNotFound"), "error");
+        return false;
+      }
+      await window.lexa.conversationLoad(convId);
+      if (switchSeq !== _conversationSwitchSeq) return false;
+      const msgs = chatMessages.querySelectorAll(".message");
+      msgs.forEach((m) => m.remove());
+      const messages = conv.messages || [];
+      renderPersistedConversationMessages(messages, convId);
+      saveAgentRunMetaForConversation(convId);
+      renderConversationList();
+      if (notify) {
+        switchView("chat");
+        // Open chat view to show loaded conversation
+        if (!window._chatViewOpen && messages.length > 0) toggleChatView();
+        showToast(t("chat.chatLoaded", {title: conv.title}), "info", 1500);
+      }
+      return true;
+    } catch (e) {
+      if (switchSeq !== _conversationSwitchSeq) return false;
+      restoreActiveConversationSelection(previousConvId, previousActiveConversation);
+      console.warn("[Chat] Failed to switch conversation:", e.message || e);
+      if (notify) showToast(t("toast.loadError"), "error");
+      return false;
     }
-  } catch (e) { console.warn("[Chat] Failed to switch conversation:", e.message || e); if (notify) showToast(t("toast.loadError"), "error"); }
+  } finally {
+    _conversationSwitchInFlight = Math.max(0, _conversationSwitchInFlight - 1);
+  }
 }
-async function saveCurrentConversation() {
-  if (!LexaState.get("currentConversationId")) return;
+async function saveCurrentConversation(options = null) {
+  const opts = options || {};
+  const convId = LexaState.get("currentConversationId");
+  if (!convId) return true;
+  saveAgentRunMetaForConversation(convId);
   const messages = [];
   chatMessages.querySelectorAll(".message").forEach((msg) => {
     if (!isPersistableChatMessage(msg)) return;
@@ -2561,36 +4414,87 @@ async function saveCurrentConversation() {
     if (text) messages.push({ role, content: text });
   });
   try {
-    await window.lexa.conversationUpdate(LexaState.get("currentConversationId"), { messages });
+    await window.lexa.conversationUpdate(convId, { messages });
+  } catch (e) {
+    console.warn("[Chat] Failed to save conversation:", e.message || e);
+    if (opts.notifyFailure) showToast(t("toast.conversationSaveFailed"), "warning", 3500);
+    return false;
+  }
+  try {
     await refreshConversationSidebar();
-  } catch (e) { console.warn("[Chat] Failed to save conversation:", e.message || e); }
+  } catch (e) {
+    console.warn("[Chat] Saved conversation but failed to refresh sidebar:", e.message || e);
+    if (opts.notifyFailure) showToast(t("toast.conversationRefreshFailed"), "warning", 3000);
+  }
+  return true;
 }
-async function deleteConversation(convId) {
+async function deleteConversation(convId, triggerBtn = null) {
+  if (triggerBtn?.disabled || triggerBtn?.getAttribute("aria-busy") === "true") return;
+  if (triggerBtn) {
+    triggerBtn.disabled = true;
+    triggerBtn.setAttribute("aria-busy", "true");
+  }
   try {
     await window.lexa.conversationDelete(convId);
-    if (convId === LexaState.get("currentConversationId")) LexaState.set("currentConversationId", null);
-    const data = await window.lexa.conversations();
-    LexaState.set("conversationsList", data.conversations || []);
-    const convList = LexaState.get("conversationsList");
-    if (typeof updateConversationCount === "function") {
-      updateConversationCount(convList.length);
+  } catch (e) {
+    console.warn("[Chat] Failed to delete conversation:", e.message || e);
+    showToast(t("toast.deleteError"), "error");
+    return;
+  }
+  try {
+    const wasActive = String(convId) === String(LexaState.get("currentConversationId")) || String(convId) === String(localStorage.getItem("lexa-active-conversation"));
+    clearAgentRunLocalStateForConversation(convId);
+    if (wasActive) {
+      LexaState.set("currentConversationId", null);
+      localStorage.removeItem("lexa-active-conversation");
     }
-    renderConversationList();
-    if (convId === parseInt(localStorage.getItem("lexa-active-conversation"))) {
+    let convList = removeConversationLocally(convId);
+    try {
+      await refreshConversationSidebar();
+      convList = LexaState.get("conversationsList") || convList;
+    } catch (e) {
+      console.warn("[Chat] Deleted conversation but failed to refresh sidebar:", e.message || e);
+      showToast(t("toast.deleteRefreshFailed"), "warning", 3000);
+    }
+    if (wasActive) {
       if (convList.length > 0) await switchConversation(convList[0].id);
       else await newConversation();
     }
     showToast(t("toast.chatDeleted"), "info", 2000);
-  } catch (e) { console.warn("[Chat] Failed to delete conversation:", e.message || e); showToast(t("toast.deleteError"), "error"); }
+  } catch (e) {
+    console.warn("[Chat] Deleted conversation but failed to finish local cleanup:", e.message || e);
+    showToast(t("toast.loadError"), "warning", 3000);
+  }
+  finally {
+    if (triggerBtn?.isConnected) {
+      triggerBtn.disabled = false;
+      triggerBtn.removeAttribute("aria-busy");
+    }
+  }
 }
 async function autoTitleConversation(userMessage) {
   const convId = LexaState.get("currentConversationId");
   if (!convId) return;
-  let title = userMessage.trim();
+  let title = String(userMessage || "").trim();
   if (title.length > 40) title = title.substring(0, 40) + "\u2026";
   if (!title) title = t("chat.newChatTitle");
-  try { await window.lexa.conversationUpdate(convId, { title }); const convList = LexaState.get("conversationsList") || []; const conv = convList.find(c => c.id === convId); if (conv) conv.title = title; renderConversationList(); } catch (e) { console.warn("[Chat] Failed to set conversation title:", e.message || e); }
-  try { const result = await window.lexa.generateTitle(userMessage); if (result.title && result.title !== title) { title = result.title; await window.lexa.conversationUpdate(convId, { title }); const convList = LexaState.get("conversationsList") || []; const conv = convList.find(c => c.id === convId); if (conv) conv.title = title; renderConversationList(); } } catch (e) { console.warn("[Chat] Failed to generate AI title:", e.message || e); }
+  try {
+    await window.lexa.conversationUpdate(convId, { title });
+    updateConversationTitleLocally(convId, title);
+  } catch (e) {
+    console.warn("[Chat] Failed to set conversation title:", e.message || e);
+  }
+  try {
+    const result = await window.lexa.generateTitle(userMessage);
+    const generatedTitle = String(result?.title || "").trim();
+    if (generatedTitle && generatedTitle !== title) {
+      title = generatedTitle;
+      await window.lexa.conversationUpdate(convId, { title });
+      updateConversationTitleLocally(convId, title);
+    }
+  } catch (e) {
+    console.warn("[Chat] Failed to generate AI title:", e.message || e);
+  }
 }
 
 // ── DRAG & DROP + FILE UPLOAD ────────────────────
@@ -2599,6 +4503,10 @@ function setupDragDrop() {
   const chatContainer = document.getElementById("chat-container");
   const overlay = document.getElementById("drop-zone-overlay");
   if (!chatContainer || !overlay) return;
+  const fileInput = document.getElementById("file-input");
+  const attachBtn = document.getElementById("attach-btn");
+  if (fileInput) fileInput.addEventListener("change", handleFileSelect);
+  if (attachBtn) attachBtn.addEventListener("click", triggerFileUpload);
   chatContainer.addEventListener("dragenter", (e) => { e.preventDefault(); dragCounter++; overlay.classList.add("visible"); });
   chatContainer.addEventListener("dragleave", (e) => { e.preventDefault(); dragCounter--; if (dragCounter <= 0) { dragCounter = 0; overlay.classList.remove("visible"); } });
   chatContainer.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; });

@@ -71,3 +71,52 @@ def test_yaml_shell_blocks_dangerous_patterns():
 
     assert result["success"] is False
     assert "Befehl blockiert" in result["error"]
+
+
+def test_python_plugin_allows_regex_compile(tmp_path):
+    plugin = tmp_path / "regex_plugin.py"
+    plugin.write_text(
+        """
+import re
+
+PLUGIN_META = {
+    "name": "Regex Plugin",
+    "version": "1.0.0",
+    "tools": [{
+        "type": "function",
+        "function": {
+            "name": "regex_plugin_search",
+            "description": "test",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }],
+}
+
+PATTERN = re.compile(r"abc")
+
+async def execute(tool_name, args):
+    return {"success": True}
+""",
+        encoding="utf-8",
+    )
+
+    manager = pm.PluginManager()
+
+    assert manager._load_python_plugin(plugin) == "Regex Plugin"
+
+
+def test_python_plugin_blocks_bare_compile(tmp_path):
+    plugin = tmp_path / "bad_plugin.py"
+    plugin.write_text(
+        """
+PLUGIN_META = {"name": "Bad", "version": "1.0.0", "tools": []}
+compiled = compile("1 + 1", "<x>", "eval")
+async def execute(tool_name, args):
+    return {"success": True}
+""",
+        encoding="utf-8",
+    )
+
+    manager = pm.PluginManager()
+
+    assert manager._load_python_plugin(plugin) is None

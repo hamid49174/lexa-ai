@@ -7,6 +7,8 @@
 
 // ── SYSTEM VIEW ──────────────────────────────────
 let systemAuditRefreshSeq = 0;
+let startupHealthRefreshSeq = 0;
+let hermesOverviewRefreshSeq = 0;
 
 function createSystemView() {
   const div = document.createElement("div");
@@ -14,6 +16,35 @@ function createSystemView() {
   div.innerHTML = `
     <div class="view-title">System <span>Monitor</span></div>
     <div class="info-grid" id="system-grid"></div>
+    <div class="system-startup-panel" id="startup-health-panel">
+      <div class="system-audit-header">
+        <div>
+          <div class="system-audit-kicker">${escapeHtml(t("system.startupHealthKicker"))}</div>
+          <h3 class="section-title">${escapeHtml(t("system.startupHealthTitle"))}</h3>
+        </div>
+        <div class="system-overview-actions">
+          <button type="button" class="action-btn action-btn-sm" data-action="refreshStartupHealth">${escapeHtml(t("system.refresh"))}</button>
+        </div>
+      </div>
+      <div class="system-overview-content system-startup-content" id="startup-health-content" aria-live="polite" aria-busy="false">
+        <div class="system-audit-empty">${escapeHtml(t("common.loading"))}</div>
+      </div>
+    </div>
+    <div class="system-overview-panel" id="hermes-overview-panel">
+      <div class="system-audit-header">
+        <div>
+          <div class="system-audit-kicker">${escapeHtml(t("system.hermesCockpitKicker"))}</div>
+          <h3 class="section-title">${escapeHtml(t("system.hermesCockpitTitle"))}</h3>
+        </div>
+        <div class="system-overview-actions">
+          <button type="button" class="action-btn action-btn-sm" data-action="hermesOverviewAskInChat">${escapeHtml(t("system.hermesAskChat"))}</button>
+          <button type="button" class="action-btn action-btn-sm" data-action="refreshHermesOverview">${escapeHtml(t("system.refresh"))}</button>
+        </div>
+      </div>
+      <div class="system-overview-content" id="hermes-overview-content" aria-live="polite" aria-busy="false">
+        <div class="system-audit-empty">${escapeHtml(t("common.loading"))}</div>
+      </div>
+    </div>
     <div class="system-audit-panel">
       <div class="system-audit-header">
         <div>
@@ -33,12 +64,20 @@ async function refreshSystemView() {
   if (!grid) return;
   if (!LexaState.get("backendOnline")) {
     grid.innerHTML = '<div class="info-card"><div class="info-card-value text-error fs-16">' + escapeHtml(t("system.backendUnreachable")) + '</div></div>';
+    setStartupHealthMessage(t("common.backendOffline"), "bad");
+    setHermesOverviewMessage(t("common.backendOffline"), "bad");
     setSystemAuditMessage(t("common.backendOffline"), "bad");
     return;
   }
   try {
-    const res = await window.lexa.execute("system_info");
-    if (!res.success) return;
+    const res = typeof window.requestSystemInfoCached === "function"
+      ? await window.requestSystemInfoCached({ maxAgeMs: 5000, force: true })
+      : await window.lexa.execute("system_info");
+    if (!res.success) {
+      refreshStartupHealth();
+      refreshHermesOverview();
+      return;
+    }
     const d = res.data;
     const infoBar = (pct, color) => {
       const safePct = Math.min(100, pct);
@@ -71,12 +110,264 @@ async function refreshSystemView() {
         ${d.battery_percent !== null ? `<div class="info-card-bar-track">${infoBar(d.battery_percent, "success")}</div>` : ""}
       </div>
     `;
+    refreshStartupHealth();
+    refreshHermesOverview();
     refreshSystemAuditActivity();
   } catch (e) {
     console.warn("[System] Failed to refresh system view:", e.message || e);
     grid.innerHTML = ""; const errCard = document.createElement("div"); errCard.className = "info-card"; const errVal = document.createElement("div"); errVal.className = "info-card-value text-error fs-16"; errVal.textContent = t("toast.loadError"); errCard.appendChild(errVal); grid.appendChild(errCard);
+    refreshStartupHealth();
     setSystemAuditMessage(t("toast.loadError"), "bad");
+    refreshHermesOverview();
   }
+}
+
+function hermesOverviewTone(state) {
+  const value = String(state || "").toLowerCase();
+  if (value === "ok" || value === "ready" || value === "enabled") return "good";
+  if (value === "warn" || value === "warning" || value === "attention") return "warn";
+  if (value === "offline" || value === "error" || value === "failed" || value === "blocked") return "bad";
+  return "info";
+}
+
+function setHermesOverviewMessage(message, tone = "muted", busy = false) {
+  const target = document.getElementById("hermes-overview-content");
+  if (!target) return;
+  target.setAttribute("aria-busy", busy ? "true" : "false");
+  const row = document.createElement("div");
+  row.className = `system-audit-empty system-audit-${tone}`;
+  row.textContent = message;
+  target.replaceChildren(row);
+}
+
+function systemErrorMessage(payload, fallback) {
+  const text = payload?.error || payload?.message || payload?.summary || fallback;
+  const requestId = String(payload?.requestId || payload?.request_id || "").replace(/\s+/g, " ").trim();
+  return requestId ? `${text} (Request ID: ${requestId.slice(0, 80)})` : text;
+}
+
+function setStartupHealthMessage(message, tone = "muted", busy = false) {
+  const target = document.getElementById("startup-health-content");
+  if (!target) return;
+  target.setAttribute("aria-busy", busy ? "true" : "false");
+  const row = document.createElement("div");
+  row.className = `system-audit-empty system-audit-${tone}`;
+  row.textContent = message;
+  target.replaceChildren(row);
+}
+
+function startupHealthMetric(counts) {
+  return `${Number(counts?.ok || 0)} / ${Number(counts?.warn || 0)} / ${Number(counts?.blocked || 0)}`;
+}
+
+function renderStartupHealth(payload) {
+  const target = document.getElementById("startup-health-content");
+  if (!target) return;
+  if (!payload || payload.ok === false) {
+    setStartupHealthMessage(systemErrorMessage(payload, t("system.startupHealthUnavailable")), "bad");
+    return;
+  }
+
+  const checks = Array.isArray(payload.checks) ? payload.checks.slice(0, 8) : [];
+  const counts = payload.counts || {};
+  const groups = payload.groups || {};
+  const providers = Array.isArray(groups.providers?.available) ? groups.providers.available : [];
+  const tools = groups.tools || {};
+  const stateTone = hermesOverviewTone(payload.state);
+  const toolsPct = Number(tools.healthPct || 0);
+
+  const checkRows = checks.length ? checks.map((check) => {
+    const tone = hermesOverviewTone(check.state);
+    return `
+      <div class="system-overview-check">
+        <span class="system-audit-dot system-audit-${tone}" aria-hidden="true"></span>
+        <span class="system-overview-check-label">${escapeHtml(check.label || check.id || "Check")}</span>
+        <span class="system-audit-status system-audit-${tone}">${escapeHtml(check.state || "unknown")}</span>
+      </div>
+    `;
+  }).join("") : `<div class="system-overview-muted">${escapeHtml(t("system.startupHealthNoSummary"))}</div>`;
+
+  const providerRows = providers.length ? providers.map((provider) => `
+    <div class="system-overview-file">
+      <span>${escapeHtml(String(provider))}</span>
+      <code>${escapeHtml(groups.providers?.selected === provider ? "selected" : "available")}</code>
+    </div>
+  `).join("") : `<div class="system-overview-muted">${escapeHtml(t("system.startupNoProviders"))}</div>`;
+
+  target.setAttribute("aria-busy", "false");
+  target.innerHTML = `
+    <div class="system-overview-summary">
+      <span class="system-overview-state system-audit-${stateTone}">${escapeHtml(payload.state || "unknown")}</span>
+      <div class="system-overview-summary-text">${escapeHtml(payload.summary || t("system.startupHealthNoSummary"))}</div>
+    </div>
+    <div class="system-overview-metrics">
+      <div class="system-overview-metric">
+        <span>${escapeHtml(t("system.startupMetricChecks"))}</span>
+        <strong>${escapeHtml(startupHealthMetric(counts))}</strong>
+      </div>
+      <div class="system-overview-metric">
+        <span>${escapeHtml(t("system.startupMetricProviders"))}</span>
+        <strong>${providers.length}/4</strong>
+      </div>
+      <div class="system-overview-metric">
+        <span>${escapeHtml(t("system.startupMetricTools"))}</span>
+        <strong>${toolsPct}%</strong>
+      </div>
+    </div>
+    <div class="system-overview-grid">
+      <section class="system-overview-section" aria-label="${escapeHtml(t("system.startupChecks"))}">
+        <div class="system-overview-section-title">${escapeHtml(t("system.startupChecks"))}</div>
+        <div class="system-overview-checks">${checkRows}</div>
+      </section>
+      <section class="system-overview-section" aria-label="${escapeHtml(t("system.startupProviders"))}">
+        <div class="system-overview-section-title">${escapeHtml(t("system.startupProviders"))}</div>
+        <div class="system-overview-files">${providerRows}</div>
+      </section>
+      <section class="system-overview-section" aria-label="${escapeHtml(t("system.startupNextAction"))}">
+        <div class="system-overview-section-title">${escapeHtml(t("system.startupNextAction"))}</div>
+        <div class="system-overview-next">${escapeHtml(payload.nextAction || t("system.startupNoNextAction"))}</div>
+      </section>
+    </div>
+  `;
+}
+
+async function refreshStartupHealth() {
+  const target = document.getElementById("startup-health-content");
+  if (!target) return;
+  const requestId = ++startupHealthRefreshSeq;
+  if (!LexaState.get("backendOnline")) {
+    setStartupHealthMessage(t("common.backendOffline"), "bad");
+    return;
+  }
+  if (!window.lexa?.startupHealth) {
+    setStartupHealthMessage(t("system.startupHealthUnavailable"), "bad");
+    return;
+  }
+  setStartupHealthMessage(t("common.loading"), "muted", true);
+  try {
+    const payload = await window.lexa.startupHealth({ probeVoice: false });
+    if (requestId !== startupHealthRefreshSeq) return;
+    renderStartupHealth(payload);
+  } catch (e) {
+    if (requestId !== startupHealthRefreshSeq) return;
+    console.warn("[System] Failed to refresh startup health:", e.message || e);
+    setStartupHealthMessage(e.message || t("system.startupHealthUnavailable"), "bad");
+  }
+}
+
+function hermesDraftMetric(counts) {
+  const drafts = counts?.drafts || {};
+  return `${Number(drafts.pending || 0)} / ${Number(drafts.approved || 0)} / ${Number(drafts.rejected || 0)}`;
+}
+
+function renderHermesOverview(payload) {
+  const target = document.getElementById("hermes-overview-content");
+  if (!target) return;
+  if (!payload || payload.ok === false) {
+    setHermesOverviewMessage(systemErrorMessage(payload, t("system.hermesOverviewUnavailable")), "bad");
+    return;
+  }
+
+  const checks = Array.isArray(payload.checks) ? payload.checks.slice(0, 7) : [];
+  const files = Array.isArray(payload.contextFiles) ? payload.contextFiles.slice(0, 5) : [];
+  const tasks = Array.isArray(payload.nextTasks) ? payload.nextTasks.slice(0, 4) : [];
+  const counts = payload.counts || {};
+  const stateTone = hermesOverviewTone(payload.healthState);
+  const contextCount = Number(counts.contextFiles ?? files.length ?? 0);
+
+  const checkRows = checks.map((check) => {
+    const tone = hermesOverviewTone(check.state);
+    return `
+      <div class="system-overview-check">
+        <span class="system-audit-dot system-audit-${tone}" aria-hidden="true"></span>
+        <span class="system-overview-check-label">${escapeHtml(check.label || check.id || "Check")}</span>
+        <span class="system-audit-status system-audit-${tone}">${escapeHtml(check.state || "unknown")}</span>
+      </div>
+    `;
+  }).join("");
+
+  const fileRows = files.length ? files.map((file) => `
+    <div class="system-overview-file">
+      <span>${escapeHtml(file.title || file.path || "OS-Datei")}</span>
+      <code>${escapeHtml(file.path || "")}</code>
+    </div>
+  `).join("") : `<div class="system-overview-muted">${escapeHtml(t("system.hermesNoContext"))}</div>`;
+
+  const taskRows = tasks.length ? tasks.map((task) => `
+    <li>${escapeHtml(task)}</li>
+  `).join("") : `<li>${escapeHtml(payload.nextAction || t("system.hermesNoNextTask"))}</li>`;
+
+  target.setAttribute("aria-busy", "false");
+  target.innerHTML = `
+    <div class="system-overview-summary">
+      <span class="system-overview-state system-audit-${stateTone}">${escapeHtml(payload.healthState || "unknown")}</span>
+      <div class="system-overview-summary-text">${escapeHtml(payload.summary || t("system.hermesOverviewNoSummary"))}</div>
+    </div>
+    <div class="system-overview-metrics">
+      <div class="system-overview-metric">
+        <span>${escapeHtml(t("system.hermesMetricDrafts"))}</span>
+        <strong>${escapeHtml(hermesDraftMetric(counts))}</strong>
+      </div>
+      <div class="system-overview-metric">
+        <span>${escapeHtml(t("system.hermesMetricContext"))}</span>
+        <strong>${contextCount}</strong>
+      </div>
+      <div class="system-overview-metric">
+        <span>${escapeHtml(t("system.hermesMetricSafeMode"))}</span>
+        <strong>${payload.safeMode ? escapeHtml(t("common.yes")) : escapeHtml(t("common.no"))}</strong>
+      </div>
+    </div>
+    <div class="system-overview-grid">
+      <section class="system-overview-section" aria-label="${escapeHtml(t("system.hermesChecks"))}">
+        <div class="system-overview-section-title">${escapeHtml(t("system.hermesChecks"))}</div>
+        <div class="system-overview-checks">${checkRows}</div>
+      </section>
+      <section class="system-overview-section" aria-label="${escapeHtml(t("system.hermesContextFiles"))}">
+        <div class="system-overview-section-title">${escapeHtml(t("system.hermesContextFiles"))}</div>
+        <div class="system-overview-files">${fileRows}</div>
+      </section>
+      <section class="system-overview-section" aria-label="${escapeHtml(t("system.hermesNextAction"))}">
+        <div class="system-overview-section-title">${escapeHtml(t("system.hermesNextAction"))}</div>
+        <div class="system-overview-next">${escapeHtml(payload.nextAction || t("system.hermesNoNextTask"))}</div>
+        <ul class="system-overview-tasks">${taskRows}</ul>
+      </section>
+    </div>
+  `;
+}
+
+async function refreshHermesOverview() {
+  const target = document.getElementById("hermes-overview-content");
+  if (!target) return;
+  const requestId = ++hermesOverviewRefreshSeq;
+  if (!LexaState.get("backendOnline")) {
+    setHermesOverviewMessage(t("common.backendOffline"), "bad");
+    return;
+  }
+  if (!window.lexa?.hermesOverview) {
+    setHermesOverviewMessage(t("system.hermesOverviewUnavailable"), "bad");
+    return;
+  }
+  setHermesOverviewMessage(t("common.loading"), "muted", true);
+  try {
+    const payload = await window.lexa.hermesOverview({ includeContext: true });
+    if (requestId !== hermesOverviewRefreshSeq) return;
+    renderHermesOverview(payload);
+  } catch (e) {
+    if (requestId !== hermesOverviewRefreshSeq) return;
+    console.warn("[System] Failed to refresh Hermes overview:", e.message || e);
+    setHermesOverviewMessage(e.message || t("system.hermesOverviewUnavailable"), "bad");
+  }
+}
+
+function hermesOverviewAskInChat() {
+  if (typeof switchView === "function") switchView("chat");
+  if (typeof _setChatInputValue === "function") {
+    _setChatInputValue("Was ist der Stand von Lexa, Hermes und OS?");
+    chatInput?.focus?.();
+    showToast(t("system.hermesPromptReady"), "success", 2200);
+    return;
+  }
+  showToast(t("pos.chatInputUnavailable"), "warning", 3000);
 }
 
 function systemAuditStatusClass(status) {
@@ -107,7 +398,7 @@ function renderSystemAuditEntries(payload) {
   const list = document.getElementById("system-audit-list");
   if (!list) return;
   if (!payload || payload.ok === false) {
-    setSystemAuditMessage(payload?.error || t("system.auditUnavailable"), "bad");
+    setSystemAuditMessage(systemErrorMessage(payload, t("system.auditUnavailable")), "bad");
     return;
   }
   const entries = Array.isArray(payload.entries) ? payload.entries : [];

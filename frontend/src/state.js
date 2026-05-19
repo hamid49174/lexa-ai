@@ -26,6 +26,7 @@ const LexaState = (() => {
     // Chat
     currentConversationId: null,
     conversationsList: [],
+    conversationAttentionOnly: false,
 
     // Notifications
     notificationsEnabled: true,
