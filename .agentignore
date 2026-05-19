@@ -1,0 +1,27 @@
+# Local user data and external mounts
+personal_os/
+tmp/
+vendor/
+hermes_workspace/
+
+# Local logs and databases
+audit.log
+bridge-audit.log
+lexa_memory.db
+lexa_memory.db-*
+
+# Build and test artifacts
+dist/
+backend-dist/
+frontend/dist/
+build/
+.pytest_cache/
+.coverage
+audio_cache/
+screenshots/
+recordings/
+
+# Runtime dependencies
+node_modules/
+frontend/node_modules/
+venv/

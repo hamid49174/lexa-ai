@@ -33,10 +33,13 @@ Thumbs.db
 desktop.ini
 
 # Lexa specific
+personal_os/
+tmp/
+vendor/
 audit.log
+bridge-audit.log
 lexa_memory.db
-lexa_memory.db-shm
-lexa_memory.db-wal
+lexa_memory.db-*
 audio_cache/
 app_cache.json
 screenshots/
