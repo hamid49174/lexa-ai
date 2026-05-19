@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } = require("electron");
+const crypto = require("crypto");
 
 const API = "http://127.0.0.1:8000";
 const LOCAL_AUTH_HEADER = "X-Lexa-Local-Token";
@@ -32,6 +33,373 @@ async function withLocalAuthHeader(url, options = {}) {
   headers.set(LOCAL_AUTH_HEADER, token);
   requestOptions.headers = headers;
   return requestOptions;
+}
+
+function bridgePolicy(name, risk, action_type, target, options = {}) {
+  const requiresGate = risk === "high" || risk === "critical";
+  return Object.freeze({
+    name,
+    risk,
+    action_type,
+    target,
+    requires_user_presence: options.requires_user_presence ?? requiresGate,
+    requires_main_confirmation: options.requires_main_confirmation ?? requiresGate,
+    batch_allowed: Boolean(options.batch_allowed),
+    audit: options.audit ?? requiresGate,
+  });
+}
+
+function buildBridgeMethodPolicy(entries) {
+  const policy = {};
+  for (const entry of entries) {
+    policy[entry.name] = entry;
+  }
+  return Object.freeze(policy);
+}
+
+const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
+  bridgePolicy("API_BASE", "low", "read", "constant"),
+  bridgePolicy("loadI18n", "low", "read", "ipc:i18n-load", { batch_allowed: true }),
+  bridgePolicy("minimize", "low", "write", "ipc:window-minimize"),
+  bridgePolicy("maximize", "low", "write", "ipc:window-maximize"),
+  bridgePolicy("close", "low", "write", "ipc:window-close"),
+  bridgePolicy("notify", "medium", "write", "ipc:show-notification", { audit: true }),
+  bridgePolicy("getAutostart", "low", "read", "ipc:get-autostart", { batch_allowed: true }),
+  bridgePolicy("setAutostart", "high", "admin", "ipc:set-autostart"),
+  bridgePolicy("onSwitchView", "low", "read", "ipc:switch-view", { batch_allowed: true }),
+  bridgePolicy("onUpdateAvailable", "low", "read", "ipc:update-available", { batch_allowed: true }),
+  bridgePolicy("licenseGet", "medium", "secret", "ipc:license-get"),
+  bridgePolicy("licenseSet", "high", "secret", "ipc:license-set"),
+  bridgePolicy("licenseValidate", "high", "secret", "/license/validate/{key}"),
+
+  bridgePolicy("chat", "medium", "write", "/chat"),
+  bridgePolicy("chatFile", "medium", "write", "/chat/file"),
+  bridgePolicy("generateTitle", "medium", "write", "/ai/title"),
+  bridgePolicy("execute", "critical", "execute", "/companion/execute"),
+  bridgePolicy("prepareCompanionExecute", "medium", "write", "/companion/execute/prepare", { audit: true }),
+  bridgePolicy("executeWithConfirmation", "critical", "execute", "/companion/execute"),
+  bridgePolicy("executeBatch", "critical", "execute", "/companion/execute/batch"),
+  bridgePolicy("companionAuditRecent", "low", "read", "/companion/audit/recent", { batch_allowed: true }),
+  bridgePolicy("commands", "low", "read", "/companion/commands", { batch_allowed: true }),
+  bridgePolicy("timers", "low", "read", "/companion/timers", { batch_allowed: true }),
+  bridgePolicy("timersAcknowledge", "medium", "write", "/companion/timers/acknowledge", { audit: true }),
+
+  bridgePolicy("tts", "medium", "write", "/voice/tts"),
+  bridgePolicy("stt", "medium", "secret", "/voice/stt"),
+  bridgePolicy("voiceStatus", "low", "read", "/voice/diagnostics", { batch_allowed: true }),
+  bridgePolicy("voiceDiagnostics", "low", "read", "/voice/diagnostics", { batch_allowed: true }),
+  bridgePolicy("voiceArchitecture", "low", "read", "/voice/architecture", { batch_allowed: true }),
+  bridgePolicy("voiceRealtimePreflight", "low", "read", "/voice/realtime/preflight", { batch_allowed: true }),
+  bridgePolicy("voiceRealtimeStart", "high", "secret", "/voice/realtime/start"),
+  bridgePolicy("voiceRealtimeStop", "medium", "write", "/voice/realtime/stop", { audit: true }),
+  bridgePolicy("voiceWebSocket", "medium", "secret", "ws:/voice/ws", { audit: true }),
+  bridgePolicy("ttsVoices", "low", "read", "/voice/tts/voices", { batch_allowed: true }),
+  bridgePolicy("elevenlabsSetKey", "critical", "secret", "/voice/tts/elevenlabs/key"),
+  bridgePolicy("elevenlabsDeleteKey", "critical", "secret", "/voice/tts/elevenlabs/key"),
+  bridgePolicy("elevenlabsVoices", "low", "read", "/voice/tts/elevenlabs/voices", { batch_allowed: true }),
+  bridgePolicy("elevenlabsSetVoice", "medium", "write", "/voice/tts/elevenlabs/voice", { audit: true }),
+  bridgePolicy("elevenlabsSetModel", "medium", "write", "/voice/tts/elevenlabs/model", { audit: true }),
+  bridgePolicy("elevenlabsSetSettings", "medium", "write", "/voice/tts/elevenlabs/settings", { audit: true }),
+  bridgePolicy("elevenlabsToggle", "medium", "write", "/voice/tts/elevenlabs/toggle", { audit: true }),
+  bridgePolicy("sttModels", "low", "read", "/voice/stt/models", { batch_allowed: true }),
+  bridgePolicy("sttSetModel", "medium", "write", "/voice/stt/model", { audit: true }),
+  bridgePolicy("sttSetLanguage", "medium", "write", "/voice/stt/language", { audit: true }),
+  bridgePolicy("sttSetEngine", "medium", "write", "/voice/stt/engine", { audit: true }),
+  bridgePolicy("deepgramSetKey", "critical", "secret", "/voice/stt/deepgram/key"),
+  bridgePolicy("deepgramDeleteKey", "critical", "secret", "/voice/stt/deepgram/key"),
+  bridgePolicy("cartesiaSetKey", "critical", "secret", "/voice/tts/cartesia/key"),
+  bridgePolicy("cartesiaDeleteKey", "critical", "secret", "/voice/tts/cartesia/key"),
+  bridgePolicy("wakewordStart", "high", "secret", "/voice/wakeword/start"),
+  bridgePolicy("wakewordStop", "medium", "write", "/voice/wakeword/stop", { audit: true }),
+  bridgePolicy("wakewordStatus", "low", "read", "/voice/wakeword/status", { batch_allowed: true }),
+  bridgePolicy("wakewordEvents", "low", "read", "/voice/wakeword/events", { batch_allowed: true }),
+  bridgePolicy("conversationStart", "high", "secret", "/voice/conversation/start"),
+  bridgePolicy("conversationStop", "medium", "write", "/voice/conversation/stop", { audit: true }),
+
+  bridgePolicy("health", "low", "read", "/health", { batch_allowed: true }),
+  bridgePolicy("startupHealth", "low", "read", "/health/startup", { batch_allowed: true }),
+  bridgePolicy("aiStatus", "low", "read", "/ai/status", { batch_allowed: true }),
+  bridgePolicy("aiModels", "low", "read", "/ai/models", { batch_allowed: true }),
+  bridgePolicy("setAiModel", "medium", "write", "/ai/models", { audit: true }),
+  bridgePolicy("diagnostics", "low", "read", "/diagnostics", { batch_allowed: true }),
+  bridgePolicy("healthTools", "low", "read", "/health/tools", { batch_allowed: true }),
+
+  bridgePolicy("memoryStats", "low", "read", "/memory/stats", { batch_allowed: true }),
+  bridgePolicy("memoryAdd", "medium", "write", "/memory/add", { audit: true }),
+  bridgePolicy("memoryCleanup", "high", "admin", "/memory/cleanup"),
+  bridgePolicy("notes", "low", "read", "/memory/notes", { batch_allowed: true }),
+  bridgePolicy("noteGet", "low", "read", "/memory/notes/{id}", { batch_allowed: true }),
+  bridgePolicy("noteUpdate", "medium", "write", "/memory/notes/{id}", { audit: true }),
+  bridgePolicy("routines", "low", "read", "/memory/routines", { batch_allowed: true }),
+  bridgePolicy("setProfile", "high", "write", "/memory/profile"),
+  bridgePolicy("ftsSearch", "low", "read", "/search/fts", { batch_allowed: true }),
+  bridgePolicy("rebuildFts", "medium", "admin", "/memory/rebuild-fts", { audit: true }),
+  bridgePolicy("historyClear", "high", "admin", "/history"),
+  bridgePolicy("search", "low", "read", "/search", { batch_allowed: true }),
+  bridgePolicy("conversations", "low", "read", "/conversations", { batch_allowed: true }),
+  bridgePolicy("conversationCreate", "medium", "write", "/conversations", { audit: true }),
+  bridgePolicy("conversationGet", "low", "read", "/conversations/{id}", { batch_allowed: true }),
+  bridgePolicy("conversationUpdate", "high", "write", "/conversations/{id}"),
+  bridgePolicy("conversationDelete", "high", "admin", "/conversations/{id}"),
+  bridgePolicy("conversationLoad", "medium", "write", "/conversations/{id}/load", { audit: true }),
+  bridgePolicy("conversationExport", "medium", "read", "/conversations/{id}/export"),
+
+  bridgePolicy("calendarStatus", "low", "read", "/calendar/status", { batch_allowed: true }),
+  bridgePolicy("calendarToday", "low", "read", "/calendar/today", { batch_allowed: true }),
+  bridgePolicy("calendarWeek", "low", "read", "/calendar/week", { batch_allowed: true }),
+  bridgePolicy("calendarConnect", "high", "admin", "/calendar/connect"),
+  bridgePolicy("clipboardHistory", "high", "secret", "/clipboard/history"),
+  bridgePolicy("clipboardAdd", "medium", "write", "/clipboard/add", { audit: true }),
+  bridgePolicy("clipboardClear", "high", "admin", "/clipboard/history"),
+  bridgePolicy("snippets", "low", "read", "/snippets", { batch_allowed: true }),
+  bridgePolicy("snippetCreate", "medium", "write", "/snippets", { audit: true }),
+  bridgePolicy("snippetDelete", "medium", "admin", "/snippets/{name}", { audit: true }),
+
+  bridgePolicy("todos", "low", "read", "/productivity/todos", { batch_allowed: true }),
+  bridgePolicy("todoCreate", "medium", "write", "/productivity/todos", { audit: true }),
+  bridgePolicy("todoUpdate", "medium", "write", "/productivity/todos/{id}", { audit: true }),
+  bridgePolicy("todoDelete", "medium", "admin", "/productivity/todos/{id}", { audit: true }),
+  bridgePolicy("todoComplete", "medium", "write", "/productivity/todos/{id}/complete", { audit: true }),
+  bridgePolicy("pomodoroStatus", "low", "read", "/productivity/pomodoro", { batch_allowed: true }),
+  bridgePolicy("pomodoroStart", "medium", "write", "/productivity/pomodoro/start", { audit: true }),
+  bridgePolicy("pomodoroStop", "medium", "write", "/productivity/pomodoro/stop", { audit: true }),
+  bridgePolicy("pomodoroAcknowledge", "medium", "write", "/productivity/pomodoro/acknowledge", { audit: true }),
+  bridgePolicy("habits", "low", "read", "/productivity/habits", { batch_allowed: true }),
+  bridgePolicy("habitCreate", "medium", "write", "/productivity/habits", { audit: true }),
+  bridgePolicy("habitLog", "medium", "write", "/productivity/habits/{name}/log", { audit: true }),
+  bridgePolicy("habitDelete", "medium", "admin", "/productivity/habits/{name}", { audit: true }),
+  bridgePolicy("timeTracking", "low", "read", "/productivity/time-tracking", { batch_allowed: true }),
+  bridgePolicy("timeTrackingStart", "medium", "write", "/productivity/time-tracking/start", { audit: true }),
+  bridgePolicy("timeTrackingStop", "medium", "write", "/productivity/time-tracking/stop", { audit: true }),
+  bridgePolicy("timeTrackingReport", "low", "read", "/productivity/time-tracking/report", { batch_allowed: true }),
+  bridgePolicy("focusStatus", "low", "read", "/productivity/focus", { batch_allowed: true }),
+  bridgePolicy("focusOn", "medium", "write", "/productivity/focus/on", { audit: true }),
+  bridgePolicy("focusOff", "medium", "write", "/productivity/focus/off", { audit: true }),
+  bridgePolicy("productivityStats", "low", "read", "/productivity/stats", { batch_allowed: true }),
+  bridgePolicy("weeklyStats", "low", "read", "/productivity/weekly", { batch_allowed: true }),
+
+  bridgePolicy("hermesGatewayAutostartStatus", "low", "read", "/hermes/gateway/autostart", { batch_allowed: true }),
+  bridgePolicy("hermesGatewayAutostartSet", "high", "admin", "/hermes/gateway/autostart"),
+  bridgePolicy("hermesOverview", "low", "read", "/hermes/overview", { batch_allowed: true }),
+  bridgePolicy("backupCreate", "high", "secret", "/backup"),
+  bridgePolicy("backupRestore", "critical", "admin", "/backup/restore"),
+  bridgePolicy("backupCreateDb", "medium", "admin", "/backup/create", { audit: true }),
+  bridgePolicy("backupListDb", "low", "read", "/backup/list", { batch_allowed: true }),
+  bridgePolicy("backupRestoreDb", "critical", "admin", "/backup/restore-db"),
+  bridgePolicy("weatherCurrent", "medium", "read", "/companion/execute:weather_current"),
+  bridgePolicy("weatherForecast", "medium", "read", "/companion/execute:weather_forecast"),
+  bridgePolicy("visionAnalyze", "critical", "secret", "/vision/analyze"),
+  bridgePolicy("visionOcr", "high", "secret", "/companion/execute:screen_read_text"),
+  bridgePolicy("visionStatus", "low", "read", "/vision/status", { batch_allowed: true }),
+  bridgePolicy("agentRun", "critical", "execute", "/agent/run"),
+  bridgePolicy("agentChat", "critical", "execute", "/agent/chat"),
+  bridgePolicy("agentStatus", "low", "read", "/agent/status", { batch_allowed: true }),
+  bridgePolicy("mcpServers", "low", "read", "/mcp/servers", { batch_allowed: true }),
+  bridgePolicy("mcpConnect", "critical", "execute", "/mcp/servers/{name}/connect"),
+  bridgePolicy("mcpDisconnect", "critical", "execute", "/mcp/servers/{name}/disconnect"),
+  bridgePolicy("mcpServerTools", "low", "read", "/mcp/servers/{name}/tools", { batch_allowed: true }),
+  bridgePolicy("mcpCallTool", "critical", "execute", "/mcp/servers/{server}/call"),
+
+  bridgePolicy("personalOsStatus", "low", "read", "/personal-os/status", { batch_allowed: true }),
+  bridgePolicy("personalOsDiagnostics", "low", "read", "/personal-os/diagnostics", { batch_allowed: true }),
+  bridgePolicy("personalOsDrafts", "low", "read", "/personal-os/drafts", { batch_allowed: true }),
+  bridgePolicy("personalOsDraftView", "low", "read", "/personal-os/drafts/view", { batch_allowed: true }),
+  bridgePolicy("personalOsDraftReview", "low", "read", "/personal-os/drafts/review", { batch_allowed: true }),
+  bridgePolicy("personalOsDraftDecision", "high", "write", "/personal-os/drafts/decision"),
+  bridgePolicy("personalOsDraftApply", "critical", "admin", "/personal-os/drafts/apply"),
+  bridgePolicy("personalOsQuery", "low", "read", "/personal-os/query", { batch_allowed: true }),
+  bridgePolicy("personalOsReadFile", "medium", "read", "/personal-os/files/read"),
+  bridgePolicy("personalOsGraph", "low", "read", "/personal-os/graph", { batch_allowed: true }),
+  bridgePolicy("personalOsContextPack", "low", "read", "/personal-os/context-pack", { batch_allowed: true }),
+  bridgePolicy("personalOsObsidianContext", "low", "read", "/personal-os/obsidian-context", { batch_allowed: true }),
+  bridgePolicy("personalOsCodeLoop", "medium", "read", "/personal-os/lexa-code-loop"),
+  bridgePolicy("personalOsRawSubmit", "high", "write", "/personal-os/raw-inbox/submit"),
+  bridgePolicy("personalOsRawStatus", "low", "read", "/personal-os/raw-inbox/status", { batch_allowed: true }),
+]);
+
+const READ_ONLY_COMPANION_BATCH_COMMANDS = new Set([
+  "system_info",
+  "weather_current",
+  "weather_forecast",
+]);
+
+function stableBridgeValue(value, seen = new WeakSet()) {
+  if (value === null || value === undefined) return value;
+  const valueType = typeof value;
+  if (valueType === "string" || valueType === "number" || valueType === "boolean") return value;
+  if (valueType === "bigint") return value.toString();
+  if (valueType === "function") return "[Function]";
+  if (valueType !== "object") return String(value);
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+
+  if (typeof Blob !== "undefined" && value instanceof Blob) {
+    return {
+      __type: value.constructor?.name || "Blob",
+      size: value.size,
+      type: value.type || "",
+      name: value.name || "",
+      lastModified: value.lastModified || 0,
+    };
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return { __type: "ArrayBuffer", byteLength: value.byteLength };
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    return { __type: value.constructor?.name || "TypedArray", byteLength: value.byteLength };
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => stableBridgeValue(item, seen));
+  }
+
+  const normalized = {};
+  for (const key of Object.keys(value).sort()) {
+    normalized[key] = stableBridgeValue(value[key], seen);
+  }
+  return normalized;
+}
+
+function bridgeArgsHash(args = []) {
+  const normalized = stableBridgeValue(Array.from(args));
+  return crypto.createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+}
+
+function bridgeArgKeys(args = []) {
+  const keys = [];
+  Array.from(args).forEach((arg, index) => {
+    if (arg && typeof arg === "object" && !(typeof Blob !== "undefined" && arg instanceof Blob) && !Array.isArray(arg)) {
+      const objectKeys = Object.keys(arg).sort();
+      if (objectKeys.length) {
+        objectKeys.slice(0, 20).forEach((key) => keys.push(`arg${index}.${key}`));
+        if (objectKeys.length > 20) keys.push(`arg${index}.[truncated]`);
+        return;
+      }
+    }
+    keys.push(`arg${index}`);
+  });
+  return keys.slice(0, 40);
+}
+
+function bridgeChallengePrefix(challengeId) {
+  return String(challengeId || "").slice(0, 10);
+}
+
+function auditBridgeDecision(policy, allowed, reason, argsHash, argKeys, challengeId = "") {
+  if (!policy?.audit && allowed) return;
+  const event = {
+    timestamp: new Date().toISOString(),
+    method: policy?.name || "unknown",
+    risk: policy?.risk || "unknown",
+    action_type: policy?.action_type || "unknown",
+    allowed: Boolean(allowed),
+    reason: String(reason || ""),
+    args_hash: String(argsHash || "").slice(0, 16),
+    arg_keys: Array.isArray(argKeys) ? argKeys.slice(0, 40) : [],
+    challenge_id_prefix: bridgeChallengePrefix(challengeId),
+  };
+  const line = `[BridgeAudit] ${JSON.stringify(event)}`;
+  if (allowed) console.info(line);
+  else console.warn(line);
+  try {
+    ipcRenderer.invoke("bridge:audit", event).catch(() => {});
+  } catch (_error) {}
+}
+
+function bridgeSecurityError(message, code = "bridge_security_denied") {
+  const error = new Error(message);
+  error.name = "BridgeSecurityError";
+  error.code = code;
+  return error;
+}
+
+function companionBatchCommandName(entry) {
+  if (typeof entry === "string") return entry;
+  if (!entry || typeof entry !== "object") return "";
+  return String(entry.command || entry.action || entry.name || "").trim();
+}
+
+function validateExecuteBatchCommands(commands) {
+  if (!Array.isArray(commands) || commands.length === 0) {
+    return { ok: false, reason: "batch_empty_or_invalid" };
+  }
+  for (const entry of commands) {
+    const command = companionBatchCommandName(entry);
+    if (!command || !READ_ONLY_COMPANION_BATCH_COMMANDS.has(command)) {
+      return { ok: false, reason: `batch_command_not_read_only:${command || "unknown"}` };
+    }
+  }
+  return { ok: true, reason: "batch_read_only_allowlist" };
+}
+
+async function guardedBridgeCall(method, args, executor, options = {}) {
+  const policy = BRIDGE_METHOD_POLICY[method];
+  if (!policy) throw bridgeSecurityError(`Blocked unclassified bridge method: ${method}`, "bridge_policy_missing");
+
+  const argsHash = bridgeArgsHash(args);
+  const argKeys = bridgeArgKeys(args);
+
+  if (method === "executeBatch") {
+    const batchCheck = validateExecuteBatchCommands(args[0]);
+    if (!batchCheck.ok) {
+      auditBridgeDecision(policy, false, batchCheck.reason, argsHash, argKeys);
+      throw bridgeSecurityError("executeBatch only allows explicitly read-only companion commands", "bridge_batch_denied");
+    }
+  }
+
+  let challengeId = "";
+  const needsPresence = policy.requires_user_presence || policy.requires_main_confirmation;
+  if (needsPresence && !options.disablePresenceChallenge) {
+    const challenge = await ipcRenderer.invoke("bridge:presence:request", {
+      method,
+      risk: policy.risk,
+      action_type: policy.action_type,
+      target: policy.target,
+      args_hash: argsHash,
+      arg_keys: argKeys,
+    });
+    if (!challenge?.ok || !challenge.challenge_id) {
+      auditBridgeDecision(policy, false, challenge?.reason || "presence_denied", argsHash, argKeys);
+      throw bridgeSecurityError("High-risk action requires explicit user presence", "bridge_presence_denied");
+    }
+    challengeId = challenge.challenge_id;
+    const consumed = await ipcRenderer.invoke("bridge:presence:consume", {
+      challenge_id: challengeId,
+      method,
+      args_hash: argsHash,
+    });
+    if (!consumed?.ok) {
+      auditBridgeDecision(policy, false, consumed?.reason || "presence_consume_failed", argsHash, argKeys, challengeId);
+      throw bridgeSecurityError("User presence challenge could not be consumed", "bridge_presence_invalid");
+    }
+  }
+
+  auditBridgeDecision(policy, true, needsPresence ? "presence_confirmed" : "policy_allowed", argsHash, argKeys, challengeId);
+  return executor();
+}
+
+function assertBridgePolicyComplete(bridge) {
+  const missing = Object.keys(bridge).filter((name) => !BRIDGE_METHOD_POLICY[name]);
+  if (missing.length) {
+    throw new Error(`Missing bridge method policy: ${missing.join(", ")}`);
+  }
+}
+
+function createGuardedBridge(bridge, options = {}) {
+  assertBridgePolicyComplete(bridge);
+  const guarded = {};
+  for (const [name, value] of Object.entries(bridge)) {
+    const policy = BRIDGE_METHOD_POLICY[name];
+    const requiresGuard = policy.requires_user_presence || policy.requires_main_confirmation || name === "executeBatch";
+    if (typeof value !== "function" || !requiresGuard) {
+      guarded[name] = value;
+      continue;
+    }
+    guarded[name] = (...args) => guardedBridgeCall(name, args, () => value(...args), options);
+  }
+  return Object.freeze(guarded);
 }
 
 if (process.env.LEXA_ELECTRON_SMOKE_MOCK === "1") {
@@ -71,7 +439,7 @@ if (process.env.LEXA_ELECTRON_SMOKE_MOCK === "1") {
   });
   const findConversation = (id) => conversations.find((c) => String(c.id) === String(id));
 
-  contextBridge.exposeInMainWorld("lexa", {
+  const smokeBridge = {
     API_BASE: "mock://lexa-smoke",
     loadI18n: (lang) => ipcRenderer.invoke("i18n-load", lang),
     minimize: () => {},
@@ -309,7 +677,8 @@ if (process.env.LEXA_ELECTRON_SMOKE_MOCK === "1") {
       steps: [],
       counts: { found: 0, changed: 0, done: 1, blocked: 0, failed: 0 },
     }),
-  });
+  };
+  contextBridge.exposeInMainWorld("lexa", createGuardedBridge(smokeBridge, { disablePresenceChallenge: true }));
   return;
 }
 
@@ -450,7 +819,7 @@ function voiceMimeFilename(mimeType) {
   return mimeToExt[normalizedType] || "recording.webm";
 }
 
-contextBridge.exposeInMainWorld("lexa", {
+const lexaBridge = {
   // API base URL (centralized — avoids hardcoding in chat.js etc.)
   API_BASE: API,
   // i18n — load translation files via IPC (bypasses file:// fetch/CSP issues)
@@ -1787,4 +2156,6 @@ contextBridge.exposeInMainWorld("lexa", {
       get connected() { return ws && ws.readyState === WebSocket.OPEN; },
     };
   },
-});
+};
+
+contextBridge.exposeInMainWorld("lexa", createGuardedBridge(lexaBridge));

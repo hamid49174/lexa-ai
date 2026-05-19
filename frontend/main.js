@@ -104,7 +104,7 @@ if (!electron || typeof electron === "string" || !electron.app) {
   );
 }
 
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification } = electron;
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, dialog } = electron;
 const { spawn } = require("child_process");
 const crypto = require("crypto");
 const http = require("http");
@@ -454,6 +454,153 @@ function openExternalUrl(rawUrl) {
   return true;
 }
 
+const BRIDGE_PRESENCE_TTL_MS = 60 * 1000;
+const BRIDGE_PRESENCE_METHODS = new Set([
+  "setAutostart",
+  "licenseSet",
+  "licenseValidate",
+  "execute",
+  "executeWithConfirmation",
+  "executeBatch",
+  "voiceRealtimeStart",
+  "elevenlabsSetKey",
+  "elevenlabsDeleteKey",
+  "deepgramSetKey",
+  "deepgramDeleteKey",
+  "cartesiaSetKey",
+  "cartesiaDeleteKey",
+  "wakewordStart",
+  "conversationStart",
+  "memoryCleanup",
+  "historyClear",
+  "setProfile",
+  "conversationUpdate",
+  "conversationDelete",
+  "calendarConnect",
+  "clipboardHistory",
+  "clipboardClear",
+  "hermesGatewayAutostartSet",
+  "backupCreate",
+  "backupRestore",
+  "backupRestoreDb",
+  "visionAnalyze",
+  "visionOcr",
+  "agentRun",
+  "agentChat",
+  "mcpConnect",
+  "mcpDisconnect",
+  "mcpCallTool",
+  "personalOsDraftDecision",
+  "personalOsDraftApply",
+  "personalOsRawSubmit",
+]);
+const bridgePresenceChallenges = new Map();
+
+function bridgePresenceIdPrefix(challengeId) {
+  return String(challengeId || "").slice(0, 10);
+}
+
+function sanitizeBridgeAuditEvent(payload = {}, source = "main") {
+  return {
+    timestamp: String(payload.timestamp || new Date().toISOString()).slice(0, 80),
+    source,
+    method: String(payload.method || "unknown").slice(0, 100),
+    risk: String(payload.risk || "unknown").slice(0, 30),
+    action_type: String(payload.action_type || payload.actionType || "unknown").slice(0, 30),
+    allowed: Boolean(payload.allowed),
+    reason: String(payload.reason || "").slice(0, 160),
+    args_hash: String(payload.args_hash || payload.argsHash || "").slice(0, 16),
+    arg_keys: Array.isArray(payload.arg_keys || payload.argKeys)
+      ? (payload.arg_keys || payload.argKeys).map((key) => String(key || "").slice(0, 80)).slice(0, 40)
+      : [],
+    challenge_id_prefix: bridgePresenceIdPrefix(payload.challenge_id_prefix || payload.challengeId || ""),
+  };
+}
+
+function writeBridgeAuditEvent(event) {
+  try {
+    const auditPath = path.join(app.getPath("userData"), "bridge-audit.log");
+    fs.appendFileSync(auditPath, `${JSON.stringify(event)}\n`, "utf8");
+  } catch (error) {
+    console.warn("[BridgePresenceAudit] write failed:", String(error?.message || error).slice(0, 120));
+  }
+}
+
+function sanitizeBridgePresenceRequest(payload = {}) {
+  const method = String(payload.method || "").trim();
+  const risk = String(payload.risk || "unknown").trim();
+  const actionType = String(payload.action_type || "unknown").trim();
+  const target = String(payload.target || "unknown").trim();
+  const argsHash = String(payload.args_hash || "").trim();
+  const argKeys = Array.isArray(payload.arg_keys)
+    ? payload.arg_keys.map((key) => String(key || "").slice(0, 80)).slice(0, 40)
+    : [];
+  return { method, risk, actionType, target, argsHash, argKeys };
+}
+
+function isValidBridgePresenceRequest(payload) {
+  return BRIDGE_PRESENCE_METHODS.has(payload.method)
+    && ["high", "critical"].includes(payload.risk)
+    && /^[a-f0-9]{64}$/i.test(payload.argsHash);
+}
+
+function auditBridgePresence(status, payload = {}, reason = "", challengeId = "") {
+  const event = sanitizeBridgeAuditEvent({
+    timestamp: new Date().toISOString(),
+    method: payload.method,
+    risk: payload.risk,
+    action_type: payload.actionType || payload.action_type,
+    allowed: status === "allowed",
+    reason: reason || status,
+    args_hash: payload.argsHash || payload.args_hash,
+    arg_keys: payload.argKeys || payload.arg_keys,
+    challenge_id_prefix: bridgePresenceIdPrefix(challengeId),
+  }, "main");
+  const line = `[BridgePresenceAudit] ${JSON.stringify(event)}`;
+  if (event.allowed) console.info(line);
+  else console.warn(line);
+  writeBridgeAuditEvent(event);
+}
+
+function pruneBridgePresenceChallenges(now = Date.now()) {
+  for (const [id, record] of bridgePresenceChallenges.entries()) {
+    if (!record || record.expiresAt <= now || record.used) {
+      bridgePresenceChallenges.delete(id);
+    }
+  }
+}
+
+function bridgePresenceSenderTrusted(event) {
+  const frameUrl = event?.senderFrame?.url || event?.sender?.getURL?.() || "";
+  return isTrustedRendererUrl(frameUrl);
+}
+
+async function showBridgePresenceDialog(payload) {
+  const owner = mainWindow && !mainWindow.isDestroyed?.() ? mainWindow : undefined;
+  const detail = [
+    `Method: ${payload.method}`,
+    `Risk: ${payload.risk}`,
+    `Type: ${payload.actionType}`,
+    `Target: ${payload.target}`,
+    payload.argKeys.length ? `Args: ${payload.argKeys.join(", ")}` : "Args: none",
+    "This approval is single-use and expires in 60 seconds.",
+  ].join("\n");
+  const options = {
+    type: payload.risk === "critical" ? "warning" : "question",
+    buttons: ["Deny", "Allow once"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    title: "Confirm Lexa action",
+    message: "Allow this high-risk Lexa action?",
+    detail,
+  };
+  const result = owner
+    ? await dialog.showMessageBox(owner, options)
+    : await dialog.showMessageBox(options);
+  return result.response === 1;
+}
+
 function installElectronSecurityGuards(win) {
   if (!win?.webContents || win.webContents.__lexaSecurityGuardsInstalled) return;
   win.webContents.__lexaSecurityGuardsInstalled = true;
@@ -710,6 +857,99 @@ ipcMain.handle("i18n-load", (_, lang) => {
 
 // ── NOTIFICATIONS ────────────────────────────────
 ipcMain.handle("local-auth-token", () => INSTANCE_TOKEN);
+
+ipcMain.handle("bridge:audit", (event, rawPayload = {}) => {
+  if (!bridgePresenceSenderTrusted(event)) return { ok: false, reason: "untrusted_renderer" };
+  const auditEvent = sanitizeBridgeAuditEvent(rawPayload, "preload");
+  writeBridgeAuditEvent(auditEvent);
+  return { ok: true };
+});
+
+ipcMain.handle("bridge:presence:request", async (event, rawPayload = {}) => {
+  const payload = sanitizeBridgePresenceRequest(rawPayload);
+  pruneBridgePresenceChallenges();
+
+  if (!bridgePresenceSenderTrusted(event)) {
+    auditBridgePresence("denied", payload, "untrusted_renderer");
+    return { ok: false, reason: "untrusted_renderer" };
+  }
+
+  if (!isValidBridgePresenceRequest(payload)) {
+    auditBridgePresence("denied", payload, "invalid_presence_request");
+    return { ok: false, reason: "invalid_presence_request" };
+  }
+
+  let approved = false;
+  try {
+    approved = await showBridgePresenceDialog(payload);
+  } catch (error) {
+    auditBridgePresence("denied", payload, `dialog_failed:${String(error?.message || error).slice(0, 80)}`);
+    return { ok: false, reason: "dialog_failed" };
+  }
+
+  if (!approved) {
+    auditBridgePresence("denied", payload, "user_denied");
+    return { ok: false, reason: "user_denied" };
+  }
+
+  const challengeId = crypto.randomBytes(18).toString("hex");
+  const expiresAt = Date.now() + BRIDGE_PRESENCE_TTL_MS;
+  bridgePresenceChallenges.set(challengeId, {
+    method: payload.method,
+    argsHash: payload.argsHash,
+    expiresAt,
+    used: false,
+  });
+  auditBridgePresence("allowed", payload, "challenge_created", challengeId);
+  return {
+    ok: true,
+    challenge_id: challengeId,
+    expires_at: new Date(expiresAt).toISOString(),
+  };
+});
+
+ipcMain.handle("bridge:presence:consume", (event, rawPayload = {}) => {
+  pruneBridgePresenceChallenges();
+
+  const challengeId = String(rawPayload.challenge_id || "");
+  const method = String(rawPayload.method || "").trim();
+  const argsHash = String(rawPayload.args_hash || "").trim();
+  const payload = { method, risk: "unknown", actionType: "consume", argsHash, argKeys: [] };
+
+  if (!bridgePresenceSenderTrusted(event)) {
+    auditBridgePresence("denied", payload, "untrusted_renderer", challengeId);
+    return { ok: false, reason: "untrusted_renderer" };
+  }
+
+  const record = bridgePresenceChallenges.get(challengeId);
+  if (!record) {
+    auditBridgePresence("denied", payload, "challenge_missing_or_expired", challengeId);
+    return { ok: false, reason: "challenge_missing_or_expired" };
+  }
+  if (record.used) {
+    bridgePresenceChallenges.delete(challengeId);
+    auditBridgePresence("denied", payload, "challenge_replay", challengeId);
+    return { ok: false, reason: "challenge_replay" };
+  }
+  if (record.expiresAt <= Date.now()) {
+    bridgePresenceChallenges.delete(challengeId);
+    auditBridgePresence("denied", payload, "challenge_expired", challengeId);
+    return { ok: false, reason: "challenge_expired" };
+  }
+  if (record.method !== method) {
+    auditBridgePresence("denied", payload, "method_mismatch", challengeId);
+    return { ok: false, reason: "method_mismatch" };
+  }
+  if (record.argsHash !== argsHash) {
+    auditBridgePresence("denied", payload, "args_hash_mismatch", challengeId);
+    return { ok: false, reason: "args_hash_mismatch" };
+  }
+
+  record.used = true;
+  bridgePresenceChallenges.delete(challengeId);
+  auditBridgePresence("allowed", payload, "challenge_consumed", challengeId);
+  return { ok: true };
+});
 
 ipcMain.on("show-notification", (_, data) => {
   if (Notification.isSupported()) {
