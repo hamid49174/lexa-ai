@@ -154,6 +154,49 @@ Tests covering the Pass 5 extraction:
 
 Next safest extraction target: do not continue rendering extraction immediately. If another small extraction is needed, target only pure composer command metadata or pure message action prompt helpers after adding direct tests. Streaming, history, tool-call rendering, confirmation UI, voice, Companion execution, and Personal OS draft flows remain intentionally untouched.
 
+## Pass 6 Safe Multi-helper Extraction
+
+Pass 6 extracted three low-risk helper clusters from `frontend/src/chat.js` after adding direct behavior guards for each boundary.
+
+Extracted clusters:
+
+| Cluster | New file | Functions/data moved | Why low risk |
+| --- | --- | --- | --- |
+| Composer command metadata/search | `frontend/src/chat_composer_helpers.js` | `LEXA_COMPOSER_COMMANDS`, `composerCommandText()`, `composerCommandLabel()`, `composerCommandDesc()`, `composerCommandPrefix()`, `composerCommandAliases()`, `composerCommandAliasKey()`, `composerCommandHintText()`, `composerCommandAliasValues()`, `composerCommandIconSvg()`, `composerCommandMatches()`, `composerCommandScore()`, `composerCommandSearchItems()`, `composerCommandForAlias()`, `expandComposerSlashAlias()` | Reads i18n through `t()` and static command data; does not mutate state, touch DOM, call backend/fetch, or own command palette lifecycle |
+| Answer action prompt builders | `frontend/src/chat_message_actions.js` | `workspaceDraftPromptFromText()`, `continuePromptFromText()`, `verifyAnswerPromptFromText()` | Builds strings from source text, composer prefixes, i18n, and `LexaConfig`; does not mutate state, touch DOM, call backend/fetch, or start agent runs |
+| Chat input metrics | `frontend/src/chat_input_helpers.js` | `chatInputMetrics()` | Pure counter/threshold calculation from input text and config; DOM sizing and class updates remain in `syncChatInputSize()` |
+
+Size snapshot before and after Pass 6:
+
+| File | Before Pass 6 | After Pass 6 |
+| --- | ---: | ---: |
+| `frontend/src/chat.js` | 4390 lines / 209339 bytes | 4218 lines / 192304 bytes |
+| `frontend/src/chat_composer_helpers.js` | new | 117 lines / 13918 bytes |
+| `frontend/src/chat_message_actions.js` | new | 41 lines / 2753 bytes |
+| `frontend/src/chat_input_helpers.js` | new | 17 lines / 673 bytes |
+
+Tests covering Pass 6:
+
+- `test_chat_send_guards.js` now directly checks empty/default input metrics, exact danger threshold behavior, empty prompt inputs, multiline/special-text preservation for prompt builders, composer fallback text behavior, and icon fallback behavior.
+- `test_frontend_script_order_static.js` verifies the new helper files are classic scripts loaded after prior chat helpers and before `chat.js`, and verifies `chat.js` consumes the extracted globals without redefining them.
+- `test_app_chat_input_wiring.js` verifies UI callers remain wired in `chat.js` while command metadata and prompt helpers live in the helper files.
+
+Current chat script order:
+
+1. `chat_constants.js`
+2. `chat_formatting.js`
+3. `chat_markdown.js`
+4. `chat_message_formatting.js`
+5. `chat_export.js`
+6. `chat_composer_helpers.js`
+7. `chat_message_actions.js`
+8. `chat_input_helpers.js`
+9. `chat.js`
+
+Remaining high-risk clusters: streaming send/abort, conversation history switching/deletion/persistence, tool-call rendering and confirmation UI, Companion execution, voice/STT/TTS/orb behavior, Personal OS draft apply/approve/reject flows, Electron preload IPC, Electron backend lifecycle, signing/update behavior, and OS cleanup.
+
+Stop-line: do not extract streaming, conversation history, tool-call rendering, or confirmation UI until direct E2E or stronger integration coverage exists for those lifecycle paths.
+
 ## Do Not Touch Yet
 
 - streaming send and abort behavior

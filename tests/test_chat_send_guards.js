@@ -18,6 +18,18 @@ const chatExportSrc = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "chat_export.js"),
   "utf8"
 );
+const chatComposerSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "chat_composer_helpers.js"),
+  "utf8"
+);
+const chatMessageActionsSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "chat_message_actions.js"),
+  "utf8"
+);
+const chatInputHelpersSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "chat_input_helpers.js"),
+  "utf8"
+);
 const deI18n = fs.readFileSync(path.join(__dirname, "..", "frontend", "src", "i18n", "de.json"), "utf8");
 const enI18n = fs.readFileSync(path.join(__dirname, "..", "frontend", "src", "i18n", "en.json"), "utf8");
 
@@ -71,26 +83,27 @@ const sandbox = new Function(`
     return key + ":" + (values.max || "");
   }
   async function sendAgentMessage(text) { events.push(["agent", text]); }
-  ${extractFn(src, "chatInputMetrics")}
+  ${extractFn(chatInputHelpersSrc, "chatInputMetrics")}
   ${extractFn(src, "getMessagePersistText")}
   ${extractFn(src, "setMessagePersistText")}
-  ${extractConstArray(src, "LEXA_COMPOSER_COMMANDS")}
-  ${extractFn(src, "composerCommandText")}
-  ${extractFn(src, "composerCommandLabel")}
-  ${extractFn(src, "composerCommandDesc")}
-  ${extractFn(src, "composerCommandPrefix")}
-  ${extractFn(src, "composerCommandAliases")}
-  ${extractFn(src, "composerCommandAliasKey")}
-  ${extractFn(src, "composerCommandHintText")}
-  ${extractFn(src, "composerCommandAliasValues")}
-  ${extractFn(src, "composerCommandMatches")}
-  ${extractFn(src, "composerCommandScore")}
-  ${extractFn(src, "composerCommandSearchItems")}
-  ${extractFn(src, "composerCommandForAlias")}
-  ${extractFn(src, "expandComposerSlashAlias")}
-  ${extractFn(src, "workspaceDraftPromptFromText")}
-  ${extractFn(src, "continuePromptFromText")}
-  ${extractFn(src, "verifyAnswerPromptFromText")}
+  ${extractConstArray(chatComposerSrc, "LEXA_COMPOSER_COMMANDS")}
+  ${extractFn(chatComposerSrc, "composerCommandText")}
+  ${extractFn(chatComposerSrc, "composerCommandLabel")}
+  ${extractFn(chatComposerSrc, "composerCommandDesc")}
+  ${extractFn(chatComposerSrc, "composerCommandPrefix")}
+  ${extractFn(chatComposerSrc, "composerCommandAliases")}
+  ${extractFn(chatComposerSrc, "composerCommandAliasKey")}
+  ${extractFn(chatComposerSrc, "composerCommandHintText")}
+  ${extractFn(chatComposerSrc, "composerCommandAliasValues")}
+  ${extractFn(chatComposerSrc, "composerCommandIconSvg")}
+  ${extractFn(chatComposerSrc, "composerCommandMatches")}
+  ${extractFn(chatComposerSrc, "composerCommandScore")}
+  ${extractFn(chatComposerSrc, "composerCommandSearchItems")}
+  ${extractFn(chatComposerSrc, "composerCommandForAlias")}
+  ${extractFn(chatComposerSrc, "expandComposerSlashAlias")}
+  ${extractFn(chatMessageActionsSrc, "workspaceDraftPromptFromText")}
+  ${extractFn(chatMessageActionsSrc, "continuePromptFromText")}
+  ${extractFn(chatMessageActionsSrc, "verifyAnswerPromptFromText")}
   ${extractFn(chatExportSrc, "messageExportMarkdownFromText")}
   ${extractFn(chatExportSrc, "messageExportFilename")}
   ${extractConstArray(chatConstantsSrc, "_AGENT_PATTERNS")}
@@ -104,6 +117,8 @@ const sandbox = new Function(`
     composerCommandSearchItems,
     composerCommandForAlias,
     composerCommandHintText,
+    composerCommandIconSvg,
+    composerCommandText,
     composerCommands: LEXA_COMPOSER_COMMANDS,
     expandComposerSlashAlias,
     workspaceDraftPromptFromText,
@@ -142,6 +157,10 @@ function assert(desc, ok, detail = "") {
   assert("marks warning range", warn.visible === true && warn.warn === true && warn.danger === false);
   const over = sandbox.chatInputMetrics("x".repeat(101), { MAX_CHAT_INPUT_LENGTH: 100, CHAR_COUNTER_WARN: 75, CHAR_COUNTER_DANGER: 95 });
   assert("marks over-limit range", over.visible === true && over.over === true && over.label === "101/100");
+  const defaultMetrics = sandbox.chatInputMetrics(null, {});
+  assert("chat input metrics handles empty input with fallback config", defaultMetrics.length === 0 && defaultMetrics.max === 4000 && defaultMetrics.visible === false && defaultMetrics.label === "0/4000");
+  const dangerEdge = sandbox.chatInputMetrics("x".repeat(95), { MAX_CHAT_INPUT_LENGTH: 100, CHAR_COUNTER_WARN: 75, CHAR_COUNTER_DANGER: 95 });
+  assert("chat input metrics marks the danger threshold without over-limit state", dangerEdge.danger === true && dangerEdge.over === false && dangerEdge.visible === true);
 
   sandbox.setInput("x".repeat(11));
   await sandbox.sendMessage();
@@ -199,16 +218,23 @@ function assert(desc, ok, detail = "") {
   assert("composer unique prefix alias expands workspace workflow", sandbox.expandComposerSlashAlias("/work Lexa roadmap").includes("workspace draft") && sandbox.expandComposerSlashAlias("/work Lexa roadmap").includes("Lexa roadmap"));
   assert("workspace handoff prompt wraps answers as artifacts", sandbox.workspaceDraftPromptFromText("Alpha answer").includes("workspace draft") && sandbox.workspaceDraftPromptFromText("Alpha answer").includes("Source answer:\nAlpha answer"));
   assert("workspace handoff prompt clips long answers", sandbox.workspaceDraftPromptFromText("x".repeat(8100)).includes("[Source clipped for chat handoff.]"));
+  assert("workspace handoff prompt skips empty source", sandbox.workspaceDraftPromptFromText(null) === "");
+  assert("workspace handoff prompt preserves multiline special text", sandbox.workspaceDraftPromptFromText("Line <one>\nLine & two").includes("Source answer:\nLine <one>\nLine & two"));
   sandbox.setMaxLength(4000);
   const continuePrompt = sandbox.continuePromptFromText("Alpha answer");
   assert("continue-from-answer prompt preserves source and cursor", continuePrompt.text.includes("chat.continueFromAnswerPrefix") && continuePrompt.text.includes("chat.continueFromAnswerNextRequest") && continuePrompt.text.includes("chat.continueFromAnswerSourceLabel:\nAlpha answer") && continuePrompt.cursorStart > 0);
   sandbox.setMaxLength(1200);
   const clippedContinuePrompt = sandbox.continuePromptFromText("x".repeat(12000));
   assert("continue-from-answer prompt clips long source context", clippedContinuePrompt.text.includes("chat.continueFromAnswerClipMarker") && clippedContinuePrompt.text.length <= 984);
+  const emptyContinuePrompt = sandbox.continuePromptFromText(undefined);
+  assert("continue-from-answer prompt skips empty source", emptyContinuePrompt.text === "" && emptyContinuePrompt.cursorStart === 0);
+  assert("continue-from-answer prompt preserves multiline special text", sandbox.continuePromptFromText("Line <one>\nLine & two").text.includes("Line <one>\nLine & two"));
   sandbox.setMaxLength(10);
   const verifyPrompt = sandbox.verifyAnswerPromptFromText("Alpha answer");
   assert("verify-answer prompt wraps answers as source-backed research", verifyPrompt.includes("source-backed research") && verifyPrompt.includes("checkable claims") && verifyPrompt.includes("Source answer:") && verifyPrompt.includes("Alpha answer"));
   assert("verify-answer prompt clips long answers", sandbox.verifyAnswerPromptFromText("x".repeat(8100)).includes("chat.verifyAnswerClipMarker"));
+  assert("verify-answer prompt skips empty source", sandbox.verifyAnswerPromptFromText(" ") === "");
+  assert("verify-answer prompt preserves multiline special text", sandbox.verifyAnswerPromptFromText("Line <one>\nLine & two").includes("Source answer:\nLine <one>\nLine & two"));
   const exportedMarkdown = sandbox.messageExportMarkdownFromText("Alpha answer", { title: "Lexa Note", exportedAt: "2026-05-18T04:58:14.627Z" });
   assert("message markdown export keeps source and metadata", exportedMarkdown.includes("# Lexa Note") && exportedMarkdown.includes("Exported: 2026-05-18T04:58:14.627Z") && exportedMarkdown.includes("Source: Lexa chat") && exportedMarkdown.endsWith("Alpha answer\n"));
   assert("message markdown export skips empty source", sandbox.messageExportMarkdownFromText("   ") === "");
@@ -233,6 +259,9 @@ function assert(desc, ok, detail = "") {
   assert("composer short alias expands ship check workflow", sandbox.expandComposerSlashAlias("/rl Lexa").includes("Ship Check") && sandbox.expandComposerSlashAlias("/rl Lexa").includes("Lexa"));
   assert("composer ambiguous prefix alias stays unexpanded", sandbox.composerCommandForAlias("re", { allowPrefix: true }) === null);
   assert("composer alias key normalizes separators and umlauts", sandbox.composerCommandAliasKey("Mehr-Schritt") === "mehrschritt" && sandbox.composerCommandAliasKey("deep_research") === "deepresearch");
+  assert("composer command text uses fallback when no i18n key is configured", sandbox.composerCommandText({ fallbackLabel: "Fallback Label" }, "label") === "Fallback Label");
+  assert("composer command text handles empty command", sandbox.composerCommandText(null, "label") === "");
+  assert("composer command icon svg falls back to command icon", sandbox.composerCommandIconSvg("missing").includes("<svg") && sandbox.composerCommandIconSvg("missing").includes('M18 6 6 18'));
   const researchCommand = sandbox.composerCommands.find((command) => command.id === "research");
   const workspaceCommand = sandbox.composerCommands.find((command) => command.id === "workspace");
   const contextCommand = sandbox.composerCommands.find((command) => command.id === "context");
