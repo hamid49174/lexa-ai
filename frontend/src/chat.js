@@ -4035,16 +4035,6 @@ function setupDragDrop() {
 function triggerFileUpload() { document.getElementById("file-input")?.click(); }
 function handleFileSelect(event) { const file = event.target.files?.[0]; if (file) handleFileUpload(file); event.target.value = ""; }
 
-function fileUploadSizeLabel(file) {
-  if (file.size < 1024) return `${file.size} B`;
-  if (file.size < 1048576) return `${(file.size / 1024).toFixed(1)} KB`;
-  return `${(file.size / 1048576).toFixed(1)} MB`;
-}
-
-function fileUploadExtension(file) {
-  return file.name.includes(".") ? file.name.split(".").pop().toUpperCase() : "FILE";
-}
-
 function buildFileUploadCard(file) {
   const ext = fileUploadExtension(file);
   const card = document.createElement("div");
@@ -4088,12 +4078,7 @@ function addFileUploadMessage(file, userMsg) {
 function buildFileInfoBadge(fileInfo) {
   const badge = document.createElement("div");
   badge.className = "file-info-badge";
-  const parts = [
-    String(fileInfo.type || "file").toUpperCase(),
-    `${fileInfo.size_kb || 0} KB`,
-  ];
-  if (fileInfo.line_count) parts.push(t("chat.fileLines", {count: fileInfo.line_count}));
-  badge.textContent = parts.join(" · ");
+  badge.textContent = fileInfoBadgeText(fileInfo);
   return badge;
 }
 

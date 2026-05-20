@@ -1,0 +1,50 @@
+/**
+ * Direct checks for file upload display helpers.
+ * Run with: node tests/test_chat_file_display_helpers.js
+ */
+
+const fs = require("fs");
+const path = require("path");
+const vm = require("vm");
+
+const root = path.join(__dirname, "..");
+const helperSrc = fs.readFileSync(path.join(root, "frontend", "src", "chat_file_display_ui.js"), "utf8");
+
+let passed = 0;
+let failed = 0;
+
+function assert(desc, ok, detail = "") {
+  if (ok) {
+    console.log(`  ok: ${desc}`);
+    passed += 1;
+  } else {
+    console.error(`  FAIL: ${desc}${detail ? " - " + detail : ""}`);
+    failed += 1;
+  }
+}
+
+const context = {
+  Number,
+  String,
+  t: (key, params = {}) => key === "chat.fileLines" ? `${params.count} lines` : key,
+};
+vm.createContext(context);
+vm.runInContext(helperSrc, context, { filename: "chat_file_display_ui.js" });
+
+console.log("\nchat file display helper boundaries:");
+
+assert("file size labels preserve byte values", context.fileUploadSizeLabel({ size: 512 }) === "512 B");
+assert("file size labels format kilobytes", context.fileUploadSizeLabel({ size: 1536 }) === "1.5 KB");
+assert("file size labels format megabytes", context.fileUploadSizeLabel({ size: 2 * 1048576 }) === "2.0 MB");
+assert("missing file size falls back safely", context.fileUploadSizeLabel(null) === "0 B");
+assert("file extension helper uppercases suffix", context.fileUploadExtension({ name: "report.final.md" }) === "MD");
+assert("file extension helper falls back when no suffix exists", context.fileUploadExtension({ name: "README" }) === "FILE");
+assert("file extension helper preserves unsafe suffix as text", context.fileUploadExtension({ name: "bad.<script>" }) === "<SCRIPT>");
+assert("file info badge text includes type and size", context.fileInfoBadgeText({ type: "md", size_kb: 12 }) === "MD \u00b7 12 KB");
+assert("file info badge text includes line count when present", context.fileInfoBadgeText({ type: "txt", size_kb: 4, line_count: 7 }) === "TXT \u00b7 4 KB \u00b7 7 lines");
+assert("file info badge text handles missing payload", context.fileInfoBadgeText(null) === "FILE \u00b7 0 KB");
+assert("unsafe file info remains plain text for renderer insertion", context.fileInfoBadgeText({ type: "<img src=x onerror=alert(1)>", size_kb: "<script>alert(1)</script>" }).includes("<script>alert(1)</script>"));
+assert("helper script remains classic", !/(^|\n)\s*(import|export)\b/.test(helperSrc));
+
+console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
+if (failed > 0) process.exit(1);

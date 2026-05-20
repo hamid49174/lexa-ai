@@ -27,6 +27,7 @@ Goal: make the classic-script frontend easier to maintain without changing visib
 | Chat input wiring | textarea sizing, history, snippets, send-mode behavior | Medium | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js` |
 | Chat persistence/history | conversation save/load, local agent metadata, deletion/switching | High | Electron visual smoke plus router conversation tests |
 | Chat streaming/tool rendering | streaming send, tool-call confirmation, agent run panels | High | Electron visual smoke, chat send guards, companion/router tests |
+| Chat file/attachment display | upload card metadata, file result badges, attachment-like history display | Low-medium | `electron_file_upload_result_smoke.js`, `test_chat_file_display_helpers.js`, `test_chat_send_guards.js` |
 | Chat voice integration | mic/STT/TTS/orb state and wake-word paths | High | `test_settings_voice_static.js`, voice tests, Electron visual smoke |
 | Settings local preferences | theme, accent, font size, language normalization and hydration helpers | Low | `electron_settings_persistence_smoke.js`, `test_settings_helpers.js`, `test_frontend_script_order_static.js` |
 | Settings provider/voice/license controls | provider status, API key/keyring buttons, voice runtime settings, license activation, backend-backed controls | High | settings voice static tests, future keyring-safe settings smokes |
@@ -598,12 +599,84 @@ Current tail script order:
 4. `settings.js`
 5. `devtools.js`
 
-Next recommended target: provider/model backend contract coverage with fake provider responses, or a render-only file upload result smoke. Secrets/keyring, provider backend writes, license activation, voice runtime, Electron IPC, and OS drafts remain stop-lined.
+Next recommended target from this point was a render-only file upload result smoke, now covered in the following section. Secrets/keyring, provider backend writes, license activation, voice runtime, Electron IPC, and OS drafts remained stop-lined.
+
+## File Upload / Attachment Result Coverage and Helper Extraction
+
+This sprint added render-only coverage for file upload cards, file result badges, and attachment-like history content before extracting only small display metadata helpers.
+
+File/attachment responsibility map:
+
+| Cluster | Location/functions | Dependencies/globals | Mutates state | Touches DOM | Backend/fetch/IPC | Current coverage | Risk | Recommended next action |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| File metadata display | `chat_file_display_ui.js` | passed file/file-info payloads, `t()` for line count label | No | No | No | `test_chat_file_display_helpers.js`, `electron_file_upload_result_smoke.js` | Low | Keep extracted; adjust only with direct helper tests |
+| Upload card rendering | `buildFileUploadCard()`, `addFileUploadMessage()` in `chat.js` | file object, `chatMessages`, DOM helper functions | DOM only | Yes | No | `electron_file_upload_result_smoke.js`, `test_chat_send_guards.js` | Low-medium | Keep render-only; do not mix with upload execution |
+| File result badge/rendering | `buildFileInfoBadge()`, `addFileUploadResponse()` in `chat.js` | file result payload, `addMessage()`, chat DOM | DOM only | Yes | No direct fetch | `electron_file_upload_result_smoke.js`, `test_chat_send_guards.js` | Low-medium | Keep display-only until backend contracts are covered |
+| Upload orchestration | `handleFileUpload()` in `chat.js` | `LexaState`, `window.lexa.chatFile()`, title/history, send button, TTS | Yes | Yes | Backend bridge call | static guards only | High | Stop-line; add safe fixture/backend contract coverage before changes |
+| Attachment-like history | `renderPersistedConversationMessages()` | history payloads, message formatter | DOM only | Yes | No | `electron_file_upload_result_smoke.js`, history smokes | Medium | Keep history orchestration in `chat.js` |
+
+Coverage added:
+
+- `tests/electron_file_upload_result_smoke.js` loads the real renderer with isolated Electron `userData` and uses in-memory `File` objects only.
+- It verifies safe filename rendering, file extension/size metadata, file result badge text, unsafe result content containment, failed result display safety, attachment-like history not becoming live controls, no executable nodes, no renderer fetch calls, and no upload/tool/provider/OS bridge methods.
+- `tests/test_chat_file_display_helpers.js` directly covers size labels, extension fallback, unsafe suffix handling, badge text with line counts, missing payloads, unsafe text preservation for renderer escaping, and classic-script constraints.
+
+Extraction completed:
+
+| File | Before sprint | After sprint |
+| --- | ---: | ---: |
+| `frontend/src/chat.js` | 4337 lines / 183080 bytes | 4322 lines / 182551 bytes |
+| `frontend/src/chat_file_display_ui.js` | new | 22 lines / 757 bytes |
+
+Moved functions:
+
+- `fileUploadSizeLabel(file)`
+- `fileUploadExtension(file)`
+- `fileInfoBadgeText(fileInfo)`
+
+Why this boundary was safe:
+
+- It reads only passed display payloads.
+- It does not touch DOM directly, call fetch/backend APIs, read files, write files, execute Companion, create OS drafts, or own upload/send/stream/history lifecycle.
+- Existing card and badge rendering still insert text through `textContent`.
+
+What stayed in `chat.js`:
+
+- `handleFileUpload()`
+- `buildFileUploadCard()`
+- `addFileUploadMessage()`
+- `buildFileInfoBadge()`
+- `addFileUploadResponse()`
+- backend upload calls through `window.lexa.chatFile()`
+- automatic title/history persistence
+- action execution after upload responses
+- TTS and send/loading state
+
+Current chat script order:
+
+1. `chat_constants.js`
+2. `chat_formatting.js`
+3. `chat_markdown.js`
+4. `chat_message_formatting.js`
+5. `chat_export.js`
+6. `chat_composer_helpers.js`
+7. `chat_message_actions.js`
+8. `chat_input_helpers.js`
+9. `chat_tool_confirmation_ui.js`
+10. `chat_tool_display_ui.js`
+11. `chat_confirmation_state.js`
+12. `chat_history_ui.js`
+13. `chat_streaming_helpers.js`
+14. `chat_file_display_ui.js`
+15. `chat.js`
+
+Next recommended target: provider/model backend contract coverage with fake provider responses, or a read-only Personal OS cockpit smoke. Real file uploads, filesystem writes, OS drafts, Companion execution, provider calls, Electron IPC, send pipeline, and full streaming lifecycle remain stop-lined.
 
 ## Do Not Touch Yet
 
 - streaming send and abort lifecycle beyond pure parser helpers
 - conversation history switching/deletion persistence orchestration
+- real file upload execution, backend upload contracts, and filesystem writes
 - real tool execution/result lifecycle and confirmation approval execution
 - voice/STT/TTS/orb behavior
 - settings keyring/API-key handling, voice runtime behavior, license activation/removal, backend/provider contracts/calls, and Electron IPC

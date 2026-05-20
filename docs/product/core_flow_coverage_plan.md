@@ -15,6 +15,7 @@ Goal: strengthen integration coverage for Lexa's internal daily-use core flows b
 | Streaming response lifecycle | `test_chat_send_guards.js`, `electron_core_chat_flow_smoke.js`, `electron_streaming_robustness_smoke.js`, `electron_ui_visual_smoke.js`, `test_chat_streaming_helpers.js` | Real provider/network behavior and full send-pipeline orchestration remain outside local smoke coverage | Streaming refactors could strand loading state, disabled buttons, duplicate partial text, or unsafe malformed stream output | Keep robustness smoke in required gates before moving any larger streaming lifecycle code |
 | Conversation history save/load | `test_router_conversations.py`, `test_chat_send_guards.js`, `electron_ui_visual_smoke.js`, `electron_core_chat_flow_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_history_lifecycle_smoke.js`, `electron_history_failure_smoke.js` | Real backend persistence and active-conversation delete edge cases still need focused coverage | History refactors could drop raw markdown, duplicate messages, corrupt active selection, or crash on malformed history payloads | Keep failure-path smoke in required gates before moving save/load/delete orchestration |
 | Tool-call display | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, backend action/parser tests, `electron_tool_confirmation_smoke.js`, `electron_tool_display_smoke.js`, `test_chat_tool_display_helpers.js` | Real Companion/tool execution remains outside renderer smoke coverage | Tool rendering refactors could expose unsafe labels, unsafe result content, or hide confirmation state | Keep render-only display smoke mocked; do not add real tool execution to renderer tests |
+| File upload / attachment display | `electron_file_upload_result_smoke.js`, `test_chat_file_display_helpers.js`, `test_chat_send_guards.js`, `test_frontend_script_order_static.js` | Real file upload execution, backend upload calls, filesystem reads/writes, and provider-backed file analysis remain intentionally outside renderer display smoke | File UI refactors could expose unsafe filenames/content, create live controls from history, or accidentally trigger upload/tool/provider paths | Keep display-only smoke mocked with in-memory `File` objects; add backend upload contract tests only with safe fixtures |
 | Confirmation happy path | `test_router_companion.py`, `test_companion_confirmation.py`, `electron_presence_challenge_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_confirmation_click_smoke.js` | Real Companion execution remains intentionally outside renderer smoke coverage | Confirmation UI refactors could call Companion incorrectly or lose safe denial behavior | Keep focused click smoke mocked; do not add real tool execution to renderer tests |
 | OS draft creation path | `test_personal_os_prompt.js`, `test_router_personal_os.py`, `test_personal_os_actions.py`, eval OS draft tests | Full renderer draft creation from chat handoff is not isolated | OS draft UI refactors could bypass Draft/Approval expectations | Add a mocked Personal OS draft handoff smoke only after core chat/history smokes are stable |
 | Settings persistence | `test_settings_voice_static.js`, `test_app_chat_input_wiring.js`, `electron_ui_visual_smoke.js`, `electron_settings_persistence_smoke.js`, `test_settings_helpers.js` | Provider/keyring/license persistence remains intentionally outside the local preference smoke | Settings refactors could silently stop saving local preferences, lose Beta/Internal labels, or apply corrupt localStorage values | Keep local preference smoke in settings gates; add provider/secret coverage only with explicit keyring-safe mocks |
@@ -169,8 +170,30 @@ Extraction completed:
 - `loadModelSelection()` and `changeAiModel()` now live in `settings.js` instead of `chat.js`.
 - API-key/keyring controls, real provider/backend calls, voice runtime, license activation, Electron IPC, chat lifecycle, and OS draft paths remain untouched.
 
+## Added In File Upload / Attachment Result Sprint
+
+`tests/electron_file_upload_result_smoke.js` adds focused render-only coverage for file and attachment display:
+
+- uses the real renderer with isolated Electron `userData`
+- uses only in-memory `File` objects
+- verifies the upload card renders a safe filename and metadata
+- verifies file result badges render unsafe type/size metadata as inert text
+- verifies result content keeps Markdown rendering while escaping unsafe HTML-like input
+- verifies failed file-result display is non-executable
+- verifies attachment-like history content does not create live action controls
+- verifies no renderer `fetch()` calls occur
+- verifies no upload/tool/provider/OS bridge methods are called
+
+`tests/test_chat_file_display_helpers.js` directly covers the extracted file display helpers for size labels, extension fallback, unsafe suffix handling, badge text, missing payloads, and classic-script constraints.
+
+Extraction completed:
+
+- `frontend/src/chat_file_display_ui.js` now owns only `fileUploadSizeLabel()`, `fileUploadExtension()`, and `fileInfoBadgeText()`.
+- `frontend/src/chat.js` still owns `handleFileUpload()`, in-memory card insertion, upload orchestration, backend calls, action handling, history persistence, and send/streaming state.
+- Real filesystem upload execution, backend file analysis, Companion execution, OS draft/apply behavior, provider calls, and Electron IPC remain untouched.
+
 ## Stop-line Before Refactors
 
-Do not extract or rewrite the full streaming lifecycle, send pipeline, conversation save/load/delete orchestration, active-conversation delete recovery, real tool execution, real confirmation approval execution, Companion execution, OS draft actions, settings keyring/secret handling, voice runtime, license activation, backend/provider calls, or Electron IPC until focused integration coverage exists for the specific lifecycle being changed.
+Do not extract or rewrite the full streaming lifecycle, send pipeline, conversation save/load/delete orchestration, active-conversation delete recovery, real file upload execution, backend upload contracts, filesystem writes, real tool execution, real confirmation approval execution, Companion execution, OS draft actions, settings keyring/secret handling, voice runtime, license activation, backend/provider calls, or Electron IPC until focused integration coverage exists for the specific lifecycle being changed.
 
-Recommended next coverage target: provider/model backend contract coverage with fake provider responses, or a focused render-only file upload result smoke without real tool/OS execution.
+Recommended next coverage target: provider/model backend contract coverage with fake provider responses, or a mocked Personal OS cockpit read-only smoke that does not write drafts.
