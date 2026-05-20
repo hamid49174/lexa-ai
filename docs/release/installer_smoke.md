@@ -49,3 +49,16 @@ Phase 4E status: unsigned installers are explicitly warn-only for `InternalRC` a
 Phase 4F status: VM readiness is now reported from Windows Sandbox, Hyper-V, and the explicit `LEXA_INSTALLER_VM_TEST` environment marker. Absence of all three keeps installer install/uninstall as "not yet proven". The script still refuses productive-machine install/uninstall unless `-VMOnly` is supplied, and even then it prints the proof plan rather than silently installing.
 
 Phase 5A status: the VM/Sandbox installer test is operationalized but not proven in this workspace. `scripts\run_installer_smoke.ps1 -PlanOnly` prints the VM readiness fields and the exact proof steps. PublicRC and PublicRelease remain blocked until the proof is run inside a disposable VM or Windows Sandbox and the result is recorded.
+
+Phase 5B status: the installer VM proof remains a user/external proof item. The script can detect Windows Sandbox, Hyper-V, and `LEXA_INSTALLER_VM_TEST`, but it does not perform a real install/uninstall on the productive machine and no VM proof is recorded by default. A real proof requires explicit human approval and an isolated VM/Sandbox run.
+
+Record these fields after a real VM proof:
+
+- installer path or build identifier
+- VM/Sandbox type
+- install result
+- launch/startup-smoke result
+- uninstall result
+- leftover-file review result
+- signing status
+- confirmation that no user data, `.env`, memory DB, OS vault data, Hermes workspace, or logs were bundled

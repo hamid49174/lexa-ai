@@ -99,6 +99,16 @@ def test_signing_password_patterns_are_blocked(tmp_path):
     assert "Secret-like pattern" in result.stdout
 
 
+def test_signtool_password_command_patterns_are_blocked(tmp_path):
+    secret_file = tmp_path / "signtool.txt"
+    secret_file.write_text("signtool sign /f cert.pfx /p supersecretvalue app.exe", encoding="utf-8")
+
+    result = run_script("-Root", str(tmp_path), "-SecretScanPath", str(secret_file))
+
+    assert result.returncode == 1
+    assert "Secret-like pattern" in result.stdout
+
+
 def test_dot_env_is_blocked_from_staging(tmp_path):
     staged = tmp_path / "staged.txt"
     staged.write_text(".env\n", encoding="utf-8")

@@ -10,6 +10,8 @@ Phase 4F status: `scripts\check_remote_ci_readiness.ps1` now performs the local 
 
 Phase 5A status: remote CI is not ambiguous anymore. It is an external blocker because `git remote -v` has no configured GitHub remote in this workspace. The repository contains the workflow and local CI proof, but PublicRC stays blocked until a GitHub repository exists, the branch is pushed, and the workflow result is recorded.
 
+Phase 5B status: remote CI is still not proven. The correct next action is a user/external step, not a code patch: create or choose the GitHub repository, set the remote, push the current branch, run the workflow, and record the run URL plus commit SHA. No upload, release action, secret, or external service credential is added by Lexa release hardening.
+
 ## GitHub Actions
 
 `.github/workflows/quality-gates.yml` runs on pushes and pull requests for `main` and `develop`.
@@ -84,6 +86,13 @@ Record these proof fields in release notes or a release review issue:
 - workflow run URL
 - run result
 - confirmation that no secrets, release artifacts, build artifacts, eval results, or user-data paths were uploaded
+
+Phase 5B proof owner split:
+
+- Agent can keep the workflow, readiness script, local CI mode, and RC checks safe.
+- User must configure the GitHub remote and approve any push.
+- External infrastructure must run GitHub Actions and provide the workflow result.
+- PublicRC remains blocked until the remote proof fields above are recorded.
 
 Until those steps are complete, the correct status is "Remote CI not yet proven", not "CI passed remotely".
 

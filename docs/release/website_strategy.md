@@ -95,3 +95,26 @@ PublicRC remains blocked until one of these is approved:
 3. Define an equivalent static-release validation process with ownership, artifact policy, CSP/vendor review, and no deployment action.
 
 InternalRC can continue with static-smoke warnings. No website redesign, migration, deployment, upload, or secret change is part of Phase 5A.
+
+## Phase 5B PublicRC Decision
+
+Decision for this phase: keep the website as `static-external` and treat PublicRC readiness as a user/product decision.
+
+Current state:
+
+- website is outside the Lexa Git repository
+- website is not a Git repository
+- no `package.json` exists
+- static smoke is the only current proof
+- `tmp_*.js` files remain warning-only until reviewed
+- external CDN/runtime scripts need CSP/vendor/SRI review
+- Supabase/Stripe placeholders/public config need a release-owner decision
+
+PublicRC options:
+
+1. Keep static-external and define a separate static-release checklist.
+2. Add a minimal website-local `package.json` with `smoke`, `check:static`, and `lint:static` in a dedicated website phase.
+3. Move the website to its own repository with its own CI.
+4. Integrate the website into a monorepo later.
+
+Phase 5B recommendation: do not add package/build files from Lexa release hardening. Choose Option 1 for InternalRC and decide Option 2 or 3 before PublicRC. No deployment, redesign, secret change, or repository migration happens in this phase.

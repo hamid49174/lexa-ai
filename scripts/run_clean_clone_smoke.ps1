@@ -203,6 +203,7 @@ if ($RunQuickGate) {
   Push-Location $CloneRoot
   try {
     powershell -ExecutionPolicy Bypass -File "scripts\run_quality_gates.ps1" -Mode Quick
+    if ($LASTEXITCODE -ne 0) { throw "clean-copy quick gate failed with exit code $LASTEXITCODE" }
   } finally {
     Pop-Location
   }

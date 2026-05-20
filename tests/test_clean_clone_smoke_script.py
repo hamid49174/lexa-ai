@@ -19,6 +19,7 @@ def test_clean_clone_smoke_script_is_non_destructive():
     assert "NoInstall" in src
     assert "package-lock.json" in src
     assert "StartsWith(\"./\")" in src
+    assert "clean-copy quick gate failed with exit code" in src
 
 
 def test_clean_clone_smoke_dry_run_passes():

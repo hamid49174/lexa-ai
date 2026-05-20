@@ -97,3 +97,16 @@ Phase 5A start criteria for the separate OS cleanup project:
 5. Smoke artifacts are archived only after approval.
 6. OS gates run after cleanup.
 7. Any OS commit happens in the OS repo only.
+
+Phase 5B review checklist:
+
+1. Confirm a backup location before touching the OS repo.
+2. Run `scripts\run_os_quality_gates.ps1` from Lexa or the equivalent OS-local gates before cleanup.
+3. Review tracked Markdown/index changes separately from drafts, events, raw inbox, and smoke artifacts.
+4. Preserve drafts/events until the user approves apply/reject/archive actions.
+5. Quarantine possible secrets or private imports for human review.
+6. Archive smoke artifacts only after explicit approval.
+7. Run OS gates again after cleanup.
+8. Commit only reviewed OS source changes in the OS repo.
+
+Phase 5B decision: the cleanup is start-ready but not started. Lexa release hardening must not perform this cleanup implicitly.

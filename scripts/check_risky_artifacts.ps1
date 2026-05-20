@@ -45,6 +45,7 @@ $riskPatterns = @(
 )
 
 $secretRegex = '(?i)(api[_-]?key|bearer|token|secret|private[_-]?key|csc[_-]key[_-]?password|csc[_-]link|win[_-]csc[_-]link|signing[_-]?password|signtool[_-]?password)\s*[:=]\s*["'']?[A-Za-z0-9_\-\.\/\\:;+=]{8,}'
+$signtoolSecretRegex = '(?i)signtool(\.exe)?\s+sign[^\r\n]*(\s/p\s+|\s/pass\s+|\s/password\s+)["'']?[^"''\s]+'
 $violations = New-Object System.Collections.Generic.List[string]
 $warnings = New-Object System.Collections.Generic.List[string]
 
@@ -124,7 +125,7 @@ foreach ($scanPath in $SecretScanPath) {
   }
   foreach ($item in $items) {
     $text = Get-Content -LiteralPath $item.FullName -Raw -ErrorAction SilentlyContinue
-    if ($text -match $secretRegex) {
+    if ($text -match $secretRegex -or $text -match $signtoolSecretRegex) {
       Add-Finding "Secret-like pattern found in $($item.FullName)" $true
     }
   }

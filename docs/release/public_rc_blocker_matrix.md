@@ -1,6 +1,6 @@
 # PublicRC Blocker Matrix
 
-Phase 4F turned the remaining PublicRC work into explicit blockers, warnings, owners, and next actions. Phase 5A keeps those blockers concrete: each item is either practically testable in this repo or explicitly marked as an external prerequisite. This file is a release-readiness artifact, not a product feature plan.
+Phase 4F turned the remaining PublicRC work into explicit blockers, warnings, owners, and next actions. Phase 5A keeps those blockers concrete: each item is either practically testable in this repo or explicitly marked as an external prerequisite. Phase 5B separates what the agent can still harden from what requires a user decision or external infrastructure proof. This file is a release-readiness artifact, not a product feature plan.
 
 | Blocker ID | Area | Status | InternalRC impact | PublicRC impact | PublicRelease impact | Why it matters | What is missing | Next concrete step | Owner | Can code help | Needs external prerequisite |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -14,6 +14,21 @@ Phase 4F turned the remaining PublicRC work into explicit blockers, warnings, ow
 | PRC-008 | Signing | blocked | warning | blocking | blocking | Signing secrets must never enter Git or build artifacts. | Secret-store or protected CI signing design. | Keep keys out of repo, use secure store/GitHub Secrets only after remote CI exists. | user / external | yes | yes |
 | PRC-009 | CI | not proven | warning | blocking | blocking | Remote runners may not have OS/Hermes/Website local paths. | Remote skip/warn behavior must be observed in Actions. | Run remote CI and confirm local-only gates skip or warn honestly. | user | yes | yes |
 | PRC-010 | Release | not proven | warning | blocking | blocking | Artifact policy must hold on the actual remote runner. | Remote proof that risky artifact scan blocks result/build/userdata paths. | Run remote CI with `scripts\check_risky_artifacts.ps1` and record outcome. | user | yes | yes |
+
+## Phase 5B Action Classification
+
+| Blocker | Category | Phase 5B result | Next action |
+| --- | --- | --- | --- |
+| Remote GitHub Actions proof | External infrastructure needed | Not proven because this repository has no GitHub remote configured. | User creates/chooses GitHub repo, sets remote, pushes branch, runs Actions, records run URL and SHA. |
+| VM installer install/uninstall proof | User/external execution needed | Not proven by this workspace. Installer smoke can print readiness and plan; it does not install into the productive machine. | Run `scripts\run_installer_smoke.ps1 -InstallerPath <installer> -Install -Uninstall -VMOnly` only inside an approved disposable VM or Windows Sandbox. |
+| Windows installer signing | External certificate decision needed | Prepared, not solved. No certificate, key, passphrase, or signing secret is present or allowed in Git. | Choose certificate/provider, store secrets outside Git, configure signing, rebuild, verify publisher. |
+| Website release target | User decision needed | Website remains `static-external`; no `package.json` is added from Lexa release hardening. | Choose static release process, minimal website package, separate website repo, or later monorepo work. |
+| OS cleanup review | User review needed | Not started. Lexa only records category-level inventory; OS remains external and dirty. | Run a separate backup-first OS cleanup project with OS gates before and after. |
+| Privacy/trace consent | User/legal/product decision needed | Checklist exists, not approved. | Review consent, retention, opt-in/opt-out, export/delete, provider-use, and public documentation decisions. |
+| Website CDN/SRI/CSP | User/security review needed | Website smoke warns; no PublicRC-grade CSP/vendor/SRI review is proven. | Review external CDN/scripts and decide pinning/CSP/vendor policy in the website release target. |
+| Public artifact policy | External CI proof needed | Local risky-artifact checks pass; remote runner behavior is not proven. | Prove risky artifact policy in GitHub Actions without publishing build/eval/trace artifacts. |
+| Remote CI artifact policy | External CI proof needed | Workflow is designed to avoid result/build artifact uploads, but no remote run exists. | Run GitHub Actions and confirm no release artifacts, eval results, traces, logs, or userdata are uploaded. |
+| PublicRelease legal/privacy docs | User/legal/product decision needed | Privacy checklist exists, not release-owner approved. | Complete and approve public privacy/release notes before PublicRelease. |
 
 ## Current Tier Decision
 
@@ -29,6 +44,15 @@ Phase 4F turned the remaining PublicRC work into explicit blockers, warnings, ow
 - Website remains `static-external` for InternalRC. PublicRC remains blocked until a separate website release target exists.
 - OS cleanup remains external and backup-first. No OS cleanup starts from Lexa release hardening.
 - Privacy/trace consent now has a checklist, but PublicRelease remains blocked until the release owner approves it.
+
+## Phase 5B Status
+
+- Remote CI remains an external/user blocker: no GitHub remote is configured, so no remote Actions run can be triggered from this workspace without upload/push approval.
+- VM installer proof remains not proven: the script can report VM/Sandbox readiness and print the proof plan, but no real install/uninstall was executed.
+- Signing remains blocked by external certificate and secret-store decisions. InternalRC can warn; PublicRC/PublicRelease require a signed installer.
+- Website remains `static-external` and PublicRC-blocking until the user approves a website release target.
+- OS cleanup remains a separate backup-first review project; Lexa does not stage, delete, archive, or commit OS data.
+- Privacy/trace consent is now concrete enough for review, but not approved for PublicRelease.
 
 ## Non-Code Prerequisites
 

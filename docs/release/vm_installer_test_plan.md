@@ -6,6 +6,8 @@ Phase 4E status: VM/Sandbox install and uninstall remain not proven from this wo
 
 Phase 4F status: installer smoke reports Windows Sandbox, Hyper-V, and `LEXA_INSTALLER_VM_TEST` marker availability. Missing VM capability is a Needs Review state, not a fake pass. PublicRC/PublicRelease remain blocked until the proof is run in a disposable environment and recorded.
 
+Phase 5B status: this remains the executable proof plan, not proof itself. If Windows Sandbox or another disposable VM is available, the user must approve the isolated install/uninstall run and record the evidence. Without that approval/evidence, PublicRC/PublicRelease stay blocked.
+
 ## Goal
 
 Prove that a generated Windows installer can install, launch, and uninstall Lexa in an isolated environment without bundling user data, OS vault data, secrets, logs, or local workspaces.
@@ -64,3 +66,15 @@ scripts\run_installer_smoke.ps1 -InstallerPath <installer> -Target PublicRC -Exp
 ```
 
 The script intentionally does not automate productive-machine installation.
+
+## Evidence Required For PublicRC
+
+- exact installer file or build identifier
+- disposable VM/Sandbox identity
+- install completed
+- app launched with isolated userData
+- startup health smoke passed
+- uninstall completed
+- leftover review completed
+- signing status recorded
+- no bundled `.env`, user data, memory DB, OS vault data, Hermes workspace, traces, eval reports, or private logs

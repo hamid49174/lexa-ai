@@ -170,6 +170,19 @@ PublicRelease additionally requires release signing, installer proof, website de
 - [ ] `docs/release/privacy_trace_consent_checklist.md` exists.
 - [ ] PublicRelease remains blocked until privacy/trace consent is reviewed and approved.
 
+## 17. Phase 5B External Proof Actions
+
+- [ ] GitHub remote exists, or Remote CI is explicitly recorded as a user/external blocker.
+- [ ] GitHub Actions run URL and commit SHA are recorded before PublicRC.
+- [ ] VM/Sandbox installer install/uninstall proof is recorded before PublicRC.
+- [ ] Installer signing certificate, secure storage, and expected publisher are decided before PublicRC.
+- [ ] Website release target is approved before PublicRC.
+- [ ] Website CDN/CSP/SRI review is completed before PublicRC.
+- [ ] OS cleanup review is completed or explicitly accepted before PublicRC.
+- [ ] Public artifact policy is proven on remote CI before PublicRC.
+- [ ] Privacy/trace consent decisions are reviewed before PublicRelease.
+- [ ] Each PublicRC blocker is classified as agent-solvable, user-decision, external-infrastructure, later, or proven in `docs/release/public_rc_blocker_matrix.md`.
+
 Decision notes:
 
 - Blocking failures require a fix or explicit release-owner review.

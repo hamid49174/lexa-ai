@@ -43,3 +43,19 @@ This checklist is a PublicRelease review artifact. It does not collect user data
 - InternalRC may continue with warnings because checks are local and no telemetry is enabled.
 - PublicRC is mainly blocked by CI, signing, installer, website, and OS review.
 - PublicRelease remains blocked by privacy/trace consent until this checklist is reviewed and approved.
+
+## Phase 5B Concrete Decisions Needed
+
+| Topic | Current default | PublicRC need | PublicRelease blocker if missing |
+| --- | --- | --- | --- |
+| Local diagnostic logs | Local only, never committed | Explain in release notes for testers | Retention/export/delete policy not approved |
+| Agent traces | Feature-flagged, redacted, local | Review whether testers may opt in | No trace opt-in/opt-out model |
+| Eval reports | Synthetic/offline by default | Ensure no user-derived reports are shared | No rule for user-derived eval evidence |
+| Memory and OS data | Local/external, not committed | Confirm no automatic sharing | No export/delete/backup consent policy |
+| Voice/STT and screenshots | Provider-dependent if enabled | Require explicit feature consent before broad testing | No provider-use consent language |
+| Clipboard access | Explicit reveal only | Keep explicit and auditable | No clipboard privacy language |
+| Website auth/subscription | Provider scoped | Covered by website release target | Website privacy docs not approved |
+
+Agent can help by keeping redaction, local-only defaults, artifact scans, and docs accurate. User/release owner must approve consent language, retention duration, provider-use defaults, export/delete expectations, and public privacy documentation.
+
+PublicRelease remains blocked until the approval is recorded. InternalRC can proceed with warnings because these checks do not enable telemetry or external trace sharing.

@@ -12,6 +12,7 @@ This pack gives Codex a safe project-level starting context for Lexa work. It is
 - Phase 4E: PublicRC blockers are being handled as explicit external proof items: remote CI, VM installer proof, signing, website release target, and OS cleanup review.
 - Phase 4F: PublicRC blockers are now tracked through a blocker matrix, remote-CI readiness script, RC next actions, and context workflow checks.
 - Phase 5A: PublicRC blockers are operationalized as proof paths or explicit external prerequisites; PublicRelease privacy/trace consent has a checklist but is not approved.
+- Phase 5B: external proof work is split into agent-solvable checks, user decisions, external infrastructure, later work, and proven items. No external blocker should be described as solved without recorded proof.
 
 Recent anchor commits:
 
@@ -68,6 +69,17 @@ Use these first:
 - Website is a static external target without package-based lint/build proof.
 - OS repo remains a separately dirty repository and needs a human-reviewed cleanup project.
 - Public release privacy/trace consent has a checklist, but is not finalized or approved.
+
+## Agent/User/External Split
+
+| Area | Classification | Next action |
+| --- | --- | --- |
+| Remote CI | external infrastructure | User sets GitHub remote, pushes branch, records Actions run URL and SHA. |
+| VM installer proof | external/user execution | User approves disposable VM/Sandbox run and records install, launch, smoke, uninstall, and leftover review. |
+| Signing | external/user decision | User selects certificate and secure store; agent keeps risky-artifact and installer checks strict. |
+| Website target | user/product decision | User chooses static release process, minimal package target, separate repo, or later monorepo phase. |
+| OS cleanup | user review project | Separate backup-first OS cleanup with OS gates before and after. |
+| Privacy/trace consent | user/legal/product decision | Review and approve consent, retention, export/delete, provider-use, and public docs. |
 
 ## Recommended Next Work
 

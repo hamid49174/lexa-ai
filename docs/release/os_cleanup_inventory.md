@@ -75,3 +75,15 @@ Observed category-level counts:
 - untracked entries: 67
 
 These counts deliberately avoid copying private file contents or private OS/Obsidian context into Lexa docs.
+
+## Phase 5B Snapshot
+
+The OS repository remains a separate dirty repository. Lexa Phase 5B records only category-level release risk and still does not modify, stage, commit, delete, archive, migrate, or clean OS files.
+
+Observed category-level counts:
+
+- tracked modified files: 16
+- tracked diff size: 261 insertions, 66 deletions
+- untracked entries: 67
+
+PublicRC remains blocked until the OS cleanup risk is reviewed or explicitly accepted by the release owner in a separate backup-first OS cleanup project.

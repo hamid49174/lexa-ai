@@ -60,6 +60,8 @@ def test_release_candidate_script_reports_decision_and_warnings():
     assert "Installer signing status is" in src
     assert "Get-InstallerSigningStatus" in src
     assert "Website release target is still static/external" in src
+    assert "Website CDN/CSP/SRI review is not proven" in src
+    assert "Public artifact policy is not proven on remote CI" in src
     assert "privacy_trace_consent_checklist.md" in src
     assert "checklist exists but is not finalized or approved" in src
     assert "Next actions:" in src
@@ -88,6 +90,8 @@ def test_release_docs_exist_and_cover_decision_states():
     assert "PublicRC" in checklist
     assert "PublicRelease" in checklist
     assert "PublicRC Blocker Matrix" in checklist
+    assert "Phase 5B External Proof Actions" in checklist
+    assert "agent-solvable" in checklist
     assert "privacy_trace_consent_checklist.md" in checklist
 
 
@@ -101,5 +105,7 @@ def test_privacy_trace_consent_checklist_exists_and_is_not_approval():
     assert "Memory DB" in text
     assert "Clipboard history" in text
     assert "PublicRelease remains blocked" in text
+    assert "Phase 5B Concrete Decisions Needed" in text
+    assert "trace opt-in/opt-out" in text
     assert "does not collect user data" in text
     assert "sk-" not in text

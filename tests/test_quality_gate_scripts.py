@@ -119,3 +119,12 @@ def test_context_pack_generator_is_non_destructive():
     assert "Remove-Item" not in src
     assert "public_rc_blocker_matrix.md" in src
     assert "privacy_trace_consent_checklist.md" in src
+    assert "agent-solvable" in src
+
+
+def test_risky_artifact_check_blocks_signtool_password_patterns():
+    src = read("scripts/check_risky_artifacts.ps1")
+
+    assert "signtoolSecretRegex" in src
+    assert "signtool" in src
+    assert "\\s/p\\s+" in src

@@ -45,3 +45,5 @@ For release-hardening phases, start with the context pack, then inspect only the
 For PublicRC work, read `docs/release/public_rc_blocker_matrix.md` after the context pack. It separates code-solvable checks from external prerequisites such as GitHub remote access, VM proof, signing certificates, website ownership, and OS cleanup review.
 
 For PublicRelease work, also read `docs/release/privacy_trace_consent_checklist.md`. It is a review checklist, not approval; do not treat PublicRelease privacy/trace consent as complete until the release owner explicitly approves it.
+
+For Phase 5B and later PublicRC proof work, classify every open item before editing: agent can solve, user must decide, external infrastructure is required, later phase, or proven. Code changes should only address the agent-solvable parts; external blockers need recorded evidence or a clear owner.

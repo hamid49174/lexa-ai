@@ -258,6 +258,8 @@ PublicRC/PublicRelease remain blocked until remote GitHub Actions, signed instal
 
 Phase 5A adds a PublicRelease privacy/trace consent checklist and keeps unresolved PublicRC items explicit: no GitHub remote means remote CI is not yet proven, unsigned installers remain PublicRC-blocking, VM install/uninstall must be proven outside the productive machine, website release targeting stays external/static until approved, and OS cleanup remains a separate backup-first review project.
 
+Phase 5B classifies every remaining PublicRC blocker as agent-solvable, user-decision, external-infrastructure, later, or proven. The release scripts and docs now make clear that GitHub Actions, VM installer proof, signing, website release target, OS cleanup review, and privacy/trace consent require user or external proof before PublicRC/PublicRelease.
+
 ---
 
 ## Sicherheit

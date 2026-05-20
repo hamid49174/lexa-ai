@@ -251,11 +251,19 @@ if ($installerSigningStatus -ne "signed") {
 }
 if ($Target -in @("PublicRC", "PublicRelease")) {
   Add-RcBlocker "[Website] Website release target is still static/external without package-based build/lint proof."
+  Add-RcBlocker "[Website] Website CDN/CSP/SRI review is not proven for the static-external target."
   Add-RcBlocker "[OS] OS cleanup remains unreviewed in a separate dirty OS repository."
+  Add-RcBlocker "[Release] Public artifact policy is not proven on remote CI."
   Add-RcNextAction "Approve a website release target with package-based build/lint or equivalent static-release validation."
+  Add-RcNextAction "Review website CDN/CSP/SRI policy before PublicRC."
   Add-RcNextAction "Run the OS cleanup review as a separate backup-first OS project."
+  Add-RcNextAction "Prove risky artifact and result-path policy on GitHub Actions before PublicRC."
   Add-RcExternalPrerequisite "Website release target decision."
   Add-RcExternalPrerequisite "Human review of the external OS dirty state."
+  Add-RcExternalPrerequisite "Remote CI proof for public artifact policy."
+}
+if ($Target -eq "PublicRC") {
+  Add-RcWarning "[Privacy] Privacy/trace consent checklist should be reviewed before broad PublicRC testing and remains blocking for PublicRelease."
 }
 if ($Target -eq "PublicRelease") {
   $privacyChecklist = Join-Path $RepoRoot "docs\release\privacy_trace_consent_checklist.md"

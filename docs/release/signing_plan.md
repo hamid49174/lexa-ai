@@ -93,3 +93,23 @@ Before PublicRC:
 9. Run `scripts\check_risky_artifacts.ps1` before staging or release review.
 
 Phase 5A decision: no certificate, key, passphrase, or signing secret is created in this repository. Signing remains an external blocker for PublicRC/PublicRelease.
+
+## Phase 5B Signing Decision Checklist
+
+Signing is ready to be decided, not performed in this repository.
+
+Required decisions before PublicRC:
+
+1. Certificate type: OV or EV Windows code signing certificate.
+2. Certificate owner: release owner or company-controlled account.
+3. Secret storage: local secure store or GitHub Secrets only after remote CI and protected branch/tag rules exist.
+4. CI variables if used: `CSC_LINK`, `CSC_KEY_PASSWORD`, and any provider-specific token must be secret-scoped and never committed.
+5. Local test signing: allowed only from a secure local store with no cert/key copied into the repo.
+6. Verification: `Get-AuthenticodeSignature <installer>` must return a valid signer matching the expected publisher.
+7. PublicRC gate: `scripts\run_installer_smoke.ps1 -Target PublicRC -ExpectedPublisher <name>` must pass.
+
+Still forbidden:
+
+- `.pfx`, `.p12`, `.pem`, `.key`, `.pvk`, private `.crt`/`.cer`, keystores, passphrases, signing env files, or signtool password commands in Git
+- signing from an unprotected branch
+- release signing before artifact scans and installer VM proof are complete

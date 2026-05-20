@@ -65,6 +65,7 @@ This file is generated from safe Lexa repository metadata and fixed release-read
 - InternalRC may proceed with documented warnings.
 - Phase 4F readiness focus: blocker matrix, remote CI readiness, VM installer proof, signing readiness, website target, OS cleanup review, and safe context workflow.
 - Phase 5A readiness focus: turn each PublicRC blocker into either a practical proof path or an explicit external prerequisite.
+- Phase 5B readiness focus: classify every remaining PublicRC blocker as agent-solvable, user-decision, external-infrastructure, later, or proven.
 - PublicRC/PublicRelease remain blocked until remote CI proof, VM installer proof, signing, website release target proof, OS cleanup review, and public privacy/trace review are complete.
 
 ## Recent Commits
@@ -107,6 +108,14 @@ $recentLines
 - Website is currently a static external target without package-based build/lint proof.
 - External OS cleanup remains a separate reviewed project.
 - Public release privacy/trace consent checklist exists only as a release review artifact until approved.
+
+## Agent/User/External Split
+
+- Agent-solvable: keep scripts, docs, redaction, artifact scans, local CI modes, and RC output honest.
+- User decisions: GitHub remote, website target, OS cleanup approval, privacy/trace consent, signing provider.
+- External infrastructure: GitHub Actions run, disposable VM/Sandbox proof, certificate/secret store.
+- Later work: website packaging/repo structure and public privacy UI after release-owner decision.
+- Proven items should have recorded command output, run URL, commit SHA, or review signoff.
 
 ## Codex Working Rules
 
