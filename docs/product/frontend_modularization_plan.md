@@ -534,13 +534,79 @@ Current tail script order:
 
 Next recommended target: provider/model settings UI coverage with keyring-safe mocks, or one more pure settings display formatter only after direct tests. Secrets/keyring, voice runtime, license activation, backend/provider calls, Electron IPC, chat lifecycle, and OS drafts remain stop-lined.
 
+## Provider/Model Settings Coverage and Helper Extraction
+
+This sprint added keyring-safe provider/model settings coverage and moved the settings-owned model selector handlers out of `frontend/src/chat.js`.
+
+Provider/model settings responsibility map:
+
+| Cluster | Location/functions | Dependencies/globals | Mutates state | Touches DOM | Backend/fetch/IPC | Current coverage | Risk | Recommended next action |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Provider status rows | `refreshSettingsView()` in `settings.js` | `LexaState`, `window.lexa.aiStatus()`, status row DOM, i18n | DOM only | Yes | Smoke bridge/backend status read | `electron_provider_settings_smoke.js`, visual smokes | Medium | Keep render-only; do not mix with API-key/keyring actions |
+| AI model selection display | `settings_provider_helpers.js`, `loadModelSelection()` in `settings.js` | `window.lexa.aiModels()`, `model-select`, `model-desc` | DOM only | Yes | Smoke bridge/backend model read | `electron_provider_settings_smoke.js`, `test_settings_provider_helpers.js` | Low-medium | Keep helper boundary; add backend contract tests before changing API payload shape |
+| AI model change action | `changeAiModel()` in `settings.js` | `window.lexa.setAiModel()`, toast, `model-desc` | Backend-selected model through bridge | Yes | Mocked write bridge only in smoke | `electron_provider_settings_smoke.js` | Medium | Keep keyring-safe smoke in gates before UI changes |
+| API-key/keyring controls | Cartesia, ElevenLabs, Deepgram key set/delete actions in `settings.js` | modal input, secret bridge policies, key storage backend | Yes | Yes | Secret/keyring bridge calls | bridge policy/static tests only | High | Stop-line; do not touch without dedicated secret-safe coverage and explicit user intent |
+| Provider/backend contracts | `/ai/models`, provider health/status, provider fallback | backend provider code and configured secrets | Yes | No direct DOM | Real backend/provider calls | Python provider/router tests, smoke mocks | High | Do not change contracts in frontend maintainability passes |
+
+Coverage added:
+
+- `tests/electron_provider_settings_smoke.js` loads the real renderer with isolated Electron `userData` and the existing smoke bridge.
+- It verifies provider status rows, model selector hydration, safe mocked model change, unsafe provider/model label containment, no renderer fetch calls, no secret-like values in the settings path, no keyring/API-key bridge calls, no presence challenge requests, redacted bridge audit metadata, and no fatal renderer errors.
+- `tests/test_settings_provider_helpers.js` directly covers provider/model option normalization, grouped and flat options, malformed payload recovery, description text, active option selection, inert unsafe label rendering, and classic-script constraints.
+
+Extraction completed:
+
+| File | Before sprint | After sprint |
+| --- | ---: | ---: |
+| `frontend/src/settings.js` | 1310 lines / 54423 bytes | 1334 lines / 55367 bytes |
+| `frontend/src/chat.js` | 4375 lines / 184875 bytes | 4337 lines / 183080 bytes |
+| `frontend/src/settings_provider_helpers.js` | new | 56 lines / 1916 bytes |
+
+Moved responsibility:
+
+- `loadModelSelection()` moved from `chat.js` to `settings.js`.
+- `changeAiModel()` moved from `chat.js` to `settings.js`.
+
+Extracted provider/model display helpers:
+
+- `settingsAiModelEntries(models)`
+- `settingsAiModelHasAvailableData(data)`
+- `settingsAiModelFlatOptions(data)`
+- `settingsAiModelGroupedOptions(data)`
+- `settingsAiModelDescriptionText(data)`
+- `settingsRenderAiModelSelection(data, select, desc)`
+
+Small robustness improvement:
+
+- malformed provider/model payloads now normalize to empty options instead of allowing unexpected non-object values into the selector rendering path. Normal backend payload behavior is unchanged.
+
+What stayed out of scope:
+
+- API-key save/load/delete actions
+- real keyring/secret access
+- real provider/network calls
+- voice/STT/TTS runtime behavior
+- license activation/removal
+- Electron main/preload IPC
+- chat send/streaming/history/tool behavior
+
+Current tail script order:
+
+1. `personal_os.js`
+2. `settings_helpers.js`
+3. `settings_provider_helpers.js`
+4. `settings.js`
+5. `devtools.js`
+
+Next recommended target: provider/model backend contract coverage with fake provider responses, or a render-only file upload result smoke. Secrets/keyring, provider backend writes, license activation, voice runtime, Electron IPC, and OS drafts remain stop-lined.
+
 ## Do Not Touch Yet
 
 - streaming send and abort lifecycle beyond pure parser helpers
 - conversation history switching/deletion persistence orchestration
 - real tool execution/result lifecycle and confirmation approval execution
 - voice/STT/TTS/orb behavior
-- settings keyring/API-key handling, voice runtime behavior, license activation/removal, backend/provider calls, and Electron IPC
+- settings keyring/API-key handling, voice runtime behavior, license activation/removal, backend/provider contracts/calls, and Electron IPC
 - Personal OS draft apply/approve/reject flows
 - Electron preload IPC risk policy
 - Electron backend lifecycle, Hermes startup, signing/update release behavior

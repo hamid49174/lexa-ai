@@ -144,6 +144,30 @@ async function refreshSettingsView() {
   setupBackupControls();
 }
 
+// AI model selection uses the guarded renderer bridge; API-key/keyring actions live elsewhere.
+async function loadModelSelection() {
+  try {
+    const data = await window.lexa.aiModels();
+    const select = document.getElementById("model-select");
+    const desc = document.getElementById("model-desc");
+    settingsRenderAiModelSelection(data, select, desc);
+  } catch (e) {
+    console.warn("[Settings] Failed to load model selection:", e.message || e);
+  }
+}
+
+async function changeAiModel(modelId) {
+  try {
+    const result = await window.lexa.setAiModel(modelId);
+    showToast(result.status || t("chat.modelChanged"), "success");
+    const desc = document.getElementById("model-desc");
+    if (desc && result.current) desc.textContent = settingsAiModelDescriptionText(result.current);
+  } catch (e) {
+    console.warn("[Settings] Failed to change AI model:", e.message || e);
+    showToast(t("toast.modelChangeFailed"), "error");
+  }
+}
+
 function diagnosticsClipLines(value, max = 4) {
   const lines = String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   return lines.slice(0, max).join(" ");

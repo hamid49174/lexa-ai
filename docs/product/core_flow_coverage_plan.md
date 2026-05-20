@@ -18,6 +18,7 @@ Goal: strengthen integration coverage for Lexa's internal daily-use core flows b
 | Confirmation happy path | `test_router_companion.py`, `test_companion_confirmation.py`, `electron_presence_challenge_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_confirmation_click_smoke.js` | Real Companion execution remains intentionally outside renderer smoke coverage | Confirmation UI refactors could call Companion incorrectly or lose safe denial behavior | Keep focused click smoke mocked; do not add real tool execution to renderer tests |
 | OS draft creation path | `test_personal_os_prompt.js`, `test_router_personal_os.py`, `test_personal_os_actions.py`, eval OS draft tests | Full renderer draft creation from chat handoff is not isolated | OS draft UI refactors could bypass Draft/Approval expectations | Add a mocked Personal OS draft handoff smoke only after core chat/history smokes are stable |
 | Settings persistence | `test_settings_voice_static.js`, `test_app_chat_input_wiring.js`, `electron_ui_visual_smoke.js`, `electron_settings_persistence_smoke.js`, `test_settings_helpers.js` | Provider/keyring/license persistence remains intentionally outside the local preference smoke | Settings refactors could silently stop saving local preferences, lose Beta/Internal labels, or apply corrupt localStorage values | Keep local preference smoke in settings gates; add provider/secret coverage only with explicit keyring-safe mocks |
+| Provider/model settings | `electron_provider_settings_smoke.js`, `test_settings_provider_helpers.js`, `test_frontend_script_order_static.js`, `test_preload_bridge_security_static.js` | Real provider calls, API-key/keyring writes, and backend contract edge cases remain intentionally outside the renderer smoke | Provider settings refactors could break model selection, expose unsafe labels, or accidentally touch secret/keyring paths | Keep provider smoke keyring-safe; add fake backend contract coverage before changing provider/model payload handling |
 | Beta/Internal label visibility | `test_internal_daily_use_readiness_static.js`, `test_app_chat_input_wiring.js` | Visual placement is only indirectly covered | Unstable surfaces could become visibly unlabelled | Keep static readiness checks in every internal daily-use pass |
 
 ## Added In This Pass
@@ -147,8 +148,29 @@ Extraction completed:
 - `frontend/src/settings_helpers.js` now owns only local preference normalization helpers.
 - `frontend/src/settings.js` still owns settings view refresh, provider/model status, voice settings, key actions, license activation/removal, profile save, backup controls, Hermes autostart controls, backend calls, and IPC-backed settings behavior.
 
+## Added In Provider/Model Settings Sprint
+
+`tests/electron_provider_settings_smoke.js` adds focused renderer coverage for provider/model settings with keyring-safe smoke mocks:
+
+- provider status rows render mocked availability for Groq, OpenAI, Gemini, and Anthropic
+- the AI model selector hydrates the mocked current model
+- a safe mocked model change uses only the `setAiModel` smoke bridge
+- unsafe provider/model labels are rendered as inert text and do not create executable nodes
+- no renderer `fetch()` calls are performed
+- no secret-like values are exposed in the Settings path
+- no API-key/keyring bridge methods or presence challenges are triggered
+- bridge audit metadata does not include the selected model value
+
+`tests/test_settings_provider_helpers.js` directly covers the extracted provider/model display helpers for grouped/flat options, malformed payload recovery, active selection, description text, and classic-script constraints.
+
+Extraction completed:
+
+- `frontend/src/settings_provider_helpers.js` now owns provider/model display helpers.
+- `loadModelSelection()` and `changeAiModel()` now live in `settings.js` instead of `chat.js`.
+- API-key/keyring controls, real provider/backend calls, voice runtime, license activation, Electron IPC, chat lifecycle, and OS draft paths remain untouched.
+
 ## Stop-line Before Refactors
 
 Do not extract or rewrite the full streaming lifecycle, send pipeline, conversation save/load/delete orchestration, active-conversation delete recovery, real tool execution, real confirmation approval execution, Companion execution, OS draft actions, settings keyring/secret handling, voice runtime, license activation, backend/provider calls, or Electron IPC until focused integration coverage exists for the specific lifecycle being changed.
 
-Recommended next coverage target: provider/model settings UI smoke with keyring-safe mocks, or a focused render-only file upload result smoke without real tool/OS execution.
+Recommended next coverage target: provider/model backend contract coverage with fake provider responses, or a focused render-only file upload result smoke without real tool/OS execution.
