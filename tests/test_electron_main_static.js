@@ -62,10 +62,12 @@ assert("uses ASCII backend ready log", src.includes("Health check passed - backe
 console.log("\nElectron broken pipe logging:");
 assert("detects broken pipe console errors", src.includes("function isBrokenPipeError") && src.includes('error?.code === "EPIPE"') && src.includes("broken pipe"));
 assert("installs pipe guard before Electron can register its error dialog", src.indexOf("installPreElectronPipeGuard();") >= 0 && src.indexOf("installPreElectronPipeGuard();") < src.indexOf('const electron = require("electron")') && src.includes("lexaIsBrokenPipeError"));
-assert("patches stdout and stderr writes below console", src.includes("function installSafeStreamWrite") && src.includes("__lexaSafeWriteInstalled") && src.includes("stream.write = (...args)") && src.includes("return originalWrite(...args)") && src.includes("installSafeProcessStreams();"));
+assert("patches stdout and stderr writes below console", src.includes("function installSafeStreamWrite") && src.includes("__lexaSafeWriteInstalled") && src.includes("stream.write = (...args)") && src.includes("return originalWrite(...safeArgs)") && src.includes("installSafeProcessStreams();"));
+assert("wraps async broken-pipe write callbacks", src.includes("function lexaWrapBrokenPipeCallback") && src.includes("wrapBrokenPipeCallback(stream, callback)") && src.includes("safeArgs[last] = wrapBrokenPipeCallback(stream, safeArgs[last])"));
 assert("patches low-level stream writers so cached Electron console paths cannot throw", src.includes("markBrokenPipe(stream)") && src.includes("stream.__lexaBrokenPipe") && src.includes("originalChunkWrite") && src.includes("stream._write = (chunk, encoding, callback)") && src.includes("originalVectorWrite") && src.includes("stream._writev = (chunks, callback)"));
 assert("patches stdio socket prototype for Electron cached console writers", src.includes('const net = require("net")') && src.includes("net.Socket.prototype._write") && src.includes("isStdioSocket") && src.includes("socket?.fd === 1") && src.includes("socket?.fd === 2"));
 assert("wraps main process console methods safely", src.includes("function installSafeConsole()") && src.includes('console.warn = (...args) => safeCall("warn", args)') && src.includes('console.error = (...args) => safeCall("error", args)'));
+assert("keeps EPIPE fallback logs under userData, not repo audit.log", src.includes("safeConsoleFallbackWriter") && src.includes("function appendSafeMainProcessLog") && src.includes("MAIN_PROCESS_LOG_MAX_BYTES") && src.includes('app.getPath("userData")') && src.includes('"main-process.log"'));
 assert("swallows uncaught EPIPE exceptions before Electron dialog listeners", src.includes("process.emit = (eventName, ...args)") && src.includes('eventName === "uncaughtException"') && src.includes("return true") && src.includes('process.on("uncaughtException"') && src.includes("if (isBrokenPipeError(error)) return"));
 assert("prevents renderer console forwarding from using Electron default pipe writer", src.includes("function installRendererConsoleGuard") && src.includes('webContents.on("console-message"') && src.includes("event.preventDefault?.()") && src.includes("installRendererConsoleGuard(mainWindow.webContents);") && src.indexOf("installRendererConsoleGuard(mainWindow.webContents);") < src.indexOf("mainWindow.loadFile"));
 
@@ -81,6 +83,14 @@ console.log("\nElectron bridge audit and smoke guard:");
 assert("rotates bridge audit log under userData", src.includes("BRIDGE_AUDIT_MAX_BYTES") && src.includes("function rotateBridgeAuditIfNeeded") && src.includes('app.getPath("userData")') && src.includes("`${auditPath}.1`"));
 assert("bridge audit records effective risk classification", src.includes("base_risk") && src.includes("effective_risk") && src.includes("classification_reason"));
 assert("smoke mock is fail-closed outside non-packaged smoke tests", src.includes("function hardenSmokeMockEnvironment") && src.includes("app.isPackaged") && src.includes("delete process.env.LEXA_ELECTRON_SMOKE_MOCK") && src.includes("function isElectronSmokeTestContext"));
+
+console.log("\nElectron IPC error containment:");
+assert("defines safe IPC wrappers", src.includes("function safeIpcHandle(channel, handler, options = {})") && src.includes("function safeIpcOn(channel, handler, options = {})"));
+assert("safe IPC handlers return structured failures instead of throwing to replyWithError", src.includes("function structuredIpcFailure") && src.includes("main_ipc_handler_failed") && src.includes("return structuredIpcFailure(channel, error);") && src.includes("auditMainIpcFailure(channel, error, args);"));
+assert("bridge presence handlers use safe IPC wrapper", src.includes('safeIpcHandle("bridge:presence:request"') && src.includes('safeIpcHandle("bridge:presence:consume"') && src.includes('safeIpcHandle("bridge:audit"'));
+assert("local auth and i18n handlers fail closed through safe IPC wrapper", src.includes('safeIpcHandle("local-auth-token"') && src.includes('failureValue: ""') && src.includes('safeIpcHandle("i18n-load"') && src.includes("failureValue: null"));
+assert("window and autostart sync IPC handlers are wrapped", src.includes('safeIpcOn("window-minimize"') && src.includes('safeIpcOn("window-maximize"') && src.includes('safeIpcOn("window-close"') && src.includes('safeIpcOn("get-autostart"') && src.includes("returnValue: false"));
+assert("bridge presence handlers are not registered directly", !src.includes('ipcMain.handle("bridge:presence:request"') && !src.includes('ipcMain.handle("bridge:presence:consume"') && !src.includes('ipcMain.handle("bridge:audit"'));
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

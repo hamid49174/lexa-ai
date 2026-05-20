@@ -1,13 +1,28 @@
 /**
  * Electron smoke test for preload bridge presence challenges.
- * Run with: frontend\node_modules\electron\dist\electron.exe tests\electron_presence_challenge_smoke.js
+ * Run with: node tests\electron_presence_challenge_smoke.js
  */
+
+const path = require("path");
+
+if (!process.versions.electron) {
+  const { spawnSync } = require("child_process");
+  const electronBinary = process.platform === "win32" ? "electron.exe" : "electron";
+  const electronPath = path.join(__dirname, "..", "frontend", "node_modules", "electron", "dist", electronBinary);
+  const env = { ...process.env, LEXA_ELECTRON_SMOKE_TEST: "1" };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const result = spawnSync(electronPath, [__filename], {
+    cwd: path.join(__dirname, ".."),
+    env,
+    stdio: "inherit",
+  });
+  process.exit(result.status ?? (result.signal ? 1 : 0));
+}
 
 const { app, BrowserWindow, ipcMain } = require("electron");
 const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
-const path = require("path");
 
 process.env.LEXA_ELECTRON_SMOKE_TEST = "1";
 delete process.env.LEXA_ELECTRON_SMOKE_MOCK;
@@ -53,6 +68,9 @@ ipcMain.handle("bridge:audit", (_event, payload = {}) => {
 
 ipcMain.handle("bridge:presence:request", (_event, payload = {}) => {
   presenceRequests += 1;
+  if (presenceMode === "main_error") {
+    return { ok: false, code: "main_ipc_handler_failed", reason: "main_ipc_handler_failed" };
+  }
   writeAudit({
     method: payload.method,
     risk: payload.risk,
@@ -151,6 +169,9 @@ async function main() {
 
   presenceMode = "deny";
   await expectRejected(win, "high-risk bridge call without challenge is blocked", "window.lexa.setAutostart(true)", "explicit user presence");
+
+  presenceMode = "main_error";
+  await expectRejected(win, "structured main-process IPC error fails closed", "window.lexa.setAutostart(true)", "explicit user presence");
 
   const beforeReads = presenceRequests;
   const readResult = await runRenderer(win, "window.lexa.getAutostart()");

@@ -527,6 +527,18 @@ function bridgeSecurityError(message, code = "bridge_security_denied") {
   return error;
 }
 
+async function invokeMainBridge(channel, payload) {
+  try {
+    const result = await ipcRenderer.invoke(channel, payload);
+    if (result && result.code === "main_ipc_handler_failed") {
+      return { ok: false, reason: result.reason || "main_ipc_handler_failed", code: result.code };
+    }
+    return result;
+  } catch (_error) {
+    return { ok: false, reason: "main_ipc_invoke_failed", code: "main_ipc_invoke_failed" };
+  }
+}
+
 function companionBatchCommandName(entry) {
   if (typeof entry === "string") return entry;
   if (!entry || typeof entry !== "object") return "";
@@ -568,7 +580,7 @@ async function guardedBridgeCall(method, args, executor, options = {}) {
   let challengeId = "";
   const needsPresence = policy.requires_user_presence || policy.requires_main_confirmation;
   if (needsPresence && !options.disablePresenceChallenge) {
-    const challenge = await ipcRenderer.invoke("bridge:presence:request", {
+    const challenge = await invokeMainBridge("bridge:presence:request", {
       method,
       risk: policy.risk,
       base_risk: policy.base_risk || policy.risk,
@@ -584,7 +596,7 @@ async function guardedBridgeCall(method, args, executor, options = {}) {
       throw bridgeSecurityError("High-risk action requires explicit user presence", "bridge_presence_denied");
     }
     challengeId = challenge.challenge_id;
-    const consumed = await ipcRenderer.invoke("bridge:presence:consume", {
+    const consumed = await invokeMainBridge("bridge:presence:consume", {
       challenge_id: challengeId,
       method,
       args_hash: argsHash,

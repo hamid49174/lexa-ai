@@ -5,6 +5,18 @@ function lexaIsBrokenPipeError(error) {
   return error?.code === "EPIPE" || /EPIPE|broken pipe/i.test(message);
 }
 
+function lexaWrapBrokenPipeCallback(stream, callback, mark) {
+  if (typeof callback !== "function") return callback;
+  return (error, ...rest) => {
+    if (lexaIsBrokenPipeError(error)) {
+      mark(stream);
+      callback();
+      return;
+    }
+    callback(error, ...rest);
+  };
+}
+
 function installPreElectronPipeGuard() {
   const mark = (stream) => {
     try { stream.__lexaBrokenPipe = true; } catch (_error) {}
@@ -15,8 +27,11 @@ function installPreElectronPipeGuard() {
     const originalWrite = stream.write.bind(stream);
     stream.write = (...args) => {
       if (stream.__lexaBrokenPipe) return false;
+      const safeArgs = [...args];
+      const last = safeArgs.length - 1;
+      if (last >= 0) safeArgs[last] = lexaWrapBrokenPipeCallback(stream, safeArgs[last], mark);
       try {
-        return originalWrite(...args);
+        return originalWrite(...safeArgs);
       } catch (error) {
         if (lexaIsBrokenPipeError(error)) {
           mark(stream);
@@ -48,16 +63,17 @@ function installPreElectronPipeGuard() {
     const originalSocketWritev = net.Socket.prototype._writev;
     const isStdioSocket = (socket) => socket === process.stdout || socket === process.stderr || socket?.fd === 1 || socket?.fd === 2;
     net.Socket.prototype._write = function guardedSocketWrite(chunk, encoding, callback) {
+      const safeCallback = isStdioSocket(this) ? lexaWrapBrokenPipeCallback(this, callback, mark) : callback;
       if (isStdioSocket(this) && this.__lexaBrokenPipe) {
-        if (typeof callback === "function") callback();
+        if (typeof safeCallback === "function") safeCallback();
         return;
       }
       try {
-        return originalSocketWrite.call(this, chunk, encoding, callback);
+        return originalSocketWrite.call(this, chunk, encoding, safeCallback);
       } catch (error) {
         if (isStdioSocket(this) && lexaIsBrokenPipeError(error)) {
           mark(this);
-          if (typeof callback === "function") callback();
+          if (typeof safeCallback === "function") safeCallback();
           return;
         }
         throw error;
@@ -65,16 +81,17 @@ function installPreElectronPipeGuard() {
     };
     if (typeof originalSocketWritev === "function") {
       net.Socket.prototype._writev = function guardedSocketWritev(chunks, callback) {
+        const safeCallback = isStdioSocket(this) ? lexaWrapBrokenPipeCallback(this, callback, mark) : callback;
         if (isStdioSocket(this) && this.__lexaBrokenPipe) {
-          if (typeof callback === "function") callback();
+          if (typeof safeCallback === "function") safeCallback();
           return;
         }
         try {
-          return originalSocketWritev.call(this, chunks, callback);
+          return originalSocketWritev.call(this, chunks, safeCallback);
         } catch (error) {
           if (isStdioSocket(this) && lexaIsBrokenPipeError(error)) {
             mark(this);
-            if (typeof callback === "function") callback();
+            if (typeof safeCallback === "function") safeCallback();
             return;
           }
           throw error;
@@ -114,8 +131,15 @@ const https = require("https");
 const { fileURLToPath } = require("url");
 
 // Suppress broken stdout/stderr pipes when launched from transient shells or tests.
+let safeConsoleFallbackWriter = null;
+const MAIN_PROCESS_LOG_MAX_BYTES = 1024 * 1024;
+
 function isBrokenPipeError(error) {
   return lexaIsBrokenPipeError(error);
+}
+
+function wrapBrokenPipeCallback(stream, callback) {
+  return lexaWrapBrokenPipeCallback(stream, callback, markBrokenPipe);
 }
 
 function markBrokenPipe(stream) {
@@ -142,8 +166,11 @@ function installSafeStreamWrite(stream) {
   });
   stream.write = (...args) => {
     if (stream.__lexaBrokenPipe) return false;
+    const safeArgs = [...args];
+    const last = safeArgs.length - 1;
+    if (last >= 0) safeArgs[last] = wrapBrokenPipeCallback(stream, safeArgs[last]);
     try {
-      return originalWrite(...args);
+      return originalWrite(...safeArgs);
     } catch (error) {
       if (isBrokenPipeError(error)) {
         markBrokenPipe(stream);
@@ -154,16 +181,17 @@ function installSafeStreamWrite(stream) {
   };
   if (originalChunkWrite) {
     stream._write = (chunk, encoding, callback) => {
+      const safeCallback = wrapBrokenPipeCallback(stream, callback);
       if (stream.__lexaBrokenPipe) {
-        if (typeof callback === "function") callback();
+        if (typeof safeCallback === "function") safeCallback();
         return;
       }
       try {
-        return originalChunkWrite(chunk, encoding, callback);
+        return originalChunkWrite(chunk, encoding, safeCallback);
       } catch (error) {
         if (isBrokenPipeError(error)) {
           markBrokenPipe(stream);
-          if (typeof callback === "function") callback();
+          if (typeof safeCallback === "function") safeCallback();
           return;
         }
         throw error;
@@ -172,16 +200,17 @@ function installSafeStreamWrite(stream) {
   }
   if (originalVectorWrite) {
     stream._writev = (chunks, callback) => {
+      const safeCallback = wrapBrokenPipeCallback(stream, callback);
       if (stream.__lexaBrokenPipe) {
-        if (typeof callback === "function") callback();
+        if (typeof safeCallback === "function") safeCallback();
         return;
       }
       try {
-        return originalVectorWrite(chunks, callback);
+        return originalVectorWrite(chunks, safeCallback);
       } catch (error) {
         if (isBrokenPipeError(error)) {
           markBrokenPipe(stream);
-          if (typeof callback === "function") callback();
+          if (typeof safeCallback === "function") safeCallback();
           return;
         }
         throw error;
@@ -214,6 +243,9 @@ function installSafeConsole() {
       original[method](...args);
     } catch (error) {
       if (!isBrokenPipeError(error)) throw error;
+      markBrokenPipe(process.stdout);
+      markBrokenPipe(process.stderr);
+      try { safeConsoleFallbackWriter?.(method, args, error); } catch (_ignored) {}
     }
   };
   console.log = (...args) => safeCall("log", args);
@@ -229,6 +261,35 @@ process.on("uncaughtException", (error) => {
   try { console.error("[Main] Uncaught exception:", error); } catch (_e) {}
   app.exit(1);
 });
+
+function redactMainLogText(value) {
+  return String(value ?? "")
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{12,}/gi, "$1[redacted]")
+    .replace(/(token|api[_-]?key|secret|password|authorization)(["':=\s]+)[^\\s,"'}]{4,}/gi, "$1$2[redacted]")
+    .slice(0, 500);
+}
+
+function appendSafeMainProcessLog(method, args, error) {
+  try {
+    const logPath = path.join(app.getPath("userData"), "main-process.log");
+    if (fs.existsSync(logPath) && fs.statSync(logPath).size > MAIN_PROCESS_LOG_MAX_BYTES) {
+      const rotated = `${logPath}.1`;
+      if (fs.existsSync(rotated)) fs.unlinkSync(rotated);
+      fs.renameSync(logPath, rotated);
+    }
+    const entry = {
+      timestamp: new Date().toISOString(),
+      source: "main",
+      method: redactMainLogText(method),
+      pipe_error: true,
+      error: redactMainLogText(error?.code || error?.message || error),
+      message: Array.from(args || []).map(redactMainLogText).join(" "),
+    };
+    fs.appendFileSync(logPath, `${JSON.stringify(entry)}\n`, "utf8");
+  } catch (_ignored) {}
+}
+
+safeConsoleFallbackWriter = appendSafeMainProcessLog;
 
 function installRendererConsoleGuard(webContents) {
   if (!webContents || webContents.__lexaConsoleGuardInstalled) return;
@@ -597,6 +658,83 @@ function auditBridgePresence(status, payload = {}, reason = "", challengeId = ""
   writeBridgeAuditEvent(event);
 }
 
+function ipcArgKeys(args = []) {
+  return Array.from(args).flatMap((arg, index) => {
+    if (arg && typeof arg === "object" && !Array.isArray(arg)) {
+      const keys = Object.keys(arg).sort().slice(0, 20);
+      return keys.length ? keys.map((key) => `arg${index}.${String(key).slice(0, 80)}`) : [`arg${index}:object`];
+    }
+    return [`arg${index}:${typeof arg}`];
+  }).slice(0, 40);
+}
+
+function ipcArgShapeHash(args = []) {
+  try {
+    return crypto.createHash("sha256").update(JSON.stringify(ipcArgKeys(args))).digest("hex");
+  } catch (_error) {
+    return "";
+  }
+}
+
+function redactedIpcErrorReason(error) {
+  const name = String(error?.name || "Error").replace(/[^\w.-]/g, "").slice(0, 40) || "Error";
+  const code = String(error?.code || "").replace(/[^\w.-]/g, "").slice(0, 40);
+  return code ? `${name}:${code}` : name;
+}
+
+function structuredIpcFailure(channel, error) {
+  return {
+    ok: false,
+    success: false,
+    code: "main_ipc_handler_failed",
+    reason: "main_ipc_handler_failed",
+    error: "Main process IPC handler failed",
+    channel: String(channel || "unknown").slice(0, 100),
+    error_type: redactedIpcErrorReason(error),
+  };
+}
+
+function auditMainIpcFailure(channel, error, args = []) {
+  const event = sanitizeBridgeAuditEvent({
+    timestamp: new Date().toISOString(),
+    method: `ipc:${String(channel || "unknown").slice(0, 100)}`,
+    risk: "unknown",
+    action_type: "ipc",
+    allowed: false,
+    reason: `handler_exception:${redactedIpcErrorReason(error)}`,
+    args_hash: ipcArgShapeHash(args),
+    arg_keys: ipcArgKeys(args),
+  }, "main");
+  try { console.warn(`[MainIPC] ${channel} handler failed: ${event.reason}`); } catch (_ignored) {}
+  writeBridgeAuditEvent(event);
+}
+
+function safeIpcHandle(channel, handler, options = {}) {
+  ipcMain.handle(channel, async (event, ...args) => {
+    try {
+      return await handler(event, ...args);
+    } catch (error) {
+      auditMainIpcFailure(channel, error, args);
+      if (Object.prototype.hasOwnProperty.call(options, "failureValue")) return options.failureValue;
+      return structuredIpcFailure(channel, error);
+    }
+  });
+}
+
+function safeIpcOn(channel, handler, options = {}) {
+  ipcMain.on(channel, (event, ...args) => {
+    try {
+      return handler(event, ...args);
+    } catch (error) {
+      auditMainIpcFailure(channel, error, args);
+      if (Object.prototype.hasOwnProperty.call(options, "returnValue") && event) {
+        try { event.returnValue = options.returnValue; } catch (_ignored) {}
+      }
+      return undefined;
+    }
+  });
+}
+
 function pruneBridgePresenceChallenges(now = Date.now()) {
   for (const [id, record] of bridgePresenceChallenges.entries()) {
     if (!record || record.expiresAt <= now || record.used) {
@@ -775,15 +913,15 @@ function createTray() {
 }
 
 // ── WINDOW CONTROLS ──────────────────────────────
-ipcMain.on("window-minimize", () => mainWindow?.minimize());
-ipcMain.on("window-maximize", () => {
+safeIpcOn("window-minimize", () => mainWindow?.minimize());
+safeIpcOn("window-maximize", () => {
   if (mainWindow?.isMaximized()) {
     mainWindow.unmaximize();
   } else {
     mainWindow?.maximize();
   }
 });
-ipcMain.on("window-close", () => mainWindow?.hide());
+safeIpcOn("window-close", () => mainWindow?.hide());
 
 // ── LICENSE & TRIAL SYSTEM ───────────────────────
 const TRIAL_DAYS = 14;
@@ -867,17 +1005,17 @@ function _getLicenseWithState() {
   return { ...lic, _state: "free", _days_left: 0 };
 }
 
-ipcMain.handle("license-get", () => {
+safeIpcHandle("license-get", () => {
   return _getLicenseWithState();
 });
 
-ipcMain.handle("license-set", (_, data) => {
+safeIpcHandle("license-set", (_event, data) => {
   const success = _writeLicense(data);
   return success ? { success: true } : { success: false, error: "Write failed" };
 });
 
 // ── I18N FILE LOADING (Electron IPC — bypasses file:// fetch issues) ──
-ipcMain.handle("i18n-load", (_, lang) => {
+safeIpcHandle("i18n-load", (_event, lang) => {
   const allowed = ["de", "en"];
   if (!allowed.includes(lang)) return null;
   const filePath = path.join(__dirname, "src", "i18n", `${lang}.json`);
@@ -891,16 +1029,16 @@ ipcMain.handle("i18n-load", (_, lang) => {
 });
 
 // ── NOTIFICATIONS ────────────────────────────────
-ipcMain.handle("local-auth-token", () => INSTANCE_TOKEN);
+safeIpcHandle("local-auth-token", () => INSTANCE_TOKEN, { failureValue: "" });
 
-ipcMain.handle("bridge:audit", (event, rawPayload = {}) => {
+safeIpcHandle("bridge:audit", (event, rawPayload = {}) => {
   if (!bridgePresenceSenderTrusted(event)) return { ok: false, reason: "untrusted_renderer" };
   const auditEvent = sanitizeBridgeAuditEvent(rawPayload, "preload");
   writeBridgeAuditEvent(auditEvent);
   return { ok: true };
-});
+}, { failureValue: null });
 
-ipcMain.handle("bridge:presence:request", async (event, rawPayload = {}) => {
+safeIpcHandle("bridge:presence:request", async (event, rawPayload = {}) => {
   const payload = sanitizeBridgePresenceRequest(rawPayload);
   pruneBridgePresenceChallenges();
 
@@ -943,7 +1081,7 @@ ipcMain.handle("bridge:presence:request", async (event, rawPayload = {}) => {
   };
 });
 
-ipcMain.handle("bridge:presence:consume", (event, rawPayload = {}) => {
+safeIpcHandle("bridge:presence:consume", (event, rawPayload = {}) => {
   pruneBridgePresenceChallenges();
 
   const challengeId = String(rawPayload.challenge_id || "");
@@ -986,7 +1124,7 @@ ipcMain.handle("bridge:presence:consume", (event, rawPayload = {}) => {
   return { ok: true };
 });
 
-ipcMain.on("show-notification", (_, data) => {
+safeIpcOn("show-notification", (_event, data) => {
   if (Notification.isSupported()) {
     const notif = new Notification({
       title: data.title || "Lexa AI",
@@ -998,11 +1136,11 @@ ipcMain.on("show-notification", (_, data) => {
 });
 
 // ── VIEW SWITCHING FROM TRAY ─────────────────────
-ipcMain.on("get-autostart", (event) => {
+safeIpcOn("get-autostart", (event) => {
   event.returnValue = app.getLoginItemSettings().openAtLogin;
-});
+}, { returnValue: false });
 
-ipcMain.on("set-autostart", (_, enabled) => {
+safeIpcOn("set-autostart", (_event, enabled) => {
   app.setLoginItemSettings({ openAtLogin: enabled });
 });
 

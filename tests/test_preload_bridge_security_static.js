@@ -156,7 +156,8 @@ assert("executeBatch blocks mutating or unknown companion commands", validateExe
 console.log("\nGuarded bridge call:");
 const guardedSource = extractFn(preloadSrc, "guardedBridgeCall");
 assert("guarded bridge applies param-sensitive policy classification", guardedSource.includes("classifyBridgeCall(method, args)") && preloadSrc.includes("function classifyBridgeCall"));
-assert("high-risk calls request main-process presence", guardedSource.includes('ipcRenderer.invoke("bridge:presence:request"') && guardedSource.includes('ipcRenderer.invoke("bridge:presence:consume"'));
+assert("preload invokes main-process presence through structured safe helper", preloadSrc.includes("async function invokeMainBridge") && guardedSource.includes('invokeMainBridge("bridge:presence:request"') && guardedSource.includes('invokeMainBridge("bridge:presence:consume"'));
+assert("preload maps main-process IPC failures to fail-closed results", preloadSrc.includes('result.code === "main_ipc_handler_failed"') && preloadSrc.includes('reason: "main_ipc_invoke_failed"') && preloadSrc.includes("return { ok: false"));
 assert("high-risk call without challenge is rejected", guardedSource.includes("!challenge?.ok") && guardedSource.includes("bridge_presence_denied"));
 assert("consume failure is rejected", guardedSource.includes("!consumed?.ok") && guardedSource.includes("bridge_presence_invalid"));
 assert("executeBatch denial happens before backend execution", guardedSource.indexOf("validateExecuteBatchCommands") < guardedSource.indexOf("return executor()") && guardedSource.includes("bridge_batch_denied"));
@@ -168,7 +169,8 @@ assert("preload forwards only redacted bridge audit events", preloadSrc.includes
 console.log("\nMain-process user-presence challenge:");
 assert("defines short bridge presence TTL", mainSrc.includes("const BRIDGE_PRESENCE_TTL_MS = 60 * 1000"));
 assert("stores challenges in main process only", mainSrc.includes("const bridgePresenceChallenges = new Map()"));
-assert("registers request, consume, and audit IPC handlers", mainSrc.includes('ipcMain.handle("bridge:presence:request"') && mainSrc.includes('ipcMain.handle("bridge:presence:consume"') && mainSrc.includes('ipcMain.handle("bridge:audit"'));
+assert("registers request, consume, and audit IPC handlers through safe wrapper", mainSrc.includes('safeIpcHandle("bridge:presence:request"') && mainSrc.includes('safeIpcHandle("bridge:presence:consume"') && mainSrc.includes('safeIpcHandle("bridge:audit"') && !mainSrc.includes('ipcMain.handle("bridge:presence:request"'));
+assert("presence IPC handler exceptions become structured denials", mainSrc.includes("function safeIpcHandle") && mainSrc.includes("function structuredIpcFailure") && mainSrc.includes("main_ipc_handler_failed"));
 assert("shows native confirmation dialog", mainSrc.includes("dialog.showMessageBox") && mainSrc.includes("Allow once") && mainSrc.includes("Deny"));
 assert("rejects untrusted renderer senders", mainSrc.includes("function bridgePresenceSenderTrusted") && mainSrc.includes("isTrustedRendererUrl(frameUrl)") && mainSrc.includes("untrusted_renderer"));
 assert("binds challenges to method and args_hash", mainSrc.includes("record.method !== method") && mainSrc.includes("record.argsHash !== argsHash"));
