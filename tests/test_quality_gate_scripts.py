@@ -30,6 +30,7 @@ def test_quality_gates_support_eval_and_ci_modes():
     assert 'if ($Mode -eq "CI")' in src
     assert "Invoke-EvalRegressionGate" in src
     assert "Invoke-PackagingConfigSmoke" in src
+    assert "No .git directory found" in src
 
 
 def test_github_quality_workflow_is_non_deploying_and_secret_free():
@@ -40,6 +41,7 @@ def test_github_quality_workflow_is_non_deploying_and_secret_free():
     assert "check_risky_artifacts.ps1" in workflow
     assert "run_packaging_smoke.ps1" in workflow
     assert "run_clean_clone_smoke.ps1 -DryRun" in workflow
+    assert "run_release_candidate_check.ps1 -Mode CICore" in workflow
     assert "run_os_quality_gates.ps1 -AllowMissing" in workflow
     assert "actions/upload-artifact" not in workflow
     assert "softprops/action-gh-release" not in workflow
@@ -64,6 +66,15 @@ def test_packaging_smoke_blocks_forbidden_content_without_cleanup():
     assert "bridge-audit.log" in src
     assert "npx.cmd --no-install electron-builder" in src
     assert "Remove-Item" not in src
+
+
+def test_eval_regression_gate_uses_unique_temp_paths():
+    src = read("scripts/run_eval_regression_gate.ps1")
+
+    assert "[System.IO.Path]::GetTempPath()" in src
+    assert "[guid]::NewGuid()" in src
+    assert "$RunId-current_eval_report.json" in src
+    assert "current_eval_report.json" in src
 
 
 def test_os_hermes_and_website_smokes_are_non_destructive():

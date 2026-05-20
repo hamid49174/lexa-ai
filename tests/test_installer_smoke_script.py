@@ -51,3 +51,24 @@ def test_installer_smoke_does_not_delete_artifacts(tmp_path):
     assert result.returncode == 0, result.stdout
     assert installer.exists()
     assert "Installer smoke completed" in result.stdout
+
+
+def test_installer_install_requires_vm_only(tmp_path):
+    installer = tmp_path / "Lexa-Setup.exe"
+    installer.write_bytes(b"0" * (2 * 1024 * 1024))
+
+    result = run_script("-ArtifactRoot", str(tmp_path), "-InstallerPath", str(installer), "-Install")
+
+    assert result.returncode != 0
+    assert "requires -VMOnly" in result.stdout
+
+
+def test_installer_vm_only_install_is_not_auto_executed(tmp_path):
+    installer = tmp_path / "Lexa-Setup.exe"
+    installer.write_bytes(b"0" * (2 * 1024 * 1024))
+
+    result = run_script("-ArtifactRoot", str(tmp_path), "-InstallerPath", str(installer), "-Install", "-Uninstall", "-VMOnly")
+
+    assert result.returncode == 0, result.stdout
+    assert "not executed automatically" in result.stdout
+    assert "not yet proven" in result.stdout

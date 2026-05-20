@@ -70,6 +70,9 @@ Use this checklist before calling any build a Lexa release candidate. Do not dep
 - [ ] Packaging smoke is green.
 - [ ] Full packaging build with `scripts\run_packaging_smoke.ps1 -Build` has been attempted for release candidates.
 - [ ] Installer smoke has checked the generated artifact or is explicitly marked not yet proven.
+- [ ] Installer install/uninstall has been tested in a disposable VM, or release is marked Needs Review.
+- [ ] Signing status is documented.
+- [ ] Public release candidate installer is signed, or release is marked Needs Review.
 - [ ] Build artifacts contain no `.env`.
 - [ ] Build artifacts contain no `audit.log` or `bridge-audit.log`.
 - [ ] Build artifacts contain no `lexa_memory.db*`.
@@ -101,8 +104,23 @@ Use this checklist before calling any build a Lexa release candidate. Do not dep
 - [ ] OS dirty state is documented and not accidentally committed through Lexa.
 - [ ] Packaging/installer status is marked as proven, warning, or blocked.
 
+## 12. Phase 4C Proof Gates
+
+- [ ] Remote CI status is recorded as proven or not yet remotely proven.
+- [ ] `scripts\run_quality_gates.ps1 -Mode CI` is green locally.
+- [ ] `scripts\run_release_candidate_check.ps1 -Mode CICore` is green locally.
+- [ ] Clean install plus Quick Gate has run, or exact blocker is documented.
+- [ ] Eval/report output paths are unique per run and safe for parallel execution.
+- [ ] `scripts\run_release_candidate_check.ps1 -Mode Packaging` is green for package proof.
+- [ ] `scripts\run_release_candidate_check.ps1 -Mode Installer` is green or marked Needs Review.
+- [ ] `scripts\run_release_candidate_check.ps1 -Mode StrictRC` reports Ready or Needs Review truthfully.
+- [ ] Signing keys and certificates are absent from Git and staged files.
+
 Decision notes:
 
 - Blocking failures require a fix or explicit release-owner review.
 - Warnings are acceptable only when documented with owner, reason, and follow-up.
 - Baseline updates are allowed only from a fully green eval run and must never accept secret leaks or high/critical failures.
+- `Ready` means every release-blocking gate is green and no unresolved release-review warning remains.
+- `Needs Review` means all blocking gates are green, but unsigned installer, missing VM install/uninstall, remote-CI-not-proven, website build gaps, or external OS dirtiness still require owner signoff.
+- `Blocked` means at least one release-blocking gate failed.

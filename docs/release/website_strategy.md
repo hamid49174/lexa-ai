@@ -13,6 +13,13 @@ Observed Phase 4B state:
 - includes external CDN/runtime scripts for Supabase, Stripe, and Spline
 - contains `tmp_*.js` migration/scratch scripts
 
+Phase 4C re-check:
+
+- website remains external and not a Git repo
+- no package-based build/lint can be proven yet
+- static smoke is the only current website gate
+- no deployment action is part of the release checks
+
 Current smoke:
 
 ```powershell
@@ -20,6 +27,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_website_smoke.ps1
 ```
 
 The smoke blocks secret files and secret-looking patterns, warns about placeholders, warns about `tmp_*.js`, and lists external scripts needing CSP/vendor review. It does not deploy.
+Public Supabase anon keys and Stripe publishable keys are allowed only when clearly treated as public client configuration. Supabase service-role keys and Stripe secret keys are blocking failures.
 
 Options:
 
@@ -30,7 +38,7 @@ Options:
 
 Recommended next small step:
 
-Keep it external for now, remove or archive `tmp_*.js` only after review, and add a minimal website build/lint project when deployment is actually being prepared.
+Keep it external for now, remove or archive `tmp_*.js` only after review, and add a minimal website `package.json` with static lint/build checks before deployment preparation. That package should not introduce a framework migration or redesign in the same patch.
 
 Release blockers:
 

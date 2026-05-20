@@ -1,7 +1,10 @@
 param(
   [string]$ArtifactRoot = "",
   [string]$InstallerPath = "",
-  [switch]$RequireInstaller
+  [switch]$RequireInstaller,
+  [switch]$Install,
+  [switch]$Uninstall,
+  [switch]$VMOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +18,11 @@ $forbiddenRegex = '(?i)(personal_os|hermes_workspace|evals[\\/]+results|tmp[\\/]
 
 Write-Host "Lexa installer smoke"
 Write-Host "ArtifactRoot: $ArtifactRoot"
+Write-Host "Install requested: $Install Uninstall requested: $Uninstall VMOnly: $VMOnly"
+
+if (($Install -or $Uninstall) -and -not $VMOnly) {
+  throw "Installer install/uninstall smoke requires -VMOnly. Do not install into the productive machine from this script."
+}
 
 if ($InstallerPath) {
   if (!(Test-Path -LiteralPath $InstallerPath -PathType Leaf)) {
@@ -60,4 +68,10 @@ Write-Host "Installer smoke completed."
 Write-Host "Installer: $($installer.FullName)"
 Write-Host "Size bytes: $($installer.Length)"
 Write-Host "Signing status: unsigned/not verified by this smoke."
+if ($Install -or $Uninstall) {
+  Write-Warning "Installer install/uninstall proof is prepared as VM-only and was not executed automatically. Run inside a disposable VM/sandbox with explicit human approval."
+  Write-Host "Installer install/uninstall status: not yet proven by this local smoke."
+} else {
+  Write-Host "Installer install/uninstall status: not requested; not yet proven."
+}
 exit 0

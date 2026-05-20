@@ -38,7 +38,9 @@ $riskPatterns = @(
   '^\.coverage$',
   '^audio_cache(/|$)',
   '(^|/)node_modules(/|$)',
-  '^venv(/|$)'
+  '^venv(/|$)',
+  '\.(pfx|p12|pem|key)$',
+  '(^|/)(codesign|code-sign|signing)[^/]*\.(json|ps1|env|txt)$'
 )
 
 $secretRegex = '(?i)(api[_-]?key|bearer|token|secret|private[_-]?key)\s*[:=]\s*["'']?[A-Za-z0-9_\-]{16,}'
@@ -47,7 +49,9 @@ $warnings = New-Object System.Collections.Generic.List[string]
 
 function Normalize-RepoPath {
   param([string]$PathValue)
-  return ($PathValue -replace '\\', '/').TrimStart('./')
+  $normalized = $PathValue -replace '\\', '/'
+  if ($normalized.StartsWith("./")) { $normalized = $normalized.Substring(2) }
+  return $normalized.TrimStart('/')
 }
 
 function Test-RiskyPath {

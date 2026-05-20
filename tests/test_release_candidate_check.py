@@ -38,11 +38,22 @@ def test_release_candidate_script_does_not_deploy_or_delete():
 def test_release_candidate_script_supports_phase_4b_modes():
     src = (REPO_ROOT / "scripts" / "run_release_candidate_check.ps1").read_text(encoding="utf-8")
 
-    assert 'ValidateSet("LocalFull", "CICore", "Packaging", "StrictRC")' in src
+    assert 'ValidateSet("LocalFull", "CICore", "Packaging", "Installer", "StrictRC")' in src
     assert '$Mode -eq "CICore"' in src
     assert '$Mode -eq "Packaging"' in src
+    assert '$Mode -eq "Installer"' in src
     assert "Quality Gates CI" in src
     assert "Installer Smoke" in src
+
+
+def test_release_candidate_script_reports_decision_and_warnings():
+    src = (REPO_ROOT / "scripts" / "run_release_candidate_check.ps1").read_text(encoding="utf-8")
+
+    assert "Release decision:" in src
+    assert "Needs Review" in src
+    assert "Ready" in src
+    assert "Remote GitHub Actions run is not proven" in src
+    assert "Installer install/uninstall" in src
 
 
 def test_release_docs_exist_and_cover_decision_states():

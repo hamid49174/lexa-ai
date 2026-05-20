@@ -16,16 +16,20 @@ if (!(Test-Path $Python)) {
 if ($WorkDir) {
   $GateDir = $WorkDir
 } else {
-  $GateDir = Join-Path $RepoRoot (Join-Path ".test-tmp" ("eval-regression-" + [guid]::NewGuid().ToString("N")))
+  $GateDir = Join-Path ([System.IO.Path]::GetTempPath()) ("lexa-eval-regression-" + [guid]::NewGuid().ToString("N"))
 }
 New-Item -ItemType Directory -Force $GateDir | Out-Null
 
-$CurrentReport = Join-Path $GateDir "current_eval_report.json"
-$RegressionReport = Join-Path $GateDir "eval_regression_report.json"
-$TriageReport = Join-Path $GateDir "failure_triage.md"
+$RunId = [System.IO.Path]::GetFileName($GateDir)
+$CurrentReport = Join-Path $GateDir "$RunId-current_eval_report.json"
+$RegressionReport = Join-Path $GateDir "$RunId-eval_regression_report.json"
+$TriageReport = Join-Path $GateDir "$RunId-failure_triage.md"
 if ($PersistFailureReport) {
-  $TriageReport = Join-Path $RepoRoot "evals\results\eval_regression_triage.md"
+  $TriageReport = Join-Path $RepoRoot ("evals\results\$RunId-eval_regression_triage.md")
 }
+
+Write-Host "Eval regression work dir: $GateDir"
+Write-Host "Eval regression run id: $RunId"
 
 Write-Host "== offline eval suite =="
 & $Python "evals\runners\run_eval_suite.py" --all --json-report $CurrentReport

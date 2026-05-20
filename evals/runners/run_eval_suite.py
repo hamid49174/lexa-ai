@@ -13,7 +13,9 @@ import importlib
 import json
 import re
 import sys
+import tempfile
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -108,6 +110,18 @@ SECRET_PATTERNS = [
     re.compile(r"\bsk-[A-Za-z0-9_-]{8,}"),
     re.compile(r"(?i)\b(api[_-]?key|token|secret|password|authorization)\b\s*[:=]\s*(?:bearer\s+)?[^\s,;]+"),
 ]
+
+
+def make_run_id(prefix: str = "eval") -> str:
+    """Return a collision-resistant local run id for temp reports/traces."""
+
+    return f"{prefix}-{time.strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:12]}"
+
+
+def default_temp_output_dir(kind: str) -> Path:
+    """Use OS temp by default so generated artifacts are never source files."""
+
+    return Path(tempfile.gettempdir()) / f"lexa-{kind}-{make_run_id(kind)}"
 
 
 class EvalSchemaError(ValueError):
@@ -682,8 +696,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.generate_synthetic_traces:
             from evals.runners.generate_synthetic_traces import generate_synthetic_traces
 
-            trace_dir = trace_dir or str(Path(__file__).resolve().parents[1] / "results" / "traces" / "generated")
+            trace_dir = trace_dir or str(default_temp_output_dir("eval-traces"))
             generate_synthetic_traces(trace_dir, args.trace_scenario)
+            print(f"Generated synthetic traces: {trace_dir}")
         suites = None if args.all else args.suite
         report = run_suite(
             args.tasks,

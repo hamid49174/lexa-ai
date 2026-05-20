@@ -76,6 +76,10 @@ function Invoke-Gate {
 }
 
 function Invoke-GitSafety {
+  if (!(Test-Path -LiteralPath (Join-Path $RepoRoot ".git"))) {
+    Write-Warning "No .git directory found; git diff/staged safety checks are skipped for this source-only clean install workspace."
+    return
+  }
   Invoke-Gate "git diff --check" { git -c core.autocrlf=false diff --check }
 
   Write-Host ""

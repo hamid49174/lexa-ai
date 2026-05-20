@@ -40,3 +40,10 @@ Forbidden in packaged output:
 - private logs or secrets
 
 The smoke does not publish, upload, sign, or delete artifacts.
+
+Signing status:
+
+- Development/package smoke installers may be unsigned.
+- Public release candidates need a signed installer.
+- Signing keys, certificates, passwords, and signing service tokens must never be committed.
+- See `docs/release/signing_plan.md`.

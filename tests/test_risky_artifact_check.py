@@ -57,3 +57,23 @@ def test_artifact_path_blocks_user_data(tmp_path):
 
     assert result.returncode == 1
     assert "Forbidden file" in result.stdout or "Risky" in result.stdout
+
+
+def test_signing_keys_are_blocked_from_staging(tmp_path):
+    staged = tmp_path / "staged.txt"
+    staged.write_text("release/windows_signing.pfx\n", encoding="utf-8")
+
+    result = run_script("-Root", str(tmp_path), "-StagedFileList", str(staged))
+
+    assert result.returncode == 1
+    assert "Risky staged path" in result.stdout
+
+
+def test_dot_env_is_blocked_from_staging(tmp_path):
+    staged = tmp_path / "staged.txt"
+    staged.write_text(".env\n", encoding="utf-8")
+
+    result = run_script("-Root", str(tmp_path), "-StagedFileList", str(staged))
+
+    assert result.returncode == 1
+    assert "Risky staged path" in result.stdout

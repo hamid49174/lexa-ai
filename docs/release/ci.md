@@ -2,6 +2,8 @@
 
 Phase 4A adds CI-ready quality gates without deployment, uploads, secrets, or external model/API calls. Phase 4B adds a local CI core mode and clean-clone smoke so the workflow is closer to a fresh runner.
 
+Phase 4C status: no remote GitHub Actions run has been proven from this workspace because the local repository has no configured `origin` remote. The workflow is therefore CI-ready and locally simulated, but remote CI remains "not yet remotely proven" until a branch is pushed to GitHub and the workflow run is inspected.
+
 ## GitHub Actions
 
 `.github/workflows/quality-gates.yml` runs on pushes and pull requests for `main` and `develop`.
@@ -17,10 +19,13 @@ It performs:
 - CI quality gate (`scripts\run_quality_gates.ps1 -Mode CI`)
 - eval regression gate
 - clean clone dry-run smoke
+- release candidate CI core check
 - full Python suite
 - release-readiness smoke checks for packaging config, Hermes, website, optional OS gates, and performance budgets
 
 The workflow does not deploy, publish, upload installers, call external LLM APIs, or require secrets.
+
+The workflow uses Windows runners, Python 3.12, and Node 20. OS gates are optional because the Personal OS is a local external mount. Website smoke is optional/static because `..\lexa-website` is not part of this Git repository.
 
 ## Local CI Simulation
 
@@ -36,6 +41,8 @@ powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1
 
 Use the release candidate script before tagging or packaging a release candidate. Build/package artifacts stay local and ignored.
 
+`CICore` proves the checks that can run from a clean repository without local OS mounts or website project dependencies. It must not be described as a completed remote CI run until a real GitHub Actions job has run.
+
 ## Known Limits
 
 - The website layer in this workspace is a static external folder at `..\lexa-website`, not a Git repo and not a Node project.
@@ -43,3 +50,5 @@ Use the release candidate script before tagging or packaging a release candidate
 - Packaging smoke defaults to config and artifact scanning. Use `scripts\run_packaging_smoke.ps1 -Build` for an isolated local installer build attempt.
 - `CICore` is intended for CI-safe checks. `LocalFull` includes local Electron/OS/Hermes/Website gates. `StrictRC` is for a fuller local release proof, including package build and installer requirement.
 - Existing `release.yml` remains a tag-triggered release workflow. Phase 4A does not run it and does not publish anything.
+- Remote CI is not yet proven in this workspace because no Git remote is configured.
+- If OS, Hermes, or Website paths are absent on CI, the corresponding local-only gate must warn or skip explicitly rather than silently pretending to validate external data.

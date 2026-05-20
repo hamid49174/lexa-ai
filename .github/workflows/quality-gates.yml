@@ -58,6 +58,10 @@ jobs:
         shell: pwsh
         run: .\scripts\run_clean_clone_smoke.ps1 -DryRun
 
+      - name: Release candidate CI core
+        shell: pwsh
+        run: .\scripts\run_release_candidate_check.ps1 -Mode CICore
+
   full-python:
     name: Full Python suite
     runs-on: windows-latest

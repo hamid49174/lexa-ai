@@ -16,6 +16,7 @@ Behavior:
 - documents that signing is not verified by this smoke
 - does not install into the productive environment
 - does not delete artifacts
+- can prepare VM-only install/uninstall proof flags without executing a productive install
 
 Strict mode:
 
@@ -25,4 +26,12 @@ powershell -ExecutionPolicy Bypass -File scripts\run_installer_smoke.ps1 -Artifa
 
 If no installer exists, default mode is warn-only. `-RequireInstaller` makes missing installer artifacts release-blocking.
 
-Phase 4B status: installer existence and artifact scan are supported. Real install/uninstall testing should happen in a disposable VM before public release.
+VM-only proof plan:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_installer_smoke.ps1 -ArtifactRoot <artifact-dir> -RequireInstaller -Install -Uninstall -VMOnly
+```
+
+This records that install/uninstall proof is requested, but it does not perform an automatic productive install. A real install/uninstall test must be run only inside a disposable VM or sandbox with explicit human approval.
+
+Phase 4C status: installer existence and artifact scan are supported. Real install/uninstall testing is still not yet proven until a disposable VM run is completed.

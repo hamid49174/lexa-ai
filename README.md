@@ -220,17 +220,19 @@ Release-readiness gates:
 powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode Full
 powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode CI
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1
+powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Mode StrictRC
 ```
 
 The release-candidate check is local only. It does not deploy, upload, delete files, or commit build artifacts. For release proofing, also use clean-clone and packaging/installer smokes:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run_clean_clone_smoke.ps1
+powershell -ExecutionPolicy Bypass -File scripts\run_clean_clone_smoke.ps1 -Install -RunQuickGate -KeepTemp
 powershell -ExecutionPolicy Bypass -File scripts\run_packaging_smoke.ps1 -Build
 powershell -ExecutionPolicy Bypass -File scripts\run_installer_smoke.ps1 -ArtifactRoot <artifact-dir>
 ```
 
-See `docs/release/release_candidate_checklist.md` and the `docs/release/` runbooks.
+`StrictRC` distinguishes `Ready` from `Needs Review` when remote CI, signing, or disposable-VM install/uninstall proof is still missing. See `docs/release/release_candidate_checklist.md` and the `docs/release/` runbooks.
 
 ---
 

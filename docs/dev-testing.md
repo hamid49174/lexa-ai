@@ -52,9 +52,13 @@ CI mode runs the security/eval/JS static gates, eval regression, packaging confi
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Mode CICore
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Mode Packaging
+powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Mode Installer
+powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Mode StrictRC
 ```
 
 The release-candidate check orchestrates Full Quality Gates, Clean Clone Smoke, Dependency Repro Check, Eval Regression Gate, Risky Artifact Check, Electron startup/presence smoke, OS quality gates when mounted, Hermes adapter smoke, website smoke, packaging/installer smoke, performance budget smoke, and final Git safety. It does not deploy, upload, delete files, or stage artifacts.
+
+`CICore` is local CI-equivalent proof, not proof of a completed remote GitHub Actions run. `Packaging` performs an isolated package build. `Installer` validates an existing installer artifact. `StrictRC` reports `Ready`, `Blocked`, or `Needs Review` truthfully and keeps unsigned installer or missing VM install/uninstall proof as review items.
 
 Supporting release-readiness scripts:
 
@@ -74,6 +78,7 @@ Release docs:
 - `docs/release/clean_clone.md`
 - `docs/release/packaging.md`
 - `docs/release/installer_smoke.md`
+- `docs/release/signing_plan.md`
 - `docs/release/website_strategy.md`
 - `docs/release/os_repo_cleanup_plan.md`
 - `docs/release/performance_budgets.md`
@@ -144,6 +149,8 @@ The eval runner can also generate and replay in one command:
 venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite trace_replay --generate-synthetic-traces --trace-dir evals\results\traces\generated
 ```
 
+When `--generate-synthetic-traces` is used without `--trace-dir`, Phase 4C writes generated traces to a unique OS temp directory instead of a fixed `evals/results/` path. This keeps parallel runs from overwriting each other. Explicit output paths are still allowed for local review, but generated result artifacts remain ignored and must not be committed.
+
 Plan/Act/Verify regression evals live in `evals/golden_tasks/plan_act_verify.jsonl` and use synthetic fixtures only. They check plans, budgets, checkpoints, approval requirements, verification behavior, and review creation.
 
 Agent simulation evals live in `evals/golden_tasks/agent_simulation.jsonl` and run through local mock tools only:
@@ -183,7 +190,7 @@ Run the local regression gate:
 powershell -ExecutionPolicy Bypass -File scripts\run_eval_regression_gate.ps1
 ```
 
-The gate runs the offline eval suite into a temp JSON report, compares it with the baseline, and writes any triage output to a temp path by default. Use `-PersistFailureReport` only when you want an ignored local report under `evals/results/`.
+The gate runs the offline eval suite into a unique temp JSON report, compares it with the baseline, and writes any triage output to a unique temp path by default. Use `-PersistFailureReport` only when you want an ignored local report under `evals/results/`.
 
 Blocking regressions include:
 

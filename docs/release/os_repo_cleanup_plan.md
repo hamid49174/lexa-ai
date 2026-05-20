@@ -15,6 +15,12 @@ Phase 4B observed state:
 - MCP/Raw-Inbox integration folders are present
 - this phase did not stage, commit, delete, migrate, archive, or clean OS files
 
+Phase 4C status:
+
+- OS remains a separate dirty Git repository.
+- Lexa release hardening did not modify, stage, commit, delete, migrate, archive, or clean OS files.
+- OS gates may still be run as validation, but cleanup is a separate review project.
+
 Classification approach for a future cleanup project:
 
 | Category | Examples | Recommendation |
@@ -38,3 +44,12 @@ Rules:
 Recommended next project:
 
 Create a separate OS cleanup branch or task, take a backup/snapshot, classify every dirty path, then commit only reviewed source-of-truth changes in the OS repo.
+
+Minimum cleanup workflow:
+
+1. Snapshot OS `git status --short` and `git diff --stat`.
+2. Back up Drafts, Events, Raw Inbox, Rollups, and Workflows.
+3. Classify each path as keep, review, archive, or quarantine.
+4. Run OS SDK, MCP, Raw-Inbox, and Draft gates before any cleanup.
+5. Apply only approved Draft/Event actions through the OS approval workflow.
+6. Run OS gates again after cleanup.
