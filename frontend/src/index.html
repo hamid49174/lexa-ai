@@ -184,6 +184,7 @@
               <path d="M8 9h8M8 13h5M16 13l2 2 3-4" />
             </svg>
             <span>OS</span>
+            <span class="readiness-chip readiness-chip-internal" data-readiness="internal" title="Personal OS is internal">Internal</span>
             <span class="sidebar-badge hidden" id="nav-pos-badge"></span>
           </button>
           <button type="button" class="sidebar-btn" data-view="settings" role="tab" aria-label="Einstellungen">
@@ -569,6 +570,7 @@
                 <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Zm0 14a5 5 0 0 1-5-5H5a7 7 0 0 0 14 0h-2a5 5 0 0 1-5 5Zm-2 4v3h4v-3h-4Z"/>
               </svg>
               <span data-voice-entry-label data-i18n="chat.talkToLexaBtn">Mit Lexa sprechen</span>
+              <span class="readiness-chip readiness-chip-beta" data-readiness="beta" title="Voice surface is beta">Beta</span>
             </button>
             <!-- Arrow to show chat messages -->
             <button type="button" id="chat-view-arrow" class="chat-view-arrow" data-action="toggleChatView" aria-label="Chat anzeigen" title="Chat anzeigen">
@@ -774,7 +776,7 @@
 
         <!-- Personal OS View -->
         <div class="tool-view" id="personal-os-view">
-          <div class="view-title" role="heading" aria-level="2">OS <span>Start</span></div>
+          <div class="view-title" role="heading" aria-level="2">OS <span>Start</span><span class="readiness-chip readiness-chip-internal" data-readiness="internal" title="Personal OS is internal">Internal</span></div>
           <div class="info-grid" id="pos-status-grid"></div>
 
           <details class="pos-panel pos-query-panel pos-collapsible-panel" aria-label="Personal OS Kontext finden">
@@ -989,7 +991,7 @@
           </div>
 
           <div class="settings-group">
-            <div class="settings-group-title">TTS PROVIDER</div>
+            <div class="settings-group-title">TTS PROVIDER <span class="readiness-chip readiness-chip-beta" data-readiness="beta" title="Voice surface is beta">Beta</span></div>
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name">Aktive TTS Engine</div>
@@ -1072,7 +1074,7 @@
           </div>
 
           <div class="settings-group">
-            <div class="settings-group-title">STIMME TESTEN</div>
+            <div class="settings-group-title">STIMME TESTEN <span class="readiness-chip readiness-chip-beta" data-readiness="beta" title="Voice surface is beta">Beta</span></div>
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name">Voice Diagnostics</div>
@@ -1101,7 +1103,7 @@
           </div>
 
           <div class="settings-group">
-            <div class="settings-group-title">SPRACHERKENNUNG (STT)</div>
+            <div class="settings-group-title">SPRACHERKENNUNG (STT) <span class="readiness-chip readiness-chip-beta" data-readiness="beta" title="Voice surface is beta">Beta</span></div>
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name">STT Engine</div>
@@ -1174,6 +1176,7 @@
                 <div class="setting-name" data-i18n="settings.hermesGatewayAutostart">Hermes Gateway Autostart</div>
                 <div class="setting-desc" data-i18n="settings.hermesGatewayAutostartDesc">Telegram-Gateway beim Windows-Login starten</div>
               </div>
+              <span class="readiness-chip readiness-chip-internal" data-readiness="internal" title="Hermes Gateway is internal">Internal</span>
               <div class="setting-actions">
                 <div class="setting-status offline" id="hermes-gateway-autostart-status" data-i18n="settings.checkingStatus">Pr&uuml;fe...</div>
                 <label class="toggle-switch">
@@ -1197,6 +1200,7 @@
                 <div class="setting-name" data-i18n="settings.wakeWord">Wake Word ("Lexa")</div>
                 <div class="setting-desc" data-i18n="settings.wakeWordDesc">Immer zuh&ouml;ren &mdash; sag &laquo;Lexa&raquo; zum Aktivieren</div>
               </div>
+              <span class="readiness-chip readiness-chip-beta" data-readiness="beta" title="Wake word is beta">Beta</span>
               <label class="toggle-switch">
                 <input type="checkbox" id="wakeword-toggle" data-action="toggleWakeWord">
                 <span class="toggle-slider"></span>
@@ -1214,6 +1218,12 @@
           <div class="settings-group">
             <div class="settings-group-title" data-i18n="license.title">LIZENZ</div>
             <div id="trial-status-bar" class="trial-status-bar hidden"></div>
+            <div class="setting-item readiness-note">
+              <div class="setting-info">
+                <div class="setting-name">Lizenz-Integritaet <span class="readiness-chip readiness-chip-internal" data-readiness="internal" title="License integrity is internal">Internal</span></div>
+                <div class="setting-desc">Intern, bis serverseitig signierte Lizenzpruefung freigegeben ist.</div>
+              </div>
+            </div>
             <div class="setting-item">
               <div class="setting-info">
                 <div class="setting-name" data-i18n="license.plan">Aktueller Plan</div>

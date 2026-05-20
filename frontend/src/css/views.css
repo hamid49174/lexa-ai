@@ -1820,6 +1820,30 @@
   margin-bottom: 12px;
 }
 
+.settings-group-title .readiness-chip {
+  margin-left: 8px;
+  -webkit-text-fill-color: currentColor;
+  vertical-align: middle;
+}
+
+.setting-item > .readiness-chip {
+  margin: 0 8px;
+}
+
+.setting-name .readiness-chip,
+.view-title .readiness-chip {
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
+.view-title .readiness-chip {
+  transform: translateY(-0.2em);
+}
+
+.readiness-note {
+  border-color: rgba(139, 146, 255, 0.18);
+}
+
 .setting-item {
   display: flex;
   justify-content: space-between;
