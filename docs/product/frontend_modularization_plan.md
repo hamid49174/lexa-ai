@@ -192,8 +192,9 @@ Current chat script order:
 7. `chat_message_actions.js`
 8. `chat_input_helpers.js`
 9. `chat_tool_confirmation_ui.js`
-10. `chat_history_ui.js`
-11. `chat.js`
+10. `chat_confirmation_state.js`
+11. `chat_history_ui.js`
+12. `chat.js`
 
 Remaining high-risk clusters: streaming send/abort, conversation history switching/deletion/persistence orchestration, non-confirmed tool-call execution/result rendering, confirmation approval execution, Companion execution, voice/STT/TTS/orb behavior, Personal OS draft apply/approve/reject flows, Electron preload IPC, Electron backend lifecycle, signing/update behavior, and OS cleanup.
 
@@ -289,7 +290,65 @@ Tests covering this boundary:
 - `test_app_chat_input_wiring.js`
 - Electron startup and visual smokes
 
-Next recommended target: add focused history failure-path coverage for save/load/delete recovery before extracting any history orchestration, or add mocked confirmation click coverage before moving confirmation approval UI. Streaming and send pipeline remain stop-lined.
+Next recommended target: after the history failure and mocked confirmation click smokes are stable, consider only pure confirmation state helpers or history fallback helpers. Streaming and send pipeline remain stop-lined.
+
+## History Failure and Confirmation Click Coverage Sprint
+
+This sprint added failure-path coverage first, fixed one small malformed-history bug, and extracted only the pure confirmation prompt summary helper.
+
+Coverage added:
+
+- `tests/electron_history_failure_smoke.js` loads the real renderer with isolated Electron `userData` and covers malformed sidebar conversations, missing title/preview fields, unsafe title/preview/message content, malformed persisted messages, failed conversation load preserving the active transcript, invalid local-history recovery, and stable empty-history recovery.
+- `tests/electron_confirmation_click_smoke.js` covers mocked approval, denial, and window-cancel confirmation clicks. It asserts pending confirmation is cleared exactly once, unsafe params remain escaped, the confirmation prompt contains the expected safe command summary, and only mocked bridge handlers are called.
+
+Bug fixed:
+
+- `frontend/src/chat_history_ui.js` now normalizes missing conversation titles and previews before rendering. This prevents malformed history payloads from crashing the sidebar while preserving normal conversation rendering.
+
+Extraction completed:
+
+| File | Before sprint | After sprint |
+| --- | ---: | ---: |
+| `frontend/src/chat.js` | 4114 lines / 186353 bytes | 4107 lines / 186009 bytes |
+| `frontend/src/chat_history_ui.js` | 84 lines / 4443 bytes | 91 lines / 4660 bytes |
+| `frontend/src/chat_confirmation_state.js` | new | 14 lines / 569 bytes |
+
+Moved function:
+
+- `confirmationActionSummaryText(action, prepared)`
+
+Why this boundary was safe:
+
+- It is a pure string builder for the existing `window.confirm()` prompt.
+- It reads only the passed action/prepared confirmation payloads.
+- It does not mutate state, touch DOM, call fetch/backend APIs, or execute Companion.
+- `electron_confirmation_click_smoke.js` covers the approval and cancel prompt summary behavior after the extraction.
+
+What stayed in `chat.js`:
+
+- `confirmAction()` approval/denial execution flow
+- pending confirmation clear call
+- `prepareCompanionExecute()` and `executeWithConfirmation()` calls
+- streaming and send pipeline behavior
+- history save/load/delete orchestration
+- real tool and Companion execution
+
+Current chat script order:
+
+1. `chat_constants.js`
+2. `chat_formatting.js`
+3. `chat_markdown.js`
+4. `chat_message_formatting.js`
+5. `chat_export.js`
+6. `chat_composer_helpers.js`
+7. `chat_message_actions.js`
+8. `chat_input_helpers.js`
+9. `chat_tool_confirmation_ui.js`
+10. `chat_confirmation_state.js`
+11. `chat_history_ui.js`
+12. `chat.js`
+
+Next recommended target: add focused streaming abort/timeout/chunk-boundary smoke before any streaming extraction, or add a render-only non-confirmed tool display smoke. Do not move history orchestration, send pipeline, real tool execution, or confirmation approval execution yet.
 
 ## Do Not Touch Yet
 

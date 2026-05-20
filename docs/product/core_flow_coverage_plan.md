@@ -13,9 +13,9 @@ Goal: strengthen integration coverage for Lexa's internal daily-use core flows b
 | Chat input submit | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, `electron_core_chat_flow_smoke.js` | Browser-level manual typing with a live backend is not covered | Send-pipeline refactors could break user-message insertion or input reset | `electron_core_chat_flow_smoke.js` submits text through the real send button with a mocked stream |
 | Mocked assistant response rendering | `test_chat_rendering.js`, `electron_core_chat_flow_smoke.js` | Does not cover every markdown feature through the full send pipeline | Renderer refactors could break streaming-to-final formatted output | Keep mocked SSE response in `electron_core_chat_flow_smoke.js` and rendering unit coverage in `test_chat_rendering.js` |
 | Streaming response lifecycle | `test_chat_send_guards.js`, `electron_core_chat_flow_smoke.js`, `electron_ui_visual_smoke.js` | Abort, timeout, chunk fragmentation, and malformed SSE integration are not fully covered | Streaming refactors could strand loading state, disabled buttons, or partial text | Add a second focused Electron smoke for abort/timeout/chunk-boundary behavior before moving streaming code |
-| Conversation history save/load | `test_router_conversations.py`, `test_chat_send_guards.js`, `electron_ui_visual_smoke.js`, `electron_core_chat_flow_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_history_lifecycle_smoke.js` | Real backend persistence, failure recovery, and active-conversation delete edge cases still need focused coverage | History refactors could drop raw markdown, duplicate messages, or corrupt active selection | Add focused failure-path smokes before moving save/load/delete orchestration |
+| Conversation history save/load | `test_router_conversations.py`, `test_chat_send_guards.js`, `electron_ui_visual_smoke.js`, `electron_core_chat_flow_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_history_lifecycle_smoke.js`, `electron_history_failure_smoke.js` | Real backend persistence and active-conversation delete edge cases still need focused coverage | History refactors could drop raw markdown, duplicate messages, corrupt active selection, or crash on malformed history payloads | Keep failure-path smoke in required gates before moving save/load/delete orchestration |
 | Tool-call display | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, backend action/parser tests, `electron_tool_confirmation_smoke.js` | Non-confirmed tool execution display remains intentionally broad-smoke/static covered only | Tool rendering refactors could expose unsafe labels or hide confirmation state | Add focused non-executing display smoke for safe/no-confirm tool results before moving more tool UI |
-| Confirmation happy path | `test_router_companion.py`, `test_companion_confirmation.py`, `electron_presence_challenge_smoke.js`, `electron_tool_confirmation_smoke.js` covers render-only UI | Renderer confirmation click path with mocked `executeWithConfirmation` is not isolated | Confirmation UI refactors could call Companion incorrectly or lose safe denial behavior | Add focused Electron confirmation click smoke only with mocked confirmation and no real Companion execution |
+| Confirmation happy path | `test_router_companion.py`, `test_companion_confirmation.py`, `electron_presence_challenge_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_confirmation_click_smoke.js` | Real Companion execution remains intentionally outside renderer smoke coverage | Confirmation UI refactors could call Companion incorrectly or lose safe denial behavior | Keep focused click smoke mocked; do not add real tool execution to renderer tests |
 | OS draft creation path | `test_personal_os_prompt.js`, `test_router_personal_os.py`, `test_personal_os_actions.py`, eval OS draft tests | Full renderer draft creation from chat handoff is not isolated | OS draft UI refactors could bypass Draft/Approval expectations | Add a mocked Personal OS draft handoff smoke only after core chat/history smokes are stable |
 | Settings persistence | `test_settings_voice_static.js`, `test_app_chat_input_wiring.js`, `electron_ui_visual_smoke.js` | Focused settings save/load smoke is thin | Settings refactors could silently stop saving provider/voice preferences | Add a small Electron settings persistence smoke if settings modularization resumes |
 | Beta/Internal label visibility | `test_internal_daily_use_readiness_static.js`, `test_app_chat_input_wiring.js` | Visual placement is only indirectly covered | Unstable surfaces could become visibly unlabelled | Keep static readiness checks in every internal daily-use pass |
@@ -69,8 +69,29 @@ Goal: strengthen integration coverage for Lexa's internal daily-use core flows b
 
 This coverage uses only the existing Electron smoke mock bridge and does not exercise real backend persistence or real data deletion.
 
+## Added In History Failure + Confirmation Click Sprint
+
+`tests/electron_history_failure_smoke.js` adds focused renderer coverage for malformed and failed history paths:
+
+- malformed conversation rows with missing title, missing preview, and unsafe HTML-like title/preview content
+- malformed persisted message entries, including null/empty entries and action-like content that must not become live controls
+- failed conversation load preserving the active conversation, active row, and transcript
+- invalid local history recovery without rendering garbage
+- empty/unavailable history recovery to a stable empty state
+
+The sprint also fixed a small history sidebar robustness bug in `frontend/src/chat_history_ui.js`: missing conversation titles/previews are normalized before rendering. Normal conversation output is preserved, and backend load/save/delete orchestration remains in `chat.js`.
+
+`tests/electron_confirmation_click_smoke.js` adds mocked renderer coverage for confirmation button behavior:
+
+- approval click clears pending confirmation once and calls only the mocked `executeWithConfirmation()` bridge path
+- denial click clears pending confirmation and updates the UI without execution
+- window-confirm cancel clears pending confirmation without execution
+- unsafe params remain contained in text, and prompt text includes the expected command summary
+
+This smoke uses mocks/spies only. It does not execute real Companion tools, OS actions, OS draft apply/write behavior, or real confirmation approval execution.
+
 ## Stop-line Before Refactors
 
-Do not extract or rewrite streaming lifecycle, send pipeline, conversation save/load/delete orchestration, active-conversation delete recovery, tool execution, confirmation approval execution, or Companion execution until focused integration coverage exists for the specific lifecycle being changed.
+Do not extract or rewrite streaming lifecycle, send pipeline, conversation save/load/delete orchestration, active-conversation delete recovery, real tool execution, real confirmation approval execution, Companion execution, or OS draft actions until focused integration coverage exists for the specific lifecycle being changed.
 
-Recommended next coverage target: focused history failure-path smokes for conversation save/load/delete recovery, or a focused renderer smoke for confirmation click denial/approval using mocked `prepareCompanionExecute()` and `executeWithConfirmation()`, with no real Companion execution.
+Recommended next coverage target: focused streaming abort/timeout/chunk-boundary smoke, or a focused non-confirmed tool display smoke that remains render-only and does not execute Companion.

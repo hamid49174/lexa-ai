@@ -2655,14 +2655,7 @@ async function confirmAction(btn, actionStr) {
       showToast(t("chat.actionFailed", {action: action.action}), "error");
       return;
     }
-    const summary = prepared.summary || {};
-    const paramKeys = Array.isArray(summary.param_keys) ? summary.param_keys.join(", ") : "";
-    const safeSummary = [
-      `Command: ${summary.command || action.action}`,
-      `Scope: ${summary.action_scope || prepared.action_scope || ""}`,
-      paramKeys ? `Params: ${paramKeys}` : "",
-      `Expires: ${prepared.expires_at || ""}`,
-    ].filter(Boolean).join("\n");
+    const safeSummary = confirmationActionSummaryText(action, prepared);
     if (typeof window.confirm === "function" && !window.confirm(safeSummary)) {
       addMessage(t("chat.denied"), "system");
       showToast(t("toast.actionCancelled"), "warning");
