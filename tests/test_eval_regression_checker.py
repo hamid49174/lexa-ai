@@ -131,3 +131,32 @@ def test_checker_cli_writes_redacted_markdown_triage(tmp_path):
     text = triage.read_text(encoding="utf-8")
     assert "sk-fixture-secret-token" not in text
     assert "api_key=" not in text
+
+
+def test_eval_regression_gate_parallel_runs_use_separate_outputs(tmp_path):
+    work_a = tmp_path / "run-a"
+    work_b = tmp_path / "run-b"
+    script = REPO_ROOT / "scripts" / "run_eval_regression_gate.ps1"
+
+    procs = [
+        subprocess.Popen(
+            ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(script), "-WorkDir", str(work_a)],
+            cwd=REPO_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        ),
+        subprocess.Popen(
+            ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(script), "-WorkDir", str(work_b)],
+            cwd=REPO_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        ),
+    ]
+    outputs = [proc.communicate(timeout=60)[0] for proc in procs]
+
+    assert all(proc.returncode == 0 for proc in procs), outputs
+    assert (work_a / "run-a-current_eval_report.json").exists()
+    assert (work_b / "run-b-current_eval_report.json").exists()
+    assert work_a != work_b

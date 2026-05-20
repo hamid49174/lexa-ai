@@ -2,7 +2,7 @@
 
 Phase 4A adds CI-ready quality gates without deployment, uploads, secrets, or external model/API calls. Phase 4B adds a local CI core mode and clean-clone smoke so the workflow is closer to a fresh runner.
 
-Phase 4C status: no remote GitHub Actions run has been proven from this workspace because the local repository has no configured `origin` remote. The workflow is therefore CI-ready and locally simulated, but remote CI remains "not yet remotely proven" until a branch is pushed to GitHub and the workflow run is inspected.
+Phase 4D status: no remote GitHub Actions run has been proven from this workspace because the local repository has no configured GitHub remote. The workflow is therefore CI-ready and locally simulated, but remote CI remains "not yet remotely proven" until a branch is pushed to GitHub and the workflow run is inspected.
 
 ## GitHub Actions
 
@@ -37,11 +37,25 @@ powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode Ful
 powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode CI
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Mode CICore
+powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target InternalRC
+powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target PublicRC
 ```
 
 Use the release candidate script before tagging or packaging a release candidate. Build/package artifacts stay local and ignored.
 
 `CICore` proves the checks that can run from a clean repository without local OS mounts or website project dependencies. It must not be described as a completed remote CI run until a real GitHub Actions job has run.
+
+## Remote CI Proof
+
+Remote CI is considered proven only when all of these are true:
+
+- a GitHub remote is configured
+- a branch or pull request is pushed
+- `.github/workflows/quality-gates.yml` runs on GitHub Actions
+- the run completes without secrets, deployment, uploads, or user-data dependencies
+- the run result is linked or recorded in release notes
+
+In this workspace there is currently no GitHub remote, so PublicRC and PublicRelease remain blocked by remote-CI proof.
 
 ## Known Limits
 

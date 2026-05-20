@@ -214,6 +214,24 @@ node tests/test_chat_rendering.js
 venv\Scripts\python -m flake8 backend companion voice --max-line-length=120 --ignore=E501,W503,E402
 ```
 
+### Release Readiness
+
+Lexa uses scripted release gates instead of ad hoc manual checks:
+
+```powershell
+scripts\run_quality_gates.ps1 -Mode Quick
+scripts\run_quality_gates.ps1 -Mode Full
+scripts\run_release_candidate_check.ps1 -Target InternalRC
+```
+
+Release tiers:
+
+- `InternalRC`: internal review candidate; warnings are allowed when documented.
+- `PublicRC`: requires remote CI proof, signing, VM installer proof, reviewed OS cleanup risk, and clear website target.
+- `PublicRelease`: requires PublicRC plus release/privacy readiness.
+
+Read `AGENTS.md`, `docs/codex_context_pack.md`, and `docs/release/release_candidate_checklist.md` before release-hardening work.
+
 Release-readiness gates:
 
 ```powershell

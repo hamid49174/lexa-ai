@@ -96,6 +96,18 @@ Use this checklist before calling any build a Lexa release candidate. Do not dep
 - [ ] Blocked
 - [ ] Needs Review
 
+## 10A. Release Tier
+
+- [ ] InternalRC
+- [ ] PublicRC
+- [ ] PublicRelease
+
+InternalRC can proceed with reviewed warnings for unsigned installer, VM install/uninstall not yet proven, remote CI not yet proven, external dirty OS, and static website gaps.
+
+PublicRC additionally requires remote CI proof, signed installer, VM install/uninstall proof, reviewed OS cleanup risk, and a clear website release target.
+
+PublicRelease additionally requires release signing, installer proof, website deployment workflow, trace/privacy consent review, and no open high/critical risks.
+
 ## 11. Phase 4B Freshness Gates
 
 - [ ] Clean clone/copy smoke is green.
@@ -115,6 +127,17 @@ Use this checklist before calling any build a Lexa release candidate. Do not dep
 - [ ] `scripts\run_release_candidate_check.ps1 -Mode Installer` is green or marked Needs Review.
 - [ ] `scripts\run_release_candidate_check.ps1 -Mode StrictRC` reports Ready or Needs Review truthfully.
 - [ ] Signing keys and certificates are absent from Git and staged files.
+
+## 13. Phase 4D Tier Gates
+
+- [ ] `scripts\run_release_candidate_check.ps1 -Target InternalRC` is green or Needs Review with only accepted warnings.
+- [ ] `scripts\run_release_candidate_check.ps1 -Target PublicRC` is blocked until signing, remote CI, VM install/uninstall, website target, and OS cleanup risk are proven/reviewed.
+- [ ] `scripts\run_release_candidate_check.ps1 -Target PublicRelease` is blocked until PublicRC requirements plus public release/privacy readiness are proven.
+- [ ] Installer VM test plan exists.
+- [ ] Signing plan defines Dev, InternalRC, PublicRC, and PublicRelease requirements.
+- [ ] Website target is explicitly classified.
+- [ ] OS cleanup inventory is category-level and does not copy private OS content.
+- [ ] Codex context pack exists and excludes user data.
 
 Decision notes:
 

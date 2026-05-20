@@ -39,9 +39,11 @@ def test_release_candidate_script_supports_phase_4b_modes():
     src = (REPO_ROOT / "scripts" / "run_release_candidate_check.ps1").read_text(encoding="utf-8")
 
     assert 'ValidateSet("LocalFull", "CICore", "Packaging", "Installer", "StrictRC")' in src
+    assert 'ValidateSet("InternalRC", "PublicRC", "PublicRelease")' in src
     assert '$Mode -eq "CICore"' in src
     assert '$Mode -eq "Packaging"' in src
     assert '$Mode -eq "Installer"' in src
+    assert '$Target -in @("PublicRC", "PublicRelease")' in src
     assert "Quality Gates CI" in src
     assert "Installer Smoke" in src
 
@@ -51,9 +53,12 @@ def test_release_candidate_script_reports_decision_and_warnings():
 
     assert "Release decision:" in src
     assert "Needs Review" in src
+    assert "Blocked" in src
     assert "Ready" in src
     assert "Remote GitHub Actions run is not proven" in src
     assert "Installer install/uninstall" in src
+    assert "Unsigned installer is allowed for development/InternalRC" in src
+    assert "Website release target is still static/external" in src
 
 
 def test_release_docs_exist_and_cover_decision_states():
@@ -68,3 +73,6 @@ def test_release_docs_exist_and_cover_decision_states():
     assert "Ready" in checklist
     assert "Blocked" in checklist
     assert "Needs Review" in checklist
+    assert "InternalRC" in checklist
+    assert "PublicRC" in checklist
+    assert "PublicRelease" in checklist

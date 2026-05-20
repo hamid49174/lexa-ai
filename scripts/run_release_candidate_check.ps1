@@ -1,6 +1,8 @@
 param(
   [ValidateSet("LocalFull", "CICore", "Packaging", "Installer", "StrictRC")]
   [string]$Mode = "LocalFull",
+  [ValidateSet("InternalRC", "PublicRC", "PublicRelease")]
+  [string]$Target = "InternalRC",
   [switch]$SkipFullQualityGate,
   [switch]$RunPackagingBuild,
   [switch]$AllowMissingOS,
@@ -11,6 +13,8 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 $Script:RcWarnings = New-Object System.Collections.Generic.List[string]
+$Script:RcBlockers = New-Object System.Collections.Generic.List[string]
+$Script:RcFacts = @{}
 
 function Invoke-RcStep {
   param(
@@ -40,22 +44,65 @@ function Add-RcWarning {
   $Script:RcWarnings.Add($Message) | Out-Null
 }
 
+function Add-RcBlocker {
+  param([string]$Message)
+  $Script:RcBlockers.Add($Message) | Out-Null
+}
+
+function Add-TargetFinding {
+  param(
+    [string]$Message,
+    [string[]]$BlockingTargets = @()
+  )
+  if ($Target -in $BlockingTargets) {
+    Add-RcBlocker $Message
+  } else {
+    Add-RcWarning $Message
+  }
+}
+
+function Test-GithubRemoteConfigured {
+  $remotes = @(git remote -v 2>$null)
+  foreach ($remote in $remotes) {
+    if ($remote -match 'github\.com[:/]' -or $remote -match 'https://github\.com/') {
+      return $true
+    }
+  }
+  return $false
+}
+
 function Complete-RcCheck {
-  param([string]$ModeName)
-  $decision = if ($Script:RcWarnings.Count -gt 0) { "Needs Review" } else { "Ready" }
+  param([string]$ModeName, [string]$TargetName)
+  $decision = if ($Script:RcBlockers.Count -gt 0) { "Blocked" } elseif ($Script:RcWarnings.Count -gt 0) { "Needs Review" } else { "Ready" }
   Write-Host ""
   Write-Host "Release decision: $decision"
+  Write-Host "Release target: $TargetName"
+  if ($Script:RcBlockers.Count -gt 0) {
+    Write-Host "Blocking findings:"
+    $Script:RcBlockers | ForEach-Object { Write-Host "- $_" }
+  }
   if ($Script:RcWarnings.Count -gt 0) {
     Write-Host "Warnings:"
     $Script:RcWarnings | ForEach-Object { Write-Host "- $_" }
   }
-  Write-Host "Release Candidate Check passed ($ModeName)."
+  if ($Script:RcBlockers.Count -gt 0) {
+    Write-Host "Release Candidate Check blocked ($ModeName / $TargetName)."
+    exit 1
+  }
+  Write-Host "Release Candidate Check passed ($ModeName / $TargetName)."
 }
 
 Write-Host "Lexa Release Candidate Check"
 Write-Host "RepoRoot: $RepoRoot"
 Write-Host "Mode: $Mode"
+Write-Host "Target: $Target"
 Write-Host "No release action, deletion, or artifact staging is performed by this script."
+
+if (Test-GithubRemoteConfigured) {
+  $Script:RcFacts["github_remote"] = $true
+} else {
+  $Script:RcFacts["github_remote"] = $false
+}
 
 $buildForMode = $RunPackagingBuild -or $Mode -in @("Packaging", "StrictRC")
 $packagingArtifactRoot = if ($buildForMode) {
@@ -73,8 +120,8 @@ if ($Mode -eq "CICore") {
   Invoke-RcStep "OS Quality Gates Optional" { powershell -ExecutionPolicy Bypass -File "scripts\run_os_quality_gates.ps1" -AllowMissing } $true
   Invoke-RcStep "Website Smoke Optional" { powershell -ExecutionPolicy Bypass -File "scripts\run_website_smoke.ps1" } $true
   Invoke-RcStep "Git Safety" { git -c core.autocrlf=false diff --check }
-  Add-RcWarning "Remote GitHub Actions run is not proven by CICore. This mode proves local CI-equivalent checks only."
-  Complete-RcCheck $Mode
+  Add-TargetFinding "Remote GitHub Actions run is not proven by CICore. This mode proves local CI-equivalent checks only." @("PublicRC", "PublicRelease")
+  Complete-RcCheck $Mode $Target
   exit 0
 }
 
@@ -84,6 +131,10 @@ if ($Mode -eq "Packaging") {
 
 if ($Mode -eq "Installer") {
   Write-Host "Installer mode validates an existing installer artifact and documents unsigned/not-yet-installed status."
+}
+
+if (-not $Script:RcFacts["github_remote"]) {
+  Add-TargetFinding "Remote CI is not yet remotely proven because no GitHub remote is configured." @("PublicRC", "PublicRelease")
 }
 
 if (-not $SkipFullQualityGate -and $Mode -notin @("Packaging", "Installer")) {
@@ -132,11 +183,18 @@ Invoke-RcStep "Installer Smoke" {
   }
 } ($Mode -ne "StrictRC" -and -not $buildForMode)
 
-if ($Mode -in @("Installer", "StrictRC")) {
-  Add-RcWarning "Installer install/uninstall in a disposable VM is not proven by this local script unless run_installer_smoke.ps1 is executed with an approved VM-only procedure."
+if ($Mode -in @("Installer", "StrictRC") -or $Target -in @("PublicRC", "PublicRelease")) {
+  Add-TargetFinding "Installer install/uninstall in a disposable VM is not proven by this local script unless run_installer_smoke.ps1 is executed with an approved VM-only procedure." @("PublicRC", "PublicRelease")
 }
-if ($Mode -eq "StrictRC") {
-  Add-RcWarning "Unsigned installer is a release review item until Windows code signing is configured."
+if ($Mode -eq "StrictRC" -or $Target -in @("PublicRC", "PublicRelease")) {
+  Add-TargetFinding "Unsigned installer is allowed for development/InternalRC but blocks PublicRC and PublicRelease." @("PublicRC", "PublicRelease")
+}
+if ($Target -in @("PublicRC", "PublicRelease")) {
+  Add-RcBlocker "Website release target is still static/external without package-based build/lint proof."
+  Add-RcBlocker "OS cleanup remains unreviewed in a separate dirty OS repository."
+}
+if ($Target -eq "PublicRelease") {
+  Add-RcBlocker "PublicRelease requires signed installer, proven VM install/uninstall, remote CI proof, and website release workflow."
 }
 Invoke-RcStep "Performance Budget Smoke" { powershell -ExecutionPolicy Bypass -File "scripts\check_performance_budgets.ps1" }
 Invoke-RcStep "Git Safety" {
@@ -149,5 +207,5 @@ Invoke-RcStep "Git Safety" {
 }
 
 Write-Host ""
-Complete-RcCheck $Mode
+Complete-RcCheck $Mode $Target
 exit 0

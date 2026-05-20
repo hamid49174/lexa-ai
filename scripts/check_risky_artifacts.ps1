@@ -39,7 +39,7 @@ $riskPatterns = @(
   '^audio_cache(/|$)',
   '(^|/)node_modules(/|$)',
   '^venv(/|$)',
-  '\.(pfx|p12|pem|key)$',
+  '\.(pfx|p12|pem|key|pvk|cer|crt)$',
   '(^|/)(codesign|code-sign|signing)[^/]*\.(json|ps1|env|txt)$'
 )
 

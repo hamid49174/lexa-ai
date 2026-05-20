@@ -21,6 +21,13 @@ Phase 4C status:
 - Lexa release hardening did not modify, stage, commit, delete, migrate, archive, or clean OS files.
 - OS gates may still be run as validation, but cleanup is a separate review project.
 
+Phase 4D status:
+
+- OS remains a separate dirty Git repository.
+- Lexa Phase 4D did not modify, stage, commit, delete, migrate, archive, or clean OS files.
+- The cleanup is now an explicit review project, not part of Lexa release hardening.
+- See `docs/release/os_cleanup_inventory.md` for the safe category-level inventory.
+
 Classification approach for a future cleanup project:
 
 | Category | Examples | Recommendation |
@@ -53,3 +60,10 @@ Minimum cleanup workflow:
 4. Run OS SDK, MCP, Raw-Inbox, and Draft gates before any cleanup.
 5. Apply only approved Draft/Event actions through the OS approval workflow.
 6. Run OS gates again after cleanup.
+7. Commit reviewed OS source changes in the OS repo only.
+
+Release tier impact:
+
+- InternalRC: dirty external OS is allowed with documentation and green OS gates.
+- PublicRC: dirty OS cleanup risk must be reviewed by a human before release.
+- PublicRelease: OS cleanup plan must be complete or explicitly accepted by the release owner.

@@ -18,6 +18,7 @@ if (-not $WebsiteRoot -or !(Test-Path -LiteralPath $WebsiteRoot)) {
 
 Write-Host "Website smoke"
 Write-Host "WebsiteRoot: $WebsiteRoot"
+Write-Host "Website release target: static-external"
 
 $secretHits = @()
 $secretPatternHits = @()
@@ -79,6 +80,7 @@ if (Test-Path -LiteralPath $pkg) {
   }
 } else {
   Write-Host "No website package.json found; treating website as static HTML/CSS/JS layer."
+  Write-Warning "Website has no package-based build/lint proof. Treat as warn-only for InternalRC and blocking for PublicRC/PublicRelease until a release target is approved."
 }
 
 Write-Host "Website smoke completed without deployment or upload."

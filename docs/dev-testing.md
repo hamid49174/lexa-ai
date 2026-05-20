@@ -54,11 +54,20 @@ powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Mode Packaging
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Mode Installer
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Mode StrictRC
+powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target InternalRC
+powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target PublicRC
+powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target PublicRelease
 ```
 
 The release-candidate check orchestrates Full Quality Gates, Clean Clone Smoke, Dependency Repro Check, Eval Regression Gate, Risky Artifact Check, Electron startup/presence smoke, OS quality gates when mounted, Hermes adapter smoke, website smoke, packaging/installer smoke, performance budget smoke, and final Git safety. It does not deploy, upload, delete files, or stage artifacts.
 
 `CICore` is local CI-equivalent proof, not proof of a completed remote GitHub Actions run. `Packaging` performs an isolated package build. `Installer` validates an existing installer artifact. `StrictRC` reports `Ready`, `Blocked`, or `Needs Review` truthfully and keeps unsigned installer or missing VM install/uninstall proof as review items.
+
+Targets separate release intent:
+
+- `InternalRC`: may proceed with reviewed warnings for unsigned installer, VM install proof not yet proven, remote CI not yet proven, external dirty OS, and static website gaps.
+- `PublicRC`: blocks on unsigned installer, remote CI not proven, VM install/uninstall not proven, unclear website release target, or unreviewed OS cleanup risk.
+- `PublicRelease`: blocks until PublicRC requirements plus release signing, installer proof, website workflow, trace/privacy review, and high/critical risk closure are done.
 
 Supporting release-readiness scripts:
 
@@ -67,6 +76,7 @@ Supporting release-readiness scripts:
 - `scripts\check_risky_artifacts.ps1`: blocks staged local data, build artifacts, result artifacts, and optional secret-pattern scan paths.
 - `scripts\run_packaging_smoke.ps1`: checks Electron packaging config and scans build artifacts. Use `-Build` only for an explicit isolated local package build.
 - `scripts\run_installer_smoke.ps1`: checks generated installer artifacts without installing into the productive machine.
+- `scripts\run_installer_smoke.ps1 -PlanOnly`: prints the VM/sandbox install-uninstall proof plan.
 - `scripts\run_os_quality_gates.ps1`: runs OS SDK/MCP/Raw-Inbox checks when the OS mount is available.
 - `scripts\run_hermes_smoke.ps1`: runs Hermes adapter tests and staged-path safety checks.
 - `scripts\run_website_smoke.ps1`: checks the external website folder without deployment.
@@ -105,6 +115,7 @@ The quality-gate script warns when these paths are present and fails if risky pa
 - Do not ignore or delete lockfiles blindly.
 - Electron smoke tests require `frontend\node_modules\electron\dist\electron.exe`.
 - `personal_os/` is treated as an external local mount. Review it separately and never commit it as Lexa source.
+- `AGENTS.md` and `docs/codex_context_pack.md` are the safe Codex starting context. They intentionally do not include private Personal OS/Obsidian content.
 
 ## Eval Suite
 

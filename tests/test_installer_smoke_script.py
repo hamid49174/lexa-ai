@@ -51,6 +51,7 @@ def test_installer_smoke_does_not_delete_artifacts(tmp_path):
     assert result.returncode == 0, result.stdout
     assert installer.exists()
     assert "Installer smoke completed" in result.stdout
+    assert "Signing status:" in result.stdout
 
 
 def test_installer_install_requires_vm_only(tmp_path):
@@ -72,3 +73,12 @@ def test_installer_vm_only_install_is_not_auto_executed(tmp_path):
     assert result.returncode == 0, result.stdout
     assert "not executed automatically" in result.stdout
     assert "not yet proven" in result.stdout
+    assert "Installer VM install/uninstall plan" in result.stdout
+
+
+def test_installer_plan_only_prints_vm_plan():
+    result = run_script("-PlanOnly")
+
+    assert result.returncode == 0, result.stdout
+    assert "Installer VM install/uninstall plan" in result.stdout
+    assert "Plan-only mode" in result.stdout

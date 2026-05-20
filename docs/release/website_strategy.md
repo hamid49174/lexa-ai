@@ -13,12 +13,14 @@ Observed Phase 4B state:
 - includes external CDN/runtime scripts for Supabase, Stripe, and Spline
 - contains `tmp_*.js` migration/scratch scripts
 
-Phase 4C re-check:
+Phase 4D re-check:
 
 - website remains external and not a Git repo
 - no package-based build/lint can be proven yet
 - static smoke is the only current website gate
 - no deployment action is part of the release checks
+- release target is currently `static-external`
+- this is acceptable for InternalRC review, but not enough for PublicRC/PublicRelease
 
 Current smoke:
 
@@ -38,7 +40,7 @@ Options:
 
 Recommended next small step:
 
-Keep it external for now, remove or archive `tmp_*.js` only after review, and add a minimal website `package.json` with static lint/build checks before deployment preparation. That package should not introduce a framework migration or redesign in the same patch.
+Keep it external/static for now, remove or archive `tmp_*.js` only after review, and add a minimal website `package.json` with static lint/build checks before deployment preparation. That package should not introduce a framework migration or redesign in the same patch.
 
 Release blockers:
 
@@ -51,3 +53,9 @@ Warn-only for now:
 - static-only website without package-based lint/build
 - CDN/external scripts needing CSP and pinning review
 - scratch `tmp_*.js` files
+
+Release tier impact:
+
+- InternalRC: static-external website is allowed with warnings.
+- PublicRC: website target must be approved and package-based build/lint or an equivalent static-release workflow must be proven.
+- PublicRelease: deployment path, public config, CSP/vendor strategy, and secret handling must be reviewed.

@@ -12,6 +12,7 @@ def test_quality_gates_include_release_script_tests_and_startup_smoke():
     src = read("scripts/run_quality_gates.ps1")
 
     assert "test_release_candidate_check.py" in src
+    assert "test_codex_context_pack.py" in src
     assert "test_quality_gate_scripts.py" in src
     assert "test_performance_budgets.py" in src
     assert "test_risky_artifact_check.py" in src

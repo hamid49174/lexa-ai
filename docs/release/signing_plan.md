@@ -1,6 +1,6 @@
 # Windows Signing Plan
 
-Phase 4C status: Lexa can build an Electron installer locally, but the installer is unsigned. Unsigned installers are acceptable for development smoke checks, not for a public release candidate.
+Phase 4D status: Lexa can build an Electron installer locally, but the installer is unsigned. Unsigned installers are acceptable for development smoke checks and InternalRC review, not for PublicRC or PublicRelease.
 
 ## Current State
 
@@ -40,6 +40,13 @@ The risky artifact check blocks common signing key file extensions and signing c
 
 ## Release Gate
 
+Release tier policy:
+
+- Dev build: unsigned is allowed.
+- InternalRC: unsigned is allowed only with a clear warning.
+- PublicRC: signing is required and unsigned installers are blocking.
+- PublicRelease: signing is required, installer install/uninstall must be proven, and release signing must be reviewed.
+
 Before a public release:
 
 1. Packaging smoke must pass.
@@ -49,4 +56,4 @@ Before a public release:
 5. The installer must be signed.
 6. The signed installer must be scanned for user data and secrets.
 
-Until then, signing remains a release-review warning, not a completed gate.
+Until then, signing remains a release-review warning for InternalRC and a blocking gate for PublicRC/PublicRelease.

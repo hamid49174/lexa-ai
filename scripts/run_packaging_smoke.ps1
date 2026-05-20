@@ -50,6 +50,18 @@ function Test-ForbiddenArtifactContent([string]$PathValue) {
   Write-Host "ok: no forbidden files found in artifact path $PathValue"
 }
 
+function Get-SigningStatus {
+  param([string]$PathValue)
+  try {
+    $signature = Get-AuthenticodeSignature -LiteralPath $PathValue -ErrorAction Stop
+    if ($signature.Status -eq "Valid") { return "signed" }
+    if ($signature.Status -eq "NotSigned") { return "unsigned" }
+    return "unknown:$($signature.Status)"
+  } catch {
+    return "unknown"
+  }
+}
+
 Write-Host "Lexa packaging smoke"
 Write-Host "RepoRoot: $RepoRoot"
 Assert-File $packageJson "frontend package.json"
@@ -86,6 +98,17 @@ if ($Build) {
 }
 
 Test-ForbiddenArtifactContent $ArtifactRoot
+
+$installers = @()
+if (Test-Path -LiteralPath $ArtifactRoot) {
+  $installers = @(Get-ChildItem -LiteralPath $ArtifactRoot -Recurse -Force -File -Include "*.exe", "*.msi", "*.msix" -ErrorAction SilentlyContinue | Sort-Object Length -Descending)
+}
+if ($installers.Count -gt 0) {
+  $primaryInstaller = $installers | Select-Object -First 1
+  Write-Host "Installer signing status: $(Get-SigningStatus $primaryInstaller.FullName)"
+} else {
+  Write-Host "Installer signing status: not checked; no installer artifact found."
+}
 
 $stagedArtifacts = @(git -C $RepoRoot diff --cached --name-only -- dist backend-dist frontend/dist build 2>$null)
 if ($stagedArtifacts.Count -gt 0) {
