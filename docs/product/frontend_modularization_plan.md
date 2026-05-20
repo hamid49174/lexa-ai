@@ -52,6 +52,26 @@ Behavior intentionally preserved:
 - agent auto-detection behavior remains covered by `test_chat_send_guards.js`
 - Beta/Internal labels remain in `index.html`
 
+## Pass 2 Extraction
+
+Pass 2 extracts only `stripModelFunctionTags()` and `normalizeChatUrl()` from `frontend/src/chat.js` into `frontend/src/chat_formatting.js`.
+
+Size snapshot before and after Pass 2:
+
+| File | Before Pass 2 | After Pass 2 |
+| --- | ---: | ---: |
+| `frontend/src/chat.js` | 4653 lines / 218734 bytes | 4632 lines / 218103 bytes |
+| `frontend/src/chat_formatting.js` | new | 22 lines / 727 bytes |
+
+Tests covering this boundary:
+
+- `test_frontend_script_order_static.js` verifies `chat_formatting.js` loads after `chat_constants.js` and before `chat.js`
+- `test_chat_rendering.js` directly checks empty input, function-tag stripping, safe URL acceptance, and unsafe URL rejection
+- `test_chat_rendering.js` still exercises the helpers indirectly through `formatMessage()`
+- Electron startup and visual smokes verify the classic renderer loads the new script in the app shell
+
+Next safest extraction target: pure markdown block helpers such as table/code/inline rendering helpers, but only after adding direct tests for the exact helper boundary. Streaming, conversation history, tool-call rendering, voice, and Personal OS draft flows remain out of scope.
+
 ## Do Not Touch Yet
 
 - streaming send and abort behavior

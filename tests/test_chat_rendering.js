@@ -10,6 +10,10 @@ const src = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "chat.js"),
   "utf8"
 );
+const formattingSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "chat_formatting.js"),
+  "utf8"
+);
 
 function extractFn(source, name) {
   const needle = `function ${name}(`;
@@ -107,7 +111,7 @@ function makeDomStub() {
 
 const escHtml = extractFn(src, "escapeHtml");
 const renderFormatted = extractFn(src, "renderFormattedMessage");
-const rendererStart = src.indexOf("function stripModelFunctionTags(");
+const rendererStart = src.indexOf("function appendInlineMarkdown(");
 const rendererEnd = src.indexOf("function generateSuggestions(");
 if (rendererStart === -1 || rendererEnd === -1 || rendererEnd <= rendererStart) {
   throw new Error("renderer helper block not found");
@@ -117,16 +121,19 @@ const rendererBlock = src.slice(rendererStart, rendererEnd);
 const sandbox = new Function("document", "URL", `
   "use strict";
   ${escHtml}
+  ${formattingSrc}
   ${renderFormatted}
   ${rendererBlock}
-  return { escapeHtml, formatMessage, renderFormattedMessage };
+  return { escapeHtml, stripModelFunctionTags, normalizeChatUrl, formatMessage, renderFormattedMessage };
 `);
 
 let escapeHtml;
+let stripModelFunctionTags;
+let normalizeChatUrl;
 let formatMessage;
 let renderFormattedMessage;
 try {
-  ({ escapeHtml, formatMessage, renderFormattedMessage } = sandbox(makeDomStub(), URL));
+  ({ escapeHtml, stripModelFunctionTags, normalizeChatUrl, formatMessage, renderFormattedMessage } = sandbox(makeDomStub(), URL));
 } catch (e) {
   console.error("Sandbox setup failed:", e.message);
   process.exit(1);
@@ -151,6 +158,17 @@ assert("escapes &", escapeHtml("a & b").includes("&amp;"));
 assert("escapes quote", escapeHtml('"').includes("&quot;"));
 assert("plain text unchanged", escapeHtml("hello") === "hello");
 assert("full XSS tag escaped", !escapeHtml("<script>alert(1)</script>").includes("<script>"));
+
+console.log("\nformatting helper boundaries:");
+assert("stripModelFunctionTags handles empty input", stripModelFunctionTags(null) === "");
+assert("stripModelFunctionTags removes wrapped function payloads", stripModelFunctionTags("before <function=tool>{\"x\":1}</function> after") === "before  after");
+assert("stripModelFunctionTags removes open function tags", stripModelFunctionTags("<function=tool name=\"x\"/>hello") === "hello");
+assert("normalizeChatUrl handles empty input", normalizeChatUrl("") === "");
+assert("normalizeChatUrl keeps safe web links", normalizeChatUrl("https://example.com/a?q=1") === "https://example.com/a?q=1");
+assert("normalizeChatUrl allows mailto links for text", normalizeChatUrl("mailto:test@example.com") === "mailto:test@example.com");
+assert("normalizeChatUrl blocks mailto links for images", normalizeChatUrl("mailto:test@example.com", { image: true }) === "");
+assert("normalizeChatUrl blocks javascript links", normalizeChatUrl("javascript:alert(1)") === "");
+assert("normalizeChatUrl blocks local file links", normalizeChatUrl("file:///C:/Users/admin/.ssh/id_rsa") === "");
 
 console.log("\nformatMessage():");
 
