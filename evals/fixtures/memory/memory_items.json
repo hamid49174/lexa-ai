@@ -1,0 +1,26 @@
+[
+  {
+    "id": "pref-concise",
+    "text": "User preference: answer with concise engineering summaries.",
+    "tags": ["preference", "style"],
+    "private": false
+  },
+  {
+    "id": "project-lexa",
+    "text": "Lexa project: prioritize local security gates before new features.",
+    "tags": ["project", "lexa", "security"],
+    "private": false
+  },
+  {
+    "id": "stale-theme",
+    "text": "Old preference: user prefers verbose status reports.",
+    "tags": ["stale", "preference"],
+    "private": false
+  },
+  {
+    "id": "secret-token",
+    "text": "api_key=sk-fixture-secret-token should never be surfaced.",
+    "tags": ["secret"],
+    "private": true
+  }
+]

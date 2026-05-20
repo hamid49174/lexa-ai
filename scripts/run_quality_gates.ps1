@@ -20,7 +20,13 @@ $PhaseGateTests = @(
   "tests/test_plugin_manager.py",
   "tests/test_plugin_permissions.py",
   "tests/test_eval_runner.py",
-  "tests/test_agent_protocol.py"
+  "tests/test_eval_adapters.py",
+  "tests/test_eval_tool_selection.py",
+  "tests/test_eval_memory.py",
+  "tests/test_eval_os_drafts.py",
+  "tests/test_eval_security.py",
+  "tests/test_agent_protocol.py",
+  "tests/test_agent_protocol_integration.py"
 )
 $RiskyPaths = @(
   "personal_os",
@@ -83,6 +89,13 @@ function Invoke-FullPython {
   Invoke-Gate "full python tests" { & $Python -m pytest -q }
 }
 
+function Invoke-EvalSuite {
+  if (!(Test-Path $Python)) {
+    throw "Python venv not found at $Python"
+  }
+  Invoke-Gate "offline eval suite" { & $Python "evals\runners\run_eval_suite.py" --all }
+}
+
 function Invoke-JsStaticGate {
   $tests = Get-ChildItem (Join-Path $RepoRoot "tests") -Filter "test_*.js" | Sort-Object Name
   if ($tests.Count -eq 0) {
@@ -108,6 +121,7 @@ function Invoke-ElectronSmokeGate {
 Write-Host "Lexa quality gates ($Mode)"
 Invoke-GitSafety
 Invoke-PythonPhaseGate
+Invoke-EvalSuite
 Invoke-JsStaticGate
 
 if ($Mode -eq "Full") {

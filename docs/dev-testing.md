@@ -12,7 +12,8 @@ Quick runs:
 
 - `git diff --check`
 - risky-path staged check
-- Python phase gate for local auth, companion confirmation, router companion, AI tool selection, CSP, Hermes, OS agent runtime, plugin permissions, eval runner schema, and the Plan/Act/Verify agent protocol
+- Python phase gate for local auth, companion confirmation, router companion, AI tool selection, CSP, Hermes, OS agent runtime, plugin permissions, eval adapters, and the Plan/Act/Verify agent protocol
+- offline eval suite with `venv\Scripts\python.exe evals\runners\run_eval_suite.py --all`
 - every `tests/test_*.js` static test with Node
 
 ## Full Gate
@@ -57,9 +58,19 @@ Phase 3A adds an offline eval scaffold under `evals/`. Run it directly with:
 venv\Scripts\python.exe evals\runners\run_eval_suite.py --tasks evals\golden_tasks
 ```
 
-Golden tasks are JSONL records that describe an input, expected behavior, forbidden behavior, risk level, and deterministic assertions. They cover tool selection, memory, OS drafts, prompt injection, local security, and answer quality.
+Phase 3B adds suite and adapter modes:
+
+```powershell
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --list-suites
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite tool_selection
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --all
+```
+
+Golden tasks are JSONL records that describe an input, expected behavior, forbidden behavior, risk level, and deterministic assertions. They cover tool selection, memory, OS drafts, prompt injection, local security, and answer quality. Local adapters may use synthetic fixtures, temp roots, and pure functions only.
 
 Generated eval reports are local evidence only. If you write reports with `--output-json` or `--output-md`, keep them under `evals/results/`; Git ignores generated files in that directory.
+
+Do not use real user data in evals. In particular, do not read or write `lexa_memory.db`, do not point an eval fixture at `personal_os/`, and do not call external APIs, real MCP servers, or network services.
 
 ## Agent Protocol
 
@@ -73,3 +84,5 @@ The protocol keeps these boundaries explicit:
 - `REVIEW`: summary, user decision points, rollback, approval references, and remaining risks.
 
 High and critical plans require user review. High and critical actions require confirmation. Ledger JSON is stable and redacts token/API-key shaped values.
+
+Phase 3B wires the ledger into `backend/agent_loop.py` behind `LEXA_AGENT_LEDGER=1`. With the flag off, the agent response shape is unchanged. With it on, runs include a redacted ledger for local verification and future eval traces.

@@ -1,10 +1,12 @@
 # Lexa Eval Suite
 
-Phase 3A introduces offline, deterministic evals for product intelligence risks. These evals are not LLM benchmarks yet. They are schema-checked golden tasks plus a local runner that can validate expected behavior, forbidden behavior, and security assertions without network or API calls.
+Phase 3A introduced offline, deterministic evals for product intelligence risks. Phase 3B connects those golden tasks to local adapters and fixtures. These evals are still not external LLM benchmarks: they run without network, API calls, real MCP servers, the real Personal OS mount, or the real memory database.
 
 ## Structure
 
 - `golden_tasks/`: JSONL task sets grouped by product capability.
+- `adapters/`: deterministic local adapters for tool selection, memory, OS drafts, and security/prompt-injection traces.
+- `fixtures/`: synthetic local fixture data only.
 - `runners/run_eval_suite.py`: offline runner and schema validator.
 - `results/`: optional local reports. Result artifacts are ignored by Git except for placeholders.
 
@@ -37,6 +39,14 @@ Allowed assertion types are `contains`, `not_contains`, `selected_tool`, `blocke
 venv\Scripts\python.exe evals\runners\run_eval_suite.py --tasks evals\golden_tasks
 ```
 
+List or run suites:
+
+```powershell
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --list-suites
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite tool_selection
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --all
+```
+
 Optional reports can be written explicitly:
 
 ```powershell
@@ -54,3 +64,13 @@ Do not commit generated reports. Use them as local evidence while developing a c
 5. Mark `risk_level` honestly. Security and destructive workflow failures should be `high` or `critical`.
 
 Future phases can connect these golden tasks to real model outputs, tool traces, and Plan/Act/Verify ledgers. Phase 3A intentionally stays offline.
+
+## Fixture Rules
+
+- Use only synthetic fixture data.
+- Do not read or write `lexa_memory.db`.
+- Do not point fixtures at the real `personal_os/` mount.
+- Do not call network, external APIs, real MCP tools, or real shell actions.
+- Keep secrets fake and ensure reports redact them.
+
+Phase 3B adapters intentionally evaluate local traces and deterministic policy behavior. They are a bridge toward real model/tool trace evals, not a replacement for end-to-end product testing.

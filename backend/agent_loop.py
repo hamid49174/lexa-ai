@@ -18,6 +18,7 @@ Sicherheit:
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -79,9 +80,10 @@ class AgentRun:
     summary: str = ""
     started_at: float = field(default_factory=time.time)
     total_duration_ms: float = 0.0
+    ledger: Optional[object] = None
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "id": self.id,
             "user_message": self.user_message,
             "steps": [s.to_dict() for s in self.steps],
@@ -89,6 +91,123 @@ class AgentRun:
             "summary": self.summary,
             "total_duration_ms": self.total_duration_ms,
         }
+        if self.ledger is not None:
+            payload["ledger"] = (
+                self.ledger.to_dict()
+                if hasattr(self.ledger, "to_dict")
+                else self.ledger
+            )
+        return payload
+
+
+def _agent_ledger_enabled() -> bool:
+    """Return whether Phase 3B ledger emission is enabled."""
+    return os.getenv("LEXA_AGENT_LEDGER", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _infer_agent_action_risk(action_name: str, permission: str = "") -> str:
+    critical_names = {
+        "backup_restore",
+        "shutdown",
+        "restart",
+        "file_delete",
+        "clean_temp",
+        "os_agent_start_task",
+    }
+    high_prefixes = (
+        "backup_",
+        "file_move",
+        "file_copy",
+        "personal_os_",
+        "hermes_",
+        "mcp_",
+    )
+    if action_name in critical_names:
+        return "critical"
+    if permission == "confirmation_required" or any(action_name.startswith(prefix) for prefix in high_prefixes):
+        return "high"
+    if action_name.startswith(("note_", "memory_", "clipboard_", "todo_")):
+        return "medium"
+    return "low"
+
+
+def _build_agent_run_ledger(run: AgentRun):
+    from backend.agent_protocol import AgentPlan, AgentRunLedger
+
+    plan = AgentPlan(
+        goal=run.user_message,
+        risk_level="medium",
+        allowed_tools=[],
+        forbidden_tools=["shell", "unsafe_direct_write"],
+        budget_steps=AGENT_MAX_STEPS,
+        budget_seconds=AGENT_MAX_STEPS * AGENT_STEP_TIMEOUT,
+        checkpoints=["plan", "act", "verify", "review"],
+        requires_user_review=False,
+    )
+    return AgentRunLedger(run_id=run.id, plan=plan, status="running")
+
+
+def _append_ledger_action(ledger, *, action_id: str, action_name: str, params: dict, permission: str):
+    from backend.agent_protocol import AgentAction
+
+    risk_level = _infer_agent_action_risk(action_name, permission)
+    requires_confirmation = permission == "confirmation_required" or risk_level in {"high", "critical"}
+    action = AgentAction(
+        action_id=action_id,
+        tool_name=action_name or "unknown",
+        action_type="execute",
+        scope="agent_loop",
+        reason=f"Agent requested tool; permission={permission or 'unknown'}; param_keys={sorted((params or {}).keys())}",
+        reversible=risk_level in {"low", "medium"},
+        requires_confirmation=requires_confirmation,
+        status="planned",
+        risk_level=risk_level,
+    )
+    ledger.actions.append(action)
+    return action
+
+
+def _append_ledger_verification(ledger, *, action_id: str, step: AgentStep):
+    from backend.agent_protocol import AgentVerification
+
+    passed = step.status == StepStatus.SUCCESS
+    failures = []
+    if step.error:
+        failures.append(step.error)
+    elif step.status in {StepStatus.FAILED, StepStatus.BLOCKED, StepStatus.NEEDS_CONFIRMATION}:
+        failures.append(step.status.value)
+    ledger.verifications.append(
+        AgentVerification(
+            action_id=action_id,
+            checks_run=["agent_step_status"],
+            passed=passed,
+            failures=failures,
+            artifacts=[],
+            redacted_logs=[step.result or step.error or step.status.value],
+        )
+    )
+
+
+def _finalize_agent_ledger(ledger, run: AgentRun) -> None:
+    from backend.agent_protocol import AgentReview, coerce_ledger_status
+
+    status_map = {
+        "completed": "completed",
+        "failed": "failed",
+        "paused": "review_required",
+    }
+    ledger.status = coerce_ledger_status(status_map.get(run.status, "completed"))
+    needs_decision = any(
+        getattr(action, "requires_confirmation", False)
+        for action in getattr(ledger, "actions", [])
+    )
+    ledger.review = AgentReview(
+        summary=run.summary or f"Agent run {run.status}",
+        user_decision_required=needs_decision,
+        rollback_available=not needs_decision,
+        approval_references=[],
+        remaining_risks=["confirmation required"] if needs_decision else [],
+    )
 
 
 # ══════════════════════════════════════════════════
@@ -199,6 +318,8 @@ async def run_agent(
     from backend.ai_engine import chat
 
     run = AgentRun(user_message=user_message)
+    if _agent_ledger_enabled():
+        run.ledger = _build_agent_run_ledger(run)
     audit_log("agent", "start", f"RUN={run.id} MSG={user_message[:100]}")
 
     # Build agent-specific system context
@@ -303,6 +424,16 @@ async def run_agent(
                     started_at=time.time(),
                 )
                 run.steps.append(step)
+                ledger_action_id = f"step-{step_count}"
+                if run.ledger is not None:
+                    permission_for_ledger = is_command_allowed(action_name)
+                    _append_ledger_action(
+                        run.ledger,
+                        action_id=ledger_action_id,
+                        action_name=action_name,
+                        params=params,
+                        permission=permission_for_ledger,
+                    )
 
                 yield {"type": "step_start", "step": step.to_dict()}
 
@@ -316,6 +447,8 @@ async def run_agent(
                     step.status = StepStatus.FAILED
                     step.error = f"Timeout nach {AGENT_STEP_TIMEOUT}s"
                     step.duration_ms = AGENT_STEP_TIMEOUT * 1000
+                    if run.ledger is not None:
+                        _append_ledger_verification(run.ledger, action_id=ledger_action_id, step=step)
                     yield {"type": "step_done", "step": step.to_dict()}
                     # Tell LLM about the timeout
                     agent_messages.append({
@@ -331,6 +464,8 @@ async def run_agent(
                 if exec_result.get("needs_confirmation"):
                     step.status = StepStatus.NEEDS_CONFIRMATION
                     step.error = exec_result.get("error", "Bestaetigung noetig")
+                    if run.ledger is not None:
+                        _append_ledger_verification(run.ledger, action_id=ledger_action_id, step=step)
                     yield {"type": "step_blocked", "step": step.to_dict()}
                     # Tell LLM this step needs confirmation — skip it
                     agent_messages.append({
@@ -352,6 +487,8 @@ async def run_agent(
                     step.result = _format_tool_result(action_name, exec_result)
 
                 yield {"type": "step_done", "step": step.to_dict()}
+                if run.ledger is not None:
+                    _append_ledger_verification(run.ledger, action_id=ledger_action_id, step=step)
 
                 # Feed result back to LLM for the next iteration
                 formatted = _format_tool_result(action_name, exec_result)
@@ -390,4 +527,6 @@ async def run_agent(
     run.total_duration_ms = (time.time() - run.started_at) * 1000
     if run.status == "running":
         run.status = "completed"
+    if run.ledger is not None:
+        _finalize_agent_ledger(run.ledger, run)
     yield {"type": "done", "run": run.to_dict()}
