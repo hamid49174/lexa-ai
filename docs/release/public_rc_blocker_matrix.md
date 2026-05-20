@@ -38,6 +38,29 @@ Phase 4F turned the remaining PublicRC work into explicit blockers, warnings, ow
 - PublicRC: blocked until PRC-001, PRC-002, PRC-003, PRC-004/006, PRC-005, PRC-009, PRC-010, and PRC-011 are resolved or explicitly accepted by the release owner.
 - PublicRelease: additionally blocked until PRC-007 is reviewed/approved and all PublicRC blockers are resolved.
 
+## Latest Local Regression Snapshot
+
+Snapshot date: 2026-05-20
+
+Snapshot commit under test: `d77db0ea8e7fb402c7ec33660048fae511ad4936`
+
+Local evidence improved since the original PublicRC hardening pass:
+
+- Full Python suite: `786 passed, 1 skipped`.
+- Eval suite: `65/65 passed, 0 failed`.
+- Eval regression gate: passed with `0 blocking`.
+- JS static/unit suite: 19/19 files passed, 956 assertions passed, 0 failed.
+- Electron focused smokes: 11/11 files exited 0, with 124 counted assertions passed, 0 failed; `electron_ui_visual_smoke.js` retained known non-blocking legacy diagnostics.
+- Hermes smoke: `14 passed`, local only.
+- OS quality gates completed without deleting, migrating, or archiving drafts.
+- Website smoke completed as `static-external` with warnings that remain PublicRC-blocking.
+- Isolated packaging build and built-installer smoke passed for InternalRC, but installer remains unsigned and install/uninstall was not run.
+- InternalRC checker: exit 0, `Needs Review`.
+- PublicRC checker: exit 1, `Blocked`.
+- PublicRelease checker: exit 1, `Blocked`.
+
+No external proof was created by this local snapshot. PRC-001, PRC-002, PRC-003, PRC-004/006, PRC-005, PRC-009, PRC-010, PRC-011, and PublicRelease privacy approval remain unresolved.
+
 ## Phase 5A Decisions
 
 - Remote CI remains external because `git remote -v` has no configured GitHub remote in this workspace.
