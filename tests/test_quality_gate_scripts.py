@@ -15,25 +15,31 @@ def test_quality_gates_include_release_script_tests_and_startup_smoke():
     assert "test_quality_gate_scripts.py" in src
     assert "test_performance_budgets.py" in src
     assert "test_risky_artifact_check.py" in src
+    assert "test_clean_clone_smoke_script.py" in src
+    assert "test_installer_smoke_script.py" in src
+    assert "test_fastapi_lifespan.py" in src
     assert "check_risky_artifacts.ps1" in src
     assert "electron_startup_health_smoke.js" in src
 
 
-def test_quality_gates_support_eval_mode():
+def test_quality_gates_support_eval_and_ci_modes():
     src = read("scripts/run_quality_gates.ps1")
 
-    assert 'ValidateSet("Quick", "Full", "Eval")' in src
+    assert 'ValidateSet("Quick", "Full", "Eval", "CI")' in src
     assert 'if ($Mode -eq "Eval")' in src
+    assert 'if ($Mode -eq "CI")' in src
     assert "Invoke-EvalRegressionGate" in src
+    assert "Invoke-PackagingConfigSmoke" in src
 
 
 def test_github_quality_workflow_is_non_deploying_and_secret_free():
     workflow = read(".github/workflows/quality-gates.yml")
 
-    assert "run_quality_gates.ps1 -Mode Quick" in workflow
+    assert "run_quality_gates.ps1 -Mode CI" in workflow
     assert "run_eval_regression_gate.ps1" in workflow
     assert "check_risky_artifacts.ps1" in workflow
     assert "run_packaging_smoke.ps1" in workflow
+    assert "run_clean_clone_smoke.ps1 -DryRun" in workflow
     assert "run_os_quality_gates.ps1 -AllowMissing" in workflow
     assert "actions/upload-artifact" not in workflow
     assert "softprops/action-gh-release" not in workflow
@@ -56,6 +62,7 @@ def test_packaging_smoke_blocks_forbidden_content_without_cleanup():
     assert "personal_os" in src
     assert "lexa_memory.db" in src
     assert "bridge-audit.log" in src
+    assert "npx.cmd --no-install electron-builder" in src
     assert "Remove-Item" not in src
 
 
@@ -68,4 +75,3 @@ def test_os_hermes_and_website_smokes_are_non_destructive():
         src = read(script)
         assert "Remove-Item" not in src
         assert "git add" not in src.lower()
-

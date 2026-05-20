@@ -38,6 +38,7 @@ Use this checklist before calling any build a Lexa release candidate. Do not dep
 - [ ] No EPIPE popup.
 - [ ] No main-process error popup.
 - [ ] `bridge-audit.log` is under userData, not the repo.
+- [ ] FastAPI uses lifespan startup/shutdown handlers without deprecated `@app.on_event` warnings.
 
 ## 5. OS Gates
 
@@ -60,11 +61,15 @@ Use this checklist before calling any build a Lexa release candidate. Do not dep
 - [ ] Website smoke ran or clearly reported website path missing.
 - [ ] Website build/lint is green if the website has a package setup.
 - [ ] No Supabase/Stripe/private secrets are committed.
+- [ ] `tmp_*.js` scratch/migration files are reviewed before deployment.
+- [ ] External scripts/CDNs are reviewed for CSP/vendor strategy.
 - [ ] No deployment occurred.
 
 ## 8. Packaging Gates
 
 - [ ] Packaging smoke is green.
+- [ ] Full packaging build with `scripts\run_packaging_smoke.ps1 -Build` has been attempted for release candidates.
+- [ ] Installer smoke has checked the generated artifact or is explicitly marked not yet proven.
 - [ ] Build artifacts contain no `.env`.
 - [ ] Build artifacts contain no `audit.log` or `bridge-audit.log`.
 - [ ] Build artifacts contain no `lexa_memory.db*`.
@@ -87,6 +92,14 @@ Use this checklist before calling any build a Lexa release candidate. Do not dep
 - [ ] Ready
 - [ ] Blocked
 - [ ] Needs Review
+
+## 11. Phase 4B Freshness Gates
+
+- [ ] Clean clone/copy smoke is green.
+- [ ] CI core mode is green or CI runner failure is documented.
+- [ ] Dependency reproducibility check has no release-blocking missing files.
+- [ ] OS dirty state is documented and not accidentally committed through Lexa.
+- [ ] Packaging/installer status is marked as proven, warning, or blocked.
 
 Decision notes:
 

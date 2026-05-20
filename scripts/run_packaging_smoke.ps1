@@ -12,15 +12,20 @@ if (-not $RepoRoot) {
   $RepoRoot = Resolve-Path -LiteralPath $RepoRoot
 }
 
-if (-not $ArtifactRoot) {
-  $ArtifactRoot = Join-Path $RepoRoot "dist"
-}
-
 $frontendRoot = Join-Path $RepoRoot "frontend"
 $packageJson = Join-Path $frontendRoot "package.json"
 $builderConfig = Join-Path $frontendRoot "electron-builder.json"
+$backendDist = Join-Path $RepoRoot "backend-dist\lexa-backend"
 $forbiddenNames = @(".env", "audit.log", "bridge-audit.log", "lexa_memory.db")
 $forbiddenPathRegex = '(?i)(personal_os|hermes_workspace|evals[\\/]+results|tmp[\\/]+agent_traces|lexa_memory\.db|bridge-audit\.log|audit\.log|\.env$|\.env[\\/])'
+
+if (-not $ArtifactRoot) {
+  if ($Build) {
+    $ArtifactRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("lexa-packaging-smoke-" + [guid]::NewGuid().ToString("N"))
+  } else {
+    $ArtifactRoot = Join-Path $RepoRoot "dist"
+  }
+}
 
 function Assert-File([string]$PathValue, [string]$Label) {
   if (!(Test-Path -LiteralPath $PathValue)) { throw "$Label not found: $PathValue" }
@@ -66,14 +71,18 @@ if ($filesJson -match $forbiddenPathRegex -or $resourcesJson -match $forbiddenPa
 Write-Host "ok: electron-builder config does not include broad or forbidden paths"
 
 if ($Build) {
+  if (!(Test-Path -LiteralPath $backendDist)) {
+    throw "backend-dist/lexa-backend is required for a full Electron package build and was not found: $backendDist"
+  }
+  New-Item -ItemType Directory -Path $ArtifactRoot -Force | Out-Null
   Push-Location $frontendRoot
   try {
-    npm.cmd run build
+    npx.cmd --no-install electron-builder --config electron-builder.json "--config.directories.output=$ArtifactRoot"
   } finally {
     Pop-Location
   }
 } else {
-  Write-Host "Build execution skipped. Use -Build for a local package build smoke."
+  Write-Host "Build execution skipped. Use -Build for an isolated local package build smoke."
 }
 
 Test-ForbiddenArtifactContent $ArtifactRoot

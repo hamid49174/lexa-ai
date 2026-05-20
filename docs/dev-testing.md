@@ -38,19 +38,31 @@ powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode Eva
 
 Eval mode runs only Git safety, the offline eval suite, and the eval regression gate. Use it when changing Golden Tasks, adapters, baselines, or triage tooling and you want a fast PR-compatible regression check before running the broader Quick or Full gates.
 
+## CI Core Gate
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode CI
+```
+
+CI mode runs the security/eval/JS static gates, eval regression, packaging config smoke, and dependency reproducibility checks without local Electron smoke or non-portable OS/Hermes/Website assumptions. It is the closest local equivalent to `.github/workflows/quality-gates.yml`.
+
 ## Release Candidate Check
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1
+powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Mode CICore
+powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Mode Packaging
 ```
 
-The release-candidate check orchestrates Full Quality Gates, Eval Regression Gate, Risky Artifact Check, Electron startup/presence smoke, OS quality gates when mounted, Hermes adapter smoke, website smoke, packaging config smoke, performance budget smoke, and final Git safety. It does not deploy, upload, delete files, or stage artifacts.
+The release-candidate check orchestrates Full Quality Gates, Clean Clone Smoke, Dependency Repro Check, Eval Regression Gate, Risky Artifact Check, Electron startup/presence smoke, OS quality gates when mounted, Hermes adapter smoke, website smoke, packaging/installer smoke, performance budget smoke, and final Git safety. It does not deploy, upload, delete files, or stage artifacts.
 
 Supporting release-readiness scripts:
 
 - `scripts\check_dependency_repro.ps1`: reports Python/Node versions and lockfile coverage without changing dependencies.
+- `scripts\run_clean_clone_smoke.ps1`: creates a source-only clean copy or dry-run proof without user data.
 - `scripts\check_risky_artifacts.ps1`: blocks staged local data, build artifacts, result artifacts, and optional secret-pattern scan paths.
-- `scripts\run_packaging_smoke.ps1`: checks Electron packaging config and scans build artifacts. Use `-Build` only for an explicit local package build.
+- `scripts\run_packaging_smoke.ps1`: checks Electron packaging config and scans build artifacts. Use `-Build` only for an explicit isolated local package build.
+- `scripts\run_installer_smoke.ps1`: checks generated installer artifacts without installing into the productive machine.
 - `scripts\run_os_quality_gates.ps1`: runs OS SDK/MCP/Raw-Inbox checks when the OS mount is available.
 - `scripts\run_hermes_smoke.ps1`: runs Hermes adapter tests and staged-path safety checks.
 - `scripts\run_website_smoke.ps1`: checks the external website folder without deployment.
@@ -59,6 +71,11 @@ Supporting release-readiness scripts:
 Release docs:
 
 - `docs/release/ci.md`
+- `docs/release/clean_clone.md`
+- `docs/release/packaging.md`
+- `docs/release/installer_smoke.md`
+- `docs/release/website_strategy.md`
+- `docs/release/os_repo_cleanup_plan.md`
 - `docs/release/performance_budgets.md`
 - `docs/release/release_candidate_checklist.md`
 

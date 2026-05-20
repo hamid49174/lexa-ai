@@ -10,6 +10,7 @@ import logging
 import os
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from backend.config import VERSION as APP_VERSION
@@ -333,7 +334,6 @@ app.include_router(_v1_router)
 #  LIFECYCLE
 # ══════════════════════════════════════════════════
 
-@app.on_event("startup")
 async def startup_event():
     """Start background services and restore session state."""
     _shared.startup_time = time.time()
@@ -516,7 +516,6 @@ async def _recover_timers():
         logger.debug(f"Timer-Recovery skipped: {e}")
 
 
-@app.on_event("shutdown")
 async def shutdown_event():
     """Persist session state before shutdown."""
     try:
@@ -534,6 +533,18 @@ async def shutdown_event():
         logger.info("MCP Server getrennt")
     except Exception as e:
         logger.debug(f"MCP shutdown: {e}")
+
+
+@asynccontextmanager
+async def _lifespan(app_: FastAPI):
+    await startup_event()
+    try:
+        yield
+    finally:
+        await shutdown_event()
+
+
+app.router.lifespan_context = _lifespan
 
 
 # ══════════════════════════════════════════════════

@@ -46,13 +46,17 @@ jobs:
         shell: pwsh
         run: .\scripts\check_risky_artifacts.ps1 -Mode Strict
 
-      - name: Quick gate
+      - name: CI core gate
         shell: pwsh
-        run: .\scripts\run_quality_gates.ps1 -Mode Quick
+        run: .\scripts\run_quality_gates.ps1 -Mode CI
 
       - name: Eval regression gate
         shell: pwsh
         run: .\scripts\run_eval_regression_gate.ps1
+
+      - name: Clean clone dry-run smoke
+        shell: pwsh
+        run: .\scripts\run_clean_clone_smoke.ps1 -DryRun
 
   full-python:
     name: Full Python suite

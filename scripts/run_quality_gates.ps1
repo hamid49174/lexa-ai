@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("Quick", "Full", "Eval")]
+  [ValidateSet("Quick", "Full", "Eval", "CI")]
   [string]$Mode = "Quick"
 )
 
@@ -37,6 +37,9 @@ $PhaseGateTests = @(
   "tests/test_quality_gate_scripts.py",
   "tests/test_performance_budgets.py",
   "tests/test_risky_artifact_check.py",
+  "tests/test_clean_clone_smoke_script.py",
+  "tests/test_installer_smoke_script.py",
+  "tests/test_fastapi_lifespan.py",
   "tests/test_eval_trace_replay.py",
   "tests/test_eval_plan_act_verify.py",
   "tests/test_eval_answer_quality.py",
@@ -123,6 +126,14 @@ function Invoke-EvalRegressionGate {
   Invoke-Gate "eval regression gate" { powershell -ExecutionPolicy Bypass -File "scripts\run_eval_regression_gate.ps1" }
 }
 
+function Invoke-DependencyReproCheck {
+  Invoke-Gate "dependency reproducibility check" { powershell -ExecutionPolicy Bypass -File "scripts\check_dependency_repro.ps1" }
+}
+
+function Invoke-PackagingConfigSmoke {
+  Invoke-Gate "packaging config smoke" { powershell -ExecutionPolicy Bypass -File "scripts\run_packaging_smoke.ps1" }
+}
+
 function Invoke-JsStaticGate {
   $tests = Get-ChildItem (Join-Path $RepoRoot "tests") -Filter "test_*.js" | Sort-Object Name
   if ($tests.Count -eq 0) {
@@ -161,6 +172,15 @@ if ($Mode -eq "Eval") {
 Invoke-PythonPhaseGate
 Invoke-EvalSuite
 Invoke-JsStaticGate
+
+if ($Mode -eq "CI") {
+  Invoke-EvalRegressionGate
+  Invoke-PackagingConfigSmoke
+  Invoke-DependencyReproCheck
+  Write-Host ""
+  Write-Host "Quality gates passed ($Mode)."
+  exit 0
+}
 
 if ($Mode -eq "Full") {
   Invoke-EvalRegressionGate

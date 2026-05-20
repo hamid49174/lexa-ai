@@ -8,6 +8,8 @@ def test_release_candidate_script_orchestrates_required_gates():
     src = (REPO_ROOT / "scripts" / "run_release_candidate_check.ps1").read_text(encoding="utf-8")
 
     required = [
+        "run_clean_clone_smoke.ps1",
+        "check_dependency_repro.ps1",
         "run_quality_gates.ps1",
         "run_eval_regression_gate.ps1",
         "check_risky_artifacts.ps1",
@@ -17,6 +19,7 @@ def test_release_candidate_script_orchestrates_required_gates():
         "run_hermes_smoke.ps1",
         "run_website_smoke.ps1",
         "run_packaging_smoke.ps1",
+        "run_installer_smoke.ps1",
         "check_performance_budgets.ps1",
         "diff --check",
     ]
@@ -30,6 +33,16 @@ def test_release_candidate_script_does_not_deploy_or_delete():
     forbidden = ["upload-artifact", "action-gh-release", "publish", "deploy", "remove-item", "git add ."]
     for item in forbidden:
         assert item not in src
+
+
+def test_release_candidate_script_supports_phase_4b_modes():
+    src = (REPO_ROOT / "scripts" / "run_release_candidate_check.ps1").read_text(encoding="utf-8")
+
+    assert 'ValidateSet("LocalFull", "CICore", "Packaging", "StrictRC")' in src
+    assert '$Mode -eq "CICore"' in src
+    assert '$Mode -eq "Packaging"' in src
+    assert "Quality Gates CI" in src
+    assert "Installer Smoke" in src
 
 
 def test_release_docs_exist_and_cover_decision_states():
