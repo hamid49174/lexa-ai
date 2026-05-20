@@ -2131,17 +2131,14 @@ async function sendMessage() {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        const parsedBuffer = chatStreamBufferedLines(buffer);
+        const lines = parsedBuffer.lines;
+        buffer = parsedBuffer.buffer;
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const raw = line.slice(6).trim();
-          if (!raw) continue;
-          try {
-            const data = JSON.parse(raw);
-            if (data.c) { fullText += data.c; scheduleStreamRender(); }
-            if (data.done) { actionData = data.action; requiresConfirmation = data.rc; if (data.reply && !fullText) { fullText = data.reply; } streamError = null; }
-          } catch (e) { console.warn("SSE parse error:", e, "raw:", raw); }
+          const data = parseChatStreamDataLine(line);
+          if (!data) continue;
+          if (data.c) { fullText += data.c; scheduleStreamRender(); }
+          if (data.done) { actionData = data.action; requiresConfirmation = data.rc; if (data.reply && !fullText) { fullText = data.reply; } streamError = null; }
         }
       }
     } catch (streamErr) {

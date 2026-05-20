@@ -194,7 +194,8 @@ Current chat script order:
 9. `chat_tool_confirmation_ui.js`
 10. `chat_confirmation_state.js`
 11. `chat_history_ui.js`
-12. `chat.js`
+12. `chat_streaming_helpers.js`
+13. `chat.js`
 
 Remaining high-risk clusters: streaming send/abort, conversation history switching/deletion/persistence orchestration, non-confirmed tool-call execution/result rendering, confirmation approval execution, Companion execution, voice/STT/TTS/orb behavior, Personal OS draft apply/approve/reject flows, Electron preload IPC, Electron backend lifecycle, signing/update behavior, and OS cleanup.
 
@@ -346,13 +347,72 @@ Current chat script order:
 9. `chat_tool_confirmation_ui.js`
 10. `chat_confirmation_state.js`
 11. `chat_history_ui.js`
-12. `chat.js`
+12. `chat_streaming_helpers.js`
+13. `chat.js`
 
 Next recommended target: add focused streaming abort/timeout/chunk-boundary smoke before any streaming extraction, or add a render-only non-confirmed tool display smoke. Do not move history orchestration, send pipeline, real tool execution, or confirmation approval execution yet.
 
+## Streaming Robustness Coverage and Parser Helper Extraction
+
+This sprint added focused streaming robustness coverage first, then extracted only the pure stream parser helpers into `frontend/src/chat_streaming_helpers.js`.
+
+Coverage added:
+
+- `tests/electron_streaming_robustness_smoke.js` loads the real renderer with isolated Electron `userData`, clicks the real send button, and mocks only `/chat/stream`.
+- It covers assistant content split across underlying stream chunks, markdown split across chunks, split code/table/link rendering, unsafe HTML containment, malformed SSE events, malformed JSON payloads, stream completion without a final marker, stream read errors, user abort during streaming, simulated timeout before response, no duplicate assistant messages, and composer/control recovery.
+- `tests/test_chat_streaming_helpers.js` directly checks buffered line splitting and `data: ` JSON event parsing, including ignored non-data lines and malformed JSON returning `null` without throwing.
+
+Extraction completed:
+
+| File | Before sprint | After sprint |
+| --- | ---: | ---: |
+| `frontend/src/chat.js` | 4107 lines / 186009 bytes | 4104 lines / 185894 bytes |
+| `frontend/src/chat_streaming_helpers.js` | new | 19 lines / 571 bytes |
+
+Moved functions:
+
+- `chatStreamBufferedLines(buffer)`
+- `parseChatStreamDataLine(line)`
+
+Why this boundary was safe:
+
+- It reads only the passed buffer or line.
+- It does not mutate renderer state, touch DOM, fetch backend data, own `AbortController`, trigger tool execution, or persist history.
+- It preserves the existing `data: ` line requirement and malformed JSON warning behavior.
+- The new streaming smoke covers the same parser edge through the real send path, and the direct helper test covers the pure helper behavior.
+
+What stayed in `chat.js`:
+
+- `sendMessage()`
+- fetch orchestration and request body
+- timeout/abort ownership
+- stream render scheduling
+- final response rendering
+- tool-call and confirmation handling
+- history persistence
+- send button/composer state recovery
+
+Current chat script order:
+
+1. `chat_constants.js`
+2. `chat_formatting.js`
+3. `chat_markdown.js`
+4. `chat_message_formatting.js`
+5. `chat_export.js`
+6. `chat_composer_helpers.js`
+7. `chat_message_actions.js`
+8. `chat_input_helpers.js`
+9. `chat_tool_confirmation_ui.js`
+10. `chat_confirmation_state.js`
+11. `chat_history_ui.js`
+12. `chat_streaming_helpers.js`
+13. `chat.js`
+
+Next recommended target: add a render-only non-confirmed tool display smoke before moving any more tool UI, or add a settings persistence smoke before settings modularization. The full streaming lifecycle and send pipeline remain stop-lined.
+
 ## Do Not Touch Yet
 
-- streaming send and abort behavior
+- streaming send and abort lifecycle beyond pure parser helpers
 - conversation history switching/deletion persistence orchestration
 - tool execution/result rendering and confirmation approval execution
 - voice/STT/TTS/orb behavior

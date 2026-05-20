@@ -12,7 +12,7 @@ Goal: strengthen integration coverage for Lexa's internal daily-use core flows b
 | Auth/local health | `electron_startup_health_smoke.js`, `test_local_auth.py`, preload security static tests | No remote CI proof; no signed installer proof | Bridge/auth regressions could weaken local-only guard behavior | Keep startup health smoke and preload static checks together |
 | Chat input submit | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, `electron_core_chat_flow_smoke.js` | Browser-level manual typing with a live backend is not covered | Send-pipeline refactors could break user-message insertion or input reset | `electron_core_chat_flow_smoke.js` submits text through the real send button with a mocked stream |
 | Mocked assistant response rendering | `test_chat_rendering.js`, `electron_core_chat_flow_smoke.js` | Does not cover every markdown feature through the full send pipeline | Renderer refactors could break streaming-to-final formatted output | Keep mocked SSE response in `electron_core_chat_flow_smoke.js` and rendering unit coverage in `test_chat_rendering.js` |
-| Streaming response lifecycle | `test_chat_send_guards.js`, `electron_core_chat_flow_smoke.js`, `electron_ui_visual_smoke.js` | Abort, timeout, chunk fragmentation, and malformed SSE integration are not fully covered | Streaming refactors could strand loading state, disabled buttons, or partial text | Add a second focused Electron smoke for abort/timeout/chunk-boundary behavior before moving streaming code |
+| Streaming response lifecycle | `test_chat_send_guards.js`, `electron_core_chat_flow_smoke.js`, `electron_streaming_robustness_smoke.js`, `electron_ui_visual_smoke.js`, `test_chat_streaming_helpers.js` | Real provider/network behavior and full send-pipeline orchestration remain outside local smoke coverage | Streaming refactors could strand loading state, disabled buttons, duplicate partial text, or unsafe malformed stream output | Keep robustness smoke in required gates before moving any larger streaming lifecycle code |
 | Conversation history save/load | `test_router_conversations.py`, `test_chat_send_guards.js`, `electron_ui_visual_smoke.js`, `electron_core_chat_flow_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_history_lifecycle_smoke.js`, `electron_history_failure_smoke.js` | Real backend persistence and active-conversation delete edge cases still need focused coverage | History refactors could drop raw markdown, duplicate messages, corrupt active selection, or crash on malformed history payloads | Keep failure-path smoke in required gates before moving save/load/delete orchestration |
 | Tool-call display | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, backend action/parser tests, `electron_tool_confirmation_smoke.js` | Non-confirmed tool execution display remains intentionally broad-smoke/static covered only | Tool rendering refactors could expose unsafe labels or hide confirmation state | Add focused non-executing display smoke for safe/no-confirm tool results before moving more tool UI |
 | Confirmation happy path | `test_router_companion.py`, `test_companion_confirmation.py`, `electron_presence_challenge_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_confirmation_click_smoke.js` | Real Companion execution remains intentionally outside renderer smoke coverage | Confirmation UI refactors could call Companion incorrectly or lose safe denial behavior | Keep focused click smoke mocked; do not add real tool execution to renderer tests |
@@ -90,8 +90,28 @@ The sprint also fixed a small history sidebar robustness bug in `frontend/src/ch
 
 This smoke uses mocks/spies only. It does not execute real Companion tools, OS actions, OS draft apply/write behavior, or real confirmation approval execution.
 
+## Added In Streaming Robustness Sprint
+
+`tests/electron_streaming_robustness_smoke.js` adds focused renderer coverage for mocked `/chat/stream` behavior:
+
+- assistant response split across underlying stream chunks renders as one coherent message
+- markdown split across chunks still renders bold text, links, code, and tables after final render
+- unsafe HTML-like content split through stream chunks remains contained as text
+- malformed SSE events and malformed JSON payloads do not crash the renderer or drop later valid content
+- a stream ending without a final marker recovers to a usable final message when content exists
+- stream read errors keep the partial answer, show a safe warning, avoid leaking raw error details into the chat, and restore the composer controls
+- user abort during streaming leaves a stable partial response and restores the composer controls
+- simulated timeout before response shows the localized timeout message without leaking mock exception details
+
+`tests/test_chat_streaming_helpers.js` directly covers the extracted streaming parser helpers for buffered-line splitting, data-line parsing, ignored non-data/empty lines, done events, and malformed JSON logging without throwing.
+
+Extraction completed:
+
+- `frontend/src/chat_streaming_helpers.js` now owns only `chatStreamBufferedLines()` and `parseChatStreamDataLine()`.
+- `frontend/src/chat.js` still owns fetch orchestration, AbortController ownership, rendering, state recovery, history persistence, tool handling, and the send pipeline.
+
 ## Stop-line Before Refactors
 
-Do not extract or rewrite streaming lifecycle, send pipeline, conversation save/load/delete orchestration, active-conversation delete recovery, real tool execution, real confirmation approval execution, Companion execution, or OS draft actions until focused integration coverage exists for the specific lifecycle being changed.
+Do not extract or rewrite the full streaming lifecycle, send pipeline, conversation save/load/delete orchestration, active-conversation delete recovery, real tool execution, real confirmation approval execution, Companion execution, or OS draft actions until focused integration coverage exists for the specific lifecycle being changed.
 
-Recommended next coverage target: focused streaming abort/timeout/chunk-boundary smoke, or a focused non-confirmed tool display smoke that remains render-only and does not execute Companion.
+Recommended next coverage target: focused non-confirmed tool display smoke that remains render-only and does not execute Companion, or settings persistence smoke before settings modularization resumes.
