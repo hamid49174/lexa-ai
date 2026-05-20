@@ -672,6 +672,76 @@ Current chat script order:
 
 Next recommended target: provider/model backend contract coverage with fake provider responses, or a read-only Personal OS cockpit smoke. Real file uploads, filesystem writes, OS drafts, Companion execution, provider calls, Electron IPC, send pipeline, and full streaming lifecycle remain stop-lined.
 
+## Read-only Personal OS Cockpit Coverage and Display Helper Extraction
+
+This sprint moved to another visible internal area and added read-only cockpit coverage before extracting only pure Personal OS display helpers.
+
+Personal OS read-only responsibility map:
+
+| Cluster | Location/functions | Dependencies/globals | Mutates state | Touches DOM | Backend/fetch/IPC | Current coverage | Risk | Recommended next action |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Display text/status helpers | `personal_os_display_helpers.js` | passed values, optional `t()`/i18n globals | No | No | No | `test_personal_os_prompt.js`, `electron_personal_os_readonly_smoke.js`, script-order static test | Low | Keep extracted; change only with direct helper tests |
+| Cockpit status and queue rendering | `renderPersonalOsStatus()`, `renderPersonalOsDraftList()` in `personal_os.js` | `PersonalOSState`, diagnostics/queue payloads, DOM | Yes, renderer state only | Yes | No direct fetch | `electron_personal_os_readonly_smoke.js`, `test_personal_os_prompt.js` | Medium | Keep render helpers in `personal_os.js` until more view-state coverage exists |
+| Context query, context pack, and graph display | `renderPersonalOsQueryPayload()`, `renderPersonalOsContextPack()`, `renderPersonalOsGraphPayload()` | payloads, graph helper functions, DOM | Yes, selected context state | Yes | No direct fetch | `electron_personal_os_readonly_smoke.js`, graph/static prompt tests | Medium | Test more direct render edge cases before extraction |
+| Personal OS bridge reads | `refreshPersonalOsView()`, context/load functions | `window.lexa.personalOs*` read methods | Yes | Yes | Smoke bridge or backend read calls | smoke bridge coverage only | Medium-high | Do not refactor until read-call failure coverage is focused |
+| Personal OS writes and SDK decisions | `decidePersonalOsDraft()`, `applyPersonalOsDraft()`, `submitPersonalOsRawInbox()` | modal input, SDK/backend write paths, bridge risk policy | Yes | Yes | Write/admin bridge calls | backend/router/OS gate tests only | High | Stop-line; no approve/reject/apply/raw-submit extraction in maintainability passes |
+
+Coverage added:
+
+- `tests/electron_personal_os_readonly_smoke.js` opens the real Personal OS view with isolated Electron `userData`, renders mocked read-only status, draft, context, context pack, graph, empty, and error states, verifies unsafe OS-like content remains contained, and verifies no write/tool/provider/secret bridge methods or renderer `fetch()` calls occur.
+- `tests/test_personal_os_prompt.js` now reads the display helper file directly and adds direct guards for status/event/assist classes, state labels, and draft status labels.
+- `tests/test_frontend_script_order_static.js` verifies `personal_os_display_helpers.js` is a classic script loaded after `memory.js` and before `personal_os.js`.
+
+Extraction completed:
+
+| File | Before sprint | After sprint |
+| --- | ---: | ---: |
+| `frontend/src/personal_os.js` | 2492 lines / 117869 bytes | 2371 lines / 112058 bytes |
+| `frontend/src/personal_os_display_helpers.js` | new | 122 lines / 5891 bytes |
+
+Moved functions:
+
+- `posText()`
+- `posUiText()`
+- `posUiCount()`
+- `posStatusClass()`
+- `posEventClass()`
+- `posAssistClass()`
+- `posErrorDetailText()`
+- `posErrorMessage()`
+- `posClip()`
+- `posRefreshLabel()`
+- `posStateLabel()`
+- `posDraftStatusText()`
+
+Why this boundary was safe:
+
+- It is pure display/text formatting.
+- It does not touch DOM directly, call the Personal OS SDK, fetch backend data, read/write files, create/approve/reject/apply drafts, run cleanup, execute Companion, or call providers.
+- Existing prompt/static tests already covered most helper behavior, and the new smoke covers the visible cockpit display path.
+
+Current tail script order:
+
+1. `memory.js`
+2. `personal_os_display_helpers.js`
+3. `personal_os.js`
+4. `settings_helpers.js`
+5. `settings_provider_helpers.js`
+6. `settings.js`
+7. `devtools.js`
+
+What stayed in `personal_os.js`:
+
+- refresh orchestration
+- bridge reads and all bridge writes
+- draft selection, review, approve/reject/apply behavior
+- raw inbox submit behavior
+- context file reads and chat handoff
+- graph DOM event handlers
+- all SDK write boundaries
+
+Next recommended target: a mocked Personal OS chat-handoff/review smoke that verifies prompt placement without approving, rejecting, applying, raw-submitting, cleaning up, or touching real OS files. OS drafts, OS cleanup, filesystem writes, Companion execution, SDK writes, Electron IPC, and provider calls remain stop-lined.
+
 ## Do Not Touch Yet
 
 - streaming send and abort lifecycle beyond pure parser helpers
@@ -680,7 +750,7 @@ Next recommended target: provider/model backend contract coverage with fake prov
 - real tool execution/result lifecycle and confirmation approval execution
 - voice/STT/TTS/orb behavior
 - settings keyring/API-key handling, voice runtime behavior, license activation/removal, backend/provider contracts/calls, and Electron IPC
-- Personal OS draft apply/approve/reject flows
+- Personal OS draft create/apply/approve/reject/raw-submit flows and OS cleanup/archive/migration
 - Electron preload IPC risk policy
 - Electron backend lifecycle, Hermes startup, signing/update release behavior
 - any OS cleanup, draft migration, or protected OS writes

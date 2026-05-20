@@ -17,6 +17,7 @@ Goal: strengthen integration coverage for Lexa's internal daily-use core flows b
 | Tool-call display | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, backend action/parser tests, `electron_tool_confirmation_smoke.js`, `electron_tool_display_smoke.js`, `test_chat_tool_display_helpers.js` | Real Companion/tool execution remains outside renderer smoke coverage | Tool rendering refactors could expose unsafe labels, unsafe result content, or hide confirmation state | Keep render-only display smoke mocked; do not add real tool execution to renderer tests |
 | File upload / attachment display | `electron_file_upload_result_smoke.js`, `test_chat_file_display_helpers.js`, `test_chat_send_guards.js`, `test_frontend_script_order_static.js` | Real file upload execution, backend upload calls, filesystem reads/writes, and provider-backed file analysis remain intentionally outside renderer display smoke | File UI refactors could expose unsafe filenames/content, create live controls from history, or accidentally trigger upload/tool/provider paths | Keep display-only smoke mocked with in-memory `File` objects; add backend upload contract tests only with safe fixtures |
 | Confirmation happy path | `test_router_companion.py`, `test_companion_confirmation.py`, `electron_presence_challenge_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_confirmation_click_smoke.js` | Real Companion execution remains intentionally outside renderer smoke coverage | Confirmation UI refactors could call Companion incorrectly or lose safe denial behavior | Keep focused click smoke mocked; do not add real tool execution to renderer tests |
+| Personal OS cockpit read-only view | `electron_personal_os_readonly_smoke.js`, `test_personal_os_prompt.js`, `test_internal_daily_use_readiness_static.js`, `test_frontend_script_order_static.js` | Real OS root browsing, draft decisions, raw inbox submit, cleanup/archive/migration, SDK write operations, and real filesystem writes remain intentionally outside smoke coverage | Personal OS UI refactors could expose unsafe OS-like content, make the Internal surface confusing, or accidentally trigger write-capable bridge methods while opening the cockpit | Keep the read-only smoke mocked; do not click approve/reject/apply/raw-submit/cleanup paths without dedicated write-safe harness coverage |
 | OS draft creation path | `test_personal_os_prompt.js`, `test_router_personal_os.py`, `test_personal_os_actions.py`, eval OS draft tests | Full renderer draft creation from chat handoff is not isolated | OS draft UI refactors could bypass Draft/Approval expectations | Add a mocked Personal OS draft handoff smoke only after core chat/history smokes are stable |
 | Settings persistence | `test_settings_voice_static.js`, `test_app_chat_input_wiring.js`, `electron_ui_visual_smoke.js`, `electron_settings_persistence_smoke.js`, `test_settings_helpers.js` | Provider/keyring/license persistence remains intentionally outside the local preference smoke | Settings refactors could silently stop saving local preferences, lose Beta/Internal labels, or apply corrupt localStorage values | Keep local preference smoke in settings gates; add provider/secret coverage only with explicit keyring-safe mocks |
 | Provider/model settings | `electron_provider_settings_smoke.js`, `test_settings_provider_helpers.js`, `test_frontend_script_order_static.js`, `test_preload_bridge_security_static.js` | Real provider calls, API-key/keyring writes, and backend contract edge cases remain intentionally outside the renderer smoke | Provider settings refactors could break model selection, expose unsafe labels, or accidentally touch secret/keyring paths | Keep provider smoke keyring-safe; add fake backend contract coverage before changing provider/model payload handling |
@@ -192,8 +193,32 @@ Extraction completed:
 - `frontend/src/chat.js` still owns `handleFileUpload()`, in-memory card insertion, upload orchestration, backend calls, action handling, history persistence, and send/streaming state.
 - Real filesystem upload execution, backend file analysis, Companion execution, OS draft/apply behavior, provider calls, and Electron IPC remain untouched.
 
+## Added In Read-only Personal OS Cockpit Sprint
+
+`tests/electron_personal_os_readonly_smoke.js` adds focused renderer coverage for opening and inspecting the Personal OS cockpit without write actions:
+
+- loads the real renderer with isolated Electron `userData` and the existing smoke bridge
+- switches to the Personal OS view and keeps the Internal readiness chip visible
+- renders mocked OS status, draft queue rows, draft detail, context query rows, context pack results, context map nodes, empty state, and error state
+- verifies unsafe OS-like titles, previews, body text, diagnostics, and graph labels remain contained and do not create executable nodes
+- verifies apply remains disabled for a mocked pending draft and write-capable controls are not clicked
+- verifies no renderer `fetch()` calls occur
+- verifies no Personal OS decision/apply/raw-submit, Companion/tool execution, provider, or secret bridge methods are called
+
+Extraction completed:
+
+- `frontend/src/personal_os_display_helpers.js` now owns pure display helpers for text normalization, localized UI text fallback, status classes, event/assist classes, error formatting, refresh labels, state labels, and draft status labels.
+- `frontend/src/personal_os.js` still owns refresh orchestration, bridge reads, draft selection/review, draft approval/rejection/apply actions, raw inbox submit, context browsing actions, graph rendering event handlers, and chat handoff.
+
+Remaining coverage gaps:
+
+- no real OS root access or real filesystem reads/writes
+- no approve/reject/apply/raw-submit/cleanup/archive/migration clicks
+- no SDK write operation coverage
+- no path-redaction assertion for arbitrary backend error detail; current coverage verifies escaping/containment, not semantic redaction
+
 ## Stop-line Before Refactors
 
-Do not extract or rewrite the full streaming lifecycle, send pipeline, conversation save/load/delete orchestration, active-conversation delete recovery, real file upload execution, backend upload contracts, filesystem writes, real tool execution, real confirmation approval execution, Companion execution, OS draft actions, settings keyring/secret handling, voice runtime, license activation, backend/provider calls, or Electron IPC until focused integration coverage exists for the specific lifecycle being changed.
+Do not extract or rewrite the full streaming lifecycle, send pipeline, conversation save/load/delete orchestration, active-conversation delete recovery, real file upload execution, backend upload contracts, filesystem writes, real tool execution, real confirmation approval execution, Companion execution, OS draft actions, Personal OS write paths, settings keyring/secret handling, voice runtime, license activation, backend/provider calls, or Electron IPC until focused integration coverage exists for the specific lifecycle being changed.
 
-Recommended next coverage target: provider/model backend contract coverage with fake provider responses, or a mocked Personal OS cockpit read-only smoke that does not write drafts.
+Recommended next coverage target: provider/model backend contract coverage with fake provider responses, or a mocked Personal OS chat-handoff/draft review smoke that still avoids approve/reject/apply and real OS writes.

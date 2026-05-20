@@ -10,6 +10,11 @@ const src = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "personal_os.js"),
   "utf8"
 );
+const displayHelpersSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "personal_os_display_helpers.js"),
+  "utf8"
+);
+const combinedPersonalOsSrc = `${displayHelpersSrc}\n${src}`;
 const html = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "index.html"),
   "utf8"
@@ -53,12 +58,17 @@ function extractFn(source, name) {
 const sandbox = new Function(`
   "use strict";
   const PersonalOSState = { selectedPath: null, isRefreshing: false, isSelecting: false, isDeciding: false, isApplying: false };
-  ${extractFn(src, "posText")}
-  ${extractFn(src, "posClip")}
-  ${extractFn(src, "posUiText")}
-  ${extractFn(src, "posErrorDetailText")}
-  ${extractFn(src, "posErrorMessage")}
-  ${extractFn(src, "posRefreshLabel")}
+  ${extractFn(displayHelpersSrc, "posText")}
+  ${extractFn(displayHelpersSrc, "posClip")}
+  ${extractFn(displayHelpersSrc, "posUiText")}
+  ${extractFn(displayHelpersSrc, "posStatusClass")}
+  ${extractFn(displayHelpersSrc, "posEventClass")}
+  ${extractFn(displayHelpersSrc, "posAssistClass")}
+  ${extractFn(displayHelpersSrc, "posErrorDetailText")}
+  ${extractFn(displayHelpersSrc, "posErrorMessage")}
+  ${extractFn(displayHelpersSrc, "posRefreshLabel")}
+  ${extractFn(displayHelpersSrc, "posStateLabel")}
+  ${extractFn(displayHelpersSrc, "posDraftStatusText")}
   ${extractFn(src, "posChatPromptLimit")}
   ${extractFn(src, "posClipChatPrompt")}
   ${extractFn(src, "personalOsHasOpenModal")}
@@ -101,14 +111,19 @@ const sandbox = new Function(`
   ${extractFn(src, "posGraphHealth")}
   ${extractFn(src, "posTargetSummary")}
   ${extractFn(src, "posMeterWidthClass")}
-  return { PersonalOSState, posClip, posErrorDetailText, posErrorMessage, posRefreshLabel, posChatPromptLimit, posClipChatPrompt, personalOsCanAutoRefresh, clearPersonalOsQuerySelection, posQueueCounts, posRefreshOptions, posDraftSelectionAfterRefresh, posDraftEmptyMessage, posDraftQueueError, posDraftMatchesSearch, posVisibleDrafts, posRawProcessorOptions, posRawStatusSummary, posUiLanguage, posLanguageText, posDiagnosticHeadline, posOfflineDiagnostics, posIsOfflineDiagnostics, posNextActionText, posNextDraftPath, posNextCardAction, personalOsReviewPrompt, personalOsReviewPromptMeta, personalOsObsidianPrompt, personalOsCodeLoopPrompt, personalOsCodeLoopAgentPrompt, personalOsCodeLoopPromptMeta, posCodeLoopEvidenceCounts, posCodeLoopDraftRank, posCodeLoopDraftRows, posNormalizeTagQuery, posTagFilter, posGraphDisplayName, posGraphTagQuery, posGraphDegreeMap, posGraphRankedNodes, posGraphHealth, posTargetSummary, posMeterWidthClass };
+  return { PersonalOSState, posClip, posStatusClass, posEventClass, posAssistClass, posErrorDetailText, posErrorMessage, posRefreshLabel, posStateLabel, posDraftStatusText, posChatPromptLimit, posClipChatPrompt, personalOsCanAutoRefresh, clearPersonalOsQuerySelection, posQueueCounts, posRefreshOptions, posDraftSelectionAfterRefresh, posDraftEmptyMessage, posDraftQueueError, posDraftMatchesSearch, posVisibleDrafts, posRawProcessorOptions, posRawStatusSummary, posUiLanguage, posLanguageText, posDiagnosticHeadline, posOfflineDiagnostics, posIsOfflineDiagnostics, posNextActionText, posNextDraftPath, posNextCardAction, personalOsReviewPrompt, personalOsReviewPromptMeta, personalOsObsidianPrompt, personalOsCodeLoopPrompt, personalOsCodeLoopAgentPrompt, personalOsCodeLoopPromptMeta, posCodeLoopEvidenceCounts, posCodeLoopDraftRank, posCodeLoopDraftRows, posNormalizeTagQuery, posTagFilter, posGraphDisplayName, posGraphTagQuery, posGraphDegreeMap, posGraphRankedNodes, posGraphHealth, posTargetSummary, posMeterWidthClass };
 `);
 
 let PersonalOSState;
 let posClip;
+let posStatusClass;
+let posEventClass;
+let posAssistClass;
 let posErrorDetailText;
 let posErrorMessage;
 let posRefreshLabel;
+let posStateLabel;
+let posDraftStatusText;
 let posChatPromptLimit;
 let posClipChatPrompt;
 let personalOsCanAutoRefresh;
@@ -149,7 +164,7 @@ let posGraphHealth;
 let posTargetSummary;
 let posMeterWidthClass;
 try {
-  ({ PersonalOSState, posClip, posErrorDetailText, posErrorMessage, posRefreshLabel, posChatPromptLimit, posClipChatPrompt, personalOsCanAutoRefresh, clearPersonalOsQuerySelection, posQueueCounts, posRefreshOptions, posDraftSelectionAfterRefresh, posDraftEmptyMessage, posDraftQueueError, posDraftMatchesSearch, posVisibleDrafts, posRawProcessorOptions, posRawStatusSummary, posUiLanguage, posLanguageText, posDiagnosticHeadline, posOfflineDiagnostics, posIsOfflineDiagnostics, posNextActionText, posNextDraftPath, posNextCardAction, personalOsReviewPrompt, personalOsReviewPromptMeta, personalOsObsidianPrompt, personalOsCodeLoopPrompt, personalOsCodeLoopAgentPrompt, personalOsCodeLoopPromptMeta, posCodeLoopEvidenceCounts, posCodeLoopDraftRank, posCodeLoopDraftRows, posNormalizeTagQuery, posTagFilter, posGraphDisplayName, posGraphTagQuery, posGraphDegreeMap, posGraphRankedNodes, posGraphHealth, posTargetSummary, posMeterWidthClass } = sandbox());
+  ({ PersonalOSState, posClip, posStatusClass, posEventClass, posAssistClass, posErrorDetailText, posErrorMessage, posRefreshLabel, posStateLabel, posDraftStatusText, posChatPromptLimit, posClipChatPrompt, personalOsCanAutoRefresh, clearPersonalOsQuerySelection, posQueueCounts, posRefreshOptions, posDraftSelectionAfterRefresh, posDraftEmptyMessage, posDraftQueueError, posDraftMatchesSearch, posVisibleDrafts, posRawProcessorOptions, posRawStatusSummary, posUiLanguage, posLanguageText, posDiagnosticHeadline, posOfflineDiagnostics, posIsOfflineDiagnostics, posNextActionText, posNextDraftPath, posNextCardAction, personalOsReviewPrompt, personalOsReviewPromptMeta, personalOsObsidianPrompt, personalOsCodeLoopPrompt, personalOsCodeLoopAgentPrompt, personalOsCodeLoopPromptMeta, posCodeLoopEvidenceCounts, posCodeLoopDraftRank, posCodeLoopDraftRows, posNormalizeTagQuery, posTagFilter, posGraphDisplayName, posGraphTagQuery, posGraphDegreeMap, posGraphRankedNodes, posGraphHealth, posTargetSummary, posMeterWidthClass } = sandbox());
 } catch (e) {
   console.error("Sandbox setup failed:", e.message);
   process.exit(1);
@@ -259,8 +274,16 @@ assert("formats empty refresh state", posRefreshLabel(null, baseTime) === "Not c
 assert("formats fresh refresh state", posRefreshLabel(baseTime - 3000, baseTime).includes("just now"));
 assert("formats second refresh age", posRefreshLabel(baseTime - 12000, baseTime).endsWith("12s ago"));
 assert("formats minute refresh age", posRefreshLabel(baseTime - 120000, baseTime).endsWith("2m ago"));
-assert("UI text fallback interpolates values", src.includes("Object.entries(values)") && src.includes("replaceAll(`{{${name}}}`"));
-assert("refresh labels route through localized UI text", src.includes('posUiText("pos.refreshNotChecked"') && src.includes('posUiText("pos.refreshJustNow"') && src.includes('posUiText("pos.refreshSecondsAgo"') && src.includes('posUiText("pos.refreshMinutesAgo"') && src.includes('posUiText("pos.refreshHoursAgo"') && i18nDe.includes('"pos.refreshNotChecked"') && i18nEn.includes('"pos.refreshNotChecked"'));
+assert("UI text fallback interpolates values", combinedPersonalOsSrc.includes("Object.entries(values)") && combinedPersonalOsSrc.includes("replaceAll(`{{${name}}}`"));
+assert("refresh labels route through localized UI text", combinedPersonalOsSrc.includes('posUiText("pos.refreshNotChecked"') && combinedPersonalOsSrc.includes('posUiText("pos.refreshJustNow"') && combinedPersonalOsSrc.includes('posUiText("pos.refreshSecondsAgo"') && combinedPersonalOsSrc.includes('posUiText("pos.refreshMinutesAgo"') && combinedPersonalOsSrc.includes('posUiText("pos.refreshHoursAgo"') && i18nDe.includes('"pos.refreshNotChecked"') && i18nEn.includes('"pos.refreshNotChecked"'));
+
+console.log("\nPersonal OS display helpers:");
+assert("count helper remains in extracted display helpers", displayHelpersSrc.includes('function posUiCount(') && displayHelpersSrc.includes('return posUiText(key, fallback, { count: Number(count) });'));
+assert("status classes map known states", posStatusClass("connected") === "pos-good" && posStatusClass("pending") === "pos-warn" && posStatusClass("offline") === "pos-bad");
+assert("event classes map audit-like events", posEventClass("DraftCreated") === "pos-warn" && posEventClass("ApplyFailed") === "pos-bad");
+assert("assist classes map review states", posAssistClass("ready") === "pos-good" && posAssistClass("attention") === "pos-warn" && posAssistClass("blocked") === "pos-bad");
+assert("state labels normalize display states", posStateLabel("ready") === "READY" && posStateLabel("custom") === "CUSTOM");
+assert("draft status labels normalize approvals", posDraftStatusText("pending") === "Needs review" && posDraftStatusText("approved") === "Approved" && posDraftStatusText("unknown-state") === "Unknown state");
 
 console.log("\npersonalOsCanAutoRefresh():");
 assert("allows idle auto refresh", personalOsCanAutoRefresh({ selectedPath: null, isRefreshing: false, isSelecting: false, isDeciding: false, isApplying: false }) === true);
@@ -394,7 +417,7 @@ assert("active draft rows expose current selection", src.includes('row.setAttrib
 assert("Personal OS cockpit uses calmer product surfaces", css.includes("#personal-os-view .info-card") && css.includes("box-shadow: none") && css.includes(".pos-panel") && css.includes("background: rgba(12, 12, 20, 0.7)") && css.includes("border-radius: 8px"));
 assert("Personal OS context search stays out of the default path", html.includes('class="pos-panel pos-query-panel pos-collapsible-panel"') && html.includes('class="pos-panel-summary"') && html.includes("Nur öffnen, wenn du Wissen aus dem OS brauchst.") && src.includes('panel.tagName === "DETAILS") panel.open = true') && overridesCss.includes(".pos-collapsible-panel") && overridesCss.includes(".pos-panel-summary::after"));
 assert("empty draft states clear stale detail controls", src.includes("function clearPersonalOsDraftDetail") && src.includes('posUiText("pos.draftTitle"') && src.includes("button.disabled = true"));
-assert("Personal OS draft detail fallbacks are localized", src.includes("function posUiText") && src.includes('posUiText("pos.noDraftSelected"') && src.includes('posUiText("pos.draftLoadFailed"') && src.includes('posUiText("pos.applyApprovedOnly"') && src.includes('posUiText("pos.applyApprovedTitle"') && i18nDe.includes('"pos.noDraftSelected"') && i18nEn.includes('"pos.noDraftSelected"') && i18nDe.includes('"pos.applyApprovedTitle"') && i18nEn.includes('"pos.applyApprovedTitle"'));
+assert("Personal OS draft detail fallbacks are localized", combinedPersonalOsSrc.includes("function posUiText") && src.includes('posUiText("pos.noDraftSelected"') && src.includes('posUiText("pos.draftLoadFailed"') && src.includes('posUiText("pos.applyApprovedOnly"') && src.includes('posUiText("pos.applyApprovedTitle"') && i18nDe.includes('"pos.noDraftSelected"') && i18nEn.includes('"pos.noDraftSelected"') && i18nDe.includes('"pos.applyApprovedTitle"') && i18nEn.includes('"pos.applyApprovedTitle"'));
 assert("empty draft detail messages are escaped", src.includes("escapeHtml(emptyMessage)") && !src.includes("${message}</div>") && !src.includes("${emptyMessage}</div>"));
 assert("Personal OS apply-draft modal copy is localized", src.includes('posUiText("pos.applyDraftTitle"') && src.includes('posUiText("pos.applyReasonLabel"') && src.includes('posUiText("pos.applyDefaultTarget"') && src.includes('posUiText("pos.applyReasonDefault"') && src.includes('posUiText("pos.applyDraftAction"') && src.includes('posUiText("pos.applyFailed"') && src.includes('posUiText("pos.applySuccess"') && i18nDe.includes('"pos.applyDraftTitle"') && i18nEn.includes('"pos.applyDraftTitle"') && i18nDe.includes('"pos.applySuccess"') && i18nEn.includes('"pos.applySuccess"'));
 assert("Personal OS draft loading and search states are localized", src.includes('posUiText("pos.loadingDraftQueue"') && src.includes('posUiText("pos.searchingDrafts"') && src.includes('posUiText("pos.noDraftSearchResult"') && src.includes('posUiText("pos.draftFoundLoaded"') && src.includes('posUiText("pos.draftsFoundSelect"') && i18nDe.includes('"pos.loadingDraftQueue"') && i18nEn.includes('"pos.loadingDraftQueue"') && i18nDe.includes('"pos.draftsFoundSelect"') && i18nEn.includes('"pos.draftsFoundSelect"'));
