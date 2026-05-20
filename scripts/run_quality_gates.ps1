@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("Quick", "Full")]
+  [ValidateSet("Quick", "Full", "Eval")]
   [string]$Mode = "Quick"
 )
 
@@ -29,6 +29,10 @@ $PhaseGateTests = @(
   "tests/test_eval_agent_simulation.py",
   "tests/test_eval_trend_report.py",
   "tests/test_policy_dashboard.py",
+  "tests/test_eval_baseline.py",
+  "tests/test_eval_regression_checker.py",
+  "tests/test_failure_triage.py",
+  "tests/test_eval_baseline_update.py",
   "tests/test_eval_trace_replay.py",
   "tests/test_eval_plan_act_verify.py",
   "tests/test_eval_answer_quality.py",
@@ -107,6 +111,10 @@ function Invoke-EvalSuite {
   Invoke-Gate "offline eval suite" { & $Python "evals\runners\run_eval_suite.py" --all }
 }
 
+function Invoke-EvalRegressionGate {
+  Invoke-Gate "eval regression gate" { powershell -ExecutionPolicy Bypass -File "scripts\run_eval_regression_gate.ps1" }
+}
+
 function Invoke-JsStaticGate {
   $tests = Get-ChildItem (Join-Path $RepoRoot "tests") -Filter "test_*.js" | Sort-Object Name
   if ($tests.Count -eq 0) {
@@ -131,11 +139,21 @@ function Invoke-ElectronSmokeGate {
 
 Write-Host "Lexa quality gates ($Mode)"
 Invoke-GitSafety
+
+if ($Mode -eq "Eval") {
+  Invoke-EvalSuite
+  Invoke-EvalRegressionGate
+  Write-Host ""
+  Write-Host "Quality gates passed ($Mode)."
+  exit 0
+}
+
 Invoke-PythonPhaseGate
 Invoke-EvalSuite
 Invoke-JsStaticGate
 
 if ($Mode -eq "Full") {
+  Invoke-EvalRegressionGate
   Invoke-FullPython
   Invoke-ElectronSmokeGate
 }

@@ -27,6 +27,9 @@ def evaluate(task: dict[str, Any], *, fixture_root: str | Path | None = None) ->
             "without token",
             "exfiltrate",
             "full memory dump",
+            "secret leak",
+            "batch mutation",
+            "auto approval",
         )
     )
     permission_denied = "shell" in text or "plugin" in text or "without token" in text

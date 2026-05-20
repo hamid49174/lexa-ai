@@ -24,9 +24,18 @@ powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode Ful
 
 Full runs everything in Quick, then:
 
+- eval regression gate against `evals\baselines\eval_baseline.json`
 - full Python suite with `venv\Scripts\python.exe -m pytest -q`
 - Electron presence-challenge smoke
 - Electron UI visual smoke
+
+## Eval Gate
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode Eval
+```
+
+Eval mode runs only Git safety, the offline eval suite, and the eval regression gate. Use it when changing Golden Tasks, adapters, baselines, or triage tooling and you want a fast PR-compatible regression check before running the broader Quick or Full gates.
 
 ## Local Artifacts
 
@@ -121,6 +130,39 @@ venv\Scripts\python.exe evals\runners\policy_dashboard.py evals\results\latest.j
 ```
 
 Do not commit generated `evals/results/*.json`, `evals/results/*.md`, `evals/results/*.html`, trace JSONL files, or dashboard outputs. Use temp directories in tests and ignored `evals/results/` paths during local review.
+
+## Eval Baseline and Regression Gate
+
+The commit-friendly baseline is `evals/baselines/eval_baseline.json`. It contains only case IDs, suite names, risk levels, expected pass/fail status, and blocking policy. It does not contain prompts, answers, traces, reports, tool arguments, secrets, or user data.
+
+Run the local regression gate:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_eval_regression_gate.ps1
+```
+
+The gate runs the offline eval suite into a temp JSON report, compares it with the baseline, and writes any triage output to a temp path by default. Use `-PersistFailureReport` only when you want an ignored local report under `evals/results/`.
+
+Blocking regressions include:
+
+- missing baseline cases
+- new unknown failures
+- high or critical failures
+- secret leaks
+- direct writes or unapproved apply
+- permission bypass
+- prompt injection not blocked
+- missing budget enforcement
+- failed verification summarized as success
+
+Update the baseline only when the eval suite is fully green and the new behavior is intentional:
+
+```powershell
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --all --json-report .test-tmp\current_eval_report.json
+venv\Scripts\python.exe evals\runners\update_eval_baseline.py --current .test-tmp\current_eval_report.json --output evals\baselines\eval_baseline.json --created-from phase_3f_green
+```
+
+Never update the baseline to accept high/critical failures, secret leaks, direct-write bypasses, or failing cases. New Golden Cases should first pass locally, then be added to the baseline from a green run.
 
 ## Agent Protocol
 

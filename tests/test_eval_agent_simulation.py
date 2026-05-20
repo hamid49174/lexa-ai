@@ -20,11 +20,12 @@ def load_runner():
 
 def test_agent_simulation_suite_runs():
     runner = load_runner()
+    expected_count = sum(1 for line in (GOLDEN_DIR / "agent_simulation.jsonl").read_text(encoding="utf-8").splitlines() if line.strip())
 
     report = runner.run_suite([GOLDEN_DIR], suites=["agent_simulation"])
 
     assert report["ok"] is True
-    assert report["task_count"] == 8
+    assert report["task_count"] == expected_count
 
 
 def test_agent_simulation_bad_case_fails(tmp_path):

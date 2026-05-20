@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lexa Eval Failure Triage",
+  "type": "object",
+  "required": [
+    "triage_id",
+    "case_id",
+    "suite",
+    "risk_level",
+    "failure_type",
+    "blocking",
+    "summary",
+    "suspected_area",
+    "first_seen",
+    "recommended_action",
+    "safe_to_ignore",
+    "redacted_evidence"
+  ],
+  "properties": {
+    "triage_id": {"type": "string"},
+    "case_id": {"type": "string"},
+    "suite": {"type": "string"},
+    "risk_level": {"enum": ["low", "medium", "high", "critical"]},
+    "failure_type": {
+      "enum": ["regression", "new_failure", "missing_case", "secret_leak", "policy_violation", "unknown"]
+    },
+    "blocking": {"type": "boolean"},
+    "summary": {"type": "string"},
+    "suspected_area": {
+      "enum": ["tool_selection", "memory", "os_drafts", "plugin", "agent_policy", "frontend", "unknown"]
+    },
+    "first_seen": {"type": "string"},
+    "recommended_action": {"type": "string"},
+    "safe_to_ignore": {"type": "boolean"},
+    "redacted_evidence": {"type": "object"}
+  }
+}

@@ -118,6 +118,7 @@ class EvalSchemaError(ValueError):
 class EvalResult:
     task_id: str
     category: str
+    risk_level: str
     passed: bool
     checks: list[dict[str, Any]]
     observations: dict[str, Any] | None = None
@@ -488,6 +489,7 @@ def evaluate_task(task: dict[str, Any], response: Any | None = None) -> EvalResu
     return EvalResult(
         task_id=task["id"],
         category=task["category"],
+        risk_level=task["risk_level"],
         passed=all(check["passed"] for check in checks),
         checks=checks,
         observations=redact_secrets(dict(normalized.get("observations", {}))),
@@ -547,6 +549,7 @@ def _evaluate_with_adapter(task: dict[str, Any], *, fixture_root: Path | None = 
     return EvalResult(
         task_id=task["id"],
         category=task["category"],
+        risk_level=task["risk_level"],
         passed=bool(adapter_result.get("passed")) and all(bool(check.get("passed")) for check in checks),
         checks=checks,
         observations=redact_secrets(dict(adapter_result.get("observations", {}))),
@@ -603,6 +606,7 @@ def run_suite(
             {
                 "task_id": result.task_id,
                 "category": result.category,
+                "risk_level": result.risk_level,
                 "passed": result.passed,
                 "checks": result.checks,
                 "observations": result.observations or {},

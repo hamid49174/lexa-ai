@@ -1,6 +1,6 @@
 # Lexa Eval Suite
 
-Phase 3A introduced offline, deterministic evals for product intelligence risks. Phase 3B connected those golden tasks to local adapters and fixtures. Phase 3C added synthetic agent trace replay and answer-quality fixture checks. Phase 3D adds controlled trace sampling, synthetic trace generation, stricter budget assertions, and Plan/Act/Verify regression evals. Phase 3E adds local agent-run simulations, trend reports, and a small policy-failure dashboard. These evals are still not external LLM benchmarks: they run without network, API calls, real MCP servers, the real Personal OS mount, or the real memory database.
+Phase 3A introduced offline, deterministic evals for product intelligence risks. Phase 3B connected those golden tasks to local adapters and fixtures. Phase 3C added synthetic agent trace replay and answer-quality fixture checks. Phase 3D adds controlled trace sampling, synthetic trace generation, stricter budget assertions, and Plan/Act/Verify regression evals. Phase 3E adds local agent-run simulations, trend reports, and a small policy-failure dashboard. Phase 3F adds a commit-friendly baseline manifest, regression gate, failure triage format, and safe baseline update workflow. These evals are still not external LLM benchmarks: they run without network, API calls, real MCP servers, the real Personal OS mount, or the real memory database.
 
 ## Structure
 
@@ -11,6 +11,8 @@ Phase 3A introduced offline, deterministic evals for product intelligence risks.
 - `runners/run_agent_simulation.py`: local synthetic agent-run simulator with mock tools.
 - `runners/eval_trend_report.py`: local trend summaries for ignored JSON reports.
 - `runners/policy_dashboard.py`: local policy/trace failure dashboard generator.
+- `baselines/eval_baseline.json`: commit-friendly expected status manifest for CI/local regression gates.
+- `triage/`: schema and docs for redacted failure triage records.
 - `results/`: optional local reports. Result artifacts are ignored by Git except for placeholders.
 
 ## Golden Task Format
@@ -134,6 +136,43 @@ venv\Scripts\python.exe evals\runners\policy_dashboard.py evals\results\latest.j
 ```
 
 The trend report compares pass rate, new failures, fixed failures, changed failures, and risk-weighted score. Critical failures carry more weight than low-risk failures. The policy dashboard surfaces high/critical failures, budget violations, direct-write violations, unconfirmed high-risk actions, prompt-injection misses, secret-leak failures, and verification failures marked as success.
+
+## Baseline and Regression Gate
+
+The baseline manifest stores expected case IDs, suites, risk levels, expected status, and blocking policy. It intentionally does not store answers, prompts, traces, tool arguments, reports, or user data.
+
+Run the regression gate:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_eval_regression_gate.ps1
+```
+
+Or run the eval-only quality gate:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode Eval
+```
+
+Blocking failures include:
+
+- missing baseline cases
+- new unknown failures
+- high or critical failures
+- `no_secret_leak` failures
+- direct writes or unapproved apply
+- permission bypasses
+- prompt injection not blocked
+- budget enforcement missing
+- failed verification marked as success
+
+Update the baseline only from a green eval run:
+
+```powershell
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --all --json-report .test-tmp\current_eval_report.json
+venv\Scripts\python.exe evals\runners\update_eval_baseline.py --current .test-tmp\current_eval_report.json --output evals\baselines\eval_baseline.json --created-from phase_3f_green
+```
+
+Never update the baseline to accept high/critical failures, secret leaks, policy violations, or failing cases. New passing cases can be added intentionally by regenerating the baseline from a fully green run.
 
 ## Fixture Rules
 
