@@ -22,6 +22,13 @@ Phase 4D re-check:
 - release target is currently `static-external`
 - this is acceptable for InternalRC review, but not enough for PublicRC/PublicRelease
 
+Phase 4E decision:
+
+- Website remains a `static-external` target for now.
+- No `package.json` is added in this phase because the website is outside the Lexa Git repository and is not itself a Git repo.
+- PublicRC remains blocked until a website release target is approved and package-based build/lint or an equivalent static-release validation is proven.
+- InternalRC may proceed with the existing static smoke warnings.
+
 Current smoke:
 
 ```powershell
@@ -41,6 +48,8 @@ Options:
 Recommended next small step:
 
 Keep it external/static for now, remove or archive `tmp_*.js` only after review, and add a minimal website `package.json` with static lint/build checks before deployment preparation. That package should not introduce a framework migration or redesign in the same patch.
+
+The safest next implementation is a dedicated website phase that either creates a separate website repository or adds a minimal website-local `package.json` with no framework migration and scripts such as `smoke`, `check:static`, and `lint:static`.
 
 Release blockers:
 

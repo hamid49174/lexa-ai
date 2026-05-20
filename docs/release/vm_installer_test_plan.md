@@ -2,6 +2,8 @@
 
 Phase 4D status: installer install/uninstall is prepared but not proven in this workspace. Do not install Lexa into the productive machine from release-smoke scripts.
 
+Phase 4E status: VM/Sandbox install and uninstall remain not proven from this workstation. The script can classify signing by release target and print the VM-only plan, but it still does not perform installation automatically.
+
 ## Goal
 
 Prove that a generated Windows installer can install, launch, and uninstall Lexa in an isolated environment without bundling user data, OS vault data, secrets, logs, or local workspaces.
@@ -55,6 +57,8 @@ Use VM-only mode inside an approved disposable VM/sandbox:
 
 ```powershell
 scripts\run_installer_smoke.ps1 -InstallerPath <installer> -Install -Uninstall -VMOnly
+scripts\run_installer_smoke.ps1 -InstallerPath <installer> -Target InternalRC -AllowUnsignedInternal
+scripts\run_installer_smoke.ps1 -InstallerPath <installer> -Target PublicRC -ExpectedPublisher "Lexa"
 ```
 
 The script intentionally does not automate productive-machine installation.

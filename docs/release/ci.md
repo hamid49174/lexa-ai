@@ -4,6 +4,8 @@ Phase 4A adds CI-ready quality gates without deployment, uploads, secrets, or ex
 
 Phase 4D status: no remote GitHub Actions run has been proven from this workspace because the local repository has no configured GitHub remote. The workflow is therefore CI-ready and locally simulated, but remote CI remains "not yet remotely proven" until a branch is pushed to GitHub and the workflow run is inspected.
 
+Phase 4E status: `git remote -v` still returns no configured remote in this workspace. Remote CI is therefore not executable from here without a manual GitHub repository setup step. `scripts\run_quality_gates.ps1 -Mode CI` remains the local CI-core proof, but PublicRC/PublicRelease stay blocked until GitHub Actions has actually run remotely.
+
 ## GitHub Actions
 
 `.github/workflows/quality-gates.yml` runs on pushes and pull requests for `main` and `develop`.
@@ -56,6 +58,20 @@ Remote CI is considered proven only when all of these are true:
 - the run result is linked or recorded in release notes
 
 In this workspace there is currently no GitHub remote, so PublicRC and PublicRelease remain blocked by remote-CI proof.
+
+## Manual Remote CI Setup
+
+To prove remote CI without adding secrets or deployment:
+
+1. Create or select the GitHub repository for Lexa.
+2. Add the remote locally, for example `git remote add origin <github-url>`.
+3. Push the current branch.
+4. Open the GitHub Actions tab and run or inspect `.github/workflows/quality-gates.yml`.
+5. Confirm the run uses no secrets, no deployment, no artifact upload, and no user-data paths.
+6. Record the run URL and commit SHA in release notes.
+7. Re-run `scripts\run_release_candidate_check.ps1 -Target PublicRC`.
+
+Until those steps are complete, the correct status is "Remote CI not yet proven", not "CI passed remotely".
 
 ## Known Limits
 

@@ -46,12 +46,13 @@ def test_installer_smoke_does_not_delete_artifacts(tmp_path):
     installer = tmp_path / "Lexa-Setup.exe"
     installer.write_bytes(b"0" * (2 * 1024 * 1024))
 
-    result = run_script("-ArtifactRoot", str(tmp_path), "-InstallerPath", str(installer))
+    result = run_script("-ArtifactRoot", str(tmp_path), "-InstallerPath", str(installer), "-AllowUnsignedInternal")
 
     assert result.returncode == 0, result.stdout
     assert installer.exists()
     assert "Installer smoke completed" in result.stdout
     assert "Signing status:" in result.stdout
+    assert "Target: InternalRC" in result.stdout
 
 
 def test_installer_install_requires_vm_only(tmp_path):
@@ -82,3 +83,38 @@ def test_installer_plan_only_prints_vm_plan():
     assert result.returncode == 0, result.stdout
     assert "Installer VM install/uninstall plan" in result.stdout
     assert "Plan-only mode" in result.stdout
+
+
+def test_unsigned_installer_blocks_public_rc(tmp_path):
+    installer = tmp_path / "Lexa-Setup.exe"
+    installer.write_bytes(b"0" * (2 * 1024 * 1024))
+
+    result = run_script(
+        "-ArtifactRoot",
+        str(tmp_path),
+        "-InstallerPath",
+        str(installer),
+        "-Target",
+        "PublicRC",
+    )
+
+    assert result.returncode != 0
+    assert "blocks PublicRC" in result.stdout
+
+
+def test_installer_accepts_expected_publisher_parameter_for_internal_rc(tmp_path):
+    installer = tmp_path / "Lexa-Setup.exe"
+    installer.write_bytes(b"0" * (2 * 1024 * 1024))
+
+    result = run_script(
+        "-ArtifactRoot",
+        str(tmp_path),
+        "-InstallerPath",
+        str(installer),
+        "-ExpectedPublisher",
+        "Lexa",
+        "-AllowUnsignedInternal",
+    )
+
+    assert result.returncode == 0, result.stdout
+    assert "ExpectedPublisher: Lexa" in result.stdout

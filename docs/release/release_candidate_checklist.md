@@ -139,6 +139,17 @@ PublicRelease additionally requires release signing, installer proof, website de
 - [ ] OS cleanup inventory is category-level and does not copy private OS content.
 - [ ] Codex context pack exists and excludes user data.
 
+## 14. Phase 4E PublicRC Blocker Readiness
+
+- [ ] `git remote -v` shows a GitHub remote, or Remote CI is explicitly marked not yet proven.
+- [ ] Manual GitHub Actions proof steps are documented.
+- [ ] Installer smoke supports `-Target`, `-ExpectedPublisher`, and `-AllowUnsignedInternal`.
+- [ ] Unsigned installer is warn-only for InternalRC and blocking for PublicRC/PublicRelease.
+- [ ] VM install/uninstall remains plan-only unless a disposable VM/sandbox is explicitly approved.
+- [ ] Website release target remains `static-external` until a separate package/build/lint target is approved.
+- [ ] OS cleanup remains separate and backup-first.
+- [ ] Codex context pack can be regenerated from safe repository metadata without reading private OS/Obsidian content.
+
 Decision notes:
 
 - Blocking failures require a fix or explicit release-owner review.

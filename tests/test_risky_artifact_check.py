@@ -79,6 +79,26 @@ def test_certificate_files_are_blocked_from_staging(tmp_path):
     assert "Risky staged path" in result.stdout
 
 
+def test_keystore_files_are_blocked_from_staging(tmp_path):
+    staged = tmp_path / "staged.txt"
+    staged.write_text("release/signing/windows.keystore\n", encoding="utf-8")
+
+    result = run_script("-Root", str(tmp_path), "-StagedFileList", str(staged))
+
+    assert result.returncode == 1
+    assert "Risky staged path" in result.stdout
+
+
+def test_signing_password_patterns_are_blocked(tmp_path):
+    secret_file = tmp_path / "signing.txt"
+    secret_file.write_text("CSC_KEY_PASSWORD=supersecretvalue", encoding="utf-8")
+
+    result = run_script("-Root", str(tmp_path), "-SecretScanPath", str(secret_file))
+
+    assert result.returncode == 1
+    assert "Secret-like pattern" in result.stdout
+
+
 def test_dot_env_is_blocked_from_staging(tmp_path):
     staged = tmp_path / "staged.txt"
     staged.write_text(".env\n", encoding="utf-8")

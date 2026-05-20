@@ -5,7 +5,11 @@ param(
   [switch]$Install,
   [switch]$Uninstall,
   [switch]$VMOnly,
-  [switch]$PlanOnly
+  [switch]$PlanOnly,
+  [ValidateSet("InternalRC", "PublicRC", "PublicRelease")]
+  [string]$Target = "InternalRC",
+  [string]$ExpectedPublisher = "",
+  [switch]$AllowUnsignedInternal
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,17 +24,23 @@ $forbiddenRegex = '(?i)(personal_os|hermes_workspace|evals[\\/]+results|tmp[\\/]
 Write-Host "Lexa installer smoke"
 Write-Host "ArtifactRoot: $ArtifactRoot"
 Write-Host "Install requested: $Install Uninstall requested: $Uninstall VMOnly: $VMOnly PlanOnly: $PlanOnly"
+Write-Host "Target: $Target ExpectedPublisher: $ExpectedPublisher AllowUnsignedInternal: $AllowUnsignedInternal"
 
-function Get-SigningStatus {
+function Get-SigningInfo {
   param([string]$PathValue)
   try {
     $signature = Get-AuthenticodeSignature -LiteralPath $PathValue -ErrorAction Stop
-    if ($signature.Status -eq "Valid") { return "signed" }
-    if ($signature.Status -eq "NotSigned") { return "unsigned" }
-    return "unknown:$($signature.Status)"
+    $status = if ($signature.Status -eq "Valid") { "signed" } elseif ($signature.Status -eq "NotSigned") { "unsigned" } else { "unknown:$($signature.Status)" }
+    $subject = if ($signature.SignerCertificate) { [string]$signature.SignerCertificate.Subject } else { "" }
+    return [pscustomobject]@{ Status = $status; Subject = $subject }
   } catch {
-    return "unknown"
+    return [pscustomobject]@{ Status = "unknown"; Subject = "" }
   }
+}
+
+function Get-SigningStatus {
+  param([string]$PathValue)
+  return (Get-SigningInfo $PathValue).Status
 }
 
 function Test-WindowsSandboxAvailable {
@@ -91,6 +101,21 @@ if ($installer.Length -lt 1MB) {
   throw "Installer artifact is unexpectedly small: $($installer.FullName) ($($installer.Length) bytes)"
 }
 
+$signingInfo = Get-SigningInfo $installer.FullName
+if ($ExpectedPublisher -and $signingInfo.Status -eq "signed" -and $signingInfo.Subject -notlike "*$ExpectedPublisher*") {
+  throw "Installer signer does not match ExpectedPublisher '$ExpectedPublisher'. Actual subject: $($signingInfo.Subject)"
+}
+if ($signingInfo.Status -ne "signed" -and $Target -in @("PublicRC", "PublicRelease")) {
+  throw "Installer signing status '$($signingInfo.Status)' blocks $Target. Use a signed installer with a verified publisher."
+}
+if ($signingInfo.Status -eq "unsigned" -and $Target -eq "InternalRC") {
+  if ($AllowUnsignedInternal) {
+    Write-Warning "Unsigned installer allowed for InternalRC because -AllowUnsignedInternal was supplied."
+  } else {
+    Write-Warning "Unsigned installer is warn-only for InternalRC. PublicRC/PublicRelease require signing."
+  }
+}
+
 if (Test-Path -LiteralPath $ArtifactRoot) {
   $forbidden = @()
   Get-ChildItem -LiteralPath $ArtifactRoot -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object {
@@ -107,10 +132,14 @@ if (Test-Path -LiteralPath $ArtifactRoot) {
 Write-Host "Installer smoke completed."
 Write-Host "Installer: $($installer.FullName)"
 Write-Host "Size bytes: $($installer.Length)"
-Write-Host "Signing status: $(Get-SigningStatus $installer.FullName)"
+Write-Host "Signing status: $($signingInfo.Status)"
+if ($signingInfo.Subject) { Write-Host "Signer subject: $($signingInfo.Subject)" }
 if ($Install -or $Uninstall) {
   $sandboxAvailable = Test-WindowsSandboxAvailable
   Write-Host "Windows Sandbox available: $sandboxAvailable"
+  if (-not $sandboxAvailable) {
+    Write-Warning "VM install/uninstall status: Needs Review. Windows Sandbox is not available or not enabled in this environment."
+  }
   Write-InstallPlan $installer.FullName
   Write-Warning "Installer install/uninstall proof is prepared as VM-only and was not executed automatically. Run inside a disposable VM/sandbox with explicit human approval."
   Write-Host "Installer install/uninstall status: not yet proven by this local smoke."

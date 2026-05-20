@@ -28,6 +28,13 @@ Phase 4D status:
 - The cleanup is now an explicit review project, not part of Lexa release hardening.
 - See `docs/release/os_cleanup_inventory.md` for the safe category-level inventory.
 
+Phase 4E status:
+
+- OS remains a separate dirty Git repository.
+- Lexa Phase 4E did not modify, stage, commit, delete, migrate, archive, or clean OS files.
+- The observed dirty state is still category-level only in Lexa docs: tracked Markdown/index changes plus untracked draft/event/raw/automation/MCP/workflow paths.
+- PublicRC remains blocked until this cleanup risk is reviewed or explicitly accepted by the release owner.
+
 Classification approach for a future cleanup project:
 
 | Category | Examples | Recommendation |

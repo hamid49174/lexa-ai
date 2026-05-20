@@ -57,7 +57,8 @@ def test_release_candidate_script_reports_decision_and_warnings():
     assert "Ready" in src
     assert "Remote GitHub Actions run is not proven" in src
     assert "Installer install/uninstall" in src
-    assert "Unsigned installer is allowed for development/InternalRC" in src
+    assert "Installer signing status is" in src
+    assert "Get-InstallerSigningStatus" in src
     assert "Website release target is still static/external" in src
 
 

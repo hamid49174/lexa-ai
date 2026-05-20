@@ -39,11 +39,12 @@ $riskPatterns = @(
   '^audio_cache(/|$)',
   '(^|/)node_modules(/|$)',
   '^venv(/|$)',
-  '\.(pfx|p12|pem|key|pvk|cer|crt)$',
-  '(^|/)(codesign|code-sign|signing)[^/]*\.(json|ps1|env|txt)$'
+  '\.(pfx|p12|pem|key|pvk|cer|crt|spc|jks|keystore)$',
+  '(^|/)(codesign|code-sign|signing|signtool)[^/]*\.(json|ps1|env|txt|xml)$',
+  '(^|/)(windows|electron)[_-]?(signing|certificate|cert)[^/]*\.(json|ps1|env|txt|xml)$'
 )
 
-$secretRegex = '(?i)(api[_-]?key|bearer|token|secret|private[_-]?key)\s*[:=]\s*["'']?[A-Za-z0-9_\-]{16,}'
+$secretRegex = '(?i)(api[_-]?key|bearer|token|secret|private[_-]?key|csc[_-]key[_-]?password|csc[_-]link|win[_-]csc[_-]link|signing[_-]?password|signtool[_-]?password)\s*[:=]\s*["'']?[A-Za-z0-9_\-\.\/\\:;+=]{8,}'
 $violations = New-Object System.Collections.Generic.List[string]
 $warnings = New-Object System.Collections.Generic.List[string]
 

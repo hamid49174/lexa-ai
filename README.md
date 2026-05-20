@@ -222,6 +222,7 @@ Lexa uses scripted release gates instead of ad hoc manual checks:
 scripts\run_quality_gates.ps1 -Mode Quick
 scripts\run_quality_gates.ps1 -Mode Full
 scripts\run_release_candidate_check.ps1 -Target InternalRC
+scripts\generate_codex_context_pack.ps1 -Check
 ```
 
 Release tiers:
@@ -251,6 +252,8 @@ powershell -ExecutionPolicy Bypass -File scripts\run_installer_smoke.ps1 -Artifa
 ```
 
 `StrictRC` distinguishes `Ready` from `Needs Review` when remote CI, signing, or disposable-VM install/uninstall proof is still missing. See `docs/release/release_candidate_checklist.md` and the `docs/release/` runbooks.
+
+PublicRC/PublicRelease remain blocked until remote GitHub Actions, signed installer, disposable VM install/uninstall, approved website release target, and OS cleanup review are proven. The context-pack generator is safe-only and must not read Personal OS content, eval results, traces, memory databases, env files, or signing material.
 
 ---
 

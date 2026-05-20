@@ -9,6 +9,7 @@ Phase 4D status: Lexa can build an Electron installer locally, but the installer
 - Installer smoke verifies artifact presence, size, and forbidden content.
 - Code signing is not configured.
 - No certificate, key, password, or signing secret exists in the repository.
+- Phase 4E prepares the signing gates without adding keys or certificates.
 
 ## Risks
 
@@ -38,6 +39,8 @@ Never commit:
 
 The risky artifact check blocks common signing key file extensions and signing config files that look secret-bearing.
 
+Phase 4E extends this blocklist to certificate/keystore/signing-password patterns such as `.pfx`, `.p12`, `.pem`, `.key`, `.pvk`, `.cer`, `.crt`, `.spc`, `.jks`, `.keystore`, `CSC_KEY_PASSWORD`, `CSC_LINK`, `WIN_CSC_LINK`, and `signtool` password-style variables.
+
 ## Release Gate
 
 Release tier policy:
@@ -57,3 +60,13 @@ Before a public release:
 6. The signed installer must be scanned for user data and secrets.
 
 Until then, signing remains a release-review warning for InternalRC and a blocking gate for PublicRC/PublicRelease.
+
+## Script Support
+
+`scripts\run_installer_smoke.ps1` supports:
+
+- `-Target InternalRC|PublicRC|PublicRelease`
+- `-ExpectedPublisher <publisher-fragment>`
+- `-AllowUnsignedInternal`
+
+`scripts\run_release_candidate_check.ps1` performs a best-effort installer signing status check from the active artifact root. PublicRC/PublicRelease are blocked when the status is anything other than `signed`.

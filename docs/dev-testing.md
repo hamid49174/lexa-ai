@@ -57,6 +57,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target InternalRC
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target PublicRC
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target PublicRelease
+powershell -ExecutionPolicy Bypass -File scripts\generate_codex_context_pack.ps1 -Check
 ```
 
 The release-candidate check orchestrates Full Quality Gates, Clean Clone Smoke, Dependency Repro Check, Eval Regression Gate, Risky Artifact Check, Electron startup/presence smoke, OS quality gates when mounted, Hermes adapter smoke, website smoke, packaging/installer smoke, performance budget smoke, and final Git safety. It does not deploy, upload, delete files, or stage artifacts.
@@ -77,6 +78,8 @@ Supporting release-readiness scripts:
 - `scripts\run_packaging_smoke.ps1`: checks Electron packaging config and scans build artifacts. Use `-Build` only for an explicit isolated local package build.
 - `scripts\run_installer_smoke.ps1`: checks generated installer artifacts without installing into the productive machine.
 - `scripts\run_installer_smoke.ps1 -PlanOnly`: prints the VM/sandbox install-uninstall proof plan.
+- `scripts\run_installer_smoke.ps1 -Target PublicRC`: blocks unsigned installers.
+- `scripts\generate_codex_context_pack.ps1 -Check`: regenerates the safe project context pack from allowlisted metadata only.
 - `scripts\run_os_quality_gates.ps1`: runs OS SDK/MCP/Raw-Inbox checks when the OS mount is available.
 - `scripts\run_hermes_smoke.ps1`: runs Hermes adapter tests and staged-path safety checks.
 - `scripts\run_website_smoke.ps1`: checks the external website folder without deployment.

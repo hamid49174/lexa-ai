@@ -50,6 +50,7 @@ scripts\run_quality_gates.ps1 -Mode Full
 scripts\run_quality_gates.ps1 -Mode CI
 scripts\run_eval_regression_gate.ps1
 scripts\run_release_candidate_check.ps1 -Target InternalRC
+scripts\generate_codex_context_pack.ps1 -Check
 ```
 
 Run OS, Hermes, Website, Packaging, and Electron smokes only when relevant to the phase or before release-readiness decisions.
@@ -63,6 +64,10 @@ Run OS, Hermes, Website, Packaging, and Electron smokes only when relevant to th
 ## OS Handling
 
 The Personal OS is a separate source of truth. Read only the minimum needed files. Do not import private OS content into Lexa docs. Do not stage or commit OS files from Lexa. OS cleanup must be a separate reviewed project with backup, OS gates before and after, and no draft/event history loss.
+
+## Context Pack
+
+Use `docs/codex_context_pack.md` as the safe project-level context packet. Regenerate it only with `scripts\generate_codex_context_pack.ps1` or a similarly allowlisted process. Do not use Personal OS, eval results, traces, memory databases, env files, logs, signing keys, or private Obsidian content as context-pack input.
 
 ## Collaboration Pattern
 

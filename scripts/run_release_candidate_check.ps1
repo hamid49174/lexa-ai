@@ -71,6 +71,25 @@ function Test-GithubRemoteConfigured {
   return $false
 }
 
+function Get-InstallerSigningStatus {
+  param([string]$ArtifactRoot)
+  if (-not $ArtifactRoot -or !(Test-Path -LiteralPath $ArtifactRoot)) {
+    return "not-found"
+  }
+  $installer = Get-ChildItem -LiteralPath $ArtifactRoot -Recurse -Force -File -Include "*.exe", "*.msi", "*.msix" -ErrorAction SilentlyContinue |
+    Sort-Object Length -Descending |
+    Select-Object -First 1
+  if (-not $installer) { return "not-found" }
+  try {
+    $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName -ErrorAction Stop
+    if ($signature.Status -eq "Valid") { return "signed" }
+    if ($signature.Status -eq "NotSigned") { return "unsigned" }
+    return "unknown:$($signature.Status)"
+  } catch {
+    return "unknown"
+  }
+}
+
 function Complete-RcCheck {
   param([string]$ModeName, [string]$TargetName)
   $decision = if ($Script:RcBlockers.Count -gt 0) { "Blocked" } elseif ($Script:RcWarnings.Count -gt 0) { "Needs Review" } else { "Ready" }
@@ -186,8 +205,11 @@ Invoke-RcStep "Installer Smoke" {
 if ($Mode -in @("Installer", "StrictRC") -or $Target -in @("PublicRC", "PublicRelease")) {
   Add-TargetFinding "Installer install/uninstall in a disposable VM is not proven by this local script unless run_installer_smoke.ps1 is executed with an approved VM-only procedure." @("PublicRC", "PublicRelease")
 }
-if ($Mode -eq "StrictRC" -or $Target -in @("PublicRC", "PublicRelease")) {
-  Add-TargetFinding "Unsigned installer is allowed for development/InternalRC but blocks PublicRC and PublicRelease." @("PublicRC", "PublicRelease")
+$installerSigningRoot = if ($buildForMode) { $packagingArtifactRoot } else { Join-Path $RepoRoot "dist" }
+$installerSigningStatus = Get-InstallerSigningStatus $installerSigningRoot
+Write-Host "Installer signing gate status: $installerSigningStatus"
+if ($installerSigningStatus -ne "signed") {
+  Add-TargetFinding "Installer signing status is '$installerSigningStatus'. Unsigned or unknown installers are warn-only for InternalRC and block PublicRC/PublicRelease." @("PublicRC", "PublicRelease")
 }
 if ($Target -in @("PublicRC", "PublicRelease")) {
   Add-RcBlocker "Website release target is still static/external without package-based build/lint proof."

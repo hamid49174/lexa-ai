@@ -2,7 +2,19 @@
 
 This is a category-level inventory for the external Personal OS repository at `C:\Users\admin\OneDrive\Desktop\OS`. It deliberately does not copy private OS/Obsidian content into the Lexa repository.
 
-## Phase 4D Observed Categories
+## Phase 4E Snapshot
+
+The external OS repository is still dirty and was not modified, staged, committed, cleaned, archived, or deleted by Phase 4E work.
+
+Observed counts from `git status --short` and `git diff --stat`:
+
+- tracked modified files: 16
+- tracked diff size: 261 insertions, 66 deletions
+- untracked paths: many draft/event/raw/automation/MCP/workflow paths
+
+These counts are intentionally category-level. Private filenames and content should stay in the OS review project, not in Lexa release docs.
+
+## Observed Categories
 
 The OS repo remains dirty and separate. Observed categories include:
 

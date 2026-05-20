@@ -87,3 +87,18 @@ def test_os_hermes_and_website_smokes_are_non_destructive():
         src = read(script)
         assert "Remove-Item" not in src
         assert "git add" not in src.lower()
+
+
+def test_website_smoke_has_target_aware_public_rc_blocking():
+    src = read("scripts/run_website_smoke.ps1")
+
+    assert 'ValidateSet("InternalRC", "PublicRC", "PublicRelease")' in src
+    assert "Website static-external target without package-based build/lint proof blocks" in src
+
+
+def test_context_pack_generator_is_non_destructive():
+    src = read("scripts/generate_codex_context_pack.ps1")
+
+    assert "personal_os" in src
+    assert "evals" in src and "results" in src
+    assert "Remove-Item" not in src
