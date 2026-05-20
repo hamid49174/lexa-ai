@@ -17,7 +17,7 @@ Goal: strengthen integration coverage for Lexa's internal daily-use core flows b
 | Tool-call display | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, backend action/parser tests, `electron_tool_confirmation_smoke.js`, `electron_tool_display_smoke.js`, `test_chat_tool_display_helpers.js` | Real Companion/tool execution remains outside renderer smoke coverage | Tool rendering refactors could expose unsafe labels, unsafe result content, or hide confirmation state | Keep render-only display smoke mocked; do not add real tool execution to renderer tests |
 | Confirmation happy path | `test_router_companion.py`, `test_companion_confirmation.py`, `electron_presence_challenge_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_confirmation_click_smoke.js` | Real Companion execution remains intentionally outside renderer smoke coverage | Confirmation UI refactors could call Companion incorrectly or lose safe denial behavior | Keep focused click smoke mocked; do not add real tool execution to renderer tests |
 | OS draft creation path | `test_personal_os_prompt.js`, `test_router_personal_os.py`, `test_personal_os_actions.py`, eval OS draft tests | Full renderer draft creation from chat handoff is not isolated | OS draft UI refactors could bypass Draft/Approval expectations | Add a mocked Personal OS draft handoff smoke only after core chat/history smokes are stable |
-| Settings persistence | `test_settings_voice_static.js`, `test_app_chat_input_wiring.js`, `electron_ui_visual_smoke.js` | Focused settings save/load smoke is thin | Settings refactors could silently stop saving provider/voice preferences | Add a small Electron settings persistence smoke if settings modularization resumes |
+| Settings persistence | `test_settings_voice_static.js`, `test_app_chat_input_wiring.js`, `electron_ui_visual_smoke.js`, `electron_settings_persistence_smoke.js`, `test_settings_helpers.js` | Provider/keyring/license persistence remains intentionally outside the local preference smoke | Settings refactors could silently stop saving local preferences, lose Beta/Internal labels, or apply corrupt localStorage values | Keep local preference smoke in settings gates; add provider/secret coverage only with explicit keyring-safe mocks |
 | Beta/Internal label visibility | `test_internal_daily_use_readiness_static.js`, `test_app_chat_input_wiring.js` | Visual placement is only indirectly covered | Unstable surfaces could become visibly unlabelled | Keep static readiness checks in every internal daily-use pass |
 
 ## Added In This Pass
@@ -127,8 +127,28 @@ Extraction completed:
 - `frontend/src/chat_tool_display_ui.js` now owns only `toolResultDisplayText()`.
 - `frontend/src/chat.js` still owns real tool execution calls, success/failure branching, rendering into the active message, notifications, history persistence, confirmation behavior, and send pipeline state.
 
+## Added In Settings Persistence Sprint
+
+`tests/electron_settings_persistence_smoke.js` adds focused renderer coverage for local settings preferences:
+
+- settings view markup loads under the real renderer
+- theme, accent, font size, and language preferences persist through the existing localStorage mechanism
+- saved local preferences hydrate back into the UI controls
+- corrupt theme/accent/font/language values recover to safe defaults
+- unknown localStorage keys are preserved
+- unsafe persisted values do not create executable DOM nodes
+- Beta/Internal readiness chips remain visible in Settings
+- the smoke does not trigger renderer `fetch()` while saving local preferences
+
+`tests/test_settings_helpers.js` directly covers the extracted pure normalization helpers for valid and invalid theme, accent, font-size, and language values.
+
+Extraction completed:
+
+- `frontend/src/settings_helpers.js` now owns only local preference normalization helpers.
+- `frontend/src/settings.js` still owns settings view refresh, provider/model status, voice settings, key actions, license activation/removal, profile save, backup controls, Hermes autostart controls, backend calls, and IPC-backed settings behavior.
+
 ## Stop-line Before Refactors
 
-Do not extract or rewrite the full streaming lifecycle, send pipeline, conversation save/load/delete orchestration, active-conversation delete recovery, real tool execution, real confirmation approval execution, Companion execution, or OS draft actions until focused integration coverage exists for the specific lifecycle being changed.
+Do not extract or rewrite the full streaming lifecycle, send pipeline, conversation save/load/delete orchestration, active-conversation delete recovery, real tool execution, real confirmation approval execution, Companion execution, OS draft actions, settings keyring/secret handling, voice runtime, license activation, backend/provider calls, or Electron IPC until focused integration coverage exists for the specific lifecycle being changed.
 
-Recommended next coverage target: settings persistence smoke before settings modularization resumes, or a focused render-only file upload result smoke without real tool/OS execution.
+Recommended next coverage target: provider/model settings UI smoke with keyring-safe mocks, or a focused render-only file upload result smoke without real tool/OS execution.

@@ -1152,7 +1152,7 @@ async function saveProfile() {
 
 // ── LANGUAGE / i18n (Phase 42.1) ─────────────────
 async function loadLanguagePreference() {
-  const lang = localStorage.getItem("lexa-lang") || "de";
+  const lang = settingsSafeLanguage(localStorage.getItem("lexa-lang") || "de");
   const select = document.getElementById("language-select");
   if (select) select.value = lang;
   // Initialize i18n system — MUST await to prevent raw key display
@@ -1164,12 +1164,13 @@ async function loadLanguagePreference() {
 
 async function changeLanguage(lang) {
   if (!lang) return;
+  const safeLang = settingsSafeLanguage(lang);
   if (typeof LexaI18n !== "undefined") {
-    await LexaI18n.setLanguage(lang);
+    await LexaI18n.setLanguage(safeLang);
     LexaI18n.translatePage();
-    showToast(lang === "de" ? t("settings.langDe") : t("settings.langEn"), "success", 2000);
+    showToast(safeLang === "de" ? t("settings.langDe") : t("settings.langEn"), "success", 2000);
   }
-  localStorage.setItem("lexa-lang", lang);
+  localStorage.setItem("lexa-lang", safeLang);
 }
 
 // ── THEME & PERSONALIZATION (Phase 15) ──────────
@@ -1180,39 +1181,42 @@ function toggleTheme(isDark) {
 }
 
 function setAccentColor(color) {
+  const safeColor = settingsSafeAccent(color);
   // Remove old accent, set new
-  if (color === "purple") {
+  if (safeColor === "purple") {
     document.documentElement.removeAttribute("data-accent");
   } else {
-    document.documentElement.setAttribute("data-accent", color);
+    document.documentElement.setAttribute("data-accent", safeColor);
   }
-  localStorage.setItem("lexa-accent", color);
+  localStorage.setItem("lexa-accent", safeColor);
 
   // Update picker UI
   document.querySelectorAll(".accent-dot").forEach(d => {
-    const isActive = d.dataset.accent === color;
+    const isActive = d.dataset.accent === safeColor;
     d.classList.toggle("active", isActive);
     d.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
 }
 
 function setFontSize(size) {
-  const safeSize = ["13", "14", "15", "16"].includes(String(size)) ? String(size) : "14";
+  const safeSize = settingsSafeFontSize(size);
   document.documentElement.setAttribute("data-font-size", safeSize);
   localStorage.setItem("lexa-fontsize", safeSize);
 }
 
 function loadThemePreferences() {
   // Theme
-  const theme = localStorage.getItem("lexa-theme") || "dark";
+  const theme = settingsSafeTheme(localStorage.getItem("lexa-theme") || "dark");
   document.documentElement.setAttribute("data-theme", theme);
   const themeToggle = document.getElementById("theme-toggle");
   if (themeToggle) themeToggle.checked = theme === "dark";
 
   // Accent
-  const accent = localStorage.getItem("lexa-accent") || "purple";
+  const accent = settingsSafeAccent(localStorage.getItem("lexa-accent") || "purple");
   if (accent !== "purple") {
     document.documentElement.setAttribute("data-accent", accent);
+  } else {
+    document.documentElement.removeAttribute("data-accent");
   }
   document.querySelectorAll(".accent-dot").forEach(d => {
     const isActive = d.dataset.accent === accent;
@@ -1223,7 +1227,7 @@ function loadThemePreferences() {
   // Font size
   const fontSize = localStorage.getItem("lexa-fontsize");
   if (fontSize) {
-    const safeFontSize = ["13", "14", "15", "16"].includes(String(fontSize)) ? String(fontSize) : "14";
+    const safeFontSize = settingsSafeFontSize(fontSize);
     document.documentElement.setAttribute("data-font-size", safeFontSize);
     const fontSelect = document.getElementById("fontsize-select");
     if (fontSelect) fontSelect.value = safeFontSize;

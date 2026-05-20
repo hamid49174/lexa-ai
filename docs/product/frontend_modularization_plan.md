@@ -28,6 +28,8 @@ Goal: make the classic-script frontend easier to maintain without changing visib
 | Chat persistence/history | conversation save/load, local agent metadata, deletion/switching | High | Electron visual smoke plus router conversation tests |
 | Chat streaming/tool rendering | streaming send, tool-call confirmation, agent run panels | High | Electron visual smoke, chat send guards, companion/router tests |
 | Chat voice integration | mic/STT/TTS/orb state and wake-word paths | High | `test_settings_voice_static.js`, voice tests, Electron visual smoke |
+| Settings local preferences | theme, accent, font size, language normalization and hydration helpers | Low | `electron_settings_persistence_smoke.js`, `test_settings_helpers.js`, `test_frontend_script_order_static.js` |
+| Settings provider/voice/license controls | provider status, API key/keyring buttons, voice runtime settings, license activation, backend-backed controls | High | settings voice static tests, future keyring-safe settings smokes |
 | Personal OS constants/pure helpers | labels, clipping, status class helpers | Low-medium | `test_personal_os_prompt.js` |
 | Personal OS draft actions | approve/reject/apply, SDK boundaries, chat handoff | High | `test_personal_os_prompt.js`, `test_router_personal_os.py`, OS gates |
 | Electron preload/main | security policy, IPC wrappers, lifecycle/retry/update checks | High | preload/main static tests, startup/presence smokes |
@@ -470,12 +472,75 @@ Current chat script order:
 
 Next recommended target: settings persistence smoke before settings modularization, or a render-only file upload result smoke. Real tool execution and confirmation execution remain stop-lined.
 
+## Settings Persistence Coverage and Helper Extraction
+
+This sprint moved outside `chat.js` and added focused coverage for the Settings local preference surface before extracting pure helpers.
+
+Settings responsibility map:
+
+| Cluster | Approx. location/functions | Dependencies/globals | Mutates state | Touches DOM | Backend/fetch/IPC | Current coverage | Risk | Recommended next action |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Local appearance and language preferences | `loadLanguagePreference()`, `changeLanguage()`, `toggleTheme()`, `setAccentColor()`, `setFontSize()`, `loadThemePreferences()` | `localStorage`, `document`, `LexaI18n`, `t()` | Yes, localStorage/document attributes only | Yes | i18n load only for language | `electron_settings_persistence_smoke.js`, `test_settings_helpers.js`, script-order static test | Low | Extracted pure normalization helpers; keep behavior in `settings.js` |
+| Settings view refresh and readiness | `refreshSettingsView()`, `renderSystemReadiness()`, diagnostics helpers | `LexaState`, `window.lexa`, settings DOM, i18n | Yes | Yes | Backend/mock bridge calls | visual/startup smokes, settings voice static | Medium | Test first; extract only pure formatting helpers later |
+| Provider/model settings | `loadModelSelection()`, `changeAiModel()`, provider status rows | `window.lexa`, model select, provider state | Yes | Yes | Backend calls | static checks and visual smoke | Medium-high | Add keyring-safe/provider-safe smoke before extraction |
+| Voice/STT/TTS settings | voice diagnostics, STT model/engine, ElevenLabs settings, microphone/TTS tests | media APIs, `window.lexa`, voice globals | Yes | Yes | Backend/voice APIs and key actions | `test_settings_voice_static.js`, visual smoke | High | Stop-line; do not extract runtime behavior yet |
+| Keyring/API key controls | Cartesia, ElevenLabs, Deepgram key set/delete actions | `showInputModal`, `window.lexa`, secret bridge policy | Yes | Yes | Secret/keyring bridge calls | bridge policy/static tests | High | Stop-line; do not touch without dedicated secret-safe coverage |
+| License display and activation | `loadLicenseStatus()`, `activateLicense()`, `removeLicense()` | `window.lexa`, license DOM, modal input | Yes | Yes | IPC and validation calls | release blocker docs, static readiness labels | High | Stop-line; PublicRC/PublicRelease decision remains external |
+| Profile, backup, Hermes controls | `saveProfile()`, backup controls, Hermes autostart controls | `window.lexa`, settings DOM, backend state | Yes | Yes | Backend/IPC bridge calls | Hermes static/visual smokes | Medium-high | Test first; leave orchestration in `settings.js` |
+
+Coverage added:
+
+- `tests/electron_settings_persistence_smoke.js` loads the real renderer, exercises only local settings preferences, asserts persistence/hydration, corrupt localStorage recovery, unknown-key preservation, unsafe value containment, no renderer `fetch()` calls, and stable Beta/Internal chips.
+- `tests/test_settings_helpers.js` directly checks the pure helper boundary for valid/invalid theme, accent, font-size, and language values.
+- `tests/test_frontend_script_order_static.js` verifies `settings_helpers.js` is a classic script loaded after `personal_os.js` and before `settings.js`.
+
+Extraction completed:
+
+| File | Before sprint | After sprint |
+| --- | ---: | ---: |
+| `frontend/src/settings.js` | 1191 lines / 54258 bytes in the Git blob | 1195 lines / 54423 bytes |
+| `frontend/src/settings_helpers.js` | new | 25 physical lines / 875 bytes |
+
+Moved functions:
+
+- `settingsSafeChoice(value, allowedValues, fallback)`
+- `settingsSafeTheme(theme)`
+- `settingsSafeAccent(accent)`
+- `settingsSafeFontSize(size)`
+- `settingsSafeLanguage(lang)`
+
+Small robustness fix:
+
+- corrupt stored `lexa-theme`, `lexa-accent`, `lexa-fontsize`, and `lexa-lang` values now recover to safe defaults instead of applying arbitrary stored strings to the UI shell.
+
+What stayed in `settings.js`:
+
+- Settings refresh/orchestration
+- provider/model calls
+- keyring/API-key actions
+- voice/STT/TTS runtime behavior
+- license activation/removal
+- profile save
+- backup controls
+- Hermes autostart controls
+- Electron IPC and backend bridge calls
+
+Current tail script order:
+
+1. `personal_os.js`
+2. `settings_helpers.js`
+3. `settings.js`
+4. `devtools.js`
+
+Next recommended target: provider/model settings UI coverage with keyring-safe mocks, or one more pure settings display formatter only after direct tests. Secrets/keyring, voice runtime, license activation, backend/provider calls, Electron IPC, chat lifecycle, and OS drafts remain stop-lined.
+
 ## Do Not Touch Yet
 
 - streaming send and abort lifecycle beyond pure parser helpers
 - conversation history switching/deletion persistence orchestration
 - real tool execution/result lifecycle and confirmation approval execution
 - voice/STT/TTS/orb behavior
+- settings keyring/API-key handling, voice runtime behavior, license activation/removal, backend/provider calls, and Electron IPC
 - Personal OS draft apply/approve/reject flows
 - Electron preload IPC risk policy
 - Electron backend lifecycle, Hermes startup, signing/update release behavior

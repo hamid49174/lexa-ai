@@ -22,6 +22,8 @@ const chatToolDisplaySrc = fs.readFileSync(path.join(root, "frontend", "src", "c
 const chatConfirmationStateSrc = fs.readFileSync(path.join(root, "frontend", "src", "chat_confirmation_state.js"), "utf8");
 const chatHistoryUiSrc = fs.readFileSync(path.join(root, "frontend", "src", "chat_history_ui.js"), "utf8");
 const chatStreamingHelpersSrc = fs.readFileSync(path.join(root, "frontend", "src", "chat_streaming_helpers.js"), "utf8");
+const settingsHelpersSrc = fs.readFileSync(path.join(root, "frontend", "src", "settings_helpers.js"), "utf8");
+const settingsSrc = fs.readFileSync(path.join(root, "frontend", "src", "settings.js"), "utf8");
 
 let passed = 0;
 let failed = 0;
@@ -68,6 +70,7 @@ const expectedTail = [
   "./commands.js",
   "./memory.js",
   "./personal_os.js",
+  "./settings_helpers.js",
   "./settings.js",
   "./devtools.js",
 ];
@@ -87,6 +90,7 @@ assert("chat tool display UI loads after tool confirmation UI and before chat.js
 assert("chat confirmation state loads after tool display UI and before chat.js", scripts.indexOf("./chat_confirmation_state.js") > scripts.indexOf("./chat_tool_display_ui.js") && scripts.indexOf("./chat_confirmation_state.js") < scripts.indexOf("./chat.js"));
 assert("chat history UI loads after confirmation state and before chat.js", scripts.indexOf("./chat_history_ui.js") > scripts.indexOf("./chat_confirmation_state.js") && scripts.indexOf("./chat_history_ui.js") < scripts.indexOf("./chat.js"));
 assert("chat streaming helpers load after history UI and before chat.js", scripts.indexOf("./chat_streaming_helpers.js") > scripts.indexOf("./chat_history_ui.js") && scripts.indexOf("./chat_streaming_helpers.js") < scripts.indexOf("./chat.js"));
+assert("settings helpers load after personal OS and before settings.js", scripts.indexOf("./settings_helpers.js") > scripts.indexOf("./personal_os.js") && scripts.indexOf("./settings_helpers.js") < scripts.indexOf("./settings.js"));
 assert("renderer scripts do not opt into module mode", !/<script\b[^>]*type=["']module["']/i.test(html));
 assert("chat constants file is classic script data", chatConstantsSrc.includes("const _AGENT_PATTERNS = [") && !/\b(import|export)\b/.test(chatConstantsSrc));
 assert("chat formatting file is classic helper script", chatFormattingSrc.includes("function stripModelFunctionTags(") && chatFormattingSrc.includes("function normalizeChatUrl(") && !/\b(import|export)\b/.test(chatFormattingSrc));
@@ -101,6 +105,7 @@ assert("chat tool display UI file is classic helper script", chatToolDisplaySrc.
 assert("chat confirmation state file is classic helper script", chatConfirmationStateSrc.includes("function confirmationActionSummaryText(") && !/\b(import|export)\b/.test(chatConfirmationStateSrc));
 assert("chat history UI file is classic helper script", chatHistoryUiSrc.includes("function conversationListRawTitle(") && chatHistoryUiSrc.includes("function createConversationListItem(") && chatHistoryUiSrc.includes("function renderConversationEmptyState(") && chatHistoryUiSrc.includes("bindKeyboardAction(item") && !/(^|\n)\s*(import|export)\b/.test(chatHistoryUiSrc));
 assert("chat streaming helpers file is classic helper script", chatStreamingHelpersSrc.includes("function chatStreamBufferedLines(") && chatStreamingHelpersSrc.includes("function parseChatStreamDataLine(") && !/\b(import|export)\b/.test(chatStreamingHelpersSrc));
+assert("settings helpers file is classic helper script", settingsHelpersSrc.includes("function settingsSafeTheme(") && settingsHelpersSrc.includes("function settingsSafeAccent(") && settingsHelpersSrc.includes("function settingsSafeFontSize(") && settingsHelpersSrc.includes("function settingsSafeLanguage(") && !/(^|\n)\s*(import|export)\b/.test(settingsHelpersSrc));
 assert("chat.js consumes extracted agent patterns", !chatSrc.includes("const _AGENT_PATTERNS = [") && chatSrc.includes("_AGENT_PATTERNS.some"));
 assert("extracted formatting helpers remain consumed", !chatSrc.includes("function stripModelFunctionTags(") && !chatSrc.includes("function normalizeChatUrl(") && chatMessageFormattingSrc.includes("stripModelFunctionTags(text)") && chatMarkdownSrc.includes("normalizeChatUrl(match["));
 assert("extracted markdown helpers remain consumed", !chatSrc.includes("function appendInlineMarkdown(") && !chatSrc.includes("function appendCodeBlock(") && chatMessageFormattingSrc.includes("appendMarkdownSegment(parent") && chatMessageFormattingSrc.includes("appendCodeBlock(parent"));
@@ -114,6 +119,7 @@ assert("chat.js consumes extracted tool display helper", !chatSrc.includes("cons
 assert("chat.js consumes extracted confirmation state helper", !chatSrc.includes("const summary = prepared.summary || {};") && chatSrc.includes("confirmationActionSummaryText(action, prepared)"));
 assert("chat.js consumes extracted history UI", !chatSrc.includes("function createConversationListItem(") && chatSrc.includes("renderConversationEmptyState(container, t(\"chat.noConversations\"))") && chatSrc.includes("createConversationListItem(c, { attention, isActive })"));
 assert("chat.js consumes extracted streaming helpers", !chatSrc.includes("const lines = buffer.split(\"\\\\n\");") && chatSrc.includes("chatStreamBufferedLines(buffer)") && chatSrc.includes("parseChatStreamDataLine(line)"));
+assert("settings.js consumes extracted preference helpers", !settingsSrc.includes("[\"13\", \"14\", \"15\", \"16\"].includes(String(size))") && settingsSrc.includes("settingsSafeTheme(") && settingsSrc.includes("settingsSafeAccent(") && settingsSrc.includes("settingsSafeFontSize(") && settingsSrc.includes("settingsSafeLanguage("));
 assert("Beta/Internal readiness labels remain in the shell", html.includes('data-readiness="beta"') && html.includes('data-readiness="internal"'));
 
 const ids = Array.from(html.matchAll(/\bid="([^"]+)"/g)).map((match) => match[1]);
