@@ -80,3 +80,20 @@ Phase 4F readiness:
 - The OS dirty state is now represented in `docs/release/public_rc_blocker_matrix.md` as PRC-005.
 - The next action is not a Lexa code patch. It is a separate backup-first OS cleanup review.
 - Lexa release scripts may warn or block by tier, but must not stage, delete, archive, migrate, or commit OS files.
+
+Phase 5A status:
+
+- OS cleanup is operationally ready but not started.
+- The OS dirty state is summarized only by category and counts in `docs/release/os_cleanup_inventory.md`.
+- No OS file is staged, committed, deleted, archived, migrated, or cleaned by Lexa Phase 5A.
+- PublicRC remains blocked until the OS cleanup risk is reviewed or explicitly accepted by the release owner.
+
+Phase 5A start criteria for the separate OS cleanup project:
+
+1. User approves a dedicated OS cleanup task.
+2. Backup/snapshot is created first.
+3. OS gates run before any cleanup action.
+4. Drafts, events, raw inbox, rollups, and workflow files are reviewed manually.
+5. Smoke artifacts are archived only after approval.
+6. OS gates run after cleanup.
+7. Any OS commit happens in the OS repo only.

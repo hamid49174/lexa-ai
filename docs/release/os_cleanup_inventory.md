@@ -63,3 +63,15 @@ This dirty state does not block InternalRC if OS gates are green and OS remains 
 - untracked content is grouped as drafts, events, raw inbox, automation/workflow, MCP/worker, and Lexa context categories
 - no private draft/event contents are copied into this repository
 - OS cleanup remains a separate review project and PublicRC blocker
+
+## Phase 5A Snapshot
+
+The OS repository is still dirty and external. Lexa Phase 5A did not modify, stage, commit, delete, migrate, archive, or clean OS files.
+
+Observed category-level counts:
+
+- tracked modified files: 16
+- tracked diff size: 261 insertions, 66 deletions
+- untracked entries: 67
+
+These counts deliberately avoid copying private file contents or private OS/Obsidian context into Lexa docs.

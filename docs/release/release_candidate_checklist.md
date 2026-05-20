@@ -160,6 +160,16 @@ PublicRelease additionally requires release signing, installer proof, website de
 - [ ] PublicRC remains blocked while remote CI, VM installer proof, signing, website target, OS cleanup review, remote runner availability, and artifact policy proof are not complete.
 - [ ] PublicRelease remains blocked until PublicRC is complete and privacy/trace consent is reviewed.
 
+## 16. Phase 5A External Blocker Operations
+
+- [ ] Remote CI is either proven with a GitHub Actions run URL and commit SHA, or explicitly marked external because no GitHub remote exists.
+- [ ] VM installer install/uninstall is either proven in a disposable VM/Sandbox, or explicitly marked not yet proven.
+- [ ] Signing checklist is complete without committing certificates, keys, passphrases, or signing secrets.
+- [ ] Website remains `static-external` for InternalRC, with PublicRC blocked until a build/lint or equivalent static-release target is approved.
+- [ ] OS cleanup remains a separate backup-first review project; no OS data is deleted or staged from Lexa.
+- [ ] `docs/release/privacy_trace_consent_checklist.md` exists.
+- [ ] PublicRelease remains blocked until privacy/trace consent is reviewed and approved.
+
 Decision notes:
 
 - Blocking failures require a fix or explicit release-owner review.

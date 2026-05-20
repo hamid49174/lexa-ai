@@ -76,3 +76,22 @@ Phase 4F readiness:
 - PublicRC remains blocked until a build/lint target or equivalent static-release proof exists.
 - `scripts\run_website_smoke.ps1 -Target PublicRC` fails by design while the website lacks package-based proof.
 - No website redesign, repository migration, or deployment action is part of Phase 4F.
+
+## Phase 5A Release Target Decision
+
+Decision for this phase: keep the website as `static-external`.
+
+Reason:
+
+- The website folder is outside the Lexa Git repository.
+- It is not a Git repository.
+- It has no `package.json`.
+- Adding a package/build target inside an external, non-versioned website folder would be a website ownership change, not a Lexa release-gate patch.
+
+PublicRC remains blocked until one of these is approved:
+
+1. Create a separate website repository with its own build/lint/smoke workflow.
+2. Add a minimal website-local `package.json` with static `smoke`, `check:static`, and `lint:static` scripts in a dedicated website phase.
+3. Define an equivalent static-release validation process with ownership, artifact policy, CSP/vendor review, and no deployment action.
+
+InternalRC can continue with static-smoke warnings. No website redesign, migration, deployment, upload, or secret change is part of Phase 5A.

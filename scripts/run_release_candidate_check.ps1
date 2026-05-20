@@ -258,9 +258,15 @@ if ($Target -in @("PublicRC", "PublicRelease")) {
   Add-RcExternalPrerequisite "Human review of the external OS dirty state."
 }
 if ($Target -eq "PublicRelease") {
-  Add-RcBlocker "[Privacy] Public release privacy and trace consent review is not finalized."
+  $privacyChecklist = Join-Path $RepoRoot "docs\release\privacy_trace_consent_checklist.md"
+  if (Test-Path -LiteralPath $privacyChecklist) {
+    Add-RcBlocker "[Privacy] Public release privacy and trace consent checklist exists but is not finalized or approved."
+  } else {
+    Add-RcBlocker "[Privacy] Public release privacy and trace consent checklist is missing."
+  }
   Add-RcBlocker "[Release] PublicRelease requires signed installer, proven VM install/uninstall, remote CI proof, and website release workflow."
-  Add-RcNextAction "Complete privacy and trace-consent review before public release."
+  Add-RcNextAction "Review docs\release\privacy_trace_consent_checklist.md and record release-owner approval before public release."
+  Add-RcExternalPrerequisite "Release-owner privacy and trace-consent approval."
 }
 Invoke-RcStep "Performance Budget Smoke" { powershell -ExecutionPolicy Bypass -File "scripts\check_performance_budgets.ps1" }
 Invoke-RcStep "Git Safety" {

@@ -64,6 +64,7 @@ This file is generated from safe Lexa repository metadata and fixed release-read
 - Release targets: InternalRC, PublicRC, PublicRelease
 - InternalRC may proceed with documented warnings.
 - Phase 4F readiness focus: blocker matrix, remote CI readiness, VM installer proof, signing readiness, website target, OS cleanup review, and safe context workflow.
+- Phase 5A readiness focus: turn each PublicRC blocker into either a practical proof path or an explicit external prerequisite.
 - PublicRC/PublicRelease remain blocked until remote CI proof, VM installer proof, signing, website release target proof, OS cleanup review, and public privacy/trace review are complete.
 
 ## Recent Commits
@@ -77,6 +78,7 @@ $recentLines
 - docs/dev-testing.md
 - docs/release/release_candidate_checklist.md
 - docs/release/public_rc_blocker_matrix.md
+- docs/release/privacy_trace_consent_checklist.md
 - docs/release/ci.md
 - docs/release/signing_plan.md
 - docs/release/website_strategy.md
@@ -104,11 +106,11 @@ $recentLines
 - Installer is unsigned.
 - Website is currently a static external target without package-based build/lint proof.
 - External OS cleanup remains a separate reviewed project.
-- Public release privacy/trace consent is not finalized.
+- Public release privacy/trace consent checklist exists only as a release review artifact until approved.
 
 ## Codex Working Rules
 
-- Do not use git add ..
+- Do not use `git add .`.
 - Do not delete files without explicit approval.
 - Do not commit user data, generated artifacts, secrets, signing keys, certificates, or private OS/Obsidian content.
 - Keep OS, Hermes, Website, Plugin, Electron, and release changes scoped to the active phase.

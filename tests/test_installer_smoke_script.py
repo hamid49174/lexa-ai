@@ -84,6 +84,9 @@ def test_installer_plan_only_prints_vm_plan():
     assert result.returncode == 0, result.stdout
     assert "Installer VM install/uninstall plan" in result.stdout
     assert "Plan-only mode" in result.stdout
+    assert "Windows Sandbox available:" in result.stdout
+    assert "Hyper-V available:" in result.stdout
+    assert "VM test marker LEXA_INSTALLER_VM_TEST:" in result.stdout
 
 
 def test_unsigned_installer_blocks_public_rc(tmp_path):

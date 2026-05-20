@@ -43,3 +43,5 @@ Use `-OutputPath <path>` only for a reviewed destination. Generated temporary pa
 For release-hardening phases, start with the context pack, then inspect only the scripts, docs, and tests relevant to the requested release blocker. Keep facts, assumptions, decisions, evidence, risks, and tasks separate in the final report.
 
 For PublicRC work, read `docs/release/public_rc_blocker_matrix.md` after the context pack. It separates code-solvable checks from external prerequisites such as GitHub remote access, VM proof, signing certificates, website ownership, and OS cleanup review.
+
+For PublicRelease work, also read `docs/release/privacy_trace_consent_checklist.md`. It is a review checklist, not approval; do not treat PublicRelease privacy/trace consent as complete until the release owner explicitly approves it.

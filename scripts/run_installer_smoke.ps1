@@ -65,6 +65,18 @@ function Test-InstallerVmMarker {
   return ($env:LEXA_INSTALLER_VM_TEST -eq "1" -or $env:LEXA_INSTALLER_VM_TEST -eq "true")
 }
 
+function Write-VmReadiness {
+  $sandboxAvailable = Test-WindowsSandboxAvailable
+  $hyperVAvailable = Test-HyperVAvailable
+  $vmMarker = Test-InstallerVmMarker
+  Write-Host "Windows Sandbox available: $sandboxAvailable"
+  Write-Host "Hyper-V available: $hyperVAvailable"
+  Write-Host "VM test marker LEXA_INSTALLER_VM_TEST: $vmMarker"
+  if (-not $sandboxAvailable -and -not $hyperVAvailable -and -not $vmMarker) {
+    Write-Warning "VM install/uninstall status: Needs Review. No Windows Sandbox, Hyper-V, or explicit VM test marker is available in this environment."
+  }
+}
+
 function Write-InstallPlan {
   param([string]$PathValue)
   Write-Host "Installer VM install/uninstall plan:"
@@ -82,6 +94,7 @@ if (($Install -or $Uninstall) -and -not $VMOnly) {
 }
 
 if ($PlanOnly) {
+  Write-VmReadiness
   Write-InstallPlan "<installer-path>"
   Write-Warning "Plan-only mode does not prove installer install/uninstall."
   exit 0
@@ -148,15 +161,7 @@ Write-Host "Size bytes: $($installer.Length)"
 Write-Host "Signing status: $($signingInfo.Status)"
 if ($signingInfo.Subject) { Write-Host "Signer subject: $($signingInfo.Subject)" }
 if ($Install -or $Uninstall) {
-  $sandboxAvailable = Test-WindowsSandboxAvailable
-  $hyperVAvailable = Test-HyperVAvailable
-  $vmMarker = Test-InstallerVmMarker
-  Write-Host "Windows Sandbox available: $sandboxAvailable"
-  Write-Host "Hyper-V available: $hyperVAvailable"
-  Write-Host "VM test marker LEXA_INSTALLER_VM_TEST: $vmMarker"
-  if (-not $sandboxAvailable -and -not $hyperVAvailable -and -not $vmMarker) {
-    Write-Warning "VM install/uninstall status: Needs Review. No Windows Sandbox, Hyper-V, or explicit VM test marker is available in this environment."
-  }
+  Write-VmReadiness
   Write-InstallPlan $installer.FullName
   Write-Warning "Installer install/uninstall proof is prepared as VM-only and was not executed automatically. Run inside a disposable VM/sandbox with explicit human approval."
   Write-Host "Installer install/uninstall status: not yet proven by this local smoke."

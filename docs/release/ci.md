@@ -8,6 +8,8 @@ Phase 4E status: `git remote -v` still returns no configured remote in this work
 
 Phase 4F status: `scripts\check_remote_ci_readiness.ps1` now performs the local readiness check. It verifies GitHub remote presence, workflow existence, absence of secret references, absence of release artifact uploads, absence of user-data paths, and local CI/RC script support. In this workspace it reports `RemoteCIReady: no` because no GitHub remote is configured.
 
+Phase 5A status: remote CI is not ambiguous anymore. It is an external blocker because `git remote -v` has no configured GitHub remote in this workspace. The repository contains the workflow and local CI proof, but PublicRC stays blocked until a GitHub repository exists, the branch is pushed, and the workflow result is recorded.
+
 ## GitHub Actions
 
 `.github/workflows/quality-gates.yml` runs on pushes and pull requests for `main` and `develop`.
@@ -73,6 +75,15 @@ To prove remote CI without adding secrets or deployment:
 5. Confirm the run uses no secrets, no deployment, no artifact upload, and no user-data paths.
 6. Record the run URL and commit SHA in release notes.
 7. Re-run `scripts\run_release_candidate_check.ps1 -Target PublicRC`.
+
+Record these proof fields in release notes or a release review issue:
+
+- GitHub repository URL
+- branch name
+- commit SHA
+- workflow run URL
+- run result
+- confirmation that no secrets, release artifacts, build artifacts, eval results, or user-data paths were uploaded
 
 Until those steps are complete, the correct status is "Remote CI not yet proven", not "CI passed remotely".
 

@@ -64,6 +64,8 @@ Run OS, Hermes, Website, Packaging, and Electron smokes only when relevant to th
 
 Use `docs/release/public_rc_blocker_matrix.md` as the source of truth for unresolved PublicRC/PublicRelease blockers and next actions.
 
+For PublicRelease work, also check `docs/release/privacy_trace_consent_checklist.md`. Its existence does not mean approval; privacy/trace consent stays blocking until the release owner signs off.
+
 ## OS Handling
 
 The Personal OS is a separate source of truth. Read only the minimum needed files. Do not import private OS content into Lexa docs. Do not stage or commit OS files from Lexa. OS cleanup must be a separate reviewed project with backup, OS gates before and after, and no draft/event history loss.

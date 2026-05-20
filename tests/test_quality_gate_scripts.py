@@ -118,3 +118,4 @@ def test_context_pack_generator_is_non_destructive():
     assert "evals" in src and "results" in src
     assert "Remove-Item" not in src
     assert "public_rc_blocker_matrix.md" in src
+    assert "privacy_trace_consent_checklist.md" in src

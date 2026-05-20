@@ -64,6 +64,7 @@ def test_context_pack_generator_uses_safe_sources(tmp_path):
     generated = output.read_text(encoding="utf-8")
     assert "PublicRC/PublicRelease remain blocked" in generated
     assert "public_rc_blocker_matrix.md" in generated
+    assert "privacy_trace_consent_checklist.md" in generated
     assert "scripts\\check_remote_ci_readiness.ps1" in generated
     assert "personal_os/" in generated
     assert "06_Inbox/Drafts/2026-" not in generated
@@ -110,6 +111,19 @@ def test_public_rc_blocker_matrix_is_structured_and_non_private():
     assert "InternalRC" in text
     assert "PublicRC" in text
     assert "PublicRelease" in text
+    assert "Phase 5A Decisions" in text
+    assert "06_Inbox/Drafts/2026-" not in text
+    assert "05_Memory/Rollups/" not in text
+    assert "sk-" not in text
+
+
+def test_privacy_context_artifact_is_safe_and_blocking():
+    text = (REPO_ROOT / "docs" / "release" / "privacy_trace_consent_checklist.md").read_text(encoding="utf-8")
+
+    assert "PublicRelease Blockers" in text
+    assert "Trace sampling" in text
+    assert "never committed" in text or "Never commit" in text
+    assert "approved" in text
     assert "06_Inbox/Drafts/2026-" not in text
     assert "05_Memory/Rollups/" not in text
     assert "sk-" not in text

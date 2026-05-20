@@ -11,6 +11,7 @@ This pack gives Codex a safe project-level starting context for Lexa work. It is
 - Phase 4D: release tiers and safe Codex context pack are in place.
 - Phase 4E: PublicRC blockers are being handled as explicit external proof items: remote CI, VM installer proof, signing, website release target, and OS cleanup review.
 - Phase 4F: PublicRC blockers are now tracked through a blocker matrix, remote-CI readiness script, RC next actions, and context workflow checks.
+- Phase 5A: PublicRC blockers are operationalized as proof paths or explicit external prerequisites; PublicRelease privacy/trace consent has a checklist but is not approved.
 
 Recent anchor commits:
 
@@ -40,6 +41,7 @@ Use these first:
 - `docs/dev-testing.md`
 - `docs/release/release_candidate_checklist.md`
 - `docs/release/public_rc_blocker_matrix.md`
+- `docs/release/privacy_trace_consent_checklist.md`
 - `docs/release/ci.md`
 - `docs/release/signing_plan.md`
 - `docs/release/website_strategy.md`
@@ -65,7 +67,7 @@ Use these first:
 - Installer is unsigned; this blocks PublicRC/PublicRelease.
 - Website is a static external target without package-based lint/build proof.
 - OS repo remains a separately dirty repository and needs a human-reviewed cleanup project.
-- Public release privacy/trace consent is not finalized.
+- Public release privacy/trace consent has a checklist, but is not finalized or approved.
 
 ## Recommended Next Work
 
@@ -74,6 +76,7 @@ Use these first:
 3. Configure Windows signing outside Git and verify publisher identity.
 4. Keep the website as `static-external` for InternalRC, then add a separate build/lint target before PublicRC.
 5. Run OS cleanup as a separate backup-first review project.
+6. Review and approve the privacy/trace consent checklist before PublicRelease.
 
 ## Context Pack Maintenance
 
