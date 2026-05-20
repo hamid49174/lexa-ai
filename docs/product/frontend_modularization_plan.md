@@ -90,7 +90,35 @@ Tests covering this boundary:
 - `test_chat_rendering.js` still exercises the helpers indirectly through `formatMessage()`
 - Electron startup and visual smokes verify the classic renderer loads the new script in the app shell
 
-Next safest extraction target: the remaining higher-level `appendMarkdownSegment()`, `appendFormattedMessage()`, and `formatMessage()` group, but only if the direct rendering tests remain stable. Streaming, conversation history, tool-call rendering, voice, Companion execution, and Personal OS draft flows remain out of scope.
+Pass 3 left the higher-level `appendMarkdownSegment()`, `appendFormattedMessage()`, and `formatMessage()` group as the next candidate, but only if direct rendering tests stayed stable. Streaming, conversation history, tool-call rendering, voice, Companion execution, and Personal OS draft flows remained out of scope.
+
+## Pass 4 Extraction
+
+Pass 4 probes and then extracts the higher-level message formatting boundary from `frontend/src/chat.js` into `frontend/src/chat_message_formatting.js`: `appendMarkdownSegment()`, `appendFormattedMessage()`, and `formatMessage()`.
+
+Dependency and risk probe:
+
+- Reads: `document`, `stripModelFunctionTags()`, and markdown helpers from `chat_markdown.js`
+- Writes: no globals or app state
+- DOM: creates transient DOM nodes/fragments for formatted chat output
+- Dependencies: calls `chat_formatting.js` through `stripModelFunctionTags()` and calls `chat_markdown.js` helpers for line breaks, inline markdown, tables, code blocks, and block-start detection
+- Streaming/history/tool surfaces: used by streaming completion, history hydration, agent summaries, and file-upload/chat rendering through the existing `renderFormattedMessage()` entry point; the extracted functions do not own those flows
+- Safety behavior: continues stripping model function tags and escaping unsafe user/model content through text nodes and safe URL checks
+
+Size snapshot before and after Pass 4:
+
+| File | Before Pass 4 | After Pass 4 |
+| --- | ---: | ---: |
+| `frontend/src/chat.js` | 4508 lines / 213344 bytes | 4402 lines / 209933 bytes |
+| `frontend/src/chat_message_formatting.js` | new | 107 lines / 3521 bytes |
+
+Tests covering this boundary:
+
+- `test_frontend_script_order_static.js` verifies `chat_message_formatting.js` loads after `chat_markdown.js` and before `chat.js`
+- `test_chat_rendering.js` directly checks plain text, empty string, multiline text, tables, function tag stripping, mixed markdown, code escaping, links, and unsafe HTML/script-like inputs
+- `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, and Electron smokes cover caller paths that use `renderFormattedMessage()`
+
+Next safest extraction target: pause further chat rendering extraction and review caller clusters around message actions or export helpers before moving more code. Streaming, conversation history, tool-call rendering, voice, Companion execution, and Personal OS draft flows remain out of scope.
 
 ## Do Not Touch Yet
 

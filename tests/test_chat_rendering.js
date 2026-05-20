@@ -18,6 +18,10 @@ const markdownSrc = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "chat_markdown.js"),
   "utf8"
 );
+const messageFormattingSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "chat_message_formatting.js"),
+  "utf8"
+);
 
 function extractFn(source, name) {
   const needle = `function ${name}(`;
@@ -115,20 +119,14 @@ function makeDomStub() {
 
 const escHtml = extractFn(src, "escapeHtml");
 const renderFormatted = extractFn(src, "renderFormattedMessage");
-const rendererStart = src.indexOf("function appendMarkdownSegment(");
-const rendererEnd = src.indexOf("function generateSuggestions(");
-if (rendererStart === -1 || rendererEnd === -1 || rendererEnd <= rendererStart) {
-  throw new Error("renderer helper block not found");
-}
-const rendererBlock = src.slice(rendererStart, rendererEnd);
 
 const sandbox = new Function("document", "URL", `
   "use strict";
   ${escHtml}
   ${formattingSrc}
   ${markdownSrc}
+  ${messageFormattingSrc}
   ${renderFormatted}
-  ${rendererBlock}
   return {
     escapeHtml,
     stripModelFunctionTags,
@@ -245,6 +243,26 @@ assert("appendCodeBlock adds a copy action", codeTarget.innerHTML.includes('data
 assert("isMarkdownBlockStart detects list starts", isMarkdownBlockStart("- item"));
 assert("isMarkdownBlockStart detects table rows", isMarkdownBlockStart("| A | B |"));
 assert("isMarkdownBlockStart ignores plain text", !isMarkdownBlockStart("plain text"));
+
+console.log("\nmessage formatting boundary:");
+const plainMessage = formatMessage("hello world");
+assert("formatMessage renders plain text", plainMessage === "hello world", plainMessage);
+
+const emptyMessage = formatMessage("");
+assert("formatMessage renders empty string as empty", emptyMessage === "", emptyMessage);
+
+const multilineMessage = formatMessage("line one\nline two");
+assert("formatMessage preserves multiline text with line breaks", multilineMessage === "line one<br>line two", multilineMessage);
+
+const tableMessage = formatMessage("| Name | Status |\n| --- | --- |\n| Lexa | **Ready** |");
+assert("formatMessage renders tables", tableMessage.includes("<table") && tableMessage.includes("<th>Name</th>") && tableMessage.includes("<strong>Ready</strong>"), tableMessage);
+
+const functionTagMessage = formatMessage("before <function=tool>{\"x\":1}</function> after");
+assert("formatMessage strips model function tags", functionTagMessage === "before  after", functionTagMessage);
+
+const mixedMessage = formatMessage("## Title\n\n- **Item**\n\n```js\nalert('<x>')\n```\n\n[safe](https://example.com)");
+assert("formatMessage handles mixed markdown blocks", mixedMessage.includes('<h3 class="chat-h3">Title</h3>') && mixedMessage.includes("<ul") && mixedMessage.includes("<pre") && mixedMessage.includes("<a "), mixedMessage);
+assert("formatMessage escapes mixed code content", mixedMessage.includes("&lt;x&gt;") && !mixedMessage.includes("<x>"), mixedMessage);
 
 console.log("\nformatMessage():");
 
