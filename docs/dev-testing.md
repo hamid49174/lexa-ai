@@ -27,6 +27,7 @@ Full runs everything in Quick, then:
 - eval regression gate against `evals\baselines\eval_baseline.json`
 - full Python suite with `venv\Scripts\python.exe -m pytest -q`
 - Electron presence-challenge smoke
+- Electron startup health smoke
 - Electron UI visual smoke
 
 ## Eval Gate
@@ -36,6 +37,30 @@ powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode Eva
 ```
 
 Eval mode runs only Git safety, the offline eval suite, and the eval regression gate. Use it when changing Golden Tasks, adapters, baselines, or triage tooling and you want a fast PR-compatible regression check before running the broader Quick or Full gates.
+
+## Release Candidate Check
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1
+```
+
+The release-candidate check orchestrates Full Quality Gates, Eval Regression Gate, Risky Artifact Check, Electron startup/presence smoke, OS quality gates when mounted, Hermes adapter smoke, website smoke, packaging config smoke, performance budget smoke, and final Git safety. It does not deploy, upload, delete files, or stage artifacts.
+
+Supporting release-readiness scripts:
+
+- `scripts\check_dependency_repro.ps1`: reports Python/Node versions and lockfile coverage without changing dependencies.
+- `scripts\check_risky_artifacts.ps1`: blocks staged local data, build artifacts, result artifacts, and optional secret-pattern scan paths.
+- `scripts\run_packaging_smoke.ps1`: checks Electron packaging config and scans build artifacts. Use `-Build` only for an explicit local package build.
+- `scripts\run_os_quality_gates.ps1`: runs OS SDK/MCP/Raw-Inbox checks when the OS mount is available.
+- `scripts\run_hermes_smoke.ps1`: runs Hermes adapter tests and staged-path safety checks.
+- `scripts\run_website_smoke.ps1`: checks the external website folder without deployment.
+- `scripts\check_performance_budgets.ps1`: measures warn-only eval suite timing.
+
+Release docs:
+
+- `docs/release/ci.md`
+- `docs/release/performance_budgets.md`
+- `docs/release/release_candidate_checklist.md`
 
 ## Local Artifacts
 

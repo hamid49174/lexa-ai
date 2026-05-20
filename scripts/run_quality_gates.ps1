@@ -33,6 +33,10 @@ $PhaseGateTests = @(
   "tests/test_eval_regression_checker.py",
   "tests/test_failure_triage.py",
   "tests/test_eval_baseline_update.py",
+  "tests/test_release_candidate_check.py",
+  "tests/test_quality_gate_scripts.py",
+  "tests/test_performance_budgets.py",
+  "tests/test_risky_artifact_check.py",
   "tests/test_eval_trace_replay.py",
   "tests/test_eval_plan_act_verify.py",
   "tests/test_eval_answer_quality.py",
@@ -69,7 +73,7 @@ function Invoke-Gate {
 }
 
 function Invoke-GitSafety {
-  Invoke-Gate "git diff --check" { git diff --check }
+  Invoke-Gate "git diff --check" { git -c core.autocrlf=false diff --check }
 
   Write-Host ""
   Write-Host "== git risky-path scan =="
@@ -88,6 +92,10 @@ function Invoke-GitSafety {
     throw "Risky paths are staged: $($riskyStaged -join ', ')"
   }
   Write-Host "No risky paths are staged."
+}
+
+function Invoke-RiskyArtifactCheck {
+  Invoke-Gate "risky artifact check" { powershell -ExecutionPolicy Bypass -File "scripts\check_risky_artifacts.ps1" -Mode Strict }
 }
 
 function Invoke-PythonPhaseGate {
@@ -133,12 +141,14 @@ function Invoke-ElectronSmokeGate {
     Write-Warning "Electron binary not found at $Electron; skipping Electron smoke gate."
     return
   }
+  Invoke-Gate "electron startup health smoke" { & $Electron "tests/electron_startup_health_smoke.js" }
   Invoke-Gate "electron presence challenge smoke" { & $Electron "tests/electron_presence_challenge_smoke.js" }
   Invoke-Gate "electron UI visual smoke" { & $Electron "tests/electron_ui_visual_smoke.js" }
 }
 
 Write-Host "Lexa quality gates ($Mode)"
 Invoke-GitSafety
+Invoke-RiskyArtifactCheck
 
 if ($Mode -eq "Eval") {
   Invoke-EvalSuite

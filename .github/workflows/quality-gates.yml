@@ -1,0 +1,129 @@
+name: Quality Gates
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  quick-quality-gates:
+    name: Quick quality gates
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m venv venv
+          .\venv\Scripts\python.exe -m pip install --upgrade pip
+          .\venv\Scripts\python.exe -m pip install -r requirements.txt
+          .\venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Risky artifact check
+        shell: pwsh
+        run: .\scripts\check_risky_artifacts.ps1 -Mode Strict
+
+      - name: Quick gate
+        shell: pwsh
+        run: .\scripts\run_quality_gates.ps1 -Mode Quick
+
+      - name: Eval regression gate
+        shell: pwsh
+        run: .\scripts\run_eval_regression_gate.ps1
+
+  full-python:
+    name: Full Python suite
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m venv venv
+          .\venv\Scripts\python.exe -m pip install --upgrade pip
+          .\venv\Scripts\python.exe -m pip install -r requirements.txt
+          .\venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+
+      - name: Run full Python tests
+        shell: pwsh
+        run: .\venv\Scripts\python.exe -m pytest -q
+
+  release-readiness-smoke:
+    name: Release readiness smoke
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m venv venv
+          .\venv\Scripts\python.exe -m pip install --upgrade pip
+          .\venv\Scripts\python.exe -m pip install -r requirements.txt
+          .\venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+          npm ci --prefix frontend
+
+      - name: Packaging config smoke
+        shell: pwsh
+        run: .\scripts\run_packaging_smoke.ps1
+
+      - name: Hermes adapter smoke
+        shell: pwsh
+        run: .\scripts\run_hermes_smoke.ps1
+
+      - name: Website smoke
+        shell: pwsh
+        run: .\scripts\run_website_smoke.ps1
+
+      - name: OS gates if mounted
+        shell: pwsh
+        run: .\scripts\run_os_quality_gates.ps1 -AllowMissing
+
+      - name: Performance budget smoke
+        shell: pwsh
+        run: .\scripts\check_performance_budgets.ps1

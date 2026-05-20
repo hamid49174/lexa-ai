@@ -214,7 +214,14 @@ node tests/test_chat_rendering.js
 venv\Scripts\python -m flake8 backend companion voice --max-line-length=120 --ignore=E501,W503,E402
 ```
 
-Aktuell laufen 317 Backend-Tests (pytest) plus 13 Frontend-Rendering-Checks.
+Release-readiness gates:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode Full
+powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1
+```
+
+The release-candidate check is local only. It does not deploy, upload, delete files, or commit build artifacts. See `docs/release/release_candidate_checklist.md`.
 
 ---
 
