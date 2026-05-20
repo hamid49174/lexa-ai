@@ -18,7 +18,9 @@ $PhaseGateTests = @(
   "tests/test_hermes_adapter.py",
   "tests/test_os_agent_runtime.py",
   "tests/test_plugin_manager.py",
-  "tests/test_plugin_permissions.py"
+  "tests/test_plugin_permissions.py",
+  "tests/test_eval_runner.py",
+  "tests/test_agent_protocol.py"
 )
 $RiskyPaths = @(
   "personal_os",

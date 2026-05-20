@@ -38,6 +38,9 @@ tmp/
 vendor/
 audit.log
 bridge-audit.log
+evals/results/*
+!evals/results/.gitkeep
+!evals/results/README.md
 lexa_memory.db
 lexa_memory.db-*
 audio_cache/
