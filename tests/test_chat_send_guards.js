@@ -10,6 +10,10 @@ const src = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "chat.js"),
   "utf8"
 );
+const chatConstantsSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "chat_constants.js"),
+  "utf8"
+);
 const deI18n = fs.readFileSync(path.join(__dirname, "..", "frontend", "src", "i18n", "de.json"), "utf8");
 const enI18n = fs.readFileSync(path.join(__dirname, "..", "frontend", "src", "i18n", "en.json"), "utf8");
 
@@ -85,7 +89,7 @@ const sandbox = new Function(`
   ${extractFn(src, "verifyAnswerPromptFromText")}
   ${extractFn(src, "messageExportMarkdownFromText")}
   ${extractFn(src, "messageExportFilename")}
-  ${extractConstArray(src, "_AGENT_PATTERNS")}
+  ${extractConstArray(chatConstantsSrc, "_AGENT_PATTERNS")}
   ${extractFn(src, "_needsAgentMode")}
   ${extractFn(src, "sendMessage")}
   return {
