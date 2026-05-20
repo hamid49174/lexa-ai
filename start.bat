@@ -14,15 +14,15 @@ set "ERRORS=0"
 set "WARNINGS=0"
 
 :: ========================================
-::  0. Kill old Lexa processes
+::  0. Free old Lexa backend port
 :: ========================================
-echo  [0/6] Cleaning up old Lexa processes...
+echo  [0/6] Checking old Lexa backend port...
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000" ^| findstr "LISTENING" 2^>nul') do (
     taskkill /f /pid %%a >nul 2>&1
 )
-taskkill /f /im electron.exe >nul 2>&1
+call :STOP_LEXA_ELECTRON
 timeout /t 1 /nobreak >nul 2>&1
-call :OK "Old processes cleaned up"
+call :OK "Backend port cleanup complete"
 
 :: ========================================
 ::  1. Check Python installation
@@ -200,13 +200,17 @@ echo  Stopping Lexa AI...
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000" ^| findstr "LISTENING" 2^>nul') do (
     taskkill /f /pid %%a >nul 2>&1
 )
-taskkill /f /im electron.exe >nul 2>&1
+call :STOP_LEXA_ELECTRON
 echo  Done. Goodbye!
 exit /b 0
 
 :: ========================================
 ::  Helper functions
 :: ========================================
+
+:STOP_LEXA_ELECTRON
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Join-Path '%~dp0' 'frontend\node_modules\electron\dist\electron.exe'; if (Test-Path -LiteralPath $p) { $resolved = (Resolve-Path -LiteralPath $p).Path; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'electron.exe' -and $_.ExecutablePath -eq $resolved } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }" >nul 2>&1
+exit /b 0
 
 :OK
 echo    [OK]   %~1

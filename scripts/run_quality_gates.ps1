@@ -41,6 +41,7 @@ $PhaseGateTests = @(
   "tests/test_risky_artifact_check.py",
   "tests/test_clean_clone_smoke_script.py",
   "tests/test_installer_smoke_script.py",
+  "tests/test_start_launcher_static.py",
   "tests/test_fastapi_lifespan.py",
   "tests/test_eval_trace_replay.py",
   "tests/test_eval_plan_act_verify.py",

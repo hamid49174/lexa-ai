@@ -310,11 +310,14 @@ function installRendererConsoleGuard(webContents) {
 // ── BACKEND PROCESS MANAGEMENT ──────────────────
 let backendProcess = null;
 const BACKEND_RESTART_DELAY_MS = 1500;
+const BACKEND_RESTART_MAX_DELAY_MS = 30000;
+const BACKEND_RESTART_MAX_ATTEMPTS = 5;
 const EXTERNAL_LEXA_BACKEND = "__external_lexa_backend__";
 const AUTH_MISMATCH_LEXA_BACKEND = "__auth_mismatch_lexa_backend__";
 const HEALTH_CHECK_BODY_LIMIT = 64 * 1024;
 const HEALTH_CHECK_TIMEOUT_MS = 2000;
 const INSTANCE_TOKEN = crypto.randomBytes(16).toString("hex");
+let backendRestartAttempts = 0;
 
 function getBackendPath() {
   // In development: use venv python
@@ -387,6 +390,29 @@ async function _waitForBackend(maxRetries = 30) {
   return false;
 }
 
+function backendRestartDelayMs(attempt) {
+  const exponent = Math.max(0, Number(attempt || 0));
+  return Math.min(BACKEND_RESTART_DELAY_MS * (2 ** exponent), BACKEND_RESTART_MAX_DELAY_MS);
+}
+
+function resetBackendRestartBackoff() {
+  backendRestartAttempts = 0;
+}
+
+function scheduleBackendRestart(log = console.log) {
+  if (backendRestartAttempts >= BACKEND_RESTART_MAX_ATTEMPTS) {
+    log("[Backend] Restart limit reached; leaving backend stopped until app restart");
+    return;
+  }
+
+  const delay = backendRestartDelayMs(backendRestartAttempts);
+  backendRestartAttempts += 1;
+  setTimeout(() => {
+    if (app.isQuitting || backendProcess) return;
+    startBackend().catch((err) => log("[Backend] Restart failed:", err.message || err));
+  }, delay);
+}
+
 async function startBackend() {
   // Check if port is already in use
   if (await isPortInUse(8000)) {
@@ -430,15 +456,13 @@ async function startBackend() {
     _log("[Backend] Exited with code:", code);
     if (backendProcess === child) backendProcess = null;
     if (!app.isQuitting) {
-      setTimeout(() => {
-        if (app.isQuitting || backendProcess) return;
-        startBackend().catch((err) => _log("[Backend] Restart failed:", err.message || err));
-      }, BACKEND_RESTART_DELAY_MS);
+      scheduleBackendRestart(_log);
     }
   });
 
   // Wait for backend to be ready
   const ready = await _waitForBackend();
+  if (ready) resetBackendRestartBackoff();
   _log("[Backend]", ready ? "Health check passed - backend is ready" : "Health check failed after 15s");
 }
 
@@ -1145,6 +1169,26 @@ safeIpcOn("set-autostart", (_event, enabled) => {
 });
 
 // ── UPDATE CHECK ────────────────────────────────
+const UPDATE_GITHUB_OWNER = "alexsprogis";
+const UPDATE_GITHUB_REPO = "lexa-ai";
+const UPDATE_GITHUB_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
+function githubLatestReleasePath(owner = UPDATE_GITHUB_OWNER, repo = UPDATE_GITHUB_REPO) {
+  if (!UPDATE_GITHUB_NAME_PATTERN.test(owner) || !UPDATE_GITHUB_NAME_PATTERN.test(repo)) return "";
+  return `/repos/${owner}/${repo}/releases/latest`;
+}
+
+function isExpectedGitHubReleaseUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "https:" &&
+      url.hostname === "github.com" &&
+      url.pathname.startsWith(`/${UPDATE_GITHUB_OWNER}/${UPDATE_GITHUB_REPO}/releases/`);
+  } catch (_error) {
+    return false;
+  }
+}
+
 function checkForUpdates() {
   let currentVersion;
   try {
@@ -1154,9 +1198,12 @@ function checkForUpdates() {
     return;
   }
 
+  const releasePath = githubLatestReleasePath();
+  if (!releasePath) return;
+
   const options = {
     hostname: "api.github.com",
-    path: "/repos/alexsprogis/lexa-ai/releases/latest",
+    path: releasePath,
     headers: { "User-Agent": "Lexa-AI" },
     timeout: 5000,
   };
@@ -1174,7 +1221,7 @@ function checkForUpdates() {
             mainWindow.webContents.send("update-available", {
               current: currentVersion,
               latest: latestVersion,
-              url: release.html_url || "",
+              url: isExpectedGitHubReleaseUrl(release.html_url) ? release.html_url : "",
             });
           }
         }

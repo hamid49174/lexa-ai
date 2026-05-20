@@ -157,7 +157,8 @@ class TestExecuteCommand:
         assert res.status_code == 200
         data = res.json()
         assert data["success"] is False
-        assert "Kaboom" in data["error"]
+        assert data["error"] == "Command execution failed. Details were logged locally."
+        assert "Kaboom" not in data["error"]
 
 
 # ══════════════════════════════════════════════════
@@ -340,6 +341,44 @@ class TestBatchExecution:
         data = res.json()
         assert data["success"] is True
         assert len(data["results"]) == 0
+
+    def test_batch_rate_limits_each_command(self, client, monkeypatch):
+        tc, mock_comp, _ = client
+        calls = []
+
+        def fake_check_rate_limit(bucket):
+            calls.append(bucket)
+            return len(calls) < 2
+
+        monkeypatch.setattr("backend.router_companion.check_rate_limit", fake_check_rate_limit)
+
+        res = tc.post("/companion/execute/batch", json={
+            "commands": [
+                {"command": "system_info"},
+                {"command": "screenshot"},
+            ],
+        })
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is False
+        assert [entry["success"] for entry in data["results"]] == [True, False]
+        assert calls == ["execute", "execute"]
+        assert mock_comp.execute.call_count == 1
+
+    def test_batch_exception_redacts_client_error(self, client):
+        tc, mock_comp, _ = client
+        mock_comp.execute.side_effect = RuntimeError("Sensitive local path C:\\Users\\admin\\secret.txt")
+
+        res = tc.post("/companion/execute/batch", json={
+            "commands": [{"command": "system_info"}],
+        })
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is False
+        assert data["results"][0]["error"] == "Command execution failed. Details were logged locally."
+        assert "Sensitive local path" not in data["results"][0]["error"]
 
 
 # ══════════════════════════════════════════════════

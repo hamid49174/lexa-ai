@@ -47,6 +47,9 @@ assert("captures spawned backend child", src.includes("const child = backendProc
 assert("does not restart while quitting", src.includes("if (!app.isQuitting)") && src.includes("if (app.isQuitting || backendProcess) return;"));
 assert("restarts backend after unexpected exit", src.includes("startBackend().catch") && src.includes("Restart failed"));
 assert("only clears matching backend child", src.includes("if (backendProcess === child) backendProcess = null;"));
+assert("bounds backend restart retries", src.includes("BACKEND_RESTART_MAX_ATTEMPTS") && src.includes("backendRestartAttempts >= BACKEND_RESTART_MAX_ATTEMPTS"));
+assert("uses exponential backend restart backoff", src.includes("function backendRestartDelayMs") && src.includes("2 ** exponent") && src.includes("BACKEND_RESTART_MAX_DELAY_MS"));
+assert("resets backend restart backoff after health success", src.includes("function resetBackendRestartBackoff") && src.includes("if (ready) resetBackendRestartBackoff();"));
 
 console.log("\nElectron tray labels:");
 assert("uses ASCII tray tooltip", src.includes('tray.setToolTip("Lexa AI - Lokaler KI-Assistent")'));
@@ -83,6 +86,11 @@ console.log("\nElectron bridge audit and smoke guard:");
 assert("rotates bridge audit log under userData", src.includes("BRIDGE_AUDIT_MAX_BYTES") && src.includes("function rotateBridgeAuditIfNeeded") && src.includes('app.getPath("userData")') && src.includes("`${auditPath}.1`"));
 assert("bridge audit records effective risk classification", src.includes("base_risk") && src.includes("effective_risk") && src.includes("classification_reason"));
 assert("smoke mock is fail-closed outside non-packaged smoke tests", src.includes("function hardenSmokeMockEnvironment") && src.includes("app.isPackaged") && src.includes("delete process.env.LEXA_ELECTRON_SMOKE_MOCK") && src.includes("function isElectronSmokeTestContext"));
+
+console.log("\nElectron update checks:");
+assert("uses expected GitHub owner and repo constants", src.includes('const UPDATE_GITHUB_OWNER = "alexsprogis"') && src.includes('const UPDATE_GITHUB_REPO = "lexa-ai"'));
+assert("validates GitHub release API path parts", src.includes("function githubLatestReleasePath") && src.includes("UPDATE_GITHUB_NAME_PATTERN.test"));
+assert("redacts unexpected update URLs", src.includes("function isExpectedGitHubReleaseUrl") && src.includes('url.hostname === "github.com"') && src.includes("isExpectedGitHubReleaseUrl(release.html_url) ? release.html_url : \"\""));
 
 console.log("\nElectron IPC error containment:");
 assert("defines safe IPC wrappers", src.includes("function safeIpcHandle(channel, handler, options = {})") && src.includes("function safeIpcOn(channel, handler, options = {})"));

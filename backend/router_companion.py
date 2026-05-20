@@ -20,6 +20,7 @@ from backend.personal_os_actions import execute_personal_os_action, is_personal_
 
 logger = logging.getLogger("lexa.companion")
 router = APIRouter(prefix="/companion", tags=["companion"])
+GENERIC_EXECUTION_ERROR = "Command execution failed. Details were logged locally."
 
 
 class CommandRequest(BaseModel):
@@ -173,7 +174,7 @@ async def execute_command(req: CommandRequest):
     except Exception as e:
         logger.error(f"companion.execute() failed for '{command}': {e}", exc_info=True)
         audit_log(command, "execution_error", str(e))
-        return CommandResponse(success=False, error=f"Ausführungsfehler: {str(e)}")
+        return CommandResponse(success=False, error=GENERIC_EXECUTION_ERROR)
 
 
 @router.get("/commands")
@@ -247,9 +248,6 @@ async def execute_batch(req: BatchCommandRequest):
     are never executed in batch mode. Individual command failures are caught and
     collected — they don't crash the entire batch.
     """
-    if not check_rate_limit("execute"):
-        return {"success": False, "error": "Rate limit erreicht.", "results": []}
-
     if len(req.commands) > 10:
         return {"success": False, "error": t("command.batchMax"), "results": []}
 
@@ -257,8 +255,8 @@ async def execute_batch(req: BatchCommandRequest):
     all_ok = True
 
     for i, cmd in enumerate(req.commands):
-        # Per-command rate limit check (prevent batch bypass of rate limits)
-        if i > 0 and not check_rate_limit("execute"):
+        # Per-command rate limit check (prevent batch bypass of rate limits).
+        if not check_rate_limit("execute"):
             entry = {"command": cmd.command, "success": False, "error": "Rate limit innerhalb Batch erreicht."}
             results.append(entry)
             all_ok = False
@@ -321,7 +319,7 @@ async def execute_batch(req: BatchCommandRequest):
         except Exception as e:
             logger.error(f"Batch command '{cmd.command}' failed: {e}", exc_info=True)
             audit_log(cmd.command, "execution_error", str(e))
-            entry = {"command": cmd.command, "success": False, "error": f"Ausführungsfehler: {str(e)}"}
+            entry = {"command": cmd.command, "success": False, "error": GENERIC_EXECUTION_ERROR}
 
         results.append(entry)
 

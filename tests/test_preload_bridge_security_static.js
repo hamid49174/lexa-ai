@@ -146,10 +146,21 @@ function testBridgeArgsHash(args = []) {
 const hashA = testBridgeArgsHash([{ b: 2, a: { y: "yes", x: 1 } }]);
 const hashB = testBridgeArgsHash([{ a: { x: 1, y: "yes" }, b: 2 }]);
 const hashC = testBridgeArgsHash([{ a: { x: 2, y: "yes" }, b: 2 }]);
+const deepValue = {};
+let cursor = deepValue;
+for (let i = 0; i < 20; i += 1) {
+  cursor.next = {};
+  cursor = cursor.next;
+}
+const wideValue = Object.fromEntries(Array.from({ length: 80 }, (_, index) => [`key${String(index).padStart(2, "0")}`, index]));
+const longValue = "x".repeat(700);
 assert("preload uses sandbox-safe WebCrypto for args_hash", preloadSrc.includes("async function bridgeArgsHash") && preloadSrc.includes("globalThis.crypto?.subtle") && !preloadSrc.includes('require("crypto")'));
 assert("args_hash is stable for key order", hashA === hashB && /^[a-f0-9]{64}$/.test(hashA));
 assert("args_hash changes when args change", hashA !== hashC);
 assert("arg keys expose only structure, not values", bridgeArgKeys([{ api_key: "SECRET", nested: "private" }]).join(",") === "arg0.api_key,arg0.nested");
+assert("stable bridge values bound deep nesting", JSON.stringify(stableBridgeValue(deepValue)).includes("[MaxDepth]"));
+assert("stable bridge values truncate wide objects", stableBridgeValue(wideValue).__truncated_keys === 30);
+assert("stable bridge values summarize long strings", stableBridgeValue(longValue).__type === "String" && stableBridgeValue(longValue).length === 700);
 assert("executeBatch allows only read-only companion commands", validateExecuteBatchCommands([{ command: "system_info" }, { command: "weather_current" }]).ok === true);
 assert("executeBatch blocks mutating or unknown companion commands", validateExecuteBatchCommands([{ command: "file_write" }]).ok === false && validateExecuteBatchCommands([{ command: "personal_os_apply" }]).ok === false);
 

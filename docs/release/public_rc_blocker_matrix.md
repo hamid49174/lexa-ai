@@ -14,6 +14,7 @@ Phase 4F turned the remaining PublicRC work into explicit blockers, warnings, ow
 | PRC-008 | Signing | blocked | warning | blocking | blocking | Signing secrets must never enter Git or build artifacts. | Secret-store or protected CI signing design. | Keep keys out of repo, use secure store/GitHub Secrets only after remote CI exists. | user / external | yes | yes |
 | PRC-009 | CI | not proven | warning | blocking | blocking | Remote runners may not have OS/Hermes/Website local paths. | Remote skip/warn behavior must be observed in Actions. | Run remote CI and confirm local-only gates skip or warn honestly. | user | yes | yes |
 | PRC-010 | Release | not proven | warning | blocking | blocking | Artifact policy must hold on the actual remote runner. | Remote proof that risky artifact scan blocks result/build/userdata paths. | Run remote CI with `scripts\check_risky_artifacts.ps1` and record outcome. | user | yes | yes |
+| PRC-011 | License integrity | decision required | warning | blocking | blocking | Local license files can be edited by the client and are not a cryptographic entitlement proof. | Server-backed signed license or explicit business acceptance of local-only enforcement limits. | Decide license entitlement model before PublicRC and record whether local checks are only defense-in-depth. | user / product | yes | partly |
 
 ## Phase 5B Action Classification
 
@@ -29,11 +30,12 @@ Phase 4F turned the remaining PublicRC work into explicit blockers, warnings, ow
 | Public artifact policy | External CI proof needed | Local risky-artifact checks pass; remote runner behavior is not proven. | Prove risky artifact policy in GitHub Actions without publishing build/eval/trace artifacts. |
 | Remote CI artifact policy | External CI proof needed | Workflow is designed to avoid result/build artifact uploads, but no remote run exists. | Run GitHub Actions and confirm no release artifacts, eval results, traces, logs, or userdata are uploaded. |
 | PublicRelease legal/privacy docs | User/legal/product decision needed | Privacy checklist exists, not release-owner approved. | Complete and approve public privacy/release notes before PublicRelease. |
+| License integrity model | User/product/security decision needed | Local license storage exists, but PublicRC-grade entitlement/integrity is not proven. | Choose server-backed signed license validation or explicitly accept local-only license checks as non-security enforcement. |
 
 ## Current Tier Decision
 
 - InternalRC: possible with Needs Review warnings.
-- PublicRC: blocked until PRC-001, PRC-002, PRC-003, PRC-004/006, PRC-005, PRC-009, and PRC-010 are resolved or explicitly accepted by the release owner.
+- PublicRC: blocked until PRC-001, PRC-002, PRC-003, PRC-004/006, PRC-005, PRC-009, PRC-010, and PRC-011 are resolved or explicitly accepted by the release owner.
 - PublicRelease: additionally blocked until PRC-007 is reviewed/approved and all PublicRC blockers are resolved.
 
 ## Phase 5A Decisions
@@ -53,6 +55,7 @@ Phase 4F turned the remaining PublicRC work into explicit blockers, warnings, ow
 - Website remains `static-external` and PublicRC-blocking until the user approves a website release target.
 - OS cleanup remains a separate backup-first review project; Lexa does not stage, delete, archive, or commit OS data.
 - Privacy/trace consent is now concrete enough for review, but not approved for PublicRelease.
+- License integrity remains a product/security decision: local tamper checks alone must not be represented as strong license enforcement.
 
 ## Non-Code Prerequisites
 
@@ -63,3 +66,4 @@ Some blockers cannot be solved by patching this repository alone:
 - Signing requires certificate procurement and secure secret handling.
 - OS cleanup requires human review of private external data.
 - Website release target requires a product/release ownership decision.
+- License integrity requires a product/security decision if PublicRC includes paid entitlement enforcement.

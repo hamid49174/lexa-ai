@@ -19,6 +19,7 @@ def test_quality_gates_include_release_script_tests_and_startup_smoke():
     assert "test_risky_artifact_check.py" in src
     assert "test_clean_clone_smoke_script.py" in src
     assert "test_installer_smoke_script.py" in src
+    assert "test_start_launcher_static.py" in src
     assert "test_fastapi_lifespan.py" in src
     assert "check_risky_artifacts.ps1" in src
     assert "electron_startup_health_smoke.js" in src

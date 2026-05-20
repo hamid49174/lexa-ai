@@ -420,13 +420,24 @@ function classifyBridgeCall(method, args = []) {
   return effectiveBridgePolicy(basePolicy);
 }
 
-function stableBridgeValue(value, seen = new WeakSet()) {
+function stableBridgeValue(value, seen = new WeakSet(), depth = 0) {
+  const MAX_DEPTH = 8;
+  const MAX_ARRAY_ITEMS = 50;
+  const MAX_OBJECT_KEYS = 50;
+  const MAX_STRING_CHARS = 512;
+
   if (value === null || value === undefined) return value;
   const valueType = typeof value;
-  if (valueType === "string" || valueType === "number" || valueType === "boolean") return value;
+  if (valueType === "string") {
+    return value.length > MAX_STRING_CHARS
+      ? { __type: "String", length: value.length, prefix: value.slice(0, MAX_STRING_CHARS) }
+      : value;
+  }
+  if (valueType === "number" || valueType === "boolean") return value;
   if (valueType === "bigint") return value.toString();
   if (valueType === "function") return "[Function]";
   if (valueType !== "object") return String(value);
+  if (depth >= MAX_DEPTH) return "[MaxDepth]";
   if (seen.has(value)) return "[Circular]";
   seen.add(value);
 
@@ -449,12 +460,22 @@ function stableBridgeValue(value, seen = new WeakSet()) {
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => stableBridgeValue(item, seen));
+    const normalizedItems = value
+      .slice(0, MAX_ARRAY_ITEMS)
+      .map((item) => stableBridgeValue(item, seen, depth + 1));
+    if (value.length > MAX_ARRAY_ITEMS) {
+      normalizedItems.push({ __truncated_items: value.length - MAX_ARRAY_ITEMS });
+    }
+    return normalizedItems;
   }
 
   const normalized = {};
-  for (const key of Object.keys(value).sort()) {
-    normalized[key] = stableBridgeValue(value[key], seen);
+  const keys = Object.keys(value).sort();
+  for (const key of keys.slice(0, MAX_OBJECT_KEYS)) {
+    normalized[key] = stableBridgeValue(value[key], seen, depth + 1);
+  }
+  if (keys.length > MAX_OBJECT_KEYS) {
+    normalized.__truncated_keys = keys.length - MAX_OBJECT_KEYS;
   }
   return normalized;
 }
