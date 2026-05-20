@@ -192,9 +192,10 @@ Current chat script order:
 7. `chat_message_actions.js`
 8. `chat_input_helpers.js`
 9. `chat_tool_confirmation_ui.js`
-10. `chat.js`
+10. `chat_history_ui.js`
+11. `chat.js`
 
-Remaining high-risk clusters: streaming send/abort, conversation history switching/deletion/persistence, non-confirmed tool-call execution/result rendering, confirmation approval execution, Companion execution, voice/STT/TTS/orb behavior, Personal OS draft apply/approve/reject flows, Electron preload IPC, Electron backend lifecycle, signing/update behavior, and OS cleanup.
+Remaining high-risk clusters: streaming send/abort, conversation history switching/deletion/persistence orchestration, non-confirmed tool-call execution/result rendering, confirmation approval execution, Companion execution, voice/STT/TTS/orb behavior, Personal OS draft apply/approve/reject flows, Electron preload IPC, Electron backend lifecycle, signing/update behavior, and OS cleanup.
 
 Stop-line: do not extract streaming, send pipeline, conversation switch/load/delete lifecycle, tool execution/result rendering, or confirmation approval execution until direct E2E or stronger integration coverage exists for those lifecycle paths.
 
@@ -242,10 +243,58 @@ Tests covering this boundary:
 
 Next recommended larger target: add a focused renderer smoke for mocked confirmation denial/approval clicks before moving any approval execution UI, or add focused conversation switch/load/delete smokes before extracting history lifecycle helpers. Do not split streaming or send pipeline code yet.
 
+## History Lifecycle Coverage and History UI Extraction
+
+This sprint added focused history lifecycle coverage first, then extracted only conversation sidebar render helpers into `frontend/src/chat_history_ui.js`.
+
+Coverage added:
+
+- `tests/electron_history_lifecycle_smoke.js` loads the real renderer with isolated Electron `userData` and the existing smoke mock bridge.
+- It verifies the initial empty history state, mocked conversation sidebar rows, safe title/preview rendering, selected row state, `switchConversation()` hydration order, Markdown formatting after history load, unsafe HTML containment, action-like persisted messages not becoming live tool controls, switching between two conversations, and deleting an inactive mocked conversation.
+- The delete assertion is limited to mocked bridge data and an inactive conversation. Real data deletion and active-conversation recovery remain out of scope for this pass.
+
+Extraction completed:
+
+| File | Before sprint | After sprint |
+| --- | ---: | ---: |
+| `frontend/src/chat.js` | 4466 lines / 189992 bytes | 4406 lines / 186353 bytes |
+| `frontend/src/chat_history_ui.js` | new | 100 lines / 4443 bytes |
+
+Moved functions:
+
+- `conversationListDisplayTitle(conversation)`
+- `conversationListPreviewText(conversation)`
+- `renderConversationEmptyState(container, message)`
+- `createConversationListItem(conversation, options)`
+
+What stayed in `chat.js`:
+
+- `loadChatHistory()`
+- `renderPersistedConversationMessages()`
+- `switchConversation()`
+- `saveCurrentConversation()`
+- `deleteConversation()`
+- conversation backend calls
+- local storage and active-conversation orchestration
+- streaming and send pipeline behavior
+
+Tests covering this boundary:
+
+- `electron_history_lifecycle_smoke.js`
+- `electron_core_chat_flow_smoke.js`
+- `electron_tool_confirmation_smoke.js`
+- `test_frontend_script_order_static.js`
+- `test_chat_rendering.js`
+- `test_chat_send_guards.js`
+- `test_app_chat_input_wiring.js`
+- Electron startup and visual smokes
+
+Next recommended target: add focused history failure-path coverage for save/load/delete recovery before extracting any history orchestration, or add mocked confirmation click coverage before moving confirmation approval UI. Streaming and send pipeline remain stop-lined.
+
 ## Do Not Touch Yet
 
 - streaming send and abort behavior
-- conversation history switching/deletion persistence
+- conversation history switching/deletion persistence orchestration
 - tool execution/result rendering and confirmation approval execution
 - voice/STT/TTS/orb behavior
 - Personal OS draft apply/approve/reject flows
