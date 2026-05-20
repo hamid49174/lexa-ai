@@ -120,6 +120,40 @@ Tests covering this boundary:
 
 Next safest extraction target: pause further chat rendering extraction and review caller clusters around message actions or export helpers before moving more code. Streaming, conversation history, tool-call rendering, voice, Companion execution, and Personal OS draft flows remain out of scope.
 
+## Pass 5 Caller Cluster Review
+
+Pass 5 paused direct rendering extraction and mapped the remaining `chat.js` caller clusters before moving more code. The only extraction performed was the pure answer download formatting helper boundary: `messageExportMarkdownFromText()` and `messageExportFilename()` moved to `frontend/src/chat_export.js`.
+
+Size snapshot before and after Pass 5:
+
+| File | Before Pass 5 | After Pass 5 |
+| --- | ---: | ---: |
+| `frontend/src/chat.js` | 4402 lines / 209933 bytes | 4390 lines / 209340 bytes |
+| `frontend/src/chat_export.js` | new | 13 lines / 687 bytes |
+
+Caller cluster map:
+
+| Cluster | Approx. location/functions | Dependencies/globals | Mutates state | Touches DOM | Backend/fetch | Current coverage | Risk | Recommended next action |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Agent attention and local conversation metadata | `setNewConversationControlsBusy()`, `getMessagePersistText()`, `getAgentRunMeta()`, `renderAgentAttentionPanel()`, conversation local helpers near the first quarter of `chat.js` | `LexaState`, `localStorage`, agent metadata, i18n | Yes | Yes | No direct fetch in most helpers | send guards, input wiring, Electron smokes | Medium | Test specific pure metadata helpers before considering any extraction |
+| Conversation history lifecycle | `saveChatHistory()`, `persistChatAfterDomMutation()`, `renderPersistedConversationMessages()`, `clearChat()`, conversation switch/delete/load helpers | `LexaState`, `localStorage`, `window.lexa`, message DOM | Yes | Yes | Some conversation APIs | chat rendering, input wiring, Electron smokes | High | Leave in `chat.js` until stronger lifecycle E2E coverage exists |
+| Message action buttons | copy, continue, verify, workspace handoff, regenerate, action overflow, action button factories | i18n, `LexaState`, composer state, message DOM | Yes | Yes | Some actions send agent messages | app input wiring, send guards, Electron smokes | Medium | Add direct tests around individual pure prompt/label helpers before extraction |
+| Answer download formatting | `messageExportMarkdownFromText()`, `messageExportFilename()` | `Date`, string inputs only | No | No | No | direct send-guard helper tests, script-order static test | Low | Extracted to `chat_export.js` in Pass 5 |
+| Answer download action | `exportMessageMarkdown()`, `createMessageExportButton()` | `document`, `Blob`, `URL`, i18n, toast helpers | Temporary button state only | Yes | No | app input wiring, Electron smokes | Medium | Keep in `chat.js`; add browser-level download action coverage before moving |
+| Send and streaming lifecycle | `sendMessage()`, streaming chunk handling, abort handling, agent run updates | `LexaState`, provider settings, streaming response state, message DOM | Yes | Yes | Yes | send guards, rendering tests, Electron smokes | High | Do not extract in near term |
+| Tool-call and confirmation UI | tool action parsing, confirmation/denial paths, Companion execution prompts | tool state, `window.lexa`, confirmation UI, i18n | Yes | Yes | Yes | send guards and smoke coverage only | High | Document and test first; no extraction yet |
+| Composer palette and input wiring | slash-command palette, snippets, input sizing, keyboard/history behavior | `chatInput`, `LexaConfig`, `LexaState`, `localStorage`, i18n | Yes | Yes | No direct fetch | app input wiring, send guards | Medium | Possible future target only for pure command metadata helpers |
+| Provider/model UI and file/search helpers | model selector, file upload, search result rendering, model status helpers | `window.lexa`, files/search state, i18n | Yes | Yes | Yes | static wiring and Electron smokes | Medium-high | Test first and leave lifecycle code in `chat.js` |
+| Voice hooks | STT/TTS, wake-word/orb hooks, recording/playback state | voice globals, media APIs, backend voice APIs, orb DOM | Yes | Yes | Yes | voice static/settings tests and smokes | High | Out of scope for frontend modularization passes |
+
+Tests covering the Pass 5 extraction:
+
+- `test_chat_send_guards.js` directly checks normal markdown metadata, empty input, default title fallback, multiline source preservation, and stable filenames.
+- `test_frontend_script_order_static.js` verifies `chat_export.js` is a classic script loaded after `chat_message_formatting.js` and before `chat.js`.
+- `test_app_chat_input_wiring.js` verifies the helper file exists while the DOM download action remains wired in `chat.js`.
+
+Next safest extraction target: do not continue rendering extraction immediately. If another small extraction is needed, target only pure composer command metadata or pure message action prompt helpers after adding direct tests. Streaming, history, tool-call rendering, confirmation UI, voice, Companion execution, and Personal OS draft flows remain intentionally untouched.
+
 ## Do Not Touch Yet
 
 - streaming send and abort behavior

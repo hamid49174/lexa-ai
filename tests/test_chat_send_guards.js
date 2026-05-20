@@ -14,6 +14,10 @@ const chatConstantsSrc = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "chat_constants.js"),
   "utf8"
 );
+const chatExportSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "chat_export.js"),
+  "utf8"
+);
 const deI18n = fs.readFileSync(path.join(__dirname, "..", "frontend", "src", "i18n", "de.json"), "utf8");
 const enI18n = fs.readFileSync(path.join(__dirname, "..", "frontend", "src", "i18n", "en.json"), "utf8");
 
@@ -87,8 +91,8 @@ const sandbox = new Function(`
   ${extractFn(src, "workspaceDraftPromptFromText")}
   ${extractFn(src, "continuePromptFromText")}
   ${extractFn(src, "verifyAnswerPromptFromText")}
-  ${extractFn(src, "messageExportMarkdownFromText")}
-  ${extractFn(src, "messageExportFilename")}
+  ${extractFn(chatExportSrc, "messageExportMarkdownFromText")}
+  ${extractFn(chatExportSrc, "messageExportFilename")}
   ${extractConstArray(chatConstantsSrc, "_AGENT_PATTERNS")}
   ${extractFn(src, "_needsAgentMode")}
   ${extractFn(src, "sendMessage")}
@@ -207,6 +211,10 @@ function assert(desc, ok, detail = "") {
   assert("verify-answer prompt clips long answers", sandbox.verifyAnswerPromptFromText("x".repeat(8100)).includes("chat.verifyAnswerClipMarker"));
   const exportedMarkdown = sandbox.messageExportMarkdownFromText("Alpha answer", { title: "Lexa Note", exportedAt: "2026-05-18T04:58:14.627Z" });
   assert("message markdown export keeps source and metadata", exportedMarkdown.includes("# Lexa Note") && exportedMarkdown.includes("Exported: 2026-05-18T04:58:14.627Z") && exportedMarkdown.includes("Source: Lexa chat") && exportedMarkdown.endsWith("Alpha answer\n"));
+  assert("message markdown export skips empty source", sandbox.messageExportMarkdownFromText("   ") === "");
+  const defaultExportedMarkdown = sandbox.messageExportMarkdownFromText("Body", { title: "   ", exportedAt: "2026-05-18T04:58:14.627Z" });
+  assert("message markdown export falls back to default title", defaultExportedMarkdown.startsWith("# Lexa Answer\n\n- Exported: 2026-05-18T04:58:14.627Z"));
+  assert("message markdown export preserves multiline source", sandbox.messageExportMarkdownFromText("Line 1\n\nLine 2", { exportedAt: "2026-05-18T04:58:14.627Z" }).endsWith("Line 1\n\nLine 2\n"));
   assert("message markdown export uses stable filename", sandbox.messageExportFilename(new Date("2026-05-18T04:58:14.627Z")) === "lexa-answer-2026-05-18T04-58-14-627Z.md");
   const persistedMessage = { dataset: { persistText: "**Bold**\\n\\n```js\\nconst x = 1;\\n```" }, querySelector() { return { textContent: "rendered fallback" }; } };
   assert("message text helper prefers raw persisted markdown", sandbox.getMessagePersistText(persistedMessage).includes("```js") && !sandbox.getMessagePersistText(persistedMessage).includes("rendered fallback"));

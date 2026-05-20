@@ -13,6 +13,7 @@ const chatConstantsSrc = fs.readFileSync(path.join(root, "frontend", "src", "cha
 const chatFormattingSrc = fs.readFileSync(path.join(root, "frontend", "src", "chat_formatting.js"), "utf8");
 const chatMarkdownSrc = fs.readFileSync(path.join(root, "frontend", "src", "chat_markdown.js"), "utf8");
 const chatMessageFormattingSrc = fs.readFileSync(path.join(root, "frontend", "src", "chat_message_formatting.js"), "utf8");
+const chatExportSrc = fs.readFileSync(path.join(root, "frontend", "src", "chat_export.js"), "utf8");
 
 let passed = 0;
 let failed = 0;
@@ -43,6 +44,7 @@ const expectedTail = [
   "./chat_formatting.js",
   "./chat_markdown.js",
   "./chat_message_formatting.js",
+  "./chat_export.js",
   "./chat.js",
   "./productivity.js",
   "./dashboard.js",
@@ -60,15 +62,18 @@ assert("chat constants load before chat.js", scripts.indexOf("./chat_constants.j
 assert("chat formatting loads after constants and before chat.js", scripts.indexOf("./chat_formatting.js") > scripts.indexOf("./chat_constants.js") && scripts.indexOf("./chat_formatting.js") < scripts.indexOf("./chat.js"));
 assert("chat markdown loads after formatting and before chat.js", scripts.indexOf("./chat_markdown.js") > scripts.indexOf("./chat_formatting.js") && scripts.indexOf("./chat_markdown.js") < scripts.indexOf("./chat.js"));
 assert("chat message formatting loads after markdown and before chat.js", scripts.indexOf("./chat_message_formatting.js") > scripts.indexOf("./chat_markdown.js") && scripts.indexOf("./chat_message_formatting.js") < scripts.indexOf("./chat.js"));
+assert("chat export loads after message formatting and before chat.js", scripts.indexOf("./chat_export.js") > scripts.indexOf("./chat_message_formatting.js") && scripts.indexOf("./chat_export.js") < scripts.indexOf("./chat.js"));
 assert("renderer scripts do not opt into module mode", !/<script\b[^>]*type=["']module["']/i.test(html));
 assert("chat constants file is classic script data", chatConstantsSrc.includes("const _AGENT_PATTERNS = [") && !/\b(import|export)\b/.test(chatConstantsSrc));
 assert("chat formatting file is classic helper script", chatFormattingSrc.includes("function stripModelFunctionTags(") && chatFormattingSrc.includes("function normalizeChatUrl(") && !/\b(import|export)\b/.test(chatFormattingSrc));
 assert("chat markdown file is classic helper script", chatMarkdownSrc.includes("function appendInlineMarkdown(") && chatMarkdownSrc.includes("function appendCodeBlock(") && !/\b(import|export)\b/.test(chatMarkdownSrc));
 assert("chat message formatting file is classic helper script", chatMessageFormattingSrc.includes("function appendMarkdownSegment(") && chatMessageFormattingSrc.includes("function formatMessage(") && !/\b(import|export)\b/.test(chatMessageFormattingSrc));
+assert("chat export file is classic helper script", chatExportSrc.includes("function messageExportMarkdownFromText(") && chatExportSrc.includes("function messageExportFilename(") && !/\b(import|export)\b/.test(chatExportSrc));
 assert("chat.js consumes extracted agent patterns", !chatSrc.includes("const _AGENT_PATTERNS = [") && chatSrc.includes("_AGENT_PATTERNS.some"));
 assert("extracted formatting helpers remain consumed", !chatSrc.includes("function stripModelFunctionTags(") && !chatSrc.includes("function normalizeChatUrl(") && chatMessageFormattingSrc.includes("stripModelFunctionTags(text)") && chatMarkdownSrc.includes("normalizeChatUrl(match["));
 assert("extracted markdown helpers remain consumed", !chatSrc.includes("function appendInlineMarkdown(") && !chatSrc.includes("function appendCodeBlock(") && chatMessageFormattingSrc.includes("appendMarkdownSegment(parent") && chatMessageFormattingSrc.includes("appendCodeBlock(parent"));
 assert("chat.js consumes extracted message formatting helpers", !chatSrc.includes("function appendMarkdownSegment(") && !chatSrc.includes("function appendFormattedMessage(") && !chatSrc.includes("function formatMessage(") && chatSrc.includes("appendFormattedMessage(target"));
+assert("chat.js consumes extracted export helpers", !chatSrc.includes("function messageExportMarkdownFromText(") && !chatSrc.includes("function messageExportFilename(") && chatSrc.includes("messageExportMarkdownFromText(text)") && chatSrc.includes("messageExportFilename()"));
 assert("Beta/Internal readiness labels remain in the shell", html.includes('data-readiness="beta"') && html.includes('data-readiness="internal"'));
 
 const ids = Array.from(html.matchAll(/\bid="([^"]+)"/g)).map((match) => match[1]);
