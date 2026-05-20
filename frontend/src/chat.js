@@ -1579,30 +1579,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   body.appendChild(msgTextEl);
 
   if (requiresConfirmation && action) {
-    const actionDiv = document.createElement("div");
-    actionDiv.className = "msg-action";
-    const actionLabel = document.createElement("div");
-    actionLabel.className = "action-label";
-    actionLabel.textContent = t("chat.confirmationRequired");
-    const actionCmd = document.createElement("div");
-    actionCmd.className = "action-cmd";
-    actionCmd.textContent = `${String(action.action)}(${JSON.stringify(action.params || {})})`;
-    actionDiv.appendChild(actionLabel);
-    actionDiv.appendChild(actionCmd);
-    body.appendChild(actionDiv);
-
-    const confirmBtn = document.createElement("button");
-    confirmBtn.type = "button";
-    confirmBtn.className = "confirm-btn";
-    confirmBtn.textContent = t("chat.confirmBtn");
-    confirmBtn.addEventListener("click", () => confirmAction(confirmBtn, encodeURIComponent(JSON.stringify(action))));
-    const denyBtn = document.createElement("button");
-    denyBtn.type = "button";
-    denyBtn.className = "deny-btn";
-    denyBtn.textContent = t("common.cancel");
-    denyBtn.addEventListener("click", () => denyAction(denyBtn));
-    body.appendChild(confirmBtn);
-    body.appendChild(denyBtn);
+    appendToolConfirmationUi(body, action);
   }
 
   msg.appendChild(avatar);
@@ -2201,30 +2178,7 @@ async function sendMessage() {
     if (actionData) {
       if (requiresConfirmation) {
         // Show confirmation UI only for dangerous actions
-        const actionDiv = document.createElement("div");
-        actionDiv.className = "msg-action";
-        const actionLabel = document.createElement("div");
-        actionLabel.className = "action-label";
-        actionLabel.textContent = t("chat.confirmationRequired");
-        const actionCmd = document.createElement("div");
-        actionCmd.className = "action-cmd";
-        actionCmd.textContent = `${String(actionData.action)}(${JSON.stringify(actionData.params || {})})`;
-        actionDiv.appendChild(actionLabel);
-        actionDiv.appendChild(actionCmd);
-        body.appendChild(actionDiv);
-
-        const confirmBtn = document.createElement("button");
-        confirmBtn.type = "button";
-        confirmBtn.className = "confirm-btn";
-        confirmBtn.textContent = t("chat.confirmBtn");
-        confirmBtn.addEventListener("click", () => confirmAction(confirmBtn, encodeURIComponent(JSON.stringify(actionData))));
-        const denyBtn = document.createElement("button");
-        denyBtn.type = "button";
-        denyBtn.className = "deny-btn";
-        denyBtn.textContent = t("common.cancel");
-        denyBtn.addEventListener("click", () => denyAction(denyBtn));
-        body.appendChild(confirmBtn);
-        body.appendChild(denyBtn);
+        appendToolConfirmationUi(body, actionData);
       } else {
         // Execute action and show REAL result in chat (not just toast)
         try {

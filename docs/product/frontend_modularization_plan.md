@@ -191,17 +191,62 @@ Current chat script order:
 6. `chat_composer_helpers.js`
 7. `chat_message_actions.js`
 8. `chat_input_helpers.js`
-9. `chat.js`
+9. `chat_tool_confirmation_ui.js`
+10. `chat.js`
 
-Remaining high-risk clusters: streaming send/abort, conversation history switching/deletion/persistence, tool-call rendering and confirmation UI, Companion execution, voice/STT/TTS/orb behavior, Personal OS draft apply/approve/reject flows, Electron preload IPC, Electron backend lifecycle, signing/update behavior, and OS cleanup.
+Remaining high-risk clusters: streaming send/abort, conversation history switching/deletion/persistence, non-confirmed tool-call execution/result rendering, confirmation approval execution, Companion execution, voice/STT/TTS/orb behavior, Personal OS draft apply/approve/reject flows, Electron preload IPC, Electron backend lifecycle, signing/update behavior, and OS cleanup.
 
-Stop-line: do not extract streaming, conversation history, tool-call rendering, or confirmation UI until direct E2E or stronger integration coverage exists for those lifecycle paths.
+Stop-line: do not extract streaming, send pipeline, conversation switch/load/delete lifecycle, tool execution/result rendering, or confirmation approval execution until direct E2E or stronger integration coverage exists for those lifecycle paths.
+
+## Internal Stability Sprint: Tool/History Coverage and Confirmation UI Split
+
+This sprint added focused renderer coverage first, then extracted only the duplicated render-only confirmation surface into `frontend/src/chat_tool_confirmation_ui.js`.
+
+Coverage added:
+
+- `tests/electron_tool_confirmation_smoke.js` loads the real renderer with isolated Electron `userData`, clicks the real send button, mocks only `/chat/stream`, and verifies a streamed `rc: true` action renders confirmation language, command/parameter text, confirm/deny controls, and escaped unsafe params without clearing or executing pending tools.
+- The same smoke calls `addMessage(..., action, true, true)` to cover direct render-only confirmation UI.
+- The history portion verifies persisted messages restore in order, assistant Markdown remains formatted, action-like persisted messages do not become live confirmation controls, the selected conversation row is marked, title/preview text renders safely, and the empty history state appears.
+
+Extraction completed:
+
+| File | Before sprint | After sprint |
+| --- | ---: | ---: |
+| `frontend/src/chat.js` | 4512 lines / 192304 bytes | 4466 lines / 189992 bytes |
+| `frontend/src/chat_tool_confirmation_ui.js` | new | 40 lines / 1388 bytes |
+
+Moved function:
+
+- `appendToolConfirmationUi(body, action)`
+
+What stayed in `chat.js`:
+
+- `confirmAction()`
+- `denyAction()`
+- streaming state and parser behavior
+- send pipeline behavior
+- history switch/load/delete lifecycle
+- Companion/tool execution calls
+- voice/STT/TTS behavior
+- Personal OS draft behavior
+
+Tests covering this boundary:
+
+- `electron_tool_confirmation_smoke.js`
+- `electron_core_chat_flow_smoke.js`
+- `test_frontend_script_order_static.js`
+- `test_chat_rendering.js`
+- `test_chat_send_guards.js`
+- `test_app_chat_input_wiring.js`
+- Electron startup and visual smokes
+
+Next recommended larger target: add a focused renderer smoke for mocked confirmation denial/approval clicks before moving any approval execution UI, or add focused conversation switch/load/delete smokes before extracting history lifecycle helpers. Do not split streaming or send pipeline code yet.
 
 ## Do Not Touch Yet
 
 - streaming send and abort behavior
 - conversation history switching/deletion persistence
-- tool-call rendering and confirmation UI
+- tool execution/result rendering and confirmation approval execution
 - voice/STT/TTS/orb behavior
 - Personal OS draft apply/approve/reject flows
 - Electron preload IPC risk policy
