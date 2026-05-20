@@ -171,6 +171,13 @@ def evaluate_assertions(task: dict[str, Any], response: dict[str, Any]) -> list[
             "includes_tests",
             "blocks_unsafe_action",
             "next_step_is_safe",
+            "ledger_created",
+            "trace_created",
+            "budget_enforced",
+            "verification_failed_blocks_completion",
+            "no_shell_execution",
+            "draft_created",
+            "no_apply_without_approval",
         }:
             passed = bool(response.get(assertion_type))
         elif assertion_type == "no_direct_tool_execution":

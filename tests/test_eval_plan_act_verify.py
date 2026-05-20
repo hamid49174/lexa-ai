@@ -24,7 +24,7 @@ def test_plan_act_verify_suite_runs():
     report = runner.run_suite([GOLDEN_DIR], suites=["plan_act_verify"])
 
     assert report["ok"] is True
-    assert report["task_count"] == 5
+    assert report["task_count"] == 8
 
 
 def test_plan_act_verify_bad_fixture_fails(tmp_path):

@@ -12,7 +12,7 @@ Quick runs:
 
 - `git diff --check`
 - risky-path staged check
-- Python phase gate for local auth, companion confirmation, router companion, AI tool selection, CSP, Hermes, OS agent runtime, plugin permissions, eval adapters, trace replay, trace sampling, synthetic trace generation, and the Plan/Act/Verify agent protocol
+- Python phase gate for local auth, companion confirmation, router companion, AI tool selection, CSP, Hermes, OS agent runtime, plugin permissions, eval adapters, agent simulations, trend reports, policy dashboard, trace replay, trace sampling, synthetic trace generation, and the Plan/Act/Verify agent protocol
 - offline eval suite with `venv\Scripts\python.exe evals\runners\run_eval_suite.py --all`
 - every `tests/test_*.js` static test with Node
 
@@ -66,7 +66,7 @@ venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite tool_selection
 venv\Scripts\python.exe evals\runners\run_eval_suite.py --all
 ```
 
-Golden tasks are JSONL records that describe an input, expected behavior, forbidden behavior, risk level, and deterministic assertions. They cover tool selection, memory, OS drafts, prompt injection, local security, answer quality, and synthetic trace replay. Local adapters may use synthetic fixtures, temp roots, and pure functions only.
+Golden tasks are JSONL records that describe an input, expected behavior, forbidden behavior, risk level, and deterministic assertions. They cover tool selection, memory, OS drafts, prompt injection, local security, answer quality, synthetic trace replay, Plan/Act/Verify, and agent simulation. Local adapters may use synthetic fixtures, temp roots, and pure functions only.
 
 Generated eval reports are local evidence only. If you write reports with `--output-json` or `--output-md`, keep them under `evals/results/`; Git ignores generated files in that directory.
 
@@ -94,6 +94,33 @@ venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite trace_replay --g
 ```
 
 Plan/Act/Verify regression evals live in `evals/golden_tasks/plan_act_verify.jsonl` and use synthetic fixtures only. They check plans, budgets, checkpoints, approval requirements, verification behavior, and review creation.
+
+Agent simulation evals live in `evals/golden_tasks/agent_simulation.jsonl` and run through local mock tools only:
+
+- `mock_memory_search`
+- `mock_os_draft_create`
+- `mock_companion_command`
+- `mock_plugin_action`
+- `mock_mcp_tool`
+- `mock_verification`
+
+Run them with:
+
+```powershell
+venv\Scripts\python.exe evals\runners\run_agent_simulation.py --list
+venv\Scripts\python.exe evals\runners\run_agent_simulation.py --simulation safe_memory_lookup
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite agent_simulation
+```
+
+Trend reports and policy dashboards are local-only report tools:
+
+```powershell
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --all --json-report evals\results\latest.json
+venv\Scripts\python.exe evals\runners\eval_trend_report.py evals\results\previous.json evals\results\latest.json --output-md evals\results\trend.md
+venv\Scripts\python.exe evals\runners\policy_dashboard.py evals\results\latest.json --output-md evals\results\policy_dashboard.md
+```
+
+Do not commit generated `evals/results/*.json`, `evals/results/*.md`, `evals/results/*.html`, trace JSONL files, or dashboard outputs. Use temp directories in tests and ignored `evals/results/` paths during local review.
 
 ## Agent Protocol
 

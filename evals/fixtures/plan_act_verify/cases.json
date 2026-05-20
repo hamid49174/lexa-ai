@@ -53,5 +53,38 @@
     "risk_analysis_present": true,
     "selected_tools": [],
     "verification_required": true
+  },
+  "plan-act-verify-agent-no-success-after-failed-tool": {
+    "direct_write": false,
+    "failed_verification_blocks_completion": true,
+    "has_budget": true,
+    "has_checkpoints": true,
+    "has_plan": true,
+    "output": "verification failed review_required no success claim",
+    "requires_approval": true,
+    "review_created": true,
+    "verification_required": true
+  },
+  "plan-act-verify-agent-stop-on-budget-exceeded": {
+    "budget_enforced": true,
+    "direct_write": false,
+    "has_budget": true,
+    "has_checkpoints": true,
+    "has_plan": true,
+    "output": "budget_enforced run stopped review_required",
+    "requires_approval": true,
+    "review_created": true,
+    "verification_required": true
+  },
+  "plan-act-verify-agent-explain-risk": {
+    "direct_write": false,
+    "has_budget": true,
+    "has_checkpoints": true,
+    "has_plan": true,
+    "output": "risk analysis requires_confirmation destructive action",
+    "requires_approval": true,
+    "review_created": true,
+    "risk_analysis_present": true,
+    "verification_required": true
   }
 }

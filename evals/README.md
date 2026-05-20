@@ -1,13 +1,16 @@
 # Lexa Eval Suite
 
-Phase 3A introduced offline, deterministic evals for product intelligence risks. Phase 3B connected those golden tasks to local adapters and fixtures. Phase 3C added synthetic agent trace replay and answer-quality fixture checks. Phase 3D adds controlled trace sampling, synthetic trace generation, stricter budget assertions, and Plan/Act/Verify regression evals. These evals are still not external LLM benchmarks: they run without network, API calls, real MCP servers, the real Personal OS mount, or the real memory database.
+Phase 3A introduced offline, deterministic evals for product intelligence risks. Phase 3B connected those golden tasks to local adapters and fixtures. Phase 3C added synthetic agent trace replay and answer-quality fixture checks. Phase 3D adds controlled trace sampling, synthetic trace generation, stricter budget assertions, and Plan/Act/Verify regression evals. Phase 3E adds local agent-run simulations, trend reports, and a small policy-failure dashboard. These evals are still not external LLM benchmarks: they run without network, API calls, real MCP servers, the real Personal OS mount, or the real memory database.
 
 ## Structure
 
 - `golden_tasks/`: JSONL task sets grouped by product capability.
-- `adapters/`: deterministic local adapters for tool selection, memory, OS drafts, trace replay, Plan/Act/Verify, answer quality, and security/prompt-injection checks.
+- `adapters/`: deterministic local adapters for tool selection, memory, OS drafts, trace replay, agent simulation, Plan/Act/Verify, answer quality, and security/prompt-injection checks.
 - `fixtures/`: synthetic local fixture data only.
 - `runners/run_eval_suite.py`: offline runner and schema validator.
+- `runners/run_agent_simulation.py`: local synthetic agent-run simulator with mock tools.
+- `runners/eval_trend_report.py`: local trend summaries for ignored JSON reports.
+- `runners/policy_dashboard.py`: local policy/trace failure dashboard generator.
 - `results/`: optional local reports. Result artifacts are ignored by Git except for placeholders.
 
 ## Golden Task Format
@@ -29,9 +32,9 @@ Each JSONL line is one task:
 }
 ```
 
-Allowed categories are `tool_selection`, `memory`, `os_drafts`, `prompt_injection`, `security`, `answer_quality`, `trace_replay`, and `plan_act_verify`.
+Allowed categories are `tool_selection`, `memory`, `os_drafts`, `prompt_injection`, `security`, `answer_quality`, `trace_replay`, `plan_act_verify`, and `agent_simulation`.
 
-Common assertion types include `contains`, `not_contains`, `selected_tool`, `not_selected_tool`, `tool_not_selected`, `selected_tool_prefix`, `blocked`, `requires_confirmation`, `creates_draft`, `no_direct_write`, `no_secret_leak`, `event_sequence_contains`, `event_sequence_not_contains`, `verification_passed`, `verification_failed_expected`, `budget_exceeded_detected`, `max_steps_not_exceeded`, `protected_write_requires_draft`, `has_plan`, `has_budget`, `verification_required`, `cites_evidence`, `no_overclaim`, and `includes_risk_analysis`.
+Common assertion types include `contains`, `not_contains`, `selected_tool`, `not_selected_tool`, `tool_not_selected`, `selected_tool_prefix`, `blocked`, `requires_confirmation`, `creates_draft`, `draft_created`, `no_direct_write`, `no_secret_leak`, `event_sequence_contains`, `event_sequence_not_contains`, `verification_passed`, `verification_failed_expected`, `verification_failed_blocks_completion`, `budget_exceeded_detected`, `budget_enforced`, `max_steps_not_exceeded`, `protected_write_requires_draft`, `ledger_created`, `trace_created`, `has_plan`, `has_budget`, `verification_required`, `no_shell_execution`, `no_apply_without_approval`, `cites_evidence`, `no_overclaim`, and `includes_risk_analysis`.
 
 ## Running Locally
 
@@ -96,6 +99,42 @@ Available synthetic scenarios include `safe_os_agent_task`, `prompt_injection_bl
 
 `golden_tasks/plan_act_verify.jsonl` checks multi-step agent behavior without live model calls. It verifies that risky requests produce plans, budgets, checkpoints, approval requirements, verification steps, and review outcomes instead of silent writes or unsafe completion.
 
+## Agent Simulation
+
+`golden_tasks/agent_simulation.jsonl` runs local synthetic agent scenarios through `runners/run_agent_simulation.py`. Mock tools include:
+
+- `mock_memory_search`: synthetic memory lookup only.
+- `mock_os_draft_create`: simulates draft creation without writing to the real OS.
+- `mock_companion_command`: simulates companion command decisions.
+- `mock_plugin_action`: simulates plugin permission checks, including shell denied by default.
+- `mock_mcp_tool`: simulates MCP tool consideration without calls.
+- `mock_verification`: simulates pass/fail verification.
+
+Run a simulation directly:
+
+```powershell
+venv\Scripts\python.exe evals\runners\run_agent_simulation.py --list
+venv\Scripts\python.exe evals\runners\run_agent_simulation.py --simulation plugin_shell_denied
+```
+
+Run the eval suite against one simulation:
+
+```powershell
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite agent_simulation --simulation budget_exceeded
+```
+
+## Trend Reports and Policy Dashboard
+
+JSON/Markdown reports are local evidence and must stay under ignored paths such as `evals/results/`.
+
+```powershell
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --all --json-report evals\results\latest.json
+venv\Scripts\python.exe evals\runners\eval_trend_report.py evals\results\previous.json evals\results\latest.json --output-md evals\results\trend.md
+venv\Scripts\python.exe evals\runners\policy_dashboard.py evals\results\latest.json --output-md evals\results\policy_dashboard.md
+```
+
+The trend report compares pass rate, new failures, fixed failures, changed failures, and risk-weighted score. Critical failures carry more weight than low-risk failures. The policy dashboard surfaces high/critical failures, budget violations, direct-write violations, unconfirmed high-risk actions, prompt-injection misses, secret-leak failures, and verification failures marked as success.
+
 ## Fixture Rules
 
 - Use only synthetic fixture data.
@@ -104,4 +143,4 @@ Available synthetic scenarios include `safe_os_agent_task`, `prompt_injection_bl
 - Do not call network, external APIs, real MCP tools, or real shell actions.
 - Keep secrets fake and ensure reports redact them.
 
-Phase 3B through 3D adapters intentionally evaluate local traces, fixtures, and deterministic policy behavior. They are a bridge toward real model/tool trace evals, not a replacement for end-to-end product testing.
+Phase 3B through 3E adapters intentionally evaluate local traces, fixtures, synthetic simulations, and deterministic policy behavior. They are a bridge toward real model/tool trace evals, not a replacement for end-to-end product testing.

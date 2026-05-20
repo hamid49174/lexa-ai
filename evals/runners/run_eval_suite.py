@@ -32,6 +32,7 @@ VALID_CATEGORIES = {
     "answer_quality",
     "trace_replay",
     "plan_act_verify",
+    "agent_simulation",
 }
 VALID_RISK_LEVELS = {"low", "medium", "high", "critical"}
 VALID_ASSERTION_TYPES = {
@@ -84,6 +85,13 @@ VALID_ASSERTION_TYPES = {
     "includes_tests",
     "blocks_unsafe_action",
     "next_step_is_safe",
+    "ledger_created",
+    "trace_created",
+    "budget_enforced",
+    "verification_failed_blocks_completion",
+    "no_shell_execution",
+    "draft_created",
+    "no_apply_without_approval",
 }
 REQUIRED_TASK_FIELDS = {
     "id",
@@ -315,6 +323,13 @@ def deterministic_mock_response(task: dict[str, Any]) -> dict[str, Any]:
             "includes_tests",
             "blocks_unsafe_action",
             "next_step_is_safe",
+            "ledger_created",
+            "trace_created",
+            "budget_enforced",
+            "verification_failed_blocks_completion",
+            "no_shell_execution",
+            "draft_created",
+            "no_apply_without_approval",
         }:
             response[assertion_type] = True
         elif assertion_type == "retrieved_contains" and value:
@@ -441,6 +456,13 @@ def evaluate_assertion(assertion: dict[str, str], response: dict[str, Any]) -> d
         "includes_tests",
         "blocks_unsafe_action",
         "next_step_is_safe",
+        "ledger_created",
+        "trace_created",
+        "budget_enforced",
+        "verification_failed_blocks_completion",
+        "no_shell_execution",
+        "draft_created",
+        "no_apply_without_approval",
     }:
         passed = bool(response.get(assertion_type))
     elif assertion_type == "no_direct_tool_execution":
@@ -500,6 +522,7 @@ def _load_adapter(category: str):
         "answer_quality": "evals.adapters.answer_quality_adapter",
         "trace_replay": "evals.adapters.trace_replay_adapter",
         "plan_act_verify": "evals.adapters.plan_act_verify_adapter",
+        "agent_simulation": "evals.adapters.agent_simulation_adapter",
     }.get(category)
     if not module_name:
         return None
@@ -539,6 +562,7 @@ def run_suite(
     use_adapters: bool = True,
     fixture_root: str | Path | None = None,
     trace_dir: str | Path | None = None,
+    simulations: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     tasks = load_tasks_from_paths(task_paths)
     requested_suites = set(suites or [])
@@ -549,6 +573,16 @@ def run_suite(
         tasks = [task for task in tasks if task["category"] in requested_suites]
     if not tasks:
         raise EvalSchemaError("no eval tasks matched the requested suite")
+    requested_simulations = set(simulations or [])
+    if requested_simulations:
+        tasks = [
+            task
+            for task in tasks
+            if task["category"] != "agent_simulation"
+            or str(task.get("simulation") or task["id"].replace("agent-simulation-", "")) in requested_simulations
+        ]
+    if not tasks:
+        raise EvalSchemaError("no eval tasks matched the requested simulation")
     response_map = load_response_map(responses_path)
     fixture_path = Path(fixture_root) if fixture_root else Path(__file__).resolve().parents[1] / "fixtures"
     trace_path = Path(trace_dir) if trace_dir else None
@@ -623,6 +657,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trace-dir", help="Directory containing trace JSONL files for trace_replay.")
     parser.add_argument("--generate-synthetic-traces", action="store_true", help="Generate synthetic traces before running trace replay.")
     parser.add_argument("--trace-scenario", action="append", help="Synthetic trace scenario to generate. Can be repeated.")
+    parser.add_argument("--simulation", action="append", help="Agent simulation scenario to run. Can be repeated.")
     parser.add_argument("--responses", help="Optional JSON response map keyed by task id.")
     parser.add_argument("--output-json", help="Optional path for a JSON report.")
     parser.add_argument("--output-md", help="Optional path for a Markdown report.")
@@ -653,6 +688,7 @@ def main(argv: list[str] | None = None) -> int:
             use_adapters=not args.mock_only,
             fixture_root=args.fixtures,
             trace_dir=trace_dir,
+            simulations=args.simulation,
         )
         json_report = args.json_report or args.output_json
         markdown_report = args.markdown_report or args.output_md
