@@ -9,19 +9,37 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 
 MAX_BUDGET_STEPS = 50
 MAX_BUDGET_SECONDS = 3600
+MAX_TRACE_SUMMARY_CHARS = 240
+MAX_TRACE_METADATA_CHARS = 160
 SECRET_PATTERNS = [
     re.compile(r"(?i)\bbearer\s+[a-z0-9._~+/=-]{8,}"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{8,}"),
     re.compile(r"(?i)\b(api[_-]?key|token|secret|password|authorization)\b\s*[:=]\s*(?:bearer\s+)?[^\s,;]+"),
 ]
+VALID_TRACE_EVENT_TYPES = {
+    "run_started",
+    "plan_created",
+    "tool_considered",
+    "tool_selected",
+    "action_started",
+    "action_finished",
+    "verification_started",
+    "verification_finished",
+    "review_created",
+    "run_finished",
+    "run_failed",
+}
 
 
 class RiskLevel(str, Enum):
@@ -48,8 +66,29 @@ class LedgerStatus(str, Enum):
     REVIEW_REQUIRED = "review_required"
 
 
+@dataclass(frozen=True)
+class AgentPolicyDecision:
+    allowed: bool
+    review_required: bool = False
+    blocked: bool = False
+    reasons: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "allowed": self.allowed,
+            "review_required": self.review_required,
+            "blocked": self.blocked,
+            "reasons": list(self.reasons),
+        }
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def stable_hash(value: Any) -> str:
+    payload = json.dumps(redact_secrets(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def coerce_risk_level(value: RiskLevel | str) -> RiskLevel:
@@ -86,6 +125,33 @@ def redact_secrets(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): redact_secrets(item) for key, item in value.items()}
     return value
+
+
+def redacted_summary(value: Any, *, max_chars: int = MAX_TRACE_SUMMARY_CHARS) -> str:
+    redacted = redact_secrets(value)
+    text = redacted if isinstance(redacted, str) else json.dumps(redacted, sort_keys=True, ensure_ascii=True, default=str)
+    text = " ".join(text.split())
+    if len(text) > max_chars:
+        return text[: max_chars - 15].rstrip() + " ... [truncated]"
+    return text
+
+
+def redacted_metadata(value: Any) -> Any:
+    redacted = redact_secrets(value)
+    if isinstance(redacted, dict):
+        safe: dict[str, Any] = {}
+        for key, item in redacted.items():
+            key_text = str(key)
+            if key_text.lower() in {"prompt", "content", "conversation", "memory", "clipboard", "args", "arguments"}:
+                safe[key_text] = {"hash": stable_hash(item)[:12], "redacted": True}
+            else:
+                safe[key_text] = redacted_metadata(item)
+        return safe
+    if isinstance(redacted, list):
+        return [redacted_metadata(item) for item in redacted[:20]]
+    if isinstance(redacted, str):
+        return redacted_summary(redacted, max_chars=MAX_TRACE_METADATA_CHARS)
+    return redacted
 
 
 def _redact_match(text: str) -> str:
@@ -156,6 +222,7 @@ class AgentAction:
     requires_confirmation: bool
     status: ActionStatus | str = ActionStatus.PLANNED
     risk_level: RiskLevel | str = RiskLevel.MEDIUM
+    policy: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.action_id.strip():
@@ -181,6 +248,7 @@ class AgentAction:
                 "requires_confirmation": self.requires_confirmation,
                 "status": self.status.value,
                 "risk_level": self.risk_level.value,
+                "policy": redacted_metadata(self.policy),
             }
         )
 
@@ -277,6 +345,233 @@ class AgentRunLedger:
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+@dataclass
+class AgentTraceEvent:
+    run_id: str
+    event_type: str
+    risk_level: RiskLevel | str
+    step_index: int
+    summary: str
+    metadata_redacted: dict[str, Any] = field(default_factory=dict)
+    related_action_id: str | None = None
+    related_tool: str | None = None
+    event_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    timestamp: str = field(default_factory=utc_now_iso)
+
+    def __post_init__(self) -> None:
+        if not self.event_id.strip():
+            raise ValueError("event_id must not be empty")
+        if not self.run_id.strip():
+            raise ValueError("run_id must not be empty")
+        if self.event_type not in VALID_TRACE_EVENT_TYPES:
+            raise ValueError(f"invalid trace event_type: {self.event_type!r}")
+        self.risk_level = coerce_risk_level(self.risk_level)
+        self.summary = redacted_summary(self.summary)
+        self.metadata_redacted = redacted_metadata(self.metadata_redacted or {})
+
+    def to_dict(self) -> dict[str, Any]:
+        return redact_secrets(
+            {
+                "event_id": self.event_id,
+                "run_id": self.run_id,
+                "timestamp": self.timestamp,
+                "event_type": self.event_type,
+                "risk_level": self.risk_level.value,
+                "step_index": int(self.step_index),
+                "summary": self.summary,
+                "metadata_redacted": self.metadata_redacted,
+                "related_action_id": self.related_action_id,
+                "related_tool": self.related_tool,
+            }
+        )
+
+    def to_jsonl(self) -> str:
+        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def trace_path_is_safe(path: str | Path, *, repo_root: str | Path | None = None) -> bool:
+    resolved = Path(path).expanduser().resolve()
+    root = Path(repo_root).resolve() if repo_root else Path(__file__).resolve().parents[1]
+    try:
+        rel = resolved.relative_to(root)
+    except ValueError:
+        return True
+    rel_text = rel.as_posix()
+    return rel_text.startswith("tmp/") or rel_text.startswith(".test-tmp/") or rel_text.startswith("evals/results/")
+
+
+class AgentTraceWriter:
+    def __init__(self, path: str | Path, *, repo_root: str | Path | None = None) -> None:
+        self.path = Path(path).expanduser().resolve()
+        if not trace_path_is_safe(self.path, repo_root=repo_root):
+            raise ValueError("agent trace path must be outside source or under tmp/, .test-tmp/, or evals/results/")
+        self.last_error: str | None = None
+
+    def write_event(self, event: AgentTraceEvent) -> bool:
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(event.to_jsonl() + "\n")
+            return True
+        except OSError as exc:
+            self.last_error = redacted_summary(str(exc))
+            return False
+
+
+class AgentTraceRecorder:
+    def __init__(self, run_id: str, writer: AgentTraceWriter | None = None) -> None:
+        if not run_id.strip():
+            raise ValueError("run_id must not be empty")
+        self.run_id = run_id
+        self.writer = writer
+        self.events: list[AgentTraceEvent] = []
+        self.write_errors: list[str] = []
+
+    def record(
+        self,
+        event_type: str,
+        *,
+        risk_level: RiskLevel | str = RiskLevel.MEDIUM,
+        step_index: int = -1,
+        summary: str = "",
+        metadata: dict[str, Any] | None = None,
+        related_action_id: str | None = None,
+        related_tool: str | None = None,
+    ) -> AgentTraceEvent:
+        event = AgentTraceEvent(
+            run_id=self.run_id,
+            event_type=event_type,
+            risk_level=risk_level,
+            step_index=step_index,
+            summary=summary or event_type,
+            metadata_redacted=metadata or {},
+            related_action_id=related_action_id,
+            related_tool=related_tool,
+        )
+        self.events.append(event)
+        if self.writer and not self.writer.write_event(event):
+            self.write_errors.append(self.writer.last_error or "trace write failed")
+        return event
+
+
+@dataclass
+class AgentTraceReplayInput:
+    events: list[AgentTraceEvent]
+
+    @classmethod
+    def from_jsonl(cls, path: str | Path) -> "AgentTraceReplayInput":
+        events: list[AgentTraceEvent] = []
+        with Path(path).open("r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                payload = json.loads(line)
+                events.append(
+                    AgentTraceEvent(
+                        event_id=str(payload["event_id"]),
+                        run_id=str(payload["run_id"]),
+                        timestamp=str(payload["timestamp"]),
+                        event_type=str(payload["event_type"]),
+                        risk_level=str(payload["risk_level"]),
+                        step_index=int(payload["step_index"]),
+                        summary=str(payload["summary"]),
+                        metadata_redacted=dict(payload.get("metadata_redacted") or {}),
+                        related_action_id=payload.get("related_action_id"),
+                        related_tool=payload.get("related_tool"),
+                    )
+                )
+        return cls(events=events)
+
+    def to_dicts(self) -> list[dict[str, Any]]:
+        return [event.to_dict() for event in self.events]
+
+
+def validate_plan(plan: AgentPlan) -> AgentPolicyDecision:
+    reasons: list[str] = []
+    overlap = sorted(set(plan.allowed_tools).intersection(plan.forbidden_tools))
+    if overlap:
+        reasons.append(f"forbidden tools also allowed: {', '.join(overlap)}")
+    if plan.risk_level in {RiskLevel.HIGH, RiskLevel.CRITICAL} and not plan.requires_user_review:
+        reasons.append("high and critical plans require user review")
+    return AgentPolicyDecision(allowed=not reasons, review_required=bool(reasons), blocked=bool(reasons), reasons=reasons)
+
+
+def _action_field(action: AgentAction | dict[str, Any], name: str, default: Any = None) -> Any:
+    if isinstance(action, dict):
+        return action.get(name, default)
+    return getattr(action, name, default)
+
+
+def validate_action_against_plan(
+    action: AgentAction | dict[str, Any],
+    plan: AgentPlan,
+    *,
+    step_index: int | None = None,
+) -> AgentPolicyDecision:
+    reasons: list[str] = []
+    tool_name = str(_action_field(action, "tool_name", "") or "")
+    scope = str(_action_field(action, "scope", "") or "")
+    action_type = str(_action_field(action, "action_type", "") or "")
+    risk_level = coerce_risk_level(_action_field(action, "risk_level", RiskLevel.MEDIUM))
+    requires_confirmation = bool(_action_field(action, "requires_confirmation", False))
+    reversible = bool(_action_field(action, "reversible", True))
+
+    if step_index is not None and step_index >= int(plan.budget_steps):
+        reasons.append("budget_steps exceeded")
+    if tool_name in plan.forbidden_tools:
+        reasons.append(f"forbidden tool selected: {tool_name}")
+    if plan.allowed_tools and tool_name not in plan.allowed_tools:
+        reasons.append(f"tool not in allowed_tools: {tool_name}")
+    if not scope.strip():
+        reasons.append("tool scope must be set")
+    if risk_level in {RiskLevel.HIGH, RiskLevel.CRITICAL} and not requires_confirmation:
+        reasons.append("high and critical actions require confirmation")
+    if risk_level in {RiskLevel.HIGH, RiskLevel.CRITICAL} and not reversible:
+        reasons.append("non-reversible high/critical action requires review")
+    protected_write = action_type in {"write", "delete", "admin", "execute"} and any(
+        marker in scope.lower() for marker in ("core", "protected", "stable")
+    )
+    if protected_write and not requires_confirmation:
+        reasons.append("protected/core direct write requires draft approval or confirmation")
+
+    return AgentPolicyDecision(
+        allowed=not reasons,
+        review_required=bool(reasons),
+        blocked=bool(reasons),
+        reasons=reasons,
+    )
+
+
+def mark_review_required(ledger: AgentRunLedger, reason: str) -> AgentPolicyDecision:
+    ledger.status = LedgerStatus.REVIEW_REQUIRED
+    if ledger.review is None:
+        ledger.review = AgentReview(
+            summary="Agent policy requires review",
+            user_decision_required=True,
+            rollback_available=True,
+            approval_references=[],
+            remaining_risks=[reason],
+        )
+    else:
+        ledger.review.user_decision_required = True
+        ledger.review.remaining_risks = sorted(set(ledger.review.remaining_risks + [reason]))
+    return AgentPolicyDecision(allowed=False, review_required=True, blocked=True, reasons=[reason])
+
+
+def enforce_agent_policy(ledger: AgentRunLedger) -> AgentPolicyDecision:
+    reasons: list[str] = []
+    plan_decision = validate_plan(ledger.plan)
+    reasons.extend(plan_decision.reasons)
+    for index, action in enumerate(ledger.actions):
+        action_decision = validate_action_against_plan(action, ledger.plan, step_index=index)
+        reasons.extend(action_decision.reasons)
+    if reasons:
+        reason = "; ".join(dict.fromkeys(reasons))
+        return mark_review_required(ledger, reason)
+    return AgentPolicyDecision(allowed=True, reasons=[])
 
 
 def _clean_string_list(values: list[str], field_name: str, *, allow_empty: bool = False) -> list[str]:

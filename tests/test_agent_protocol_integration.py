@@ -43,7 +43,7 @@ def test_agent_ledger_feature_flag_on_emits_redacted_ledger(monkeypatch):
     ledger_json = json.dumps(ledger, sort_keys=True)
 
     assert ledger["status"] == "completed"
-    assert ledger["plan"]["forbidden_tools"] == ["shell", "unsafe_direct_write"]
+    assert ledger["plan"]["forbidden_tools"] == ["shell", "unsafe_direct_write", "mcpCallTool"]
     assert "supersecretvalue" not in ledger_json
     assert "[REDACTED]" in ledger_json
 
@@ -79,6 +79,11 @@ def test_agent_ledger_records_tool_action_and_verification(monkeypatch):
     assert ledger["actions"][0]["tool_name"] == "backup_restore"
     assert ledger["actions"][0]["requires_confirmation"] is True
     assert ledger["actions"][0]["risk_level"] == "critical"
+    assert ledger["actions"][0]["policy"]["selected_tool"] == "backup_restore"
+    assert ledger["actions"][0]["policy"]["considered_tools"] == ["backup_restore"]
+    assert ledger["actions"][0]["policy"]["requires_confirmation"] is True
+    assert ledger["actions"][0]["policy"]["args_hash"]
+    assert ledger["actions"][0]["policy"]["arg_keys"] == ["backup_path"]
     assert ledger["verifications"][0]["passed"] is True
     assert "supersecretvalue" not in ledger_json
 
@@ -99,3 +104,24 @@ def test_agent_ledger_marks_high_risk_actions_as_confirmation_required():
 
     assert action.risk_level.value == "critical"
     assert action.requires_confirmation is True
+    assert action.policy["selected_tool"] == "backup_restore"
+    assert action.policy["policy_reason"]
+
+
+def test_agent_ledger_records_rejected_tool_policy_reason():
+    from backend.agent_loop import AgentRun, _append_ledger_action, _build_agent_run_ledger
+
+    run = AgentRun(user_message="try unsafe MCP")
+    ledger = _build_agent_run_ledger(run)
+
+    action = _append_ledger_action(
+        ledger,
+        action_id="step-0",
+        action_name="mcpCallTool",
+        params={"tool": "dangerous"},
+        permission="blocked",
+    )
+
+    assert action.risk_level.value == "critical"
+    assert action.policy["selected_tool"] == "mcpCallTool"
+    assert action.policy["rejected_tools"] == [{"tool_name": "mcpCallTool", "reason": "blocked"}]

@@ -23,6 +23,7 @@ import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from enum import Enum
+from pathlib import Path
 from typing import AsyncGenerator, Optional
 
 from backend.config import (
@@ -105,7 +106,35 @@ def _agent_ledger_enabled() -> bool:
     return os.getenv("LEXA_AGENT_LEDGER", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _agent_trace_enabled() -> bool:
+    """Return whether Phase 3C trace emission is enabled."""
+    return os.getenv("LEXA_AGENT_TRACE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _agent_policy_enforce_enabled() -> bool:
+    """Return whether Phase 3C policy enforcement is enabled."""
+    return os.getenv("LEXA_AGENT_POLICY_ENFORCE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _agent_trace_path(run_id: str) -> Path:
+    root = Path(__file__).resolve().parents[1]
+    configured = os.getenv("LEXA_AGENT_TRACE_DIR", "").strip()
+    trace_dir = Path(configured).expanduser() if configured else root / "evals" / "results" / "traces"
+    return trace_dir / f"{run_id}.jsonl"
+
+
+def _build_agent_trace_recorder(run: AgentRun):
+    from backend.agent_protocol import AgentTraceRecorder, AgentTraceWriter
+
+    try:
+        return AgentTraceRecorder(run.id, writer=AgentTraceWriter(_agent_trace_path(run.id)))
+    except ValueError as exc:
+        logger.warning("Agent trace disabled: %s", exc)
+        return AgentTraceRecorder(run.id)
+
+
 def _infer_agent_action_risk(action_name: str, permission: str = "") -> str:
+    normalized = (action_name or "").lower()
     critical_names = {
         "backup_restore",
         "shutdown",
@@ -113,6 +142,7 @@ def _infer_agent_action_risk(action_name: str, permission: str = "") -> str:
         "file_delete",
         "clean_temp",
         "os_agent_start_task",
+        "mcpcalltool",
     }
     high_prefixes = (
         "backup_",
@@ -122,11 +152,11 @@ def _infer_agent_action_risk(action_name: str, permission: str = "") -> str:
         "hermes_",
         "mcp_",
     )
-    if action_name in critical_names:
+    if normalized in critical_names:
         return "critical"
-    if permission == "confirmation_required" or any(action_name.startswith(prefix) for prefix in high_prefixes):
+    if permission == "confirmation_required" or any(normalized.startswith(prefix) for prefix in high_prefixes) or "mcp" in normalized:
         return "high"
-    if action_name.startswith(("note_", "memory_", "clipboard_", "todo_")):
+    if normalized.startswith(("note_", "memory_", "clipboard_", "todo_")):
         return "medium"
     return "low"
 
@@ -138,7 +168,7 @@ def _build_agent_run_ledger(run: AgentRun):
         goal=run.user_message,
         risk_level="medium",
         allowed_tools=[],
-        forbidden_tools=["shell", "unsafe_direct_write"],
+        forbidden_tools=["shell", "unsafe_direct_write", "mcpCallTool"],
         budget_steps=AGENT_MAX_STEPS,
         budget_seconds=AGENT_MAX_STEPS * AGENT_STEP_TIMEOUT,
         checkpoints=["plan", "act", "verify", "review"],
@@ -148,20 +178,41 @@ def _build_agent_run_ledger(run: AgentRun):
 
 
 def _append_ledger_action(ledger, *, action_id: str, action_name: str, params: dict, permission: str):
-    from backend.agent_protocol import AgentAction
+    from backend.agent_protocol import AgentAction, stable_hash
 
     risk_level = _infer_agent_action_risk(action_name, permission)
     requires_confirmation = permission == "confirmation_required" or risk_level in {"high", "critical"}
+    param_keys = sorted((params or {}).keys())
+    policy_reason = (
+        "confirmation required by command policy"
+        if requires_confirmation
+        else f"permission={permission or 'unknown'}"
+    )
+    rejected_tools = (
+        [{"tool_name": action_name, "reason": permission}]
+        if permission in {"blocked", "unknown"}
+        else []
+    )
     action = AgentAction(
         action_id=action_id,
         tool_name=action_name or "unknown",
         action_type="execute",
         scope="agent_loop",
-        reason=f"Agent requested tool; permission={permission or 'unknown'}; param_keys={sorted((params or {}).keys())}",
+        reason=f"Agent requested tool; permission={permission or 'unknown'}; param_keys={param_keys}",
         reversible=risk_level in {"low", "medium"},
         requires_confirmation=requires_confirmation,
         status="planned",
         risk_level=risk_level,
+        policy={
+            "considered_tools": [action_name] if action_name else [],
+            "selected_tool": action_name or "",
+            "rejected_tools": rejected_tools,
+            "risk_level": risk_level,
+            "requires_confirmation": requires_confirmation,
+            "policy_reason": policy_reason,
+            "args_hash": stable_hash(params or {})[:12],
+            "arg_keys": param_keys,
+        },
     )
     ledger.actions.append(action)
     return action
@@ -320,6 +371,29 @@ async def run_agent(
     run = AgentRun(user_message=user_message)
     if _agent_ledger_enabled():
         run.ledger = _build_agent_run_ledger(run)
+    trace_recorder = _build_agent_trace_recorder(run) if _agent_trace_enabled() else None
+    if trace_recorder is not None:
+        from backend.agent_protocol import stable_hash
+
+        trace_recorder.record(
+            "run_started",
+            risk_level="medium",
+            step_index=-1,
+            summary="Agent run started",
+            metadata={"message_hash": stable_hash(user_message)[:12], "history_count": len(conversation_history)},
+        )
+        if run.ledger is not None:
+            trace_recorder.record(
+                "plan_created",
+                risk_level=run.ledger.plan.risk_level,
+                step_index=-1,
+                summary="Agent ledger plan created",
+                metadata={
+                    "budget_steps": run.ledger.plan.budget_steps,
+                    "budget_seconds": run.ledger.plan.budget_seconds,
+                    "forbidden_tools": run.ledger.plan.forbidden_tools,
+                },
+            )
     audit_log("agent", "start", f"RUN={run.id} MSG={user_message[:100]}")
 
     # Build agent-specific system context
@@ -362,6 +436,14 @@ async def run_agent(
             logger.error(f"Agent LLM call failed: {e}", exc_info=True)
             run.status = "failed"
             run.summary = f"KI-Fehler: {e}"
+            if trace_recorder is not None:
+                trace_recorder.record(
+                    "run_failed",
+                    risk_level="high",
+                    step_index=step_count,
+                    summary="Agent LLM call failed",
+                    metadata={"error": str(e)},
+                )
             yield {"type": "error", "message": f"KI-Fehler: {e}"}
             break
 
@@ -425,17 +507,72 @@ async def run_agent(
                 )
                 run.steps.append(step)
                 ledger_action_id = f"step-{step_count}"
+                permission_for_step = is_command_allowed(action_name)
+                if trace_recorder is not None:
+                    trace_recorder.record(
+                        "tool_considered",
+                        risk_level=_infer_agent_action_risk(action_name, permission_for_step),
+                        step_index=step_count,
+                        summary="Agent considered tool",
+                        metadata={"tool_name": action_name, "permission": permission_for_step, "arg_keys": sorted((params or {}).keys())},
+                        related_action_id=ledger_action_id,
+                        related_tool=action_name,
+                    )
+                    trace_recorder.record(
+                        "tool_selected",
+                        risk_level=_infer_agent_action_risk(action_name, permission_for_step),
+                        step_index=step_count,
+                        summary="Agent selected tool",
+                        metadata={"tool_name": action_name, "permission": permission_for_step},
+                        related_action_id=ledger_action_id,
+                        related_tool=action_name,
+                    )
                 if run.ledger is not None:
-                    permission_for_ledger = is_command_allowed(action_name)
                     _append_ledger_action(
                         run.ledger,
                         action_id=ledger_action_id,
                         action_name=action_name,
                         params=params,
-                        permission=permission_for_ledger,
+                        permission=permission_for_step,
                     )
 
+                    if _agent_policy_enforce_enabled():
+                        from backend.agent_protocol import validate_action_against_plan
+
+                        decision = validate_action_against_plan(run.ledger.actions[-1], run.ledger.plan, step_index=step_count)
+                        if not decision.allowed:
+                            step.status = StepStatus.BLOCKED
+                            step.error = "Agent policy review required: " + "; ".join(decision.reasons)
+                            if trace_recorder is not None:
+                                trace_recorder.record(
+                                    "action_finished",
+                                    risk_level=run.ledger.actions[-1].risk_level,
+                                    step_index=step_count,
+                                    summary="Agent policy blocked action",
+                                    metadata={"reasons": decision.reasons},
+                                    related_action_id=ledger_action_id,
+                                    related_tool=action_name,
+                                )
+                            _append_ledger_verification(run.ledger, action_id=ledger_action_id, step=step)
+                            yield {"type": "step_blocked", "step": step.to_dict()}
+                            agent_messages.append({
+                                "role": "user",
+                                "content": f"[TOOL ERGEBNIS] {action_name}: Agent policy requires review.",
+                            })
+                            step_count += 1
+                            continue
+
                 yield {"type": "step_start", "step": step.to_dict()}
+                if trace_recorder is not None:
+                    trace_recorder.record(
+                        "action_started",
+                        risk_level=_infer_agent_action_risk(action_name, permission_for_step),
+                        step_index=step_count,
+                        summary="Agent action started",
+                        metadata={"tool_name": action_name, "arg_keys": sorted((params or {}).keys())},
+                        related_action_id=ledger_action_id,
+                        related_tool=action_name,
+                    )
 
                 # Execute the tool
                 try:
@@ -448,7 +585,37 @@ async def run_agent(
                     step.error = f"Timeout nach {AGENT_STEP_TIMEOUT}s"
                     step.duration_ms = AGENT_STEP_TIMEOUT * 1000
                     if run.ledger is not None:
+                        if trace_recorder is not None:
+                            trace_recorder.record(
+                                "verification_started",
+                                risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
+                                step_index=step_count,
+                                summary="Agent verification started",
+                                metadata={"check": "agent_step_status"},
+                                related_action_id=ledger_action_id,
+                                related_tool=action_name,
+                            )
                         _append_ledger_verification(run.ledger, action_id=ledger_action_id, step=step)
+                        if trace_recorder is not None:
+                            trace_recorder.record(
+                                "verification_finished",
+                                risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
+                                step_index=step_count,
+                                summary="Agent verification finished",
+                                metadata={"passed": False, "status": step.status.value},
+                                related_action_id=ledger_action_id,
+                                related_tool=action_name,
+                            )
+                    if trace_recorder is not None:
+                        trace_recorder.record(
+                            "action_finished",
+                            risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
+                            step_index=step_count,
+                            summary="Agent action timed out",
+                            metadata={"status": step.status.value},
+                            related_action_id=ledger_action_id,
+                            related_tool=action_name,
+                        )
                     yield {"type": "step_done", "step": step.to_dict()}
                     # Tell LLM about the timeout
                     agent_messages.append({
@@ -465,7 +632,37 @@ async def run_agent(
                     step.status = StepStatus.NEEDS_CONFIRMATION
                     step.error = exec_result.get("error", "Bestaetigung noetig")
                     if run.ledger is not None:
+                        if trace_recorder is not None:
+                            trace_recorder.record(
+                                "verification_started",
+                                risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
+                                step_index=step_count,
+                                summary="Agent verification started",
+                                metadata={"check": "agent_step_status"},
+                                related_action_id=ledger_action_id,
+                                related_tool=action_name,
+                            )
                         _append_ledger_verification(run.ledger, action_id=ledger_action_id, step=step)
+                        if trace_recorder is not None:
+                            trace_recorder.record(
+                                "verification_finished",
+                                risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
+                                step_index=step_count,
+                                summary="Agent verification finished",
+                                metadata={"passed": False, "status": step.status.value},
+                                related_action_id=ledger_action_id,
+                                related_tool=action_name,
+                            )
+                    if trace_recorder is not None:
+                        trace_recorder.record(
+                            "action_finished",
+                            risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
+                            step_index=step_count,
+                            summary="Agent action needs confirmation",
+                            metadata={"status": step.status.value},
+                            related_action_id=ledger_action_id,
+                            related_tool=action_name,
+                        )
                     yield {"type": "step_blocked", "step": step.to_dict()}
                     # Tell LLM this step needs confirmation — skip it
                     agent_messages.append({
@@ -488,7 +685,37 @@ async def run_agent(
 
                 yield {"type": "step_done", "step": step.to_dict()}
                 if run.ledger is not None:
+                    if trace_recorder is not None:
+                        trace_recorder.record(
+                            "verification_started",
+                            risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
+                            step_index=step_count,
+                            summary="Agent verification started",
+                            metadata={"check": "agent_step_status"},
+                            related_action_id=ledger_action_id,
+                            related_tool=action_name,
+                        )
                     _append_ledger_verification(run.ledger, action_id=ledger_action_id, step=step)
+                    if trace_recorder is not None:
+                        trace_recorder.record(
+                            "verification_finished",
+                            risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
+                            step_index=step_count,
+                            summary="Agent verification finished",
+                            metadata={"passed": step.status == StepStatus.SUCCESS, "status": step.status.value},
+                            related_action_id=ledger_action_id,
+                            related_tool=action_name,
+                        )
+                if trace_recorder is not None:
+                    trace_recorder.record(
+                        "action_finished",
+                        risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
+                        step_index=step_count,
+                        summary="Agent action finished",
+                        metadata={"status": step.status.value, "success": bool(exec_result.get("success"))},
+                        related_action_id=ledger_action_id,
+                        related_tool=action_name,
+                    )
 
                 # Feed result back to LLM for the next iteration
                 formatted = _format_tool_result(action_name, exec_result)
@@ -529,4 +756,24 @@ async def run_agent(
         run.status = "completed"
     if run.ledger is not None:
         _finalize_agent_ledger(run.ledger, run)
+        if _agent_policy_enforce_enabled():
+            from backend.agent_protocol import enforce_agent_policy
+
+            enforce_agent_policy(run.ledger)
+        if trace_recorder is not None:
+            trace_recorder.record(
+                "review_created",
+                risk_level=run.ledger.plan.risk_level,
+                step_index=step_count,
+                summary="Agent review created",
+                metadata={"status": run.ledger.status.value, "review_required": bool(run.ledger.review and run.ledger.review.user_decision_required)},
+            )
+    if trace_recorder is not None:
+        trace_recorder.record(
+            "run_finished" if run.status != "failed" else "run_failed",
+            risk_level="medium",
+            step_index=step_count,
+            summary=f"Agent run {run.status}",
+            metadata={"status": run.status, "steps": len(run.steps), "trace_write_errors": trace_recorder.write_errors},
+        )
     yield {"type": "done", "run": run.to_dict()}

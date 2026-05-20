@@ -66,11 +66,19 @@ venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite tool_selection
 venv\Scripts\python.exe evals\runners\run_eval_suite.py --all
 ```
 
-Golden tasks are JSONL records that describe an input, expected behavior, forbidden behavior, risk level, and deterministic assertions. They cover tool selection, memory, OS drafts, prompt injection, local security, and answer quality. Local adapters may use synthetic fixtures, temp roots, and pure functions only.
+Golden tasks are JSONL records that describe an input, expected behavior, forbidden behavior, risk level, and deterministic assertions. They cover tool selection, memory, OS drafts, prompt injection, local security, answer quality, and synthetic trace replay. Local adapters may use synthetic fixtures, temp roots, and pure functions only.
 
 Generated eval reports are local evidence only. If you write reports with `--output-json` or `--output-md`, keep them under `evals/results/`; Git ignores generated files in that directory.
 
 Do not use real user data in evals. In particular, do not read or write `lexa_memory.db`, do not point an eval fixture at `personal_os/`, and do not call external APIs, real MCP servers, or network services.
+
+Trace replay is available with:
+
+```powershell
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite trace_replay
+```
+
+Trace fixtures must be synthetic. Runtime traces, if enabled, are local artifacts and must stay in ignored paths such as `evals/results/traces/` or `tmp/agent_traces/`.
 
 ## Agent Protocol
 
@@ -86,3 +94,10 @@ The protocol keeps these boundaries explicit:
 High and critical plans require user review. High and critical actions require confirmation. Ledger JSON is stable and redacts token/API-key shaped values.
 
 Phase 3B wires the ledger into `backend/agent_loop.py` behind `LEXA_AGENT_LEDGER=1`. With the flag off, the agent response shape is unchanged. With it on, runs include a redacted ledger for local verification and future eval traces.
+
+Phase 3C adds two more feature flags:
+
+- `LEXA_AGENT_TRACE=1`: writes redacted JSONL agent traces to an ignored trace directory. Optional `LEXA_AGENT_TRACE_DIR` can point to a temp or ignored path.
+- `LEXA_AGENT_POLICY_ENFORCE=1`: enables the first Plan/Act/Verify policy checks in the agent loop. High/critical unsafe actions, forbidden tools, missing scopes, budget violations, and protected direct writes become review-required or blocked instead of silently proceeding.
+
+With both flags off, runtime behavior remains compatible with the pre-Phase-3C agent loop.

@@ -1,11 +1,11 @@
 # Lexa Eval Suite
 
-Phase 3A introduced offline, deterministic evals for product intelligence risks. Phase 3B connects those golden tasks to local adapters and fixtures. These evals are still not external LLM benchmarks: they run without network, API calls, real MCP servers, the real Personal OS mount, or the real memory database.
+Phase 3A introduced offline, deterministic evals for product intelligence risks. Phase 3B connected those golden tasks to local adapters and fixtures. Phase 3C adds synthetic agent trace replay and answer-quality fixture checks. These evals are still not external LLM benchmarks: they run without network, API calls, real MCP servers, the real Personal OS mount, or the real memory database.
 
 ## Structure
 
 - `golden_tasks/`: JSONL task sets grouped by product capability.
-- `adapters/`: deterministic local adapters for tool selection, memory, OS drafts, and security/prompt-injection traces.
+- `adapters/`: deterministic local adapters for tool selection, memory, OS drafts, trace replay, answer quality, and security/prompt-injection checks.
 - `fixtures/`: synthetic local fixture data only.
 - `runners/run_eval_suite.py`: offline runner and schema validator.
 - `results/`: optional local reports. Result artifacts are ignored by Git except for placeholders.
@@ -29,9 +29,9 @@ Each JSONL line is one task:
 }
 ```
 
-Allowed categories are `tool_selection`, `memory`, `os_drafts`, `prompt_injection`, `security`, and `answer_quality`.
+Allowed categories are `tool_selection`, `memory`, `os_drafts`, `prompt_injection`, `security`, `answer_quality`, and `trace_replay`.
 
-Allowed assertion types are `contains`, `not_contains`, `selected_tool`, `blocked`, `requires_confirmation`, `creates_draft`, and `no_secret_leak`.
+Common assertion types include `contains`, `not_contains`, `selected_tool`, `not_selected_tool`, `tool_not_selected`, `selected_tool_prefix`, `blocked`, `requires_confirmation`, `creates_draft`, `no_direct_write`, `no_secret_leak`, `event_sequence_contains`, `event_sequence_not_contains`, `verification_passed`, `verification_failed_expected`, `cites_evidence`, `no_overclaim`, and `includes_risk_analysis`.
 
 ## Running Locally
 
@@ -65,6 +65,18 @@ Do not commit generated reports. Use them as local evidence while developing a c
 
 Future phases can connect these golden tasks to real model outputs, tool traces, and Plan/Act/Verify ledgers. Phase 3A intentionally stays offline.
 
+## Trace Replay
+
+Trace replay tasks use synthetic JSONL traces under `fixtures/traces/`. A trace event contains only IDs, event types, risk, short summaries, hashes, keys, and redacted metadata. Do not place real prompts, conversations, memory contents, clipboard contents, OS file bodies, tokens, API keys, or full tool arguments in trace fixtures.
+
+Run trace replay directly:
+
+```powershell
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite trace_replay
+```
+
+Runtime trace capture is feature-flagged with `LEXA_AGENT_TRACE=1` and writes only to ignored paths such as `evals/results/traces/`, `tmp/agent_traces/`, or test temp directories. Real trace files are local artifacts and must not be committed.
+
 ## Fixture Rules
 
 - Use only synthetic fixture data.
@@ -73,4 +85,4 @@ Future phases can connect these golden tasks to real model outputs, tool traces,
 - Do not call network, external APIs, real MCP tools, or real shell actions.
 - Keep secrets fake and ensure reports redact them.
 
-Phase 3B adapters intentionally evaluate local traces and deterministic policy behavior. They are a bridge toward real model/tool trace evals, not a replacement for end-to-end product testing.
+Phase 3B and 3C adapters intentionally evaluate local traces, fixtures, and deterministic policy behavior. They are a bridge toward real model/tool trace evals, not a replacement for end-to-end product testing.
