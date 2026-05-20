@@ -72,6 +72,26 @@ Tests covering this boundary:
 
 Next safest extraction target: pure markdown block helpers such as table/code/inline rendering helpers, but only after adding direct tests for the exact helper boundary. Streaming, conversation history, tool-call rendering, voice, and Personal OS draft flows remain out of scope.
 
+## Pass 3 Extraction
+
+Pass 3 extracts low-level markdown DOM helpers from `frontend/src/chat.js` into `frontend/src/chat_markdown.js`: `appendInlineMarkdown()`, `appendLineBreak()`, `chatTableCells()`, `isChatTableSeparator()`, `appendChatTable()`, `appendCodeBlock()`, and `isMarkdownBlockStart()`.
+
+Size snapshot before and after Pass 3:
+
+| File | Before Pass 3 | After Pass 3 |
+| --- | ---: | ---: |
+| `frontend/src/chat.js` | 4632 lines / 218103 bytes | 4508 lines / 213344 bytes |
+| `frontend/src/chat_markdown.js` | new | 125 lines / 4858 bytes |
+
+Tests covering this boundary:
+
+- `test_frontend_script_order_static.js` verifies `chat_markdown.js` loads after `chat_formatting.js` and before `chat.js`
+- `test_chat_rendering.js` directly checks inline markdown, empty input, unsafe HTML/link handling, table rendering, code-block escaping, and block-start detection
+- `test_chat_rendering.js` still exercises the helpers indirectly through `formatMessage()`
+- Electron startup and visual smokes verify the classic renderer loads the new script in the app shell
+
+Next safest extraction target: the remaining higher-level `appendMarkdownSegment()`, `appendFormattedMessage()`, and `formatMessage()` group, but only if the direct rendering tests remain stable. Streaming, conversation history, tool-call rendering, voice, Companion execution, and Personal OS draft flows remain out of scope.
+
 ## Do Not Touch Yet
 
 - streaming send and abort behavior

@@ -14,6 +14,10 @@ const formattingSrc = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "chat_formatting.js"),
   "utf8"
 );
+const markdownSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "chat_markdown.js"),
+  "utf8"
+);
 
 function extractFn(source, name) {
   const needle = `function ${name}(`;
@@ -111,7 +115,7 @@ function makeDomStub() {
 
 const escHtml = extractFn(src, "escapeHtml");
 const renderFormatted = extractFn(src, "renderFormattedMessage");
-const rendererStart = src.indexOf("function appendInlineMarkdown(");
+const rendererStart = src.indexOf("function appendMarkdownSegment(");
 const rendererEnd = src.indexOf("function generateSuggestions(");
 if (rendererStart === -1 || rendererEnd === -1 || rendererEnd <= rendererStart) {
   throw new Error("renderer helper block not found");
@@ -122,18 +126,52 @@ const sandbox = new Function("document", "URL", `
   "use strict";
   ${escHtml}
   ${formattingSrc}
+  ${markdownSrc}
   ${renderFormatted}
   ${rendererBlock}
-  return { escapeHtml, stripModelFunctionTags, normalizeChatUrl, formatMessage, renderFormattedMessage };
+  return {
+    escapeHtml,
+    stripModelFunctionTags,
+    normalizeChatUrl,
+    appendInlineMarkdown,
+    appendLineBreak,
+    chatTableCells,
+    isChatTableSeparator,
+    appendChatTable,
+    appendCodeBlock,
+    isMarkdownBlockStart,
+    formatMessage,
+    renderFormattedMessage,
+  };
 `);
 
 let escapeHtml;
 let stripModelFunctionTags;
 let normalizeChatUrl;
+let appendInlineMarkdown;
+let appendLineBreak;
+let chatTableCells;
+let isChatTableSeparator;
+let appendChatTable;
+let appendCodeBlock;
+let isMarkdownBlockStart;
 let formatMessage;
 let renderFormattedMessage;
 try {
-  ({ escapeHtml, stripModelFunctionTags, normalizeChatUrl, formatMessage, renderFormattedMessage } = sandbox(makeDomStub(), URL));
+  ({
+    escapeHtml,
+    stripModelFunctionTags,
+    normalizeChatUrl,
+    appendInlineMarkdown,
+    appendLineBreak,
+    chatTableCells,
+    isChatTableSeparator,
+    appendChatTable,
+    appendCodeBlock,
+    isMarkdownBlockStart,
+    formatMessage,
+    renderFormattedMessage,
+  } = sandbox(makeDomStub(), URL));
 } catch (e) {
   console.error("Sandbox setup failed:", e.message);
   process.exit(1);
@@ -169,6 +207,44 @@ assert("normalizeChatUrl allows mailto links for text", normalizeChatUrl("mailto
 assert("normalizeChatUrl blocks mailto links for images", normalizeChatUrl("mailto:test@example.com", { image: true }) === "");
 assert("normalizeChatUrl blocks javascript links", normalizeChatUrl("javascript:alert(1)") === "");
 assert("normalizeChatUrl blocks local file links", normalizeChatUrl("file:///C:/Users/admin/.ssh/id_rsa") === "");
+
+console.log("\nmarkdown helper boundaries:");
+const inlineTarget = makeDomStub().createElement("p");
+appendInlineMarkdown(inlineTarget, "Hello **bold** and [safe](https://example.com/a?q=1)");
+assert("appendInlineMarkdown renders strong text", inlineTarget.innerHTML.includes("<strong>bold</strong>"), inlineTarget.innerHTML);
+assert("appendInlineMarkdown renders safe links", inlineTarget.innerHTML.includes("<a ") && inlineTarget.innerHTML.includes('rel="noopener noreferrer"'), inlineTarget.innerHTML);
+
+const unsafeInlineTarget = makeDomStub().createElement("p");
+appendInlineMarkdown(unsafeInlineTarget, "<script>alert(1)</script> [bad](javascript:alert(1))");
+assert("appendInlineMarkdown escapes unsafe HTML", unsafeInlineTarget.innerHTML.includes("&lt;script&gt;") && !unsafeInlineTarget.innerHTML.includes("<script>"), unsafeInlineTarget.innerHTML);
+assert("appendInlineMarkdown blocks unsafe links", !unsafeInlineTarget.innerHTML.includes("<a "), unsafeInlineTarget.innerHTML);
+
+const emptyInlineTarget = makeDomStub().createElement("p");
+appendInlineMarkdown(emptyInlineTarget, null);
+assert("appendInlineMarkdown leaves empty input empty", emptyInlineTarget.innerHTML === "", emptyInlineTarget.innerHTML);
+
+const breakTarget = makeDomStub().createElement("p");
+appendLineBreak(breakTarget);
+assert("appendLineBreak appends a br", breakTarget.innerHTML === "<br>", breakTarget.innerHTML);
+
+assert("chatTableCells trims outer pipes", JSON.stringify(chatTableCells("| Name | Status |")) === JSON.stringify([" Name ", " Status "]));
+assert("isChatTableSeparator detects markdown separator", isChatTableSeparator("| --- | :---: |"));
+assert("isChatTableSeparator rejects normal table rows", !isChatTableSeparator("| Name | Status |"));
+
+const tableTarget = makeDomStub().createElement("div");
+appendChatTable(tableTarget, ["| Name | Status |", "| --- | --- |", "| Lexa | **Ready** |"]);
+assert("appendChatTable renders header cells", tableTarget.innerHTML.includes("<th>Name</th>") && tableTarget.innerHTML.includes("<th>Status</th>"), tableTarget.innerHTML);
+assert("appendChatTable renders inline markdown in cells", tableTarget.innerHTML.includes("<strong>Ready</strong>"), tableTarget.innerHTML);
+
+const codeTarget = makeDomStub().createElement("div");
+appendCodeBlock(codeTarget, "js<script>", "const x = '<b>'; ");
+assert("appendCodeBlock sanitizes language labels", codeTarget.innerHTML.includes('<span class="code-lang">jsscript</span>'), codeTarget.innerHTML);
+assert("appendCodeBlock escapes code text", codeTarget.innerHTML.includes("&lt;b&gt;") && !codeTarget.innerHTML.includes("<b>"), codeTarget.innerHTML);
+assert("appendCodeBlock adds a copy action", codeTarget.innerHTML.includes('data-action="copy-code"'), codeTarget.innerHTML);
+
+assert("isMarkdownBlockStart detects list starts", isMarkdownBlockStart("- item"));
+assert("isMarkdownBlockStart detects table rows", isMarkdownBlockStart("| A | B |"));
+assert("isMarkdownBlockStart ignores plain text", !isMarkdownBlockStart("plain text"));
 
 console.log("\nformatMessage():");
 
