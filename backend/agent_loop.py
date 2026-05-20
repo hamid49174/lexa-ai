@@ -111,6 +111,11 @@ def _agent_trace_enabled() -> bool:
     return os.getenv("LEXA_AGENT_TRACE", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _agent_trace_sampling_enabled() -> bool:
+    """Return whether Phase 3D controlled trace sampling is enabled."""
+    return os.getenv("LEXA_AGENT_TRACE_SAMPLING", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _agent_policy_enforce_enabled() -> bool:
     """Return whether Phase 3C policy enforcement is enabled."""
     return os.getenv("LEXA_AGENT_POLICY_ENFORCE", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -123,14 +128,33 @@ def _agent_trace_path(run_id: str) -> Path:
     return trace_dir / f"{run_id}.jsonl"
 
 
-def _build_agent_trace_recorder(run: AgentRun):
+def _build_agent_trace_recorder(run: AgentRun, *, source: str, synthetic_context: bool):
     from backend.agent_protocol import AgentTraceRecorder, AgentTraceWriter
+    from backend.agent_trace_sampling import AgentTraceSamplingPolicy
 
+    policy = AgentTraceSamplingPolicy.from_env()
+    if not policy.should_sample(source=source, synthetic_context=synthetic_context):
+        return None, policy
     try:
-        return AgentTraceRecorder(run.id, writer=AgentTraceWriter(_agent_trace_path(run.id)))
+        writer = AgentTraceWriter(policy.safe_output_path(run.id))
+        return AgentTraceRecorder(run.id, writer=writer, max_events=policy.max_events_per_run), policy
     except ValueError as exc:
         logger.warning("Agent trace disabled: %s", exc)
-        return AgentTraceRecorder(run.id)
+        return None, policy
+
+
+def _record_agent_trace(trace_recorder, trace_policy, event_type: str, **kwargs) -> None:
+    if trace_recorder is None:
+        return
+    try:
+        metadata = kwargs.pop("metadata", None) or {}
+        summary = kwargs.pop("summary", event_type)
+        if trace_policy is not None:
+            metadata = trace_policy.sanitize_metadata(metadata)
+            summary = trace_policy.sanitize_summary(summary)
+        trace_recorder.record(event_type, summary=summary, metadata=metadata, **kwargs)
+    except Exception as exc:
+        logger.warning("Agent trace event skipped: %s", exc)
 
 
 def _infer_agent_action_risk(action_name: str, permission: str = "") -> str:
@@ -173,6 +197,12 @@ def _build_agent_run_ledger(run: AgentRun):
         budget_seconds=AGENT_MAX_STEPS * AGENT_STEP_TIMEOUT,
         checkpoints=["plan", "act", "verify", "review"],
         requires_user_review=False,
+        max_tool_calls=AGENT_MAX_STEPS,
+        max_risky_tool_calls=max(1, AGENT_MAX_STEPS // 2),
+        max_memory_reads=AGENT_MAX_STEPS,
+        max_os_writes=1,
+        max_runtime_seconds=AGENT_MAX_STEPS * AGENT_STEP_TIMEOUT,
+        max_retry_count=2,
     )
     return AgentRunLedger(run_id=run.id, plan=plan, status="running")
 
@@ -354,6 +384,9 @@ def _format_tool_result(action_name: str, result: dict) -> str:
 async def run_agent(
     user_message: str,
     conversation_history: list[dict],
+    *,
+    trace_source: str = "runtime",
+    synthetic_context: bool = False,
 ) -> AsyncGenerator[dict, None]:
     """Run the multi-step agent loop.
 
@@ -371,19 +404,35 @@ async def run_agent(
     run = AgentRun(user_message=user_message)
     if _agent_ledger_enabled():
         run.ledger = _build_agent_run_ledger(run)
-    trace_recorder = _build_agent_trace_recorder(run) if _agent_trace_enabled() else None
+    trace_recorder = None
+    trace_policy = None
+    if _agent_trace_enabled() and _agent_trace_sampling_enabled():
+        trace_recorder, trace_policy = _build_agent_trace_recorder(
+            run,
+            source=trace_source,
+            synthetic_context=synthetic_context,
+        )
     if trace_recorder is not None:
         from backend.agent_protocol import stable_hash
 
-        trace_recorder.record(
+        _record_agent_trace(
+            trace_recorder,
+            trace_policy,
             "run_started",
             risk_level="medium",
             step_index=-1,
             summary="Agent run started",
-            metadata={"message_hash": stable_hash(user_message)[:12], "history_count": len(conversation_history)},
+            metadata={
+                "message_hash": stable_hash(user_message)[:12],
+                "history_count": len(conversation_history),
+                "trace_source": trace_source,
+                "synthetic_context": synthetic_context,
+            },
         )
         if run.ledger is not None:
-            trace_recorder.record(
+            _record_agent_trace(
+                trace_recorder,
+                trace_policy,
                 "plan_created",
                 risk_level=run.ledger.plan.risk_level,
                 step_index=-1,
@@ -437,7 +486,9 @@ async def run_agent(
             run.status = "failed"
             run.summary = f"KI-Fehler: {e}"
             if trace_recorder is not None:
-                trace_recorder.record(
+                _record_agent_trace(
+                    trace_recorder,
+                    trace_policy,
                     "run_failed",
                     risk_level="high",
                     step_index=step_count,
@@ -509,7 +560,9 @@ async def run_agent(
                 ledger_action_id = f"step-{step_count}"
                 permission_for_step = is_command_allowed(action_name)
                 if trace_recorder is not None:
-                    trace_recorder.record(
+                    _record_agent_trace(
+                        trace_recorder,
+                        trace_policy,
                         "tool_considered",
                         risk_level=_infer_agent_action_risk(action_name, permission_for_step),
                         step_index=step_count,
@@ -518,7 +571,9 @@ async def run_agent(
                         related_action_id=ledger_action_id,
                         related_tool=action_name,
                     )
-                    trace_recorder.record(
+                    _record_agent_trace(
+                        trace_recorder,
+                        trace_policy,
                         "tool_selected",
                         risk_level=_infer_agent_action_risk(action_name, permission_for_step),
                         step_index=step_count,
@@ -544,7 +599,9 @@ async def run_agent(
                             step.status = StepStatus.BLOCKED
                             step.error = "Agent policy review required: " + "; ".join(decision.reasons)
                             if trace_recorder is not None:
-                                trace_recorder.record(
+                                _record_agent_trace(
+                                    trace_recorder,
+                                    trace_policy,
                                     "action_finished",
                                     risk_level=run.ledger.actions[-1].risk_level,
                                     step_index=step_count,
@@ -564,7 +621,9 @@ async def run_agent(
 
                 yield {"type": "step_start", "step": step.to_dict()}
                 if trace_recorder is not None:
-                    trace_recorder.record(
+                    _record_agent_trace(
+                        trace_recorder,
+                        trace_policy,
                         "action_started",
                         risk_level=_infer_agent_action_risk(action_name, permission_for_step),
                         step_index=step_count,
@@ -586,7 +645,9 @@ async def run_agent(
                     step.duration_ms = AGENT_STEP_TIMEOUT * 1000
                     if run.ledger is not None:
                         if trace_recorder is not None:
-                            trace_recorder.record(
+                            _record_agent_trace(
+                                trace_recorder,
+                                trace_policy,
                                 "verification_started",
                                 risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
                                 step_index=step_count,
@@ -597,7 +658,9 @@ async def run_agent(
                             )
                         _append_ledger_verification(run.ledger, action_id=ledger_action_id, step=step)
                         if trace_recorder is not None:
-                            trace_recorder.record(
+                            _record_agent_trace(
+                                trace_recorder,
+                                trace_policy,
                                 "verification_finished",
                                 risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
                                 step_index=step_count,
@@ -607,7 +670,9 @@ async def run_agent(
                                 related_tool=action_name,
                             )
                     if trace_recorder is not None:
-                        trace_recorder.record(
+                        _record_agent_trace(
+                            trace_recorder,
+                            trace_policy,
                             "action_finished",
                             risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
                             step_index=step_count,
@@ -633,7 +698,9 @@ async def run_agent(
                     step.error = exec_result.get("error", "Bestaetigung noetig")
                     if run.ledger is not None:
                         if trace_recorder is not None:
-                            trace_recorder.record(
+                            _record_agent_trace(
+                                trace_recorder,
+                                trace_policy,
                                 "verification_started",
                                 risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
                                 step_index=step_count,
@@ -644,7 +711,9 @@ async def run_agent(
                             )
                         _append_ledger_verification(run.ledger, action_id=ledger_action_id, step=step)
                         if trace_recorder is not None:
-                            trace_recorder.record(
+                            _record_agent_trace(
+                                trace_recorder,
+                                trace_policy,
                                 "verification_finished",
                                 risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
                                 step_index=step_count,
@@ -654,7 +723,9 @@ async def run_agent(
                                 related_tool=action_name,
                             )
                     if trace_recorder is not None:
-                        trace_recorder.record(
+                        _record_agent_trace(
+                            trace_recorder,
+                            trace_policy,
                             "action_finished",
                             risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
                             step_index=step_count,
@@ -686,7 +757,9 @@ async def run_agent(
                 yield {"type": "step_done", "step": step.to_dict()}
                 if run.ledger is not None:
                     if trace_recorder is not None:
-                        trace_recorder.record(
+                        _record_agent_trace(
+                            trace_recorder,
+                            trace_policy,
                             "verification_started",
                             risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
                             step_index=step_count,
@@ -697,7 +770,9 @@ async def run_agent(
                         )
                     _append_ledger_verification(run.ledger, action_id=ledger_action_id, step=step)
                     if trace_recorder is not None:
-                        trace_recorder.record(
+                        _record_agent_trace(
+                            trace_recorder,
+                            trace_policy,
                             "verification_finished",
                             risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
                             step_index=step_count,
@@ -707,7 +782,9 @@ async def run_agent(
                             related_tool=action_name,
                         )
                 if trace_recorder is not None:
-                    trace_recorder.record(
+                    _record_agent_trace(
+                        trace_recorder,
+                        trace_policy,
                         "action_finished",
                         risk_level=_infer_agent_action_risk(action_name, is_command_allowed(action_name)),
                         step_index=step_count,
@@ -761,7 +838,9 @@ async def run_agent(
 
             enforce_agent_policy(run.ledger)
         if trace_recorder is not None:
-            trace_recorder.record(
+            _record_agent_trace(
+                trace_recorder,
+                trace_policy,
                 "review_created",
                 risk_level=run.ledger.plan.risk_level,
                 step_index=step_count,
@@ -769,7 +848,9 @@ async def run_agent(
                 metadata={"status": run.ledger.status.value, "review_required": bool(run.ledger.review and run.ledger.review.user_decision_required)},
             )
     if trace_recorder is not None:
-        trace_recorder.record(
+        _record_agent_trace(
+            trace_recorder,
+            trace_policy,
             "run_finished" if run.status != "failed" else "run_failed",
             risk_level="medium",
             step_index=step_count,

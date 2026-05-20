@@ -24,7 +24,7 @@ def test_answer_quality_suite_runs_from_local_fixtures():
     report = runner.run_suite([GOLDEN_DIR], suites=["answer_quality"])
 
     assert report["ok"] is True
-    assert report["task_count"] == 5
+    assert report["task_count"] == 9
 
 
 def test_answer_quality_adapter_detects_bad_fixture(tmp_path):
@@ -94,4 +94,17 @@ def test_all_includes_answer_quality_adapter():
     report = runner.run_suite([GOLDEN_DIR])
 
     assert "answer_quality" in report["suites"]
+    assert report["ok"] is True
+
+
+def test_answer_quality_phase3d_cases_cover_product_behavior():
+    runner = load_runner()
+
+    report = runner.run_suite([GOLDEN_DIR], suites=["answer_quality"])
+    ids = {result["task_id"] for result in report["results"]}
+
+    assert "answer-quality-explains-progress" in ids
+    assert "answer-quality-no-overclaim-product-status" in ids
+    assert "answer-quality-safe-next-steps" in ids
+    assert "answer-quality-runtime-bug-priority" in ids
     assert report["ok"] is True

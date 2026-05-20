@@ -177,6 +177,12 @@ class AgentPlan:
     checkpoints: list[str] = field(default_factory=list)
     requires_user_review: bool = False
     created_at: str = field(default_factory=utc_now_iso)
+    max_tool_calls: int | None = None
+    max_risky_tool_calls: int | None = None
+    max_memory_reads: int | None = None
+    max_os_writes: int | None = None
+    max_runtime_seconds: int | None = None
+    max_retry_count: int | None = None
 
     def __post_init__(self) -> None:
         if not self.goal.strip():
@@ -191,6 +197,12 @@ class AgentPlan:
             raise ValueError(f"budget_steps must be between 1 and {MAX_BUDGET_STEPS}")
         if not 1 <= int(self.budget_seconds) <= MAX_BUDGET_SECONDS:
             raise ValueError(f"budget_seconds must be between 1 and {MAX_BUDGET_SECONDS}")
+        self.max_tool_calls = _clean_optional_budget(self.max_tool_calls, "max_tool_calls", MAX_BUDGET_STEPS)
+        self.max_risky_tool_calls = _clean_optional_budget(self.max_risky_tool_calls, "max_risky_tool_calls", MAX_BUDGET_STEPS)
+        self.max_memory_reads = _clean_optional_budget(self.max_memory_reads, "max_memory_reads", MAX_BUDGET_STEPS)
+        self.max_os_writes = _clean_optional_budget(self.max_os_writes, "max_os_writes", MAX_BUDGET_STEPS)
+        self.max_runtime_seconds = _clean_optional_budget(self.max_runtime_seconds, "max_runtime_seconds", MAX_BUDGET_SECONDS)
+        self.max_retry_count = _clean_optional_budget(self.max_retry_count, "max_retry_count", MAX_BUDGET_STEPS)
         self.checkpoints = _clean_string_list(self.checkpoints, "checkpoints", allow_empty=True)
         if self.risk_level in {RiskLevel.HIGH, RiskLevel.CRITICAL} and not self.requires_user_review:
             raise ValueError("high and critical plans require user review")
@@ -207,6 +219,12 @@ class AgentPlan:
                 "checkpoints": self.checkpoints,
                 "requires_user_review": self.requires_user_review,
                 "created_at": self.created_at,
+                "max_tool_calls": self.max_tool_calls,
+                "max_risky_tool_calls": self.max_risky_tool_calls,
+                "max_memory_reads": self.max_memory_reads,
+                "max_os_writes": self.max_os_writes,
+                "max_runtime_seconds": self.max_runtime_seconds,
+                "max_retry_count": self.max_retry_count,
             }
         )
 
@@ -421,13 +439,14 @@ class AgentTraceWriter:
 
 
 class AgentTraceRecorder:
-    def __init__(self, run_id: str, writer: AgentTraceWriter | None = None) -> None:
+    def __init__(self, run_id: str, writer: AgentTraceWriter | None = None, *, max_events: int | None = None) -> None:
         if not run_id.strip():
             raise ValueError("run_id must not be empty")
         self.run_id = run_id
         self.writer = writer
         self.events: list[AgentTraceEvent] = []
         self.write_errors: list[str] = []
+        self.max_events = max_events
 
     def record(
         self,
@@ -450,6 +469,10 @@ class AgentTraceRecorder:
             related_action_id=related_action_id,
             related_tool=related_tool,
         )
+        if self.max_events is not None and len(self.events) >= self.max_events:
+            if "trace event limit reached" not in self.write_errors:
+                self.write_errors.append("trace event limit reached")
+            return event
         self.events.append(event)
         if self.writer and not self.writer.write_event(event):
             self.write_errors.append(self.writer.last_error or "trace write failed")
@@ -568,6 +591,33 @@ def enforce_agent_policy(ledger: AgentRunLedger) -> AgentPolicyDecision:
     for index, action in enumerate(ledger.actions):
         action_decision = validate_action_against_plan(action, ledger.plan, step_index=index)
         reasons.extend(action_decision.reasons)
+    if ledger.plan.max_tool_calls is not None and len(ledger.actions) > ledger.plan.max_tool_calls:
+        reasons.append("max_tool_calls exceeded")
+    risky_count = sum(1 for action in ledger.actions if action.risk_level in {RiskLevel.HIGH, RiskLevel.CRITICAL})
+    if ledger.plan.max_risky_tool_calls is not None and risky_count > ledger.plan.max_risky_tool_calls:
+        reasons.append("max_risky_tool_calls exceeded")
+    memory_reads = sum(
+        1
+        for action in ledger.actions
+        if action.action_type == "read" and (action.tool_name.startswith("memory_") or action.scope.startswith("memory"))
+    )
+    if ledger.plan.max_memory_reads is not None and memory_reads > ledger.plan.max_memory_reads:
+        reasons.append("max_memory_reads exceeded")
+    os_writes = sum(
+        1
+        for action in ledger.actions
+        if action.action_type in {"write", "delete", "admin", "execute"}
+        and (
+            action.tool_name.startswith("personal_os_")
+            or any(marker in action.scope.lower() for marker in ("os", "core", "protected", "stable"))
+        )
+    )
+    if ledger.plan.max_os_writes is not None and os_writes > ledger.plan.max_os_writes:
+        reasons.append("max_os_writes exceeded")
+    if ledger.plan.max_retry_count is not None:
+        retry_count = sum(int((action.policy or {}).get("retry_count", 0) or 0) for action in ledger.actions)
+        if retry_count > ledger.plan.max_retry_count:
+            reasons.append("max_retry_count exceeded")
     if reasons:
         reason = "; ".join(dict.fromkeys(reasons))
         return mark_review_required(ledger, reason)
@@ -581,3 +631,12 @@ def _clean_string_list(values: list[str], field_name: str, *, allow_empty: bool 
     if not allow_empty and len(cleaned) != len(values):
         raise ValueError(f"{field_name} must not contain empty strings")
     return cleaned
+
+
+def _clean_optional_budget(value: int | None, field_name: str, upper_bound: int) -> int | None:
+    if value is None:
+        return None
+    normalized = int(value)
+    if not 0 <= normalized <= upper_bound:
+        raise ValueError(f"{field_name} must be between 0 and {upper_bound}")
+    return normalized

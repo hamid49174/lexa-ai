@@ -26,11 +26,14 @@ $PhaseGateTests = @(
   "tests/test_eval_os_drafts.py",
   "tests/test_eval_security.py",
   "tests/test_eval_trace_replay.py",
+  "tests/test_eval_plan_act_verify.py",
   "tests/test_eval_answer_quality.py",
   "tests/test_agent_protocol.py",
   "tests/test_agent_protocol_integration.py",
   "tests/test_agent_trace_capture.py",
-  "tests/test_agent_policy_enforcement.py"
+  "tests/test_agent_trace_sampling.py",
+  "tests/test_agent_policy_enforcement.py",
+  "tests/test_synthetic_trace_generator.py"
 )
 $RiskyPaths = @(
   "personal_os",

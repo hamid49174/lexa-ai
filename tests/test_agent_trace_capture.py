@@ -92,12 +92,17 @@ def test_agent_trace_feature_flag_controls_file_write(monkeypatch, tmp_path):
     monkeypatch.setattr(ai_engine, "chat", fake_chat)
     monkeypatch.setenv("LEXA_AGENT_TRACE_DIR", str(tmp_path))
     monkeypatch.delenv("LEXA_AGENT_TRACE", raising=False)
+    monkeypatch.delenv("LEXA_AGENT_TRACE_SAMPLING", raising=False)
 
     collect_agent_events(run_agent("hello token=supersecretvalue", []))
     assert not list(tmp_path.glob("*.jsonl"))
 
     monkeypatch.setenv("LEXA_AGENT_TRACE", "1")
-    events = collect_agent_events(run_agent("hello token=supersecretvalue", []))
+    collect_agent_events(run_agent("hello token=supersecretvalue", [], trace_source="synthetic", synthetic_context=True))
+    assert not list(tmp_path.glob("*.jsonl"))
+
+    monkeypatch.setenv("LEXA_AGENT_TRACE_SAMPLING", "1")
+    events = collect_agent_events(run_agent("hello token=supersecretvalue", [], trace_source="synthetic", synthetic_context=True))
     traces = list(tmp_path.glob("*.jsonl"))
 
     assert events[-1]["run"]["summary"].startswith("Done")
@@ -113,6 +118,7 @@ def test_agent_trace_records_tool_selection_without_ledger_flag(monkeypatch, tmp
     import backend.agent_loop as agent_loop
 
     monkeypatch.setenv("LEXA_AGENT_TRACE", "1")
+    monkeypatch.setenv("LEXA_AGENT_TRACE_SAMPLING", "1")
     monkeypatch.setenv("LEXA_AGENT_TRACE_DIR", str(tmp_path))
     monkeypatch.delenv("LEXA_AGENT_LEDGER", raising=False)
     calls = {"count": 0}
@@ -130,7 +136,7 @@ def test_agent_trace_records_tool_selection_without_ledger_flag(monkeypatch, tmp
     monkeypatch.setattr(agent_loop, "_execute_tool", fake_execute_tool)
     monkeypatch.setattr(agent_loop, "is_command_allowed", lambda action_name: "allowed")
 
-    collect_agent_events(agent_loop.run_agent("create note", []))
+    collect_agent_events(agent_loop.run_agent("create note", [], trace_source="synthetic", synthetic_context=True))
     trace_text = next(tmp_path.glob("*.jsonl")).read_text(encoding="utf-8")
 
     assert "tool_selected" in trace_text

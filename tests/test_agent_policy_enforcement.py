@@ -80,6 +80,81 @@ def test_budget_steps_exceeded_is_blocked():
     assert "budget_steps exceeded" in decision.reasons
 
 
+def test_max_tool_calls_budget_is_enforced():
+    plan = make_plan(max_tool_calls=1, allowed_tools=["memory_search"])
+    actions = [
+        AgentAction("a1", "memory_search", "read", "memory:metadata", "lookup", True, False, risk_level="low"),
+        AgentAction("a2", "memory_search", "read", "memory:metadata", "lookup", True, False, risk_level="low"),
+    ]
+    ledger = AgentRunLedger(run_id="run-tool-budget", plan=plan, actions=actions, status="running")
+
+    decision = enforce_agent_policy(ledger)
+
+    assert decision.allowed is False
+    assert "max_tool_calls exceeded" in decision.reasons[0]
+
+
+def test_max_risky_tool_calls_budget_is_enforced():
+    plan = make_plan(max_risky_tool_calls=0, allowed_tools=["backup_restore"])
+    action = AgentAction(
+        "a1",
+        "backup_restore",
+        "execute",
+        "agent_loop",
+        "restore",
+        False,
+        True,
+        risk_level="critical",
+    )
+    ledger = AgentRunLedger(run_id="run-risk-budget", plan=plan, actions=[action], status="running")
+
+    decision = enforce_agent_policy(ledger)
+
+    assert decision.allowed is False
+    assert "max_risky_tool_calls exceeded" in "; ".join(decision.reasons)
+
+
+def test_max_os_writes_budget_is_enforced():
+    plan = make_plan(max_os_writes=0, allowed_tools=["personal_os_draft_apply"])
+    action = AgentAction(
+        "a1",
+        "personal_os_draft_apply",
+        "write",
+        "personal_os/core",
+        "apply approved draft",
+        False,
+        True,
+        risk_level="high",
+    )
+    ledger = AgentRunLedger(run_id="run-os-budget", plan=plan, actions=[action], status="running")
+
+    decision = enforce_agent_policy(ledger)
+
+    assert decision.allowed is False
+    assert "max_os_writes exceeded" in "; ".join(decision.reasons)
+
+
+def test_retry_limit_is_enforced():
+    plan = make_plan(max_retry_count=1, allowed_tools=["memory_search"])
+    action = AgentAction(
+        "a1",
+        "memory_search",
+        "read",
+        "memory:metadata",
+        "lookup",
+        True,
+        False,
+        risk_level="low",
+        policy={"retry_count": 2},
+    )
+    ledger = AgentRunLedger(run_id="run-retry-budget", plan=plan, actions=[action], status="running")
+
+    decision = enforce_agent_policy(ledger)
+
+    assert decision.allowed is False
+    assert "max_retry_count exceeded" in "; ".join(decision.reasons)
+
+
 def test_missing_scope_is_rejected():
     plan = make_plan()
     action = {

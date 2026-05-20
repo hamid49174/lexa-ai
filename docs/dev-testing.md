@@ -12,7 +12,7 @@ Quick runs:
 
 - `git diff --check`
 - risky-path staged check
-- Python phase gate for local auth, companion confirmation, router companion, AI tool selection, CSP, Hermes, OS agent runtime, plugin permissions, eval adapters, and the Plan/Act/Verify agent protocol
+- Python phase gate for local auth, companion confirmation, router companion, AI tool selection, CSP, Hermes, OS agent runtime, plugin permissions, eval adapters, trace replay, trace sampling, synthetic trace generation, and the Plan/Act/Verify agent protocol
 - offline eval suite with `venv\Scripts\python.exe evals\runners\run_eval_suite.py --all`
 - every `tests/test_*.js` static test with Node
 
@@ -78,7 +78,22 @@ Trace replay is available with:
 venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite trace_replay
 ```
 
-Trace fixtures must be synthetic. Runtime traces, if enabled, are local artifacts and must stay in ignored paths such as `evals/results/traces/` or `tmp/agent_traces/`.
+Trace fixtures must be synthetic. Runtime trace sampling writes only when both `LEXA_AGENT_TRACE=1` and `LEXA_AGENT_TRACE_SAMPLING=1` are set and the run is marked as synthetic/test context. Real runtime traces are local artifacts and must stay in ignored paths such as `evals/results/traces/` or `tmp/agent_traces/`.
+
+Generate synthetic traces locally:
+
+```powershell
+venv\Scripts\python.exe evals\runners\generate_synthetic_traces.py --output-dir evals\results\traces\generated
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite trace_replay --trace-dir evals\results\traces\generated
+```
+
+The eval runner can also generate and replay in one command:
+
+```powershell
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite trace_replay --generate-synthetic-traces --trace-dir evals\results\traces\generated
+```
+
+Plan/Act/Verify regression evals live in `evals/golden_tasks/plan_act_verify.jsonl` and use synthetic fixtures only. They check plans, budgets, checkpoints, approval requirements, verification behavior, and review creation.
 
 ## Agent Protocol
 
@@ -100,4 +115,11 @@ Phase 3C adds two more feature flags:
 - `LEXA_AGENT_TRACE=1`: writes redacted JSONL agent traces to an ignored trace directory. Optional `LEXA_AGENT_TRACE_DIR` can point to a temp or ignored path.
 - `LEXA_AGENT_POLICY_ENFORCE=1`: enables the first Plan/Act/Verify policy checks in the agent loop. High/critical unsafe actions, forbidden tools, missing scopes, budget violations, and protected direct writes become review-required or blocked instead of silently proceeding.
 
-With both flags off, runtime behavior remains compatible with the pre-Phase-3C agent loop.
+Phase 3D tightens trace capture:
+
+- `LEXA_AGENT_TRACE_SAMPLING=1`: required in addition to `LEXA_AGENT_TRACE=1` before trace writes are allowed.
+- Sampling requires synthetic/test context by default.
+- Sampling limits event count, metadata length, and output paths.
+- `LEXA_AGENT_POLICY_ENFORCE=1` now also evaluates stricter tool, risky-tool, OS-write, memory-read, runtime, and retry budgets.
+
+With these flags off, runtime behavior remains compatible with the pre-Phase-3C agent loop.

@@ -1,11 +1,11 @@
 # Lexa Eval Suite
 
-Phase 3A introduced offline, deterministic evals for product intelligence risks. Phase 3B connected those golden tasks to local adapters and fixtures. Phase 3C adds synthetic agent trace replay and answer-quality fixture checks. These evals are still not external LLM benchmarks: they run without network, API calls, real MCP servers, the real Personal OS mount, or the real memory database.
+Phase 3A introduced offline, deterministic evals for product intelligence risks. Phase 3B connected those golden tasks to local adapters and fixtures. Phase 3C added synthetic agent trace replay and answer-quality fixture checks. Phase 3D adds controlled trace sampling, synthetic trace generation, stricter budget assertions, and Plan/Act/Verify regression evals. These evals are still not external LLM benchmarks: they run without network, API calls, real MCP servers, the real Personal OS mount, or the real memory database.
 
 ## Structure
 
 - `golden_tasks/`: JSONL task sets grouped by product capability.
-- `adapters/`: deterministic local adapters for tool selection, memory, OS drafts, trace replay, answer quality, and security/prompt-injection checks.
+- `adapters/`: deterministic local adapters for tool selection, memory, OS drafts, trace replay, Plan/Act/Verify, answer quality, and security/prompt-injection checks.
 - `fixtures/`: synthetic local fixture data only.
 - `runners/run_eval_suite.py`: offline runner and schema validator.
 - `results/`: optional local reports. Result artifacts are ignored by Git except for placeholders.
@@ -29,9 +29,9 @@ Each JSONL line is one task:
 }
 ```
 
-Allowed categories are `tool_selection`, `memory`, `os_drafts`, `prompt_injection`, `security`, `answer_quality`, and `trace_replay`.
+Allowed categories are `tool_selection`, `memory`, `os_drafts`, `prompt_injection`, `security`, `answer_quality`, `trace_replay`, and `plan_act_verify`.
 
-Common assertion types include `contains`, `not_contains`, `selected_tool`, `not_selected_tool`, `tool_not_selected`, `selected_tool_prefix`, `blocked`, `requires_confirmation`, `creates_draft`, `no_direct_write`, `no_secret_leak`, `event_sequence_contains`, `event_sequence_not_contains`, `verification_passed`, `verification_failed_expected`, `cites_evidence`, `no_overclaim`, and `includes_risk_analysis`.
+Common assertion types include `contains`, `not_contains`, `selected_tool`, `not_selected_tool`, `tool_not_selected`, `selected_tool_prefix`, `blocked`, `requires_confirmation`, `creates_draft`, `no_direct_write`, `no_secret_leak`, `event_sequence_contains`, `event_sequence_not_contains`, `verification_passed`, `verification_failed_expected`, `budget_exceeded_detected`, `max_steps_not_exceeded`, `protected_write_requires_draft`, `has_plan`, `has_budget`, `verification_required`, `cites_evidence`, `no_overclaim`, and `includes_risk_analysis`.
 
 ## Running Locally
 
@@ -75,7 +75,26 @@ Run trace replay directly:
 venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite trace_replay
 ```
 
-Runtime trace capture is feature-flagged with `LEXA_AGENT_TRACE=1` and writes only to ignored paths such as `evals/results/traces/`, `tmp/agent_traces/`, or test temp directories. Real trace files are local artifacts and must not be committed.
+Runtime trace capture is feature-flagged and sampled. It writes only when both `LEXA_AGENT_TRACE=1` and `LEXA_AGENT_TRACE_SAMPLING=1` are enabled, and only for synthetic/test/source-marked runs. Outputs must stay in ignored paths such as `evals/results/traces/`, `tmp/agent_traces/`, or test temp directories. Real trace files are local artifacts and must not be committed.
+
+Generate synthetic traces for replay:
+
+```powershell
+venv\Scripts\python.exe evals\runners\generate_synthetic_traces.py --output-dir evals\results\traces\generated
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite trace_replay --trace-dir evals\results\traces\generated
+```
+
+The runner can generate and replay in one step:
+
+```powershell
+venv\Scripts\python.exe evals\runners\run_eval_suite.py --suite trace_replay --generate-synthetic-traces --trace-dir evals\results\traces\generated
+```
+
+Available synthetic scenarios include `safe_os_agent_task`, `prompt_injection_blocked`, `memory_correction_review`, `os_core_write_draft_only`, `plugin_shell_denied`, `budget_exceeded`, and `secret_redaction_case`.
+
+## Plan/Act/Verify Evals
+
+`golden_tasks/plan_act_verify.jsonl` checks multi-step agent behavior without live model calls. It verifies that risky requests produce plans, budgets, checkpoints, approval requirements, verification steps, and review outcomes instead of silent writes or unsafe completion.
 
 ## Fixture Rules
 
@@ -85,4 +104,4 @@ Runtime trace capture is feature-flagged with `LEXA_AGENT_TRACE=1` and writes on
 - Do not call network, external APIs, real MCP tools, or real shell actions.
 - Keep secrets fake and ensure reports redact them.
 
-Phase 3B and 3C adapters intentionally evaluate local traces, fixtures, and deterministic policy behavior. They are a bridge toward real model/tool trace evals, not a replacement for end-to-end product testing.
+Phase 3B through 3D adapters intentionally evaluate local traces, fixtures, and deterministic policy behavior. They are a bridge toward real model/tool trace evals, not a replacement for end-to-end product testing.
