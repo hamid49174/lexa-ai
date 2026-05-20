@@ -192,14 +192,15 @@ Current chat script order:
 7. `chat_message_actions.js`
 8. `chat_input_helpers.js`
 9. `chat_tool_confirmation_ui.js`
-10. `chat_confirmation_state.js`
-11. `chat_history_ui.js`
-12. `chat_streaming_helpers.js`
-13. `chat.js`
+10. `chat_tool_display_ui.js`
+11. `chat_confirmation_state.js`
+12. `chat_history_ui.js`
+13. `chat_streaming_helpers.js`
+14. `chat.js`
 
-Remaining high-risk clusters: streaming send/abort, conversation history switching/deletion/persistence orchestration, non-confirmed tool-call execution/result rendering, confirmation approval execution, Companion execution, voice/STT/TTS/orb behavior, Personal OS draft apply/approve/reject flows, Electron preload IPC, Electron backend lifecycle, signing/update behavior, and OS cleanup.
+Remaining high-risk clusters: streaming send/abort, conversation history switching/deletion/persistence orchestration, real tool execution/result lifecycle, confirmation approval execution, Companion execution, voice/STT/TTS/orb behavior, Personal OS draft apply/approve/reject flows, Electron preload IPC, Electron backend lifecycle, signing/update behavior, and OS cleanup.
 
-Stop-line: do not extract streaming, send pipeline, conversation switch/load/delete lifecycle, tool execution/result rendering, or confirmation approval execution until direct E2E or stronger integration coverage exists for those lifecycle paths.
+Stop-line: do not extract streaming, send pipeline, conversation switch/load/delete lifecycle, real tool execution/result lifecycle, or confirmation approval execution until direct E2E or stronger integration coverage exists for those lifecycle paths.
 
 ## Internal Stability Sprint: Tool/History Coverage and Confirmation UI Split
 
@@ -345,10 +346,11 @@ Current chat script order:
 7. `chat_message_actions.js`
 8. `chat_input_helpers.js`
 9. `chat_tool_confirmation_ui.js`
-10. `chat_confirmation_state.js`
-11. `chat_history_ui.js`
-12. `chat_streaming_helpers.js`
-13. `chat.js`
+10. `chat_tool_display_ui.js`
+11. `chat_confirmation_state.js`
+12. `chat_history_ui.js`
+13. `chat_streaming_helpers.js`
+14. `chat.js`
 
 Next recommended target: add focused streaming abort/timeout/chunk-boundary smoke before any streaming extraction, or add a render-only non-confirmed tool display smoke. Do not move history orchestration, send pipeline, real tool execution, or confirmation approval execution yet.
 
@@ -403,18 +405,76 @@ Current chat script order:
 7. `chat_message_actions.js`
 8. `chat_input_helpers.js`
 9. `chat_tool_confirmation_ui.js`
-10. `chat_confirmation_state.js`
-11. `chat_history_ui.js`
-12. `chat_streaming_helpers.js`
-13. `chat.js`
+10. `chat_tool_display_ui.js`
+11. `chat_confirmation_state.js`
+12. `chat_history_ui.js`
+13. `chat_streaming_helpers.js`
+14. `chat.js`
 
-Next recommended target: add a render-only non-confirmed tool display smoke before moving any more tool UI, or add a settings persistence smoke before settings modularization. The full streaming lifecycle and send pipeline remain stop-lined.
+Next recommended target: add a settings persistence smoke before settings modularization, or add a render-only file upload result smoke. The full streaming lifecycle, send pipeline, and real tool execution remain stop-lined.
+
+## Tool Display Coverage and Display Helper Extraction
+
+This sprint added render-only non-confirmed tool display coverage first, then extracted only the pure tool-result display text helper into `frontend/src/chat_tool_display_ui.js`.
+
+Coverage added:
+
+- `tests/electron_tool_display_smoke.js` loads the real renderer with isolated Electron `userData`, clicks the real send button, and mocks only `/chat/stream`; the tool execution path uses the existing Electron smoke bridge only.
+- It covers non-confirmed mocked tool result display replacing placeholder text, unsafe result content remaining contained, no confirmation controls/action cards for non-confirmed display, no-result tool output keeping safe placeholder text, composer/control recovery, and persisted tool-like history content not creating live controls.
+- `tests/test_chat_tool_display_helpers.js` directly covers `toolResultDisplayText()` for string results, summary/message/error precedence, fallback key-value formatting, skipped internal fields, empty unsupported data, and unsafe text staying plain text for renderer formatting.
+
+Extraction completed:
+
+| File | Before sprint | After sprint |
+| --- | ---: | ---: |
+| `frontend/src/chat.js` | 4104 lines / 185894 bytes | 4083 lines / 184875 bytes |
+| `frontend/src/chat_tool_display_ui.js` | new | 18 lines / 608 bytes |
+
+Moved function:
+
+- `toolResultDisplayText(data)`
+
+Why this boundary was safe:
+
+- It reads only the passed tool result data.
+- It does not mutate state, touch DOM, fetch backend data, execute tools, trigger confirmation, persist history, or own send/streaming lifecycle.
+- It preserves existing result precedence: string data, then `summary`, `message`, `error`, then fallback key-value pairs while skipping internal display fields.
+- The new smoke covers the display path through the real send flow with mocked tool execution, and the direct helper test covers the pure formatter behavior.
+
+What stayed in `chat.js`:
+
+- `window.lexa.execute()` calls
+- success/failure branching
+- active message rendering
+- toast and notification behavior
+- history persistence
+- confirmation approval/denial execution
+- send pipeline and streaming lifecycle
+
+Current chat script order:
+
+1. `chat_constants.js`
+2. `chat_formatting.js`
+3. `chat_markdown.js`
+4. `chat_message_formatting.js`
+5. `chat_export.js`
+6. `chat_composer_helpers.js`
+7. `chat_message_actions.js`
+8. `chat_input_helpers.js`
+9. `chat_tool_confirmation_ui.js`
+10. `chat_tool_display_ui.js`
+11. `chat_confirmation_state.js`
+12. `chat_history_ui.js`
+13. `chat_streaming_helpers.js`
+14. `chat.js`
+
+Next recommended target: settings persistence smoke before settings modularization, or a render-only file upload result smoke. Real tool execution and confirmation execution remain stop-lined.
 
 ## Do Not Touch Yet
 
 - streaming send and abort lifecycle beyond pure parser helpers
 - conversation history switching/deletion persistence orchestration
-- tool execution/result rendering and confirmation approval execution
+- real tool execution/result lifecycle and confirmation approval execution
 - voice/STT/TTS/orb behavior
 - Personal OS draft apply/approve/reject flows
 - Electron preload IPC risk policy

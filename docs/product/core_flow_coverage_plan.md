@@ -14,7 +14,7 @@ Goal: strengthen integration coverage for Lexa's internal daily-use core flows b
 | Mocked assistant response rendering | `test_chat_rendering.js`, `electron_core_chat_flow_smoke.js` | Does not cover every markdown feature through the full send pipeline | Renderer refactors could break streaming-to-final formatted output | Keep mocked SSE response in `electron_core_chat_flow_smoke.js` and rendering unit coverage in `test_chat_rendering.js` |
 | Streaming response lifecycle | `test_chat_send_guards.js`, `electron_core_chat_flow_smoke.js`, `electron_streaming_robustness_smoke.js`, `electron_ui_visual_smoke.js`, `test_chat_streaming_helpers.js` | Real provider/network behavior and full send-pipeline orchestration remain outside local smoke coverage | Streaming refactors could strand loading state, disabled buttons, duplicate partial text, or unsafe malformed stream output | Keep robustness smoke in required gates before moving any larger streaming lifecycle code |
 | Conversation history save/load | `test_router_conversations.py`, `test_chat_send_guards.js`, `electron_ui_visual_smoke.js`, `electron_core_chat_flow_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_history_lifecycle_smoke.js`, `electron_history_failure_smoke.js` | Real backend persistence and active-conversation delete edge cases still need focused coverage | History refactors could drop raw markdown, duplicate messages, corrupt active selection, or crash on malformed history payloads | Keep failure-path smoke in required gates before moving save/load/delete orchestration |
-| Tool-call display | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, backend action/parser tests, `electron_tool_confirmation_smoke.js` | Non-confirmed tool execution display remains intentionally broad-smoke/static covered only | Tool rendering refactors could expose unsafe labels or hide confirmation state | Add focused non-executing display smoke for safe/no-confirm tool results before moving more tool UI |
+| Tool-call display | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, backend action/parser tests, `electron_tool_confirmation_smoke.js`, `electron_tool_display_smoke.js`, `test_chat_tool_display_helpers.js` | Real Companion/tool execution remains outside renderer smoke coverage | Tool rendering refactors could expose unsafe labels, unsafe result content, or hide confirmation state | Keep render-only display smoke mocked; do not add real tool execution to renderer tests |
 | Confirmation happy path | `test_router_companion.py`, `test_companion_confirmation.py`, `electron_presence_challenge_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_confirmation_click_smoke.js` | Real Companion execution remains intentionally outside renderer smoke coverage | Confirmation UI refactors could call Companion incorrectly or lose safe denial behavior | Keep focused click smoke mocked; do not add real tool execution to renderer tests |
 | OS draft creation path | `test_personal_os_prompt.js`, `test_router_personal_os.py`, `test_personal_os_actions.py`, eval OS draft tests | Full renderer draft creation from chat handoff is not isolated | OS draft UI refactors could bypass Draft/Approval expectations | Add a mocked Personal OS draft handoff smoke only after core chat/history smokes are stable |
 | Settings persistence | `test_settings_voice_static.js`, `test_app_chat_input_wiring.js`, `electron_ui_visual_smoke.js` | Focused settings save/load smoke is thin | Settings refactors could silently stop saving provider/voice preferences | Add a small Electron settings persistence smoke if settings modularization resumes |
@@ -110,8 +110,25 @@ Extraction completed:
 - `frontend/src/chat_streaming_helpers.js` now owns only `chatStreamBufferedLines()` and `parseChatStreamDataLine()`.
 - `frontend/src/chat.js` still owns fetch orchestration, AbortController ownership, rendering, state recovery, history persistence, tool handling, and the send pipeline.
 
+## Added In Tool Display Coverage Sprint
+
+`tests/electron_tool_display_smoke.js` adds focused renderer coverage for mocked non-confirmed tool display:
+
+- a mocked `/chat/stream` response with a non-confirmed `system_info` action uses only the Electron smoke bridge and replaces placeholder assistant text with the mocked tool result
+- rendered tool result content remains safe when formatted into chat DOM
+- non-confirmed tool success and no-result paths do not render confirmation controls or live action cards
+- composer/send state recovers after mocked tool display
+- persisted tool-like history content remains escaped text and does not create live action controls
+
+`tests/test_chat_tool_display_helpers.js` directly covers the extracted display helper for string results, summary/message/error precedence, fallback key-value formatting, skipped internal fields, empty unsupported data, and unsafe text staying text for renderer formatting.
+
+Extraction completed:
+
+- `frontend/src/chat_tool_display_ui.js` now owns only `toolResultDisplayText()`.
+- `frontend/src/chat.js` still owns real tool execution calls, success/failure branching, rendering into the active message, notifications, history persistence, confirmation behavior, and send pipeline state.
+
 ## Stop-line Before Refactors
 
 Do not extract or rewrite the full streaming lifecycle, send pipeline, conversation save/load/delete orchestration, active-conversation delete recovery, real tool execution, real confirmation approval execution, Companion execution, or OS draft actions until focused integration coverage exists for the specific lifecycle being changed.
 
-Recommended next coverage target: focused non-confirmed tool display smoke that remains render-only and does not execute Companion, or settings persistence smoke before settings modularization resumes.
+Recommended next coverage target: settings persistence smoke before settings modularization resumes, or a focused render-only file upload result smoke without real tool/OS execution.

@@ -2181,19 +2181,7 @@ async function sendMessage() {
         try {
           const execResult = await window.lexa.execute(actionData.action, actionData.params || {});
           if (execResult.success) {
-            // Extract human-readable result
-            let resultText = "";
-            const d = execResult.data;
-            if (d && typeof d === "string") {
-              resultText = d;
-            } else if (d && typeof d === "object") {
-              resultText = d.summary || d.message || d.error || "";
-              if (!resultText) {
-                // Format key-value pairs, skip internal fields
-                const skip = new Set(["icon", "icon_code", "will_rain", "success"]);
-                resultText = Object.entries(d).filter(([k, v]) => v && !skip.has(k)).map(([k, v]) => `${k}: ${v}`).join(". ");
-              }
-            }
+            const resultText = toolResultDisplayText(execResult.data);
             if (resultText) {
               // Replace AI placeholder text with actual result
               renderFormattedMessage(textEl, resultText);
@@ -3626,16 +3614,7 @@ function handleChatResponse(res, ambient = false) {
       window.lexa.execute(res.action.action, res.action.params || {}).then((execResult) => {
         if (execResult.success) {
           // Show REAL result in chat, not just AI text
-          let resultText = "";
-          const d = execResult.data;
-          if (d && typeof d === "string") resultText = d;
-          else if (d && typeof d === "object") {
-            resultText = d.summary || d.message || d.error || "";
-            if (!resultText) {
-              const skip = new Set(["icon", "icon_code", "will_rain", "success"]);
-              resultText = Object.entries(d).filter(([k, v]) => v && !skip.has(k)).map(([k, v]) => `${k}: ${v}`).join(". ");
-            }
-          }
+          const resultText = toolResultDisplayText(execResult.data);
           if (resultText) {
             // Find last system message and update its text
             const msgs = chatMessages.querySelectorAll(".system-message .msg-text");
