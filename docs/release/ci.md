@@ -6,6 +6,8 @@ Phase 4D status: no remote GitHub Actions run has been proven from this workspac
 
 Phase 4E status: `git remote -v` still returns no configured remote in this workspace. Remote CI is therefore not executable from here without a manual GitHub repository setup step. `scripts\run_quality_gates.ps1 -Mode CI` remains the local CI-core proof, but PublicRC/PublicRelease stay blocked until GitHub Actions has actually run remotely.
 
+Phase 4F status: `scripts\check_remote_ci_readiness.ps1` now performs the local readiness check. It verifies GitHub remote presence, workflow existence, absence of secret references, absence of release artifact uploads, absence of user-data paths, and local CI/RC script support. In this workspace it reports `RemoteCIReady: no` because no GitHub remote is configured.
+
 ## GitHub Actions
 
 `.github/workflows/quality-gates.yml` runs on pushes and pull requests for `main` and `develop`.
@@ -39,6 +41,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode Ful
 powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode CI
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Mode CICore
+powershell -ExecutionPolicy Bypass -File scripts\check_remote_ci_readiness.ps1
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target InternalRC
 powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target PublicRC
 ```
@@ -72,6 +75,12 @@ To prove remote CI without adding secrets or deployment:
 7. Re-run `scripts\run_release_candidate_check.ps1 -Target PublicRC`.
 
 Until those steps are complete, the correct status is "Remote CI not yet proven", not "CI passed remotely".
+
+Readiness script expected outcomes:
+
+- no GitHub remote: exit 0, `RemoteCIReady: no`, PublicRC remains blocked
+- safe GitHub remote plus safe workflow: exit 0, `RemoteCIReady: yes`, remote run still must be executed and recorded
+- workflow with secret references, artifact upload, release action, or user-data paths: exit 1
 
 ## Known Limits
 

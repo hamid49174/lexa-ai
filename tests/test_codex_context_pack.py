@@ -63,6 +63,8 @@ def test_context_pack_generator_uses_safe_sources(tmp_path):
     assert result.returncode == 0, result.stdout
     generated = output.read_text(encoding="utf-8")
     assert "PublicRC/PublicRelease remain blocked" in generated
+    assert "public_rc_blocker_matrix.md" in generated
+    assert "scripts\\check_remote_ci_readiness.ps1" in generated
     assert "personal_os/" in generated
     assert "06_Inbox/Drafts/2026-" not in generated
     assert "05_Memory/Rollups/" not in generated
@@ -87,3 +89,27 @@ def test_agent_context_strategy_uses_allowlisted_sources():
     assert "personal_os/" in text
     assert "Forbidden Context Inputs" in text
     assert "private OS/Obsidian content" in text
+
+
+def test_public_rc_blocker_matrix_is_structured_and_non_private():
+    text = (REPO_ROOT / "docs" / "release" / "public_rc_blocker_matrix.md").read_text(encoding="utf-8")
+
+    for blocker_id in [
+        "PRC-001",
+        "PRC-002",
+        "PRC-003",
+        "PRC-004",
+        "PRC-005",
+        "PRC-006",
+        "PRC-007",
+        "PRC-008",
+        "PRC-009",
+        "PRC-010",
+    ]:
+        assert blocker_id in text
+    assert "InternalRC" in text
+    assert "PublicRC" in text
+    assert "PublicRelease" in text
+    assert "06_Inbox/Drafts/2026-" not in text
+    assert "05_Memory/Rollups/" not in text
+    assert "sk-" not in text

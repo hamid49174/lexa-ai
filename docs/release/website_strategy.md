@@ -68,3 +68,11 @@ Release tier impact:
 - InternalRC: static-external website is allowed with warnings.
 - PublicRC: website target must be approved and package-based build/lint or an equivalent static-release workflow must be proven.
 - PublicRelease: deployment path, public config, CSP/vendor strategy, and secret handling must be reviewed.
+
+Phase 4F readiness:
+
+- Website remains `static-external`.
+- This is an explicit release decision for InternalRC only.
+- PublicRC remains blocked until a build/lint target or equivalent static-release proof exists.
+- `scripts\run_website_smoke.ps1 -Target PublicRC` fails by design while the website lacks package-based proof.
+- No website redesign, repository migration, or deployment action is part of Phase 4F.

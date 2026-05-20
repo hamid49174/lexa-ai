@@ -45,3 +45,5 @@ This records that install/uninstall proof is requested, but it does not perform 
 Phase 4D status: installer existence and artifact scan are supported. Real install/uninstall testing is still not yet proven until a disposable VM run is completed. InternalRC may carry this as a warning; PublicRC and PublicRelease are blocked until the VM/sandbox procedure is proven and recorded.
 
 Phase 4E status: unsigned installers are explicitly warn-only for `InternalRC` and blocking for `PublicRC`/`PublicRelease`. `ExpectedPublisher` is checked when a valid signer certificate is present. No certificate, key, signing password, or signing secret may be placed in Git.
+
+Phase 4F status: VM readiness is now reported from Windows Sandbox, Hyper-V, and the explicit `LEXA_INSTALLER_VM_TEST` environment marker. Absence of all three keeps installer install/uninstall as "not yet proven". The script still refuses productive-machine install/uninstall unless `-VMOnly` is supplied, and even then it prints the proof plan rather than silently installing.

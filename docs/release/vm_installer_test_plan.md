@@ -4,6 +4,8 @@ Phase 4D status: installer install/uninstall is prepared but not proven in this 
 
 Phase 4E status: VM/Sandbox install and uninstall remain not proven from this workstation. The script can classify signing by release target and print the VM-only plan, but it still does not perform installation automatically.
 
+Phase 4F status: installer smoke reports Windows Sandbox, Hyper-V, and `LEXA_INSTALLER_VM_TEST` marker availability. Missing VM capability is a Needs Review state, not a fake pass. PublicRC/PublicRelease remain blocked until the proof is run in a disposable environment and recorded.
+
 ## Goal
 
 Prove that a generated Windows installer can install, launch, and uninstall Lexa in an isolated environment without bundling user data, OS vault data, secrets, logs, or local workspaces.

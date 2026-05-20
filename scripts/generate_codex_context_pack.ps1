@@ -63,7 +63,8 @@ This file is generated from safe Lexa repository metadata and fixed release-read
 - GitHub remote status: $remoteStatus
 - Release targets: InternalRC, PublicRC, PublicRelease
 - InternalRC may proceed with documented warnings.
-- PublicRC/PublicRelease remain blocked until remote CI proof, VM installer proof, signing, website release target proof, and OS cleanup review are complete.
+- Phase 4F readiness focus: blocker matrix, remote CI readiness, VM installer proof, signing readiness, website target, OS cleanup review, and safe context workflow.
+- PublicRC/PublicRelease remain blocked until remote CI proof, VM installer proof, signing, website release target proof, OS cleanup review, and public privacy/trace review are complete.
 
 ## Recent Commits
 
@@ -75,6 +76,7 @@ $recentLines
 - README.md
 - docs/dev-testing.md
 - docs/release/release_candidate_checklist.md
+- docs/release/public_rc_blocker_matrix.md
 - docs/release/ci.md
 - docs/release/signing_plan.md
 - docs/release/website_strategy.md
@@ -93,6 +95,7 @@ $recentLines
 - scripts\run_quality_gates.ps1 -Mode CI
 - scripts\run_eval_regression_gate.ps1
 - scripts\run_release_candidate_check.ps1 -Target InternalRC
+- scripts\check_remote_ci_readiness.ps1
 
 ## Open PublicRC Blockers
 
@@ -101,6 +104,7 @@ $recentLines
 - Installer is unsigned.
 - Website is currently a static external target without package-based build/lint proof.
 - External OS cleanup remains a separate reviewed project.
+- Public release privacy/trace consent is not finalized.
 
 ## Codex Working Rules
 

@@ -74,3 +74,9 @@ Release tier impact:
 - InternalRC: dirty external OS is allowed with documentation and green OS gates.
 - PublicRC: dirty OS cleanup risk must be reviewed by a human before release.
 - PublicRelease: OS cleanup plan must be complete or explicitly accepted by the release owner.
+
+Phase 4F readiness:
+
+- The OS dirty state is now represented in `docs/release/public_rc_blocker_matrix.md` as PRC-005.
+- The next action is not a Lexa code patch. It is a separate backup-first OS cleanup review.
+- Lexa release scripts may warn or block by tier, but must not stage, delete, archive, migrate, or commit OS files.

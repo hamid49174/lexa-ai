@@ -50,6 +50,7 @@ scripts\run_quality_gates.ps1 -Mode Full
 scripts\run_quality_gates.ps1 -Mode CI
 scripts\run_eval_regression_gate.ps1
 scripts\run_release_candidate_check.ps1 -Target InternalRC
+scripts\check_remote_ci_readiness.ps1
 scripts\generate_codex_context_pack.ps1 -Check
 ```
 
@@ -60,6 +61,8 @@ Run OS, Hermes, Website, Packaging, and Electron smokes only when relevant to th
 - `InternalRC`: local/internal candidate. Unsigned installer, missing VM install proof, external dirty OS, and static website gaps may be warnings if documented.
 - `PublicRC`: public candidate. Requires remote CI proof, signed installer, VM install/uninstall proof, reviewed OS cleanup risk, and clear website release target.
 - `PublicRelease`: stricter than PublicRC. Requires signing, installer proof, website workflow, privacy/trace consent review, and no open high/critical risks.
+
+Use `docs/release/public_rc_blocker_matrix.md` as the source of truth for unresolved PublicRC/PublicRelease blockers and next actions.
 
 ## OS Handling
 

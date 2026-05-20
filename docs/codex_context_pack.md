@@ -10,6 +10,7 @@ This pack gives Codex a safe project-level starting context for Lexa work. It is
 - Phase 4A-4C: release-readiness gates, clean install, CI-core, packaging smoke, installer smoke, collision-safe eval reports, signing plan, and release proof docs are in place.
 - Phase 4D: release tiers and safe Codex context pack are in place.
 - Phase 4E: PublicRC blockers are being handled as explicit external proof items: remote CI, VM installer proof, signing, website release target, and OS cleanup review.
+- Phase 4F: PublicRC blockers are now tracked through a blocker matrix, remote-CI readiness script, RC next actions, and context workflow checks.
 
 Recent anchor commits:
 
@@ -38,6 +39,7 @@ Use these first:
 - `README.md`
 - `docs/dev-testing.md`
 - `docs/release/release_candidate_checklist.md`
+- `docs/release/public_rc_blocker_matrix.md`
 - `docs/release/ci.md`
 - `docs/release/signing_plan.md`
 - `docs/release/website_strategy.md`
@@ -63,6 +65,7 @@ Use these first:
 - Installer is unsigned; this blocks PublicRC/PublicRelease.
 - Website is a static external target without package-based lint/build proof.
 - OS repo remains a separately dirty repository and needs a human-reviewed cleanup project.
+- Public release privacy/trace consent is not finalized.
 
 ## Recommended Next Work
 
@@ -75,6 +78,8 @@ Use these first:
 ## Context Pack Maintenance
 
 Use `scripts\generate_codex_context_pack.ps1` to regenerate a safe project-level context pack. The generator must not read `personal_os/`, eval results, traces, memory databases, env files, signing keys, build artifacts, or private OS/Obsidian content.
+
+Use `scripts\check_remote_ci_readiness.ps1` before PublicRC review to prove whether the repository has a GitHub remote and a safe workflow candidate.
 
 ## Codex Usage Notes
 

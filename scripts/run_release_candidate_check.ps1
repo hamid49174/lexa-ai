@@ -14,6 +14,8 @@ $RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 $Script:RcWarnings = New-Object System.Collections.Generic.List[string]
 $Script:RcBlockers = New-Object System.Collections.Generic.List[string]
+$Script:RcNextActions = New-Object System.Collections.Generic.List[string]
+$Script:RcExternalPrerequisites = New-Object System.Collections.Generic.List[string]
 $Script:RcFacts = @{}
 
 function Invoke-RcStep {
@@ -47,6 +49,26 @@ function Add-RcWarning {
 function Add-RcBlocker {
   param([string]$Message)
   $Script:RcBlockers.Add($Message) | Out-Null
+}
+
+function Add-UniqueListItem {
+  param(
+    [System.Collections.Generic.List[string]]$List,
+    [string]$Message
+  )
+  if ($Message -and -not $List.Contains($Message)) {
+    $List.Add($Message) | Out-Null
+  }
+}
+
+function Add-RcNextAction {
+  param([string]$Message)
+  Add-UniqueListItem $Script:RcNextActions $Message
+}
+
+function Add-RcExternalPrerequisite {
+  param([string]$Message)
+  Add-UniqueListItem $Script:RcExternalPrerequisites $Message
 }
 
 function Add-TargetFinding {
@@ -104,6 +126,14 @@ function Complete-RcCheck {
     Write-Host "Warnings:"
     $Script:RcWarnings | ForEach-Object { Write-Host "- $_" }
   }
+  if ($Script:RcNextActions.Count -gt 0) {
+    Write-Host "Next actions:"
+    $Script:RcNextActions | ForEach-Object { Write-Host "- $_" }
+  }
+  if ($Script:RcExternalPrerequisites.Count -gt 0) {
+    Write-Host "External prerequisites:"
+    $Script:RcExternalPrerequisites | ForEach-Object { Write-Host "- $_" }
+  }
   if ($Script:RcBlockers.Count -gt 0) {
     Write-Host "Release Candidate Check blocked ($ModeName / $TargetName)."
     exit 1
@@ -122,6 +152,8 @@ if (Test-GithubRemoteConfigured) {
 } else {
   $Script:RcFacts["github_remote"] = $false
 }
+
+Invoke-RcStep "Remote CI Readiness" { powershell -ExecutionPolicy Bypass -File "scripts\check_remote_ci_readiness.ps1" }
 
 $buildForMode = $RunPackagingBuild -or $Mode -in @("Packaging", "StrictRC")
 $packagingArtifactRoot = if ($buildForMode) {
@@ -153,7 +185,9 @@ if ($Mode -eq "Installer") {
 }
 
 if (-not $Script:RcFacts["github_remote"]) {
-  Add-TargetFinding "Remote CI is not yet remotely proven because no GitHub remote is configured." @("PublicRC", "PublicRelease")
+  Add-TargetFinding "[CI] Remote CI is not yet remotely proven because no GitHub remote is configured." @("PublicRC", "PublicRelease")
+  Add-RcNextAction "Create a GitHub remote, push the branch, run the quality-gates workflow, and record the run URL plus commit SHA."
+  Add-RcExternalPrerequisite "GitHub repository with Actions enabled."
 }
 
 if (-not $SkipFullQualityGate -and $Mode -notin @("Packaging", "Installer")) {
@@ -203,20 +237,30 @@ Invoke-RcStep "Installer Smoke" {
 } ($Mode -ne "StrictRC" -and -not $buildForMode)
 
 if ($Mode -in @("Installer", "StrictRC") -or $Target -in @("PublicRC", "PublicRelease")) {
-  Add-TargetFinding "Installer install/uninstall in a disposable VM is not proven by this local script unless run_installer_smoke.ps1 is executed with an approved VM-only procedure." @("PublicRC", "PublicRelease")
+  Add-TargetFinding "[Installer] Installer install/uninstall in a disposable VM is not proven by this local script unless run_installer_smoke.ps1 is executed with an approved VM-only procedure." @("PublicRC", "PublicRelease")
+  Add-RcNextAction "Run installer install/uninstall proof in a disposable VM or Windows Sandbox with -VMOnly."
+  Add-RcExternalPrerequisite "Disposable Windows VM or Windows Sandbox."
 }
 $installerSigningRoot = if ($buildForMode) { $packagingArtifactRoot } else { Join-Path $RepoRoot "dist" }
 $installerSigningStatus = Get-InstallerSigningStatus $installerSigningRoot
 Write-Host "Installer signing gate status: $installerSigningStatus"
 if ($installerSigningStatus -ne "signed") {
-  Add-TargetFinding "Installer signing status is '$installerSigningStatus'. Unsigned or unknown installers are warn-only for InternalRC and block PublicRC/PublicRelease." @("PublicRC", "PublicRelease")
+  Add-TargetFinding "[Signing] Installer signing status is '$installerSigningStatus'. Unsigned or unknown installers are warn-only for InternalRC and block PublicRC/PublicRelease." @("PublicRC", "PublicRelease")
+  Add-RcNextAction "Configure Windows signing outside Git, rebuild, and verify the expected signer identity."
+  Add-RcExternalPrerequisite "Windows code signing certificate and protected secret store."
 }
 if ($Target -in @("PublicRC", "PublicRelease")) {
-  Add-RcBlocker "Website release target is still static/external without package-based build/lint proof."
-  Add-RcBlocker "OS cleanup remains unreviewed in a separate dirty OS repository."
+  Add-RcBlocker "[Website] Website release target is still static/external without package-based build/lint proof."
+  Add-RcBlocker "[OS] OS cleanup remains unreviewed in a separate dirty OS repository."
+  Add-RcNextAction "Approve a website release target with package-based build/lint or equivalent static-release validation."
+  Add-RcNextAction "Run the OS cleanup review as a separate backup-first OS project."
+  Add-RcExternalPrerequisite "Website release target decision."
+  Add-RcExternalPrerequisite "Human review of the external OS dirty state."
 }
 if ($Target -eq "PublicRelease") {
-  Add-RcBlocker "PublicRelease requires signed installer, proven VM install/uninstall, remote CI proof, and website release workflow."
+  Add-RcBlocker "[Privacy] Public release privacy and trace consent review is not finalized."
+  Add-RcBlocker "[Release] PublicRelease requires signed installer, proven VM install/uninstall, remote CI proof, and website release workflow."
+  Add-RcNextAction "Complete privacy and trace-consent review before public release."
 }
 Invoke-RcStep "Performance Budget Smoke" { powershell -ExecutionPolicy Bypass -File "scripts\check_performance_budgets.ps1" }
 Invoke-RcStep "Git Safety" {

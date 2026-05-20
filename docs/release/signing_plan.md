@@ -70,3 +70,10 @@ Until then, signing remains a release-review warning for InternalRC and a blocki
 - `-AllowUnsignedInternal`
 
 `scripts\run_release_candidate_check.ps1` performs a best-effort installer signing status check from the active artifact root. PublicRC/PublicRelease are blocked when the status is anything other than `signed`.
+
+Phase 4F readiness:
+
+- signing remains a non-code external prerequisite
+- `scripts\check_risky_artifacts.ps1` blocks common signing key, certificate, keystore, and password patterns from staged files and scan paths
+- `scripts\run_installer_smoke.ps1 -Target PublicRC` and `-Target PublicRelease` block unsigned or unknown signing status
+- `scripts\run_release_candidate_check.ps1` reports signing as a `[Signing]` finding with a concrete next action and external prerequisite

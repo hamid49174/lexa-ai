@@ -56,3 +56,10 @@ The OS repo remains dirty and separate. Observed categories include:
 ## Release Impact
 
 This dirty state does not block InternalRC if OS gates are green and OS remains external/uncommitted. It blocks PublicRC/PublicRelease until the cleanup risk is reviewed or accepted by the release owner.
+
+## Phase 4F Summary
+
+- tracked modified count remains category-level only
+- untracked content is grouped as drafts, events, raw inbox, automation/workflow, MCP/worker, and Lexa context categories
+- no private draft/event contents are copied into this repository
+- OS cleanup remains a separate review project and PublicRC blocker

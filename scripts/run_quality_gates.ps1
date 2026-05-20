@@ -34,6 +34,7 @@ $PhaseGateTests = @(
   "tests/test_failure_triage.py",
   "tests/test_eval_baseline_update.py",
   "tests/test_release_candidate_check.py",
+  "tests/test_remote_ci_readiness_script.py",
   "tests/test_codex_context_pack.py",
   "tests/test_quality_gate_scripts.py",
   "tests/test_performance_budgets.py",

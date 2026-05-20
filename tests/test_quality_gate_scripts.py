@@ -12,6 +12,7 @@ def test_quality_gates_include_release_script_tests_and_startup_smoke():
     src = read("scripts/run_quality_gates.ps1")
 
     assert "test_release_candidate_check.py" in src
+    assert "test_remote_ci_readiness_script.py" in src
     assert "test_codex_context_pack.py" in src
     assert "test_quality_gate_scripts.py" in src
     assert "test_performance_budgets.py" in src
@@ -47,6 +48,20 @@ def test_github_quality_workflow_is_non_deploying_and_secret_free():
     assert "actions/upload-artifact" not in workflow
     assert "softprops/action-gh-release" not in workflow
     assert "secrets." not in workflow
+
+
+def test_remote_ci_readiness_script_exists_and_checks_required_safety():
+    src = read("scripts/check_remote_ci_readiness.ps1")
+
+    assert "RemoteCIReady" in src
+    assert "github\\.com" in src
+    assert "quality-gates.yml" in src
+    assert "secrets\\." in src
+    assert "upload-artifact" in src
+    assert "personal_os" in src
+    assert "run_quality_gates.ps1" in src
+    assert "run_release_candidate_check.ps1" in src
+    assert "Remove-Item" not in src
 
 
 def test_dependency_repro_script_is_read_only():
@@ -102,3 +117,4 @@ def test_context_pack_generator_is_non_destructive():
     assert "personal_os" in src
     assert "evals" in src and "results" in src
     assert "Remove-Item" not in src
+    assert "public_rc_blocker_matrix.md" in src

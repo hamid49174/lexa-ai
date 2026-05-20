@@ -52,6 +52,19 @@ function Test-WindowsSandboxAvailable {
   }
 }
 
+function Test-HyperVAvailable {
+  try {
+    $feature = Get-WindowsOptionalFeature -Online -FeatureName "Microsoft-Hyper-V-All" -ErrorAction Stop
+    return ($feature.State -eq "Enabled")
+  } catch {
+    return $false
+  }
+}
+
+function Test-InstallerVmMarker {
+  return ($env:LEXA_INSTALLER_VM_TEST -eq "1" -or $env:LEXA_INSTALLER_VM_TEST -eq "true")
+}
+
 function Write-InstallPlan {
   param([string]$PathValue)
   Write-Host "Installer VM install/uninstall plan:"
@@ -136,9 +149,13 @@ Write-Host "Signing status: $($signingInfo.Status)"
 if ($signingInfo.Subject) { Write-Host "Signer subject: $($signingInfo.Subject)" }
 if ($Install -or $Uninstall) {
   $sandboxAvailable = Test-WindowsSandboxAvailable
+  $hyperVAvailable = Test-HyperVAvailable
+  $vmMarker = Test-InstallerVmMarker
   Write-Host "Windows Sandbox available: $sandboxAvailable"
-  if (-not $sandboxAvailable) {
-    Write-Warning "VM install/uninstall status: Needs Review. Windows Sandbox is not available or not enabled in this environment."
+  Write-Host "Hyper-V available: $hyperVAvailable"
+  Write-Host "VM test marker LEXA_INSTALLER_VM_TEST: $vmMarker"
+  if (-not $sandboxAvailable -and -not $hyperVAvailable -and -not $vmMarker) {
+    Write-Warning "VM install/uninstall status: Needs Review. No Windows Sandbox, Hyper-V, or explicit VM test marker is available in this environment."
   }
   Write-InstallPlan $installer.FullName
   Write-Warning "Installer install/uninstall proof is prepared as VM-only and was not executed automatically. Run inside a disposable VM/sandbox with explicit human approval."

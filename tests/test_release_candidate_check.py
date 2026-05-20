@@ -55,11 +55,19 @@ def test_release_candidate_script_reports_decision_and_warnings():
     assert "Needs Review" in src
     assert "Blocked" in src
     assert "Ready" in src
-    assert "Remote GitHub Actions run is not proven" in src
+    assert "Remote CI is not yet remotely proven" in src
     assert "Installer install/uninstall" in src
     assert "Installer signing status is" in src
     assert "Get-InstallerSigningStatus" in src
     assert "Website release target is still static/external" in src
+    assert "Next actions:" in src
+    assert "External prerequisites:" in src
+    assert "[CI]" in src
+    assert "[Installer]" in src
+    assert "[Signing]" in src
+    assert "[Website]" in src
+    assert "[OS]" in src
+    assert "[Privacy]" in src
 
 
 def test_release_docs_exist_and_cover_decision_states():
@@ -77,3 +85,4 @@ def test_release_docs_exist_and_cover_decision_states():
     assert "InternalRC" in checklist
     assert "PublicRC" in checklist
     assert "PublicRelease" in checklist
+    assert "PublicRC Blocker Matrix" in checklist

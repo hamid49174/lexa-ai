@@ -75,6 +75,7 @@ def test_installer_vm_only_install_is_not_auto_executed(tmp_path):
     assert "not executed automatically" in result.stdout
     assert "not yet proven" in result.stdout
     assert "Installer VM install/uninstall plan" in result.stdout
+    assert "VM test marker LEXA_INSTALLER_VM_TEST" in result.stdout
 
 
 def test_installer_plan_only_prints_vm_plan():
@@ -100,6 +101,23 @@ def test_unsigned_installer_blocks_public_rc(tmp_path):
 
     assert result.returncode != 0
     assert "blocks PublicRC" in result.stdout
+
+
+def test_unsigned_installer_blocks_public_release(tmp_path):
+    installer = tmp_path / "Lexa-Setup.exe"
+    installer.write_bytes(b"0" * (2 * 1024 * 1024))
+
+    result = run_script(
+        "-ArtifactRoot",
+        str(tmp_path),
+        "-InstallerPath",
+        str(installer),
+        "-Target",
+        "PublicRelease",
+    )
+
+    assert result.returncode != 0
+    assert "blocks PublicRelease" in result.stdout
 
 
 def test_installer_accepts_expected_publisher_parameter_for_internal_rc(tmp_path):

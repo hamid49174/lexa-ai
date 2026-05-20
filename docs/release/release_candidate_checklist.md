@@ -150,6 +150,16 @@ PublicRelease additionally requires release signing, installer proof, website de
 - [ ] OS cleanup remains separate and backup-first.
 - [ ] Codex context pack can be regenerated from safe repository metadata without reading private OS/Obsidian content.
 
+## 15. Phase 4F PublicRC Blocker Matrix
+
+- [ ] PublicRC Blocker Matrix exists at `docs/release/public_rc_blocker_matrix.md`.
+- [ ] Each PublicRC blocker has area, status, tier impact, missing proof, next action, owner, and external prerequisite status.
+- [ ] `scripts\check_remote_ci_readiness.ps1` reports `RemoteCIReady`.
+- [ ] RC check output contains blockers, warnings, next actions, and external prerequisites.
+- [ ] InternalRC may remain Needs Review with accepted warnings.
+- [ ] PublicRC remains blocked while remote CI, VM installer proof, signing, website target, OS cleanup review, remote runner availability, and artifact policy proof are not complete.
+- [ ] PublicRelease remains blocked until PublicRC is complete and privacy/trace consent is reviewed.
+
 Decision notes:
 
 - Blocking failures require a fix or explicit release-owner review.
