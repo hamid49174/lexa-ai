@@ -427,6 +427,7 @@ function assert(desc, ok, detail = "") {
   assert("normal chat stop labels are translated", deI18n.includes('"chat.stopResponseButton"') && enI18n.includes('"chat.stopResponseButton"') && deI18n.includes('"chat.responseStopped"') && enI18n.includes('"chat.responseStopped"'));
   assert("normal chat HTTP error clears stream timeout", sendSource.includes("clearTimeout(_streamTimeout);") && sendSource.includes("window._lexaStreamAbort = null"));
   assert("normal chat HTTP errors persist and re-enable answer actions", sendSource.includes("setMessagePersistText(msgEl, errMsg);") && sendSource.includes("copyBtn.disabled = false;\n      memoryBtn.disabled = false;\n      workspaceBtn.disabled = false;\n      continueBtn.disabled = false;\n      verifyBtn.disabled = false;\n      exportBtn.disabled = false;\n      regenBtn.disabled = false;") && sendSource.includes("saveChatHistory();\n      saveCurrentConversation();\n      return;"));
+  assert("normal chat stream includes local auth cookie credentials", sendSource.includes('fetch(`${window.lexa.API_BASE}/chat/stream`, {') && sendSource.includes('credentials: "include"'));
 
   const voiceStartStatusSource = extractFn(src, "voiceStart");
   const voiceProcessStatusSource = extractFn(src, "voiceProcess");
@@ -434,6 +435,7 @@ function assert(desc, ok, detail = "") {
   const voiceTTSNextStatusSource = extractFn(src, "voiceTTSNext");
   const voiceStatusUpdateSource = extractFn(src, "voiceStatusBarUpdate");
   const voiceStatusResetSource = extractFn(src, "voiceStatusBarReset");
+  assert("voice chat stream includes local auth cookie credentials", voiceStreamChatStatusSource.includes('fetch(`${API}/chat/stream`, {') && voiceStreamChatStatusSource.includes('credentials: "include"'));
   const voiceSpeechPendingSource = extractFn(src, "voiceSpeechPending");
   const voiceResetIfNoSpeechSource = extractFn(src, "voiceStatusBarResetIfNoSpeechPending");
   const voiceTtsFindSplitSource = extractFn(src, "voiceTTSFindSplit");

@@ -1381,7 +1381,7 @@ function denyAction(btn) {
   btn.disabled = true;
   btn.classList.add("action-denied");
   // Clear pending confirmation on the backend
-  try { fetch(`${window.lexa.API_BASE}/chat/confirm-clear`, { method: "POST" }); } catch (_) {}
+  try { fetch(`${window.lexa.API_BASE}/chat/confirm-clear`, { method: "POST", credentials: "include" }); } catch (_) {}
   showToast(t("toast.actionCancelled"), "warning");
 }
 
@@ -1701,6 +1701,7 @@ async function sendMessage() {
       response = await fetch(`${window.lexa.API_BASE}/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ message: text }),
         signal: window._lexaStreamAbort.signal,
       });
@@ -2268,7 +2269,7 @@ async function confirmAction(btn, actionStr) {
   btn.textContent = t("chat.executing");
   btn.disabled = true;
   // Clear pending confirmation on the backend (user clicked the button)
-  try { await fetch(`${window.lexa.API_BASE}/chat/confirm-clear`, { method: "POST" }); } catch (_) {}
+  try { await fetch(`${window.lexa.API_BASE}/chat/confirm-clear`, { method: "POST", credentials: "include" }); } catch (_) {}
   try {
     const prepared = await window.lexa.prepareCompanionExecute(action.action, action.params || {});
     if (!prepared.success) {
@@ -3000,6 +3001,7 @@ async function voiceStreamChat(text) {
     const resp = await fetch(`${API}/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({
         message: text,
         conversation_id: LexaState.get("activeConversationId"),

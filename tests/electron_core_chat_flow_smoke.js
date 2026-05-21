@@ -128,7 +128,7 @@ async function main() {
       window.fetch = async (url, options = {}) => {
         const urlText = String(url || "");
         const bodyText = typeof options.body === "string" ? options.body : "";
-        fetchCalls.push({ url: urlText, body: bodyText });
+        fetchCalls.push({ url: urlText, body: bodyText, credentials: options.credentials || "" });
         if (urlText.endsWith("/chat/stream")) {
           const encoder = new TextEncoder();
           const chunks = [
@@ -173,6 +173,7 @@ async function main() {
       const coreFlow = {
         waitOk: sendWait.ok,
         streamRequested: Boolean(streamCall),
+        streamCredentials: streamCall?.credentials || "",
         streamMessage: streamBody.message || "",
         userText: userMessage?.textContent || "",
         assistantText: assistantMessage?.textContent || "",
@@ -215,6 +216,7 @@ async function main() {
   console.log("\nCore chat flow integration:");
   assert("send handler completes with mocked stream", core.waitOk === true, JSON.stringify(core));
   assert("chat stream receives submitted input", core.streamRequested === true && core.streamMessage === "Write a stable internal smoke response", JSON.stringify(core));
+  assert("chat stream sends local auth cookie credentials", core.streamCredentials === "include", JSON.stringify(core));
   assert("user message is rendered", /stable internal smoke response/.test(core.userText || ""), core.userText);
   assert("assistant streamed response renders", /Mocked assistant response/.test(core.assistantText || "") && /safe markdown/.test(core.assistantText || ""), core.assistantText);
   assert("assistant markdown is formatted", Number(core.strongCount || 0) >= 1, core.assistantHtml);

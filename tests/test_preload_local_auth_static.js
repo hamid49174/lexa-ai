@@ -17,6 +17,7 @@ function assert(desc, ok) {
 
 console.log("\nPreload local auth:");
 assert("does not expose local auth token on window.lexa", !src.includes("localAuthToken:"));
+assert("does not expose cookie auth token on window.lexa", !src.includes("lexa_local_auth"));
 assert("gets local auth token only through IPC", src.includes('ipcRenderer.invoke("local-auth-token")'));
 assert("adds X-Lexa-Local-Token header centrally", src.includes("headers.set(LOCAL_AUTH_HEADER, token)"));
 assert("guards token forwarding to local backend URLs", src.includes("function isLocalLexaBackendUrl") && src.includes('"127.0.0.1"') && src.includes('"localhost"'));

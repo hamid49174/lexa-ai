@@ -121,7 +121,7 @@ if (!electron || typeof electron === "string" || !electron.app) {
   );
 }
 
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, dialog } = electron;
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, dialog, session } = electron;
 const { spawn } = require("child_process");
 const crypto = require("crypto");
 const http = require("http");
@@ -316,8 +316,18 @@ const EXTERNAL_LEXA_BACKEND = "__external_lexa_backend__";
 const AUTH_MISMATCH_LEXA_BACKEND = "__auth_mismatch_lexa_backend__";
 const HEALTH_CHECK_BODY_LIMIT = 64 * 1024;
 const HEALTH_CHECK_TIMEOUT_MS = 2000;
+const LOCAL_AUTH_COOKIE = "lexa_local_auth";
 const INSTANCE_TOKEN = crypto.randomBytes(16).toString("hex");
 let backendRestartAttempts = 0;
+
+async function installLocalAuthCookie() {
+  await session.defaultSession.cookies.set({
+    url: "http://127.0.0.1:8000",
+    name: LOCAL_AUTH_COOKIE,
+    value: INSTANCE_TOKEN,
+    httpOnly: true,
+  });
+}
 
 function getBackendPath() {
   // In development: use venv python
@@ -1257,6 +1267,7 @@ app.whenReady().then(async () => {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   process.env.LEXA_DATA_DIR = dataDir;
   console.log("[App] Data directory:", dataDir);
+  await installLocalAuthCookie();
 
   // Initialize trial license on first launch
   _initTrialIfNeeded();

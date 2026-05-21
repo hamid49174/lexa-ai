@@ -7,6 +7,7 @@ import os
 from fastapi import Request
 
 LOCAL_AUTH_HEADER = "X-Lexa-Local-Token"
+LOCAL_AUTH_COOKIE = "lexa_local_auth"
 _PUBLIC_PATHS = {"/health"}
 _DEV_DOC_PATHS = {"/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"}
 _DEV_ENVS = {"dev", "development", "local", "test", "testing"}
@@ -35,8 +36,13 @@ def request_has_valid_local_token(request: Request) -> bool:
     expected = get_local_auth_token()
     if not expected:
         return True
-    supplied = (request.headers.get(LOCAL_AUTH_HEADER) or "").strip()
-    return bool(supplied) and hmac.compare_digest(supplied, expected)
+    supplied_header = (request.headers.get(LOCAL_AUTH_HEADER) or "").strip()
+    supplied_cookie = (request.cookies.get(LOCAL_AUTH_COOKIE) or "").strip()
+    return (
+        bool(supplied_header) and hmac.compare_digest(supplied_header, expected)
+    ) or (
+        bool(supplied_cookie) and hmac.compare_digest(supplied_cookie, expected)
+    )
 
 
 def health_auth_fields(request: Request) -> dict[str, bool]:

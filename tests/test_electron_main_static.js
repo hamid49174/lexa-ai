@@ -41,6 +41,7 @@ assert("settles backend health checks once", src.includes("let settled = false")
 assert("recognizes tokenless Lexa backends", src.includes("EXTERNAL_LEXA_BACKEND") && src.includes('data.service === "lexa-ai"'));
 assert("does not trust leaked health instance tokens", !src.includes("data.instance_token"));
 assert("sends local auth token as health header", src.includes('"X-Lexa-Local-Token": INSTANCE_TOKEN'));
+assert("installs HttpOnly local auth cookie for renderer fetches", src.includes('const LOCAL_AUTH_COOKIE = "lexa_local_auth"') && src.includes("function installLocalAuthCookie") && src.includes("httpOnly: true") && src.includes("session.defaultSession.cookies.set") && src.includes('url: "http://127.0.0.1:8000"') && src.includes("await installLocalAuthCookie();"));
 assert("reuses tokenless Lexa backend on occupied port", src.includes("without instance token") && src.includes("token === EXTERNAL_LEXA_BACKEND"));
 assert("treats tokenless Lexa health as backend-ready", src.includes("token === INSTANCE_TOKEN || token === EXTERNAL_LEXA_BACKEND"));
 assert("captures spawned backend child", src.includes("const child = backendProcess;"));
