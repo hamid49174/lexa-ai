@@ -40,17 +40,18 @@ Phase 4F turned the remaining PublicRC work into explicit blockers, warnings, ow
 
 ## Latest Local Regression Snapshot
 
-Snapshot date: 2026-05-20
+Snapshot date: 2026-05-21
 
-Snapshot commit under test: `d77db0ea8e7fb402c7ec33660048fae511ad4936`
+Snapshot commit under test: `b876228b08b2106193b2fb10a9a71ec58463e41c`
 
-Local evidence improved since the original PublicRC hardening pass:
+Local evidence after Agent Reflection v1 and abuse coverage:
 
-- Full Python suite: `786 passed, 1 skipped`.
+- Full Python suite: `886 passed, 1 skipped, 1 warning`.
+- Focused reflection/security tests: `163 passed`.
 - Eval suite: `65/65 passed, 0 failed`.
 - Eval regression gate: passed with `0 blocking`.
-- JS static/unit suite: 19/19 files passed, 956 assertions passed, 0 failed.
-- Electron focused smokes: 11/11 files exited 0, with 124 counted assertions passed, 0 failed; `electron_ui_visual_smoke.js` retained known non-blocking legacy diagnostics.
+- JS static/unit suite: 21/21 files passed, 997 assertions passed, 0 failed.
+- Electron focused smokes: 15/15 files exited 0, with 176 counted assertions passed, 0 failed; `electron_ui_visual_smoke.js` retained known non-blocking legacy diagnostics.
 - Hermes smoke: `14 passed`, local only.
 - OS quality gates completed without deleting, migrating, or archiving drafts.
 - Website smoke completed as `static-external` with warnings that remain PublicRC-blocking.

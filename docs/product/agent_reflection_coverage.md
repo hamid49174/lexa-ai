@@ -75,6 +75,26 @@ Reflection audit entries must not include:
 
 Sensitive-looking keys such as `api_key`, `token`, `authorization`, `password`, `secret`, `credential`, `path`, and `file` are redacted as `[REDACTED_KEY]`.
 
+## Post-Reflection Regression Evidence
+
+The full local regression snapshot on 2026-05-21 exercised commit `b876228b08b2106193b2fb10a9a71ec58463e41c` after Agent Reflection v1 and the abuse-coverage sprint.
+
+| Area | Result |
+| --- | --- |
+| Full Python suite | `886 passed, 1 skipped, 1 warning` |
+| Focused reflection/security tests | `163 passed` |
+| Eval suite | `65/65 passed, 0 failed` |
+| Eval regression gate | passed with `0 blocking` |
+| JS static/unit suite | 21/21 files passed; 997 assertions passed, 0 failed |
+| Electron smokes | 15/15 files exited 0; 176 counted assertions passed, 0 failed; known non-blocking UI diagnostics retained |
+| Hermes smoke | `14 passed`, local only |
+| OS quality gates | completed without deleting, migrating, or archiving drafts |
+| InternalRC checker | exit 0; `Needs Review` |
+| PublicRC checker | exit 1 as expected; `Blocked` |
+| PublicRelease checker | exit 1 as expected; `Blocked` |
+
+No real Companion tools, OS actions, draft approvals/rejections/applications, scheduler side effects, provider calls, or public release actions were executed by this snapshot.
+
 ## Remaining Gaps
 
 - Reflection v1 is policy-based. It does not prove semantic plan quality or full autonomous reasoning safety.

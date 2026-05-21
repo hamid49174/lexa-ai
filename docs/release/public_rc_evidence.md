@@ -4,9 +4,9 @@ This ledger records local evidence only. It does not prove external PublicRC blo
 
 ## Evidence Capture
 
-- Date: 2026-05-20
+- Date: 2026-05-21
 - Branch: `codex/lexa-stabilization-review`
-- Latest full internal regression snapshot commit under test: `d77db0ea8e7fb402c7ec33660048fae511ad4936`
+- Latest full internal regression snapshot commit under test: `b876228b08b2106193b2fb10a9a71ec58463e41c`
 - Baseline commit inspected before PublicRC hardening: `672d2e714595f4c24d7115bb757fba03f3e85faf`
 - GitHub remote: not configured in this workspace
 
@@ -59,6 +59,41 @@ New local evidence added:
 - `docs/product/agent_reflection_coverage.md` maps executable paths and remaining gaps.
 - Abuse tests cover unknown tools, malformed args, low-confidence risky calls, multi-step reflection, Personal OS boundaries, scheduler/routine paths, workflow `_step_tool`, blocked Reflection decisions, and confirmation-required behavior.
 - Audit redaction tests verify Reflection audit entries include risk/confidence/reason/arg-key metadata but not argument values, prompt-injection strings, nested action payloads, file paths, API keys, tokens, authorization strings, passwords, secrets, or credentials.
+
+## Post-Reflection Full InternalRC Regression Snapshot
+
+This snapshot was run locally on 2026-05-21 against commit `b876228b08b2106193b2fb10a9a71ec58463e41c` after Agent Reflection v1 and the abuse-coverage sprint. It strengthens InternalRC evidence only. It does not prove external PublicRC/PublicRelease blockers and does not change release status.
+
+| Area | Command | Result |
+| --- | --- | --- |
+| Git status | `git status --short` | clean before snapshot |
+| Branch | `git rev-parse --abbrev-ref HEAD` | `codex/lexa-stabilization-review` |
+| Commit under test | `git rev-parse HEAD` | `b876228b08b2106193b2fb10a9a71ec58463e41c` |
+| Full Python suite | `venv\Scripts\python.exe -m pytest -q` | `886 passed, 1 skipped, 1 warning in 74.84s` |
+| Reflection/security focused tests | `venv\Scripts\python.exe -m pytest -q tests/test_agent_reflection.py tests/test_action_executor_schema_validation.py tests/test_agent_loop.py tests/test_scheduler_schema_validation.py tests/test_router_companion.py tests/test_workflows.py tests/test_companion_confirmation.py tests/test_security.py tests/test_action_parser.py` | `163 passed in 3.46s` |
+| Eval suite | `venv\Scripts\python.exe evals\runners\run_eval_suite.py --all` | `65/65 passed, 0 failed` |
+| Eval regression gate | `powershell -ExecutionPolicy Bypass -File scripts\run_eval_regression_gate.ps1` | passed; `0 blocking` regressions |
+| JS static/unit suite | PowerShell loop over `tests/test_*.js` with `node` | 21/21 files passed; 997 assertions passed, 0 failed |
+| Electron focused smokes | robust PowerShell loop over `tests/electron_*_smoke.js` with `node` | 15/15 smoke files exited 0; counted assertions: 176 passed, 0 failed; `electron_ui_visual_smoke.js` retained known non-blocking legacy diagnostics and no counted summary |
+| Hermes smoke | `powershell -ExecutionPolicy Bypass -File scripts\run_hermes_smoke.ps1` | `14 passed`; no external Telegram/API calls |
+| OS quality gates | `powershell -ExecutionPolicy Bypass -File scripts\run_os_quality_gates.ps1 -AllowMissing` | completed OS SDK TypeScript, draft check, phase2a smoke, OS MCP server type/check, and Raw Inbox Worker type/check without deleting, migrating, or archiving drafts; draft counts: total 15, pending 0, approved 11, rejected 3, conflict 0, missing 1, invalid 0 |
+| Website smoke | `powershell -ExecutionPolicy Bypass -File scripts\run_website_smoke.ps1` | exit 0 with static-external warnings: `tmp_*.js` files need review, config placeholders remain, external CDN resources need CSP/vendor review, and there is no package-based build/lint proof |
+| Dependency reproducibility | `powershell -ExecutionPolicy Bypass -File scripts\check_dependency_repro.ps1` | completed with 1 warning: `python` is not available on PATH; website package/lock are optional missing for the static-external website |
+| Remote CI readiness | `powershell -ExecutionPolicy Bypass -File scripts\check_remote_ci_readiness.ps1` | `RemoteCIReady: no`; no GitHub remote configured |
+| Clean clone/copy smoke | `powershell -ExecutionPolicy Bypass -File scripts\run_clean_clone_smoke.ps1` | completed; install/gates skipped by script defaults; temp clean copy retained for inspection |
+| Packaging config smoke | `powershell -ExecutionPolicy Bypass -File scripts\run_packaging_smoke.ps1` | passed; build skipped by design; existing `dist` installer status: unsigned; no build artifacts staged |
+| VM installer proof plan | `powershell -ExecutionPolicy Bypass -File scripts\run_installer_smoke.ps1 -PlanOnly -Target InternalRC` | plan-only output; Windows Sandbox available: `True`; Hyper-V available: `False`; VM marker: `False`; does not prove install/uninstall |
+| Isolated packaging build | `powershell -ExecutionPolicy Bypass -File scripts\run_packaging_smoke.ps1 -Build -ArtifactRoot <temp-artifact-root>` | passed; NSIS installer built in temp; forbidden artifact scan passed; `Lexa AI Setup 1.0.0.exe` size `252721968` bytes; signing status: unsigned |
+| Built-installer smoke | `powershell -ExecutionPolicy Bypass -File scripts\run_installer_smoke.ps1 -ArtifactRoot <temp-artifact-root> -RequireInstaller -Target InternalRC -AllowUnsignedInternal` | passed for InternalRC with unsigned warning; install/uninstall not requested and not proven |
+| InternalRC checker | `powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target InternalRC -SkipFullQualityGate -AllowMissingOS -AllowMissingWebsite` | exit 0; decision: `Needs Review`; warnings include no remote CI proof and unsigned installer |
+| PublicRC checker | `powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target PublicRC -SkipFullQualityGate -AllowMissingOS -AllowMissingWebsite` | exit 1 as expected; decision: `Blocked`; blockers include remote CI, VM installer proof, signing, website target/CDN/CSP/SRI review, OS cleanup review, and remote artifact-policy proof |
+| PublicRelease checker | `powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target PublicRelease -SkipFullQualityGate -AllowMissingOS -AllowMissingWebsite` | exit 1 as expected; decision: `Blocked`; PublicRC blockers plus privacy/trace consent approval and public release workflow requirements |
+
+Known non-blocking diagnostics retained:
+
+- `electron_ui_visual_smoke.js` exits 0 but prints legacy UI diagnostics that remain non-blocking in this snapshot.
+- Release candidate checks print Electron GPU/cache diagnostic lines in this local environment; the checker decisions and smoke assertions still complete as recorded.
+- Dependency reproducibility warns that `python` is not on PATH, while the repository venv command path works and the full Python suite passes.
 
 JS static/unit exact results:
 
