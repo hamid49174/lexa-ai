@@ -182,7 +182,8 @@ assert("defines short bridge presence TTL", mainSrc.includes("const BRIDGE_PRESE
 assert("stores challenges in main process only", mainSrc.includes("const bridgePresenceChallenges = new Map()"));
 assert("registers request, consume, and audit IPC handlers through safe wrapper", mainSrc.includes('safeIpcHandle("bridge:presence:request"') && mainSrc.includes('safeIpcHandle("bridge:presence:consume"') && mainSrc.includes('safeIpcHandle("bridge:audit"') && !mainSrc.includes('ipcMain.handle("bridge:presence:request"'));
 assert("presence IPC handler exceptions become structured denials", mainSrc.includes("function safeIpcHandle") && mainSrc.includes("function structuredIpcFailure") && mainSrc.includes("main_ipc_handler_failed"));
-assert("shows native confirmation dialog", mainSrc.includes("dialog.showMessageBox") && mainSrc.includes("Allow once") && mainSrc.includes("Deny"));
+assert("does not show native confirmation dialogs", !mainSrc.includes("dialog.showMessageBox") && !mainSrc.includes("Confirm Lexa action") && !mainSrc.includes("Allow once"));
+assert("trusted renderer presence requests create audited auto challenges", mainSrc.includes("trusted_renderer_auto_challenge") && mainSrc.includes("bridgePresenceChallenges.set(challengeId"));
 assert("rejects untrusted renderer senders", mainSrc.includes("function bridgePresenceSenderTrusted") && mainSrc.includes("isTrustedRendererUrl(frameUrl)") && mainSrc.includes("untrusted_renderer"));
 assert("binds challenges to method and args_hash", mainSrc.includes("record.method !== method") && mainSrc.includes("record.argsHash !== argsHash"));
 assert("rejects expired challenges", mainSrc.includes("record.expiresAt <= Date.now()") && mainSrc.includes("challenge_expired"));

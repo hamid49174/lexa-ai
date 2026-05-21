@@ -101,6 +101,7 @@ assert("bridge presence handlers use safe IPC wrapper", src.includes('safeIpcHan
 assert("local auth and i18n handlers fail closed through safe IPC wrapper", src.includes('safeIpcHandle("local-auth-token"') && src.includes('failureValue: ""') && src.includes('safeIpcHandle("i18n-load"') && src.includes("failureValue: null"));
 assert("window and autostart sync IPC handlers are wrapped", src.includes('safeIpcOn("window-minimize"') && src.includes('safeIpcOn("window-maximize"') && src.includes('safeIpcOn("window-close"') && src.includes('safeIpcOn("get-autostart"') && src.includes("returnValue: false"));
 assert("bridge presence handlers are not registered directly", !src.includes('ipcMain.handle("bridge:presence:request"') && !src.includes('ipcMain.handle("bridge:presence:consume"') && !src.includes('ipcMain.handle("bridge:audit"'));
+assert("bridge presence no longer uses native confirmation dialogs", !src.includes("dialog.showMessageBox") && !src.includes("Confirm Lexa action") && !src.includes("Allow once") && src.includes("trusted_renderer_auto_challenge"));
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

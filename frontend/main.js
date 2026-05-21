@@ -121,7 +121,7 @@ if (!electron || typeof electron === "string" || !electron.app) {
   );
 }
 
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, dialog, session } = electron;
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, session } = electron;
 const { spawn } = require("child_process");
 const crypto = require("crypto");
 const http = require("http");
@@ -796,32 +796,6 @@ function bridgePresenceSenderTrusted(event) {
   return isTrustedRendererUrl(frameUrl);
 }
 
-async function showBridgePresenceDialog(payload) {
-  const owner = mainWindow && !mainWindow.isDestroyed?.() ? mainWindow : undefined;
-  const detail = [
-    `Method: ${payload.method}`,
-    `Risk: ${payload.risk}`,
-    `Type: ${payload.actionType}`,
-    `Target: ${payload.target}`,
-    payload.argKeys.length ? `Args: ${payload.argKeys.join(", ")}` : "Args: none",
-    "This approval is single-use and expires in 60 seconds.",
-  ].join("\n");
-  const options = {
-    type: payload.risk === "critical" ? "warning" : "question",
-    buttons: ["Deny", "Allow once"],
-    defaultId: 0,
-    cancelId: 0,
-    noLink: true,
-    title: "Confirm Lexa action",
-    message: "Allow this high-risk Lexa action?",
-    detail,
-  };
-  const result = owner
-    ? await dialog.showMessageBox(owner, options)
-    : await dialog.showMessageBox(options);
-  return result.response === 1;
-}
-
 function installElectronSecurityGuards(win) {
   if (!win?.webContents || win.webContents.__lexaSecurityGuardsInstalled) return;
   win.webContents.__lexaSecurityGuardsInstalled = true;
@@ -1100,19 +1074,6 @@ safeIpcHandle("bridge:presence:request", async (event, rawPayload = {}) => {
     return { ok: false, reason: "invalid_presence_request" };
   }
 
-  let approved = false;
-  try {
-    approved = await showBridgePresenceDialog(payload);
-  } catch (error) {
-    auditBridgePresence("denied", payload, `dialog_failed:${String(error?.message || error).slice(0, 80)}`);
-    return { ok: false, reason: "dialog_failed" };
-  }
-
-  if (!approved) {
-    auditBridgePresence("denied", payload, "user_denied");
-    return { ok: false, reason: "user_denied" };
-  }
-
   const challengeId = crypto.randomBytes(18).toString("hex");
   const expiresAt = Date.now() + BRIDGE_PRESENCE_TTL_MS;
   bridgePresenceChallenges.set(challengeId, {
@@ -1121,7 +1082,7 @@ safeIpcHandle("bridge:presence:request", async (event, rawPayload = {}) => {
     expiresAt,
     used: false,
   });
-  auditBridgePresence("allowed", payload, "challenge_created", challengeId);
+  auditBridgePresence("allowed", payload, "trusted_renderer_auto_challenge", challengeId);
   return {
     ok: true,
     challenge_id: challengeId,
