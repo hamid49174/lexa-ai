@@ -408,6 +408,73 @@ class TestConversationList:
 
 
 # ---------------------------------------------------------------------------
+#  Memory Graph
+# ---------------------------------------------------------------------------
+
+class TestMemoryGraph:
+    def test_memory_graph_returns_read_only_compact_payload(self):
+        """memory_graph exposes a compact read-only graph without full bodies."""
+        from backend.memory import (
+            add_memory,
+            conversation_create,
+            conversation_update,
+            get_memory_stats,
+            memory_graph,
+            note_create,
+            routine_create,
+            snippet_create,
+        )
+
+        hidden_tail = "TAIL_SHOULD_NOT_LEAK_" * 12
+        note_create(
+            "Graph Project",
+            "Visible graph note " + ("shared topology " * 90) + hidden_tail,
+            "project",
+        )
+        add_memory(
+            "Preference: Nutzer mag dunkle Obsidian Graphen mit lokalen Knoten",
+            "preference",
+            8,
+            "user",
+        )
+        snippet_create("Graph Snippet", "shared topology snippet for graph display")
+        routine_create(
+            "Graph Routine",
+            "shared topology review routine",
+            "daily 09:00",
+            [{"tool": "noop", "params": {}}],
+        )
+        cid = conversation_create("Graph Chat")
+        conversation_update(cid, messages=[
+            {"role": "user", "content": "Bitte zeig shared topology"},
+            {"role": "assistant", "content": "Ich zeige den lokalen Graphen."},
+        ])
+        before = get_memory_stats()
+
+        graph = memory_graph(140)
+        after = get_memory_stats()
+
+        assert before["notes"] == after["notes"]
+        assert before["memories"] == after["memories"]
+        assert graph["status"] == "ok"
+        assert graph["source"] == "local_sqlite_readonly"
+        assert len(graph["nodes"]) >= 8
+        assert len(graph["links"]) >= 5
+        node_ids = {node["id"] for node in graph["nodes"]}
+        node_types = {node["type"] for node in graph["nodes"]}
+        assert "hub:memory" in node_ids
+        assert any(node_id.startswith("note:") for node_id in node_ids)
+        assert any(node_id.startswith("memory:") for node_id in node_ids)
+        assert any(node_id.startswith("conversation:") for node_id in node_ids)
+        assert any(node_id.startswith("routine:") for node_id in node_ids)
+        assert any(node_id.startswith("snippet:") for node_id in node_ids)
+        assert {"hub", "group", "memory", "note", "conversation"}.issubset(node_types)
+        assert all("content" not in node for node in graph["nodes"])
+        assert all(len(node.get("preview", "")) <= 160 for node in graph["nodes"])
+        assert hidden_tail not in str(graph)
+
+
+# ---------------------------------------------------------------------------
 #  Dedup LIKE Escape
 # ---------------------------------------------------------------------------
 

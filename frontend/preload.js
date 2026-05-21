@@ -124,6 +124,7 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("healthTools", "low", "read", "/health/tools", { batch_allowed: true }),
 
   bridgePolicy("memoryStats", "low", "read", "/memory/stats", { batch_allowed: true }),
+  bridgePolicy("memoryGraph", "low", "read", "/memory/graph", { batch_allowed: true }),
   bridgePolicy("memoryAdd", "medium", "write", "/memory/add", { audit: true }),
   bridgePolicy("memoryCleanup", "high", "admin", "/memory/cleanup"),
   bridgePolicy("notes", "low", "read", "/memory/notes", { batch_allowed: true }),
@@ -765,6 +766,22 @@ if (isLexaSmokeMockAllowed()) {
     aiModels: async () => ({ current: "smoke-model", current_name: "Smoke Model", available: {} }),
     setAiModel: async () => ok(),
     memoryStats: async () => ({ notes: 0, memories: 0, interactions: 0, routines: 0 }),
+    memoryGraph: async () => ({
+      status: "ok",
+      nodes: [
+        { id: "hub:memory", label: "Lexa Gedächtnis", type: "hub", group: "hub", weight: 10, preview: "Smoke graph" },
+        { id: "group:notes", label: "Notizen", type: "group", group: "notes", weight: 5, preview: "" },
+        { id: "note:smoke", label: "Smoke Note", type: "note", group: "notes", weight: 3, preview: "Mock note" },
+        { id: "note:unsafe-smoke", label: "Smoke <img src=x onerror=alert(1)>", type: "note", group: "notes", weight: 2.5, preview: "<script>alert(1)</script>" },
+      ],
+      links: [
+        { source: "hub:memory", target: "group:notes", kind: "contains", weight: 2 },
+        { source: "group:notes", target: "note:smoke", kind: "contains", weight: 1 },
+        { source: "note:smoke", target: "note:unsafe-smoke", kind: "related", weight: 1 },
+      ],
+      counts: { nodes: 4, links: 3 },
+      source: "smoke_mock",
+    }),
     memoryAdd: async () => ok(),
     memoryCleanup: async () => ok(),
     notes: async () => ({ notes: [] }),
@@ -1447,6 +1464,17 @@ const lexaBridge = {
     } catch (e) {
       console.warn("[Preload] memoryStats failed:", e.message || e);
       return { notes: 0, memories: 0, interactions: 0, routines: 0 };
+    }
+  },
+
+  memoryGraph: async (limit = 160) => {
+    try {
+      const safeLimit = Math.max(40, Math.min(220, Number.parseInt(limit, 10) || 160));
+      const res = await fetchWithTimeout(`${API}/memory/graph?limit=${encodeURIComponent(String(safeLimit))}`);
+      return res.json();
+    } catch (e) {
+      console.warn("[Preload] memoryGraph failed:", e.message || e);
+      return { status: "error", nodes: [], links: [], counts: {}, source: "unavailable" };
     }
   },
 

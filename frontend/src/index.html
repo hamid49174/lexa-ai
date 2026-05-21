@@ -718,60 +718,28 @@
 
         <!-- Memory View -->
         <div class="tool-view" id="memory-view">
-          <div class="view-title" role="heading" aria-level="2">Ged&auml;chtnis <span>&amp; Notizen</span></div>
-          <div class="info-grid" id="memory-stats-grid"></div>
-
-          <div class="memory-section">
-            <div class="section-header">
-              <h3 data-i18n="memory.notes">Notizen</h3>
-              <div class="flex-row">
-                <input type="text" id="notes-filter" class="cmd-search-input compact-filter" placeholder="Filtern..." data-i18n-placeholder="memory.filter" data-action="filterNotes" aria-label="Notizen filtern">
-                <button type="button" class="action-btn" data-action="createNote" data-i18n="notes.newNote">+ Neue Notiz</button>
+          <section class="memory-graph-shell" aria-labelledby="memory-graph-title">
+            <div class="memory-graph-toolbar">
+              <div class="memory-graph-title-block">
+                <div class="memory-graph-kicker">Local Graph</div>
+                <h2 id="memory-graph-title">Ged&auml;chtnis</h2>
+              </div>
+              <div class="memory-graph-controls">
+                <input type="search" id="memory-graph-filter" class="memory-graph-search" placeholder="Knoten suchen..." aria-label="Ged&auml;chtnis-Graph filtern">
+                <button type="button" class="memory-graph-fit-btn" id="memory-graph-fit-btn">Fit</button>
               </div>
             </div>
-            <div id="notes-list" class="notes-list"></div>
-          </div>
-
-          <div class="memory-section section-spacing-sm">
-            <div class="section-header">
-              <h3 data-i18n="memory.textSnippets">Text-Snippets</h3>
-              <button type="button" class="action-btn" data-action="createSnippet" data-i18n="snippets.newSnippet">+ Neues Snippet</button>
+            <div class="memory-graph-stage" id="memory-graph-stage">
+              <svg id="memory-graph-svg" class="memory-graph-svg" role="img" aria-label="Ged&auml;chtnis-Graph mit lokalen Wissensknoten" focusable="false"></svg>
+              <div class="memory-graph-empty hidden" id="memory-graph-empty">Lade Ged&auml;chtnis-Graph...</div>
+              <aside class="memory-graph-inspector" id="memory-graph-inspector" aria-live="polite">
+                <div class="memory-graph-inspector-type">Hover</div>
+                <div class="memory-graph-inspector-title">Knoten erkunden</div>
+                <div class="memory-graph-inspector-meta">Bewege den Cursor ueber einen Punkt.</div>
+              </aside>
             </div>
-            <div id="snippets-list" class="notes-list"></div>
-          </div>
-
-          <div class="memory-section section-spacing-sm">
-            <div class="section-header">
-              <h3 data-i18n="memory.aiProvider">KI-Provider</h3>
-            </div>
-            <div id="ai-status-panel" class="info-grid"></div>
-          </div>
-
-          <div class="memory-section section-spacing-sm">
-            <div class="section-header">
-              <h3 data-i18n="memory.routines">Routinen</h3>
-              <button type="button" class="action-btn" data-action="createRoutine" data-i18n="memory.newRoutine">+ Neue Routine</button>
-            </div>
-            <div id="routines-list" class="notes-list"></div>
-          </div>
-
-          <div class="memory-section section-spacing-sm">
-            <div class="section-header">
-              <h3 data-i18n="memory.clipboardHistory">Zwischenablage-Verlauf</h3>
-              <button type="button" class="action-btn" data-action="clearClipboardHistory" title="Verlauf leeren" data-i18n="memory.clear">&times; Leeren</button>
-            </div>
-            <div id="clipboard-history-list" class="notes-list"></div>
-          </div>
-
-          <div class="memory-section section-spacing-sm">
-            <div class="section-header">
-              <h3 data-i18n="memory.maintenance">Wartung</h3>
-            </div>
-            <div id="memory-cleanup-info">
-              <button type="button" class="action-btn" data-action="runMemoryCleanup" data-i18n="memory.cleanupOld">&#129529; Alte Erinnerungen aufr&auml;umen</button>
-              <button type="button" class="action-btn ml-8" data-action="showDiagnostics" data-i18n="memory.diagnosticsBtn">&#128202; Diagnostics</button>
-            </div>
-          </div>
+            <div class="memory-graph-legend" id="memory-graph-legend" aria-label="Graph-Legende"></div>
+          </section>
         </div>
 
         <!-- Personal OS View -->

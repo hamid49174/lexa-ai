@@ -26,8 +26,427 @@ function bindMemoryCardAction(el, handler, label) {
   el.addEventListener("click", handler);
 }
 
+const MEMORY_GRAPH_NS = "http://www.w3.org/2000/svg";
+let memoryGraphState = null;
+
+function memoryGraphHash(value) {
+  let hash = 2166136261;
+  const text = String(value || "");
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash >>> 0);
+}
+
+function memoryGraphColor(type) {
+  const colors = {
+    hub: "#a78bfa",
+    group: "#7dd3fc",
+    type: "#c084fc",
+    keyword: "#34d399",
+    note: "#8b9cff",
+    memory: "#f0abfc",
+    conversation: "#60a5fa",
+    routine: "#fbbf24",
+    snippet: "#2dd4bf",
+  };
+  return colors[type] || "#9ca3af";
+}
+
+function memoryGraphClassToken(value, fallback = "node") {
+  const token = String(value || fallback)
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return token || fallback;
+}
+
+function memoryGraphSafeNodes(nodes = []) {
+  return nodes
+    .filter((node) => node && node.id)
+    .map((node) => {
+      const type = memoryGraphClassToken(node.type, "node");
+      return {
+        id: String(node.id),
+        label: String(node.label || node.id).slice(0, 96),
+        type,
+        group: memoryGraphClassToken(node.group || type, type),
+        weight: Math.max(0.5, Math.min(12, Number(node.weight) || 1)),
+        preview: String(node.preview || "").slice(0, 220),
+        meta: node.meta && typeof node.meta === "object" ? node.meta : {},
+      };
+    });
+}
+
+function memoryGraphSafeLinks(links = [], nodeMap = new Map()) {
+  return links
+    .filter((link) => link && nodeMap.has(String(link.source)) && nodeMap.has(String(link.target)))
+    .map((link) => ({
+      source: String(link.source),
+      target: String(link.target),
+      kind: memoryGraphClassToken(link.kind, "link"),
+      weight: Math.max(0.2, Math.min(6, Number(link.weight) || 1)),
+    }));
+}
+
+function renderMemoryGraphEmpty(message) {
+  const empty = document.getElementById("memory-graph-empty");
+  const svg = document.getElementById("memory-graph-svg");
+  if (memoryGraphState?.frame) cancelAnimationFrame(memoryGraphState.frame);
+  memoryGraphState = null;
+  if (svg) svg.replaceChildren();
+  if (empty) {
+    empty.textContent = message || "Kein Graph verfuegbar.";
+    empty.classList.remove("hidden");
+  }
+}
+
+function updateMemoryGraphInspector(node, graph) {
+  const panel = document.getElementById("memory-graph-inspector");
+  if (!panel) return;
+  const typeEl = panel.querySelector(".memory-graph-inspector-type");
+  const titleEl = panel.querySelector(".memory-graph-inspector-title");
+  const metaEl = panel.querySelector(".memory-graph-inspector-meta");
+  if (!node) {
+    if (typeEl) typeEl.textContent = "Graph";
+    if (titleEl) titleEl.textContent = `${graph.nodes.length} Knoten · ${graph.links.length} Linien`;
+    if (metaEl) metaEl.textContent = "Hover oder Klick auf einen Punkt zeigt Details.";
+    return;
+  }
+  const degree = graph.neighbors.get(node.id)?.size || 0;
+  const metaBits = [];
+  if (node.meta?.memory_type) metaBits.push(node.meta.memory_type);
+  if (node.meta?.category) metaBits.push(node.meta.category);
+  if (node.meta?.message_count) metaBits.push(`${node.meta.message_count} Nachrichten`);
+  if (node.meta?.importance) metaBits.push(`Wichtigkeit ${node.meta.importance}`);
+  if (typeEl) typeEl.textContent = `${node.type} · ${degree} Links`;
+  if (titleEl) titleEl.textContent = node.label;
+  if (metaEl) metaEl.textContent = [node.preview, metaBits.join(" · ")].filter(Boolean).join(" · ");
+}
+
+function memoryGraphCreateSvgElement(name, attrs = {}) {
+  const el = document.createElementNS(MEMORY_GRAPH_NS, name);
+  Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, String(value)));
+  return el;
+}
+
+function memoryGraphApplyFocus(graph, activeId = "") {
+  graph.activeId = activeId || "";
+  const query = (graph.filter || "").trim().toLowerCase();
+  const neighborSet = activeId ? (graph.neighbors.get(activeId) || new Set()) : null;
+  graph.nodes.forEach((node) => {
+    const matches = !query
+      || node.label.toLowerCase().includes(query)
+      || node.type.toLowerCase().includes(query)
+      || node.group.toLowerCase().includes(query)
+      || node.preview.toLowerCase().includes(query);
+    const related = !activeId || node.id === activeId || neighborSet?.has(node.id);
+    node.el?.classList.toggle("is-active", node.id === activeId);
+    node.el?.classList.toggle("is-neighbor", Boolean(activeId && neighborSet?.has(node.id)));
+    node.el?.classList.toggle("is-dim", !matches || !related);
+    node.labelEl?.classList.toggle("is-dim", !matches || !related);
+    node.labelEl?.classList.toggle("is-visible", matches && (node.id === activeId || node.weight >= 4.8 || node.type === "group" || node.type === "hub"));
+  });
+  graph.links.forEach((link) => {
+    const visible = !activeId || link.source === activeId || link.target === activeId;
+    link.el?.classList.toggle("is-dim", !visible);
+    link.el?.classList.toggle("is-active", visible && Boolean(activeId));
+  });
+}
+
+function memoryGraphLayout(nodes, links, width, height) {
+  const groups = [...new Set(nodes.map((node) => node.group || node.type))].sort();
+  const groupAngles = new Map(groups.map((group, index) => [group, -Math.PI / 2 + (Math.PI * 2 * index) / Math.max(1, groups.length)]));
+  nodes.forEach((node, index) => {
+    const seed = memoryGraphHash(node.id);
+    const groupAngle = groupAngles.get(node.group) ?? 0;
+    const jitter = ((seed % 1000) / 1000 - 0.5) * 0.9;
+    const radius = node.type === "hub" ? 0 : Math.min(width, height) * (0.16 + ((seed % 7) * 0.026) + (index % 5) * 0.012);
+    node.x = width / 2 + Math.cos(groupAngle + jitter) * radius;
+    node.y = height / 2 + Math.sin(groupAngle + jitter) * radius;
+    node.vx = 0;
+    node.vy = 0;
+    node.radius = Math.max(3.2, Math.min(15, 3.2 + node.weight * 1.15));
+    node.color = memoryGraphColor(node.type);
+  });
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  links.forEach((link) => {
+    link.sourceNode = nodeMap.get(link.source);
+    link.targetNode = nodeMap.get(link.target);
+  });
+}
+
+function memoryGraphStep(graph) {
+  const { nodes, links, width, height } = graph;
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const phase = Date.now() / 9000;
+
+  links.forEach((link) => {
+    const a = link.sourceNode;
+    const b = link.targetNode;
+    if (!a || !b) return;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const desired = link.kind === "contains" ? 92 : link.kind === "mentions" ? 118 : 150;
+    const pull = (dist - desired) * 0.004 * link.weight;
+    const fx = (dx / dist) * pull;
+    const fy = (dy / dist) * pull;
+    if (!a.fixed) { a.vx += fx; a.vy += fy; }
+    if (!b.fixed) { b.vx -= fx; b.vy -= fy; }
+  });
+
+  for (let i = 0; i < nodes.length; i += 1) {
+    const a = nodes[i];
+    for (let j = i + 1; j < nodes.length; j += 1) {
+      const b = nodes[j];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const distSq = Math.max(64, dx * dx + dy * dy);
+      const force = (a.radius + b.radius + 38) / distSq;
+      const fx = dx * force;
+      const fy = dy * force;
+      if (!a.fixed) { a.vx -= fx; a.vy -= fy; }
+      if (!b.fixed) { b.vx += fx; b.vy += fy; }
+    }
+  }
+
+  nodes.forEach((node) => {
+    const groupSeed = memoryGraphHash(node.group);
+    const groupAngle = (groupSeed % 628) / 100;
+    const anchorRadius = node.type === "hub" ? 0 : Math.min(width, height) * 0.22;
+    const anchorX = centerX + Math.cos(groupAngle + Math.sin(phase + groupSeed) * 0.08) * anchorRadius;
+    const anchorY = centerY + Math.sin(groupAngle + Math.cos(phase + groupSeed) * 0.08) * anchorRadius;
+    if (!node.fixed) {
+      node.vx += (anchorX - node.x) * 0.0018;
+      node.vy += (anchorY - node.y) * 0.0018;
+      node.vx *= 0.86;
+      node.vy *= 0.86;
+      node.x += node.vx;
+      node.y += node.vy;
+      node.x = Math.max(22, Math.min(width - 22, node.x));
+      node.y = Math.max(22, Math.min(height - 22, node.y));
+    }
+  });
+}
+
+function memoryGraphPaint(graph) {
+  graph.links.forEach((link) => {
+    if (!link.sourceNode || !link.targetNode) return;
+    link.el.setAttribute("x1", link.sourceNode.x.toFixed(1));
+    link.el.setAttribute("y1", link.sourceNode.y.toFixed(1));
+    link.el.setAttribute("x2", link.targetNode.x.toFixed(1));
+    link.el.setAttribute("y2", link.targetNode.y.toFixed(1));
+  });
+  graph.nodes.forEach((node) => {
+    node.el.setAttribute("cx", node.x.toFixed(1));
+    node.el.setAttribute("cy", node.y.toFixed(1));
+    node.labelEl.setAttribute("x", (node.x + node.radius + 7).toFixed(1));
+    node.labelEl.setAttribute("y", (node.y + 4).toFixed(1));
+  });
+}
+
+function startMemoryGraphAnimation(graph) {
+  if (memoryGraphState?.frame) cancelAnimationFrame(memoryGraphState.frame);
+  memoryGraphState = graph;
+  const animate = () => {
+    if (memoryGraphState !== graph) return;
+    if (typeof LexaState !== "undefined" && LexaState.get("currentView") !== "memory") {
+      graph.frame = 0;
+      return;
+    }
+    memoryGraphStep(graph);
+    memoryGraphPaint(graph);
+    graph.frame = requestAnimationFrame(animate);
+  };
+  animate();
+}
+
+function renderMemoryGraphLegend(graph) {
+  const legend = document.getElementById("memory-graph-legend");
+  if (!legend) return;
+  legend.replaceChildren();
+  const types = [...new Set(graph.nodes.map((node) => node.type))].sort((a, b) => a.localeCompare(b));
+  types.forEach((type) => {
+    const item = document.createElement("span");
+    item.className = "memory-graph-legend-item";
+    const dot = document.createElement("span");
+    dot.className = "memory-graph-legend-dot";
+    dot.style.background = memoryGraphColor(type);
+    const label = document.createElement("span");
+    label.textContent = type;
+    item.append(dot, label);
+    legend.appendChild(item);
+  });
+}
+
+function renderMemoryGraph(data) {
+  const stage = document.getElementById("memory-graph-stage");
+  const svg = document.getElementById("memory-graph-svg");
+  const empty = document.getElementById("memory-graph-empty");
+  if (!stage || !svg) return;
+
+  const nodes = memoryGraphSafeNodes(data?.nodes || []);
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const links = memoryGraphSafeLinks(data?.links || [], nodeMap);
+  if (!nodes.length) {
+    renderMemoryGraphEmpty("Noch keine Knoten im lokalen Gedächtnis.");
+    return;
+  }
+  if (empty) empty.classList.add("hidden");
+
+  const rect = stage.getBoundingClientRect();
+  const width = Math.max(720, Math.floor(rect.width || 960));
+  const height = Math.max(480, Math.floor(rect.height || 620));
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.replaceChildren();
+
+  const defs = memoryGraphCreateSvgElement("defs");
+  const filter = memoryGraphCreateSvgElement("filter", { id: "memory-graph-glow", x: "-50%", y: "-50%", width: "200%", height: "200%" });
+  filter.appendChild(memoryGraphCreateSvgElement("feGaussianBlur", { stdDeviation: "3.5", result: "coloredBlur" }));
+  const merge = memoryGraphCreateSvgElement("feMerge");
+  merge.appendChild(memoryGraphCreateSvgElement("feMergeNode", { in: "coloredBlur" }));
+  merge.appendChild(memoryGraphCreateSvgElement("feMergeNode", { in: "SourceGraphic" }));
+  filter.appendChild(merge);
+  defs.appendChild(filter);
+  svg.appendChild(defs);
+
+  const linkLayer = memoryGraphCreateSvgElement("g", { class: "memory-graph-links" });
+  const nodeLayer = memoryGraphCreateSvgElement("g", { class: "memory-graph-nodes" });
+  const labelLayer = memoryGraphCreateSvgElement("g", { class: "memory-graph-labels" });
+  svg.append(linkLayer, nodeLayer, labelLayer);
+
+  const neighbors = new Map(nodes.map((node) => [node.id, new Set()]));
+  links.forEach((link) => {
+    neighbors.get(link.source)?.add(link.target);
+    neighbors.get(link.target)?.add(link.source);
+  });
+
+  memoryGraphLayout(nodes, links, width, height);
+  const graph = { nodes, links, neighbors, width, height, activeId: "", filter: "", frame: 0 };
+
+  links.forEach((link) => {
+    const el = memoryGraphCreateSvgElement("line", {
+      class: `memory-graph-link memory-graph-link-${link.kind}`,
+      "data-kind": link.kind,
+      "stroke-width": Math.max(0.5, Math.min(2.8, link.weight * 0.42)).toFixed(2),
+    });
+    link.el = el;
+    linkLayer.appendChild(el);
+  });
+
+  nodes.forEach((node) => {
+    const circle = memoryGraphCreateSvgElement("circle", {
+      class: `memory-graph-node memory-graph-node-${node.type}`,
+      r: node.radius.toFixed(1),
+      fill: node.color,
+      tabindex: "0",
+      role: "button",
+      "aria-label": `${node.type}: ${node.label}`,
+    });
+    const label = memoryGraphCreateSvgElement("text", {
+      class: "memory-graph-label",
+      "data-node-label": node.id,
+    });
+    label.textContent = node.label;
+    node.el = circle;
+    node.labelEl = label;
+    circle.addEventListener("pointerenter", () => {
+      updateMemoryGraphInspector(node, graph);
+      memoryGraphApplyFocus(graph, node.id);
+    });
+    circle.addEventListener("focus", () => {
+      updateMemoryGraphInspector(node, graph);
+      memoryGraphApplyFocus(graph, node.id);
+    });
+    circle.addEventListener("click", () => {
+      graph.activeId = graph.activeId === node.id ? "" : node.id;
+      updateMemoryGraphInspector(graph.activeId ? node : null, graph);
+      memoryGraphApplyFocus(graph, graph.activeId);
+    });
+    circle.addEventListener("pointerdown", (event) => {
+      node.fixed = true;
+      graph.dragNode = node;
+      circle.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    });
+    circle.addEventListener("pointermove", (event) => {
+      if (graph.dragNode !== node) return;
+      const bounds = svg.getBoundingClientRect();
+      const scaleX = width / Math.max(1, bounds.width);
+      const scaleY = height / Math.max(1, bounds.height);
+      node.x = (event.clientX - bounds.left) * scaleX;
+      node.y = (event.clientY - bounds.top) * scaleY;
+      node.vx = 0;
+      node.vy = 0;
+      memoryGraphPaint(graph);
+    });
+    const release = (event) => {
+      if (graph.dragNode !== node) return;
+      graph.dragNode = null;
+      node.fixed = false;
+      try { circle.releasePointerCapture?.(event.pointerId); } catch (_error) {}
+    };
+    circle.addEventListener("pointerup", release);
+    circle.addEventListener("pointercancel", release);
+    nodeLayer.appendChild(circle);
+    labelLayer.appendChild(label);
+  });
+
+  const filterInput = document.getElementById("memory-graph-filter");
+  graph.filter = filterInput?.value || "";
+  if (filterInput && !filterInput.__memoryGraphBound) {
+    filterInput.__memoryGraphBound = true;
+    filterInput.addEventListener("input", () => {
+      if (!memoryGraphState) return;
+      memoryGraphState.filter = filterInput.value || "";
+      memoryGraphApplyFocus(memoryGraphState, memoryGraphState.activeId);
+    });
+  }
+  const fitBtn = document.getElementById("memory-graph-fit-btn");
+  if (fitBtn && !fitBtn.__memoryGraphBound) {
+    fitBtn.__memoryGraphBound = true;
+    fitBtn.addEventListener("click", () => {
+      if (!memoryGraphState) return;
+      memoryGraphLayout(memoryGraphState.nodes, memoryGraphState.links, memoryGraphState.width, memoryGraphState.height);
+      memoryGraphApplyFocus(memoryGraphState, "");
+    });
+  }
+
+  renderMemoryGraphLegend(graph);
+  updateMemoryGraphInspector(null, graph);
+  startMemoryGraphAnimation(graph);
+  memoryGraphApplyFocus(graph, "");
+}
+
+async function refreshMemoryGraphView() {
+  const empty = document.getElementById("memory-graph-empty");
+  if (empty) {
+    empty.textContent = "Lade Gedächtnis-Graph...";
+    empty.classList.remove("hidden");
+  }
+  if (!LexaState.get("backendOnline")) {
+    renderMemoryGraphEmpty("Backend offline. Graph ist lokal bereit, sobald Lexa verbunden ist.");
+    return;
+  }
+  try {
+    const data = typeof window.lexa.memoryGraph === "function"
+      ? await window.lexa.memoryGraph(180)
+      : { nodes: [], links: [] };
+    renderMemoryGraph(data);
+  } catch (error) {
+    console.warn("[Memory] Graph render failed:", error.message || error);
+    renderMemoryGraphEmpty("Gedächtnis-Graph konnte nicht geladen werden.");
+  }
+}
+
 // ── MEMORY VIEW ──────────────────────────────────
 async function refreshMemoryView() {
+  await refreshMemoryGraphView();
+  return;
+
   if (!LexaState.get("backendOnline")) return;
 
   // Fetch all memory data in parallel

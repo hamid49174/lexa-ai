@@ -56,6 +56,15 @@ async def memory_stats():
     return result
 
 
+@router.get("/memory/graph")
+async def memory_graph(limit: int = 160):
+    """Get a read-only graph payload for the Memory/Gedächtnis view."""
+    safe_limit = max(40, min(220, int(limit or 160)))
+    result = await asyncio.to_thread(memory.memory_graph, safe_limit)
+    result["status"] = result.get("status", "ok")
+    return result
+
+
 # ══════════════════════════════════════════════════
 #  NOTES
 # ══════════════════════════════════════════════════

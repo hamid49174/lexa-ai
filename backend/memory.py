@@ -55,6 +55,9 @@ MEMORY_TYPES: tuple[str, ...] = (
     "preference",
     "system",
 )
+MEMORY_GRAPH_MAX_NODES = 220
+MEMORY_GRAPH_KEYWORD_NODES = 24
+MEMORY_GRAPH_MAX_LINKS = 420
 _VALID_MEMORY_TYPES: frozenset[str] = frozenset(MEMORY_TYPES)
 _MEMORY_TYPE_CATEGORY_MAP: dict[str, str] = {
     "preference": "preference",
@@ -2337,6 +2340,289 @@ def get_memory_stats() -> dict:
 
 # Alias for consistent naming
 memory_stats = get_memory_stats
+
+
+def _graph_text(value: Any, limit: int = 120) -> str:
+    """Return compact display text for read-only graph payloads."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _graph_terms(*values: Any) -> list[str]:
+    """Extract stable graph terms without exposing full content."""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for term in _extract_search_terms(str(value or "")):
+            normalized = term.lower().strip()
+            if len(normalized) < 3 or normalized in seen:
+                continue
+            seen.add(normalized)
+            terms.append(normalized)
+            if len(terms) >= 8:
+                return terms
+    return terms
+
+
+def memory_graph(limit: int = 160) -> dict:
+    """Build a read-only Obsidian-style graph from Lexa memory surfaces.
+
+    The graph payload exposes compact labels/previews only. It never writes to
+    the database and never returns full note, conversation, or memory bodies.
+    """
+    db = _get_db()
+    limit = max(40, min(MEMORY_GRAPH_MAX_NODES, int(limit or 160)))
+    fixed_node_budget = 1 + 5 + len(MEMORY_TYPES) + MEMORY_GRAPH_KEYWORD_NODES
+    per_bucket = max(8, (limit - fixed_node_budget) // 4)
+    secondary_bucket = max(6, per_bucket // 2)
+
+    nodes: dict[str, dict] = {}
+    links: list[dict] = []
+    terms_by_node: dict[str, set[str]] = {}
+    keyword_counts: dict[str, int] = {}
+
+    def add_node(
+        node_id: str,
+        label: str,
+        node_type: str,
+        *,
+        group: str | None = None,
+        weight: float = 1.0,
+        preview: str = "",
+        meta: dict | None = None,
+        terms: list[str] | None = None,
+    ) -> None:
+        nodes[node_id] = {
+            "id": node_id,
+            "label": _graph_text(label, 80) or node_type.title(),
+            "type": node_type,
+            "group": group or node_type,
+            "weight": round(max(0.5, min(12.0, float(weight or 1.0))), 3),
+            "preview": _graph_text(preview, 160),
+            "meta": meta or {},
+        }
+        safe_terms = {t for t in (terms or []) if t and len(t) >= 3}
+        terms_by_node[node_id] = safe_terms
+        for term in safe_terms:
+            keyword_counts[term] = keyword_counts.get(term, 0) + 1
+
+    def add_link(source: str, target: str, kind: str, *, weight: float = 1.0) -> None:
+        if source == target or source not in nodes or target not in nodes:
+            return
+        key = tuple(sorted((source, target))) + (kind,)
+        for existing in links:
+            existing_key = tuple(sorted((existing["source"], existing["target"]))) + (existing.get("kind", ""),)
+            if existing_key == key:
+                existing["weight"] = round(max(float(existing.get("weight", 1)), weight), 3)
+                return
+        if len(links) < MEMORY_GRAPH_MAX_LINKS:
+            links.append({
+                "source": source,
+                "target": target,
+                "kind": kind,
+                "weight": round(max(0.2, min(6.0, float(weight or 1.0))), 3),
+            })
+
+    add_node(
+        "hub:memory",
+        "Lexa Gedächtnis",
+        "hub",
+        group="hub",
+        weight=10,
+        preview="Lokaler Wissensgraph aus Notizen, Erinnerungen, Chats, Routinen und Snippets.",
+    )
+    for group_id, label in [
+        ("group:notes", "Notizen"),
+        ("group:memories", "Erinnerungen"),
+        ("group:conversations", "Chats"),
+        ("group:routines", "Routinen"),
+        ("group:snippets", "Snippets"),
+    ]:
+        add_node(group_id, label, "group", group=group_id.split(":", 1)[1], weight=5)
+        add_link("hub:memory", group_id, "contains", weight=2.5)
+
+    notes = db.execute(
+        """SELECT id, title, category, created_at, updated_at, SUBSTR(content, 1, 320) AS preview
+           FROM notes
+           ORDER BY updated_at DESC
+           LIMIT ?""",
+        (per_bucket,),
+    ).fetchall()
+    for row in notes:
+        node_id = f"note:{row['id']}"
+        terms = _graph_terms(row["title"], row["category"], row["preview"])
+        add_node(
+            node_id,
+            row["title"],
+            "note",
+            group="notes",
+            weight=2.4 + min(4, len(terms) * 0.45),
+            preview=row["preview"],
+            meta={"category": row["category"], "updated_at": row["updated_at"]},
+            terms=terms,
+        )
+        add_link("group:notes", node_id, "contains")
+
+    memories = db.execute(
+        """SELECT id, content, category, memory_type, importance, source, created_at,
+                  access_count, last_accessed_at
+           FROM memories
+           ORDER BY importance DESC, access_count DESC, created_at DESC
+           LIMIT ?""",
+        (per_bucket,),
+    ).fetchall()
+    for memory_type in MEMORY_TYPES:
+        type_id = f"type:{memory_type}"
+        add_node(type_id, memory_type, "type", group="memories", weight=3.2)
+        add_link("group:memories", type_id, "type", weight=1.2)
+    for row in memories:
+        node_id = f"memory:{row['id']}"
+        content = row["content"]
+        terms = _graph_terms(content, row["category"], row["memory_type"])
+        importance = int(row["importance"] or 5)
+        add_node(
+            node_id,
+            content,
+            "memory",
+            group=row["memory_type"] or "memories",
+            weight=2.2 + importance * 0.35 + min(3, int(row["access_count"] or 0) * 0.1),
+            preview=content,
+            meta={
+                "category": row["category"],
+                "memory_type": row["memory_type"],
+                "importance": importance,
+                "source": row["source"],
+                "created_at": row["created_at"],
+            },
+            terms=terms,
+        )
+        add_link("group:memories", node_id, "contains")
+        if row["memory_type"]:
+            add_link(f"type:{row['memory_type']}", node_id, "typed", weight=1.6)
+
+    conversations = conversation_list(limit=per_bucket)
+    for row in conversations:
+        node_id = f"conversation:{row['id']}"
+        title = row.get("title") or "Chat"
+        preview = row.get("last_message") or ""
+        count = int(row.get("message_count") or 0)
+        terms = _graph_terms(title, preview)
+        add_node(
+            node_id,
+            title,
+            "conversation",
+            group="conversations",
+            weight=2.0 + min(5.5, math.log(count + 1, 2) if count else 0.6),
+            preview=preview,
+            meta={"message_count": count, "updated_at": row.get("updated_at")},
+            terms=terms,
+        )
+        add_link("group:conversations", node_id, "contains")
+
+    routines = db.execute(
+        """SELECT id, name, description, schedule, enabled, last_run
+           FROM routines
+           ORDER BY enabled DESC, name
+           LIMIT ?""",
+        (secondary_bucket,),
+    ).fetchall()
+    for row in routines:
+        node_id = f"routine:{row['id']}"
+        terms = _graph_terms(row["name"], row["description"], row["schedule"])
+        add_node(
+            node_id,
+            row["name"],
+            "routine",
+            group="routines",
+            weight=3.2 if row["enabled"] else 2.2,
+            preview=row["description"] or row["schedule"],
+            meta={"schedule": row["schedule"], "enabled": bool(row["enabled"])},
+            terms=terms,
+        )
+        add_link("group:routines", node_id, "contains")
+
+    snippets = db.execute(
+        """SELECT name, SUBSTR(text, 1, 260) AS preview, use_count, created_at
+           FROM snippets
+           ORDER BY use_count DESC, name
+           LIMIT ?""",
+        (secondary_bucket,),
+    ).fetchall()
+    for row in snippets:
+        node_id = f"snippet:{row['name']}"
+        terms = _graph_terms(row["name"], row["preview"])
+        add_node(
+            node_id,
+            row["name"],
+            "snippet",
+            group="snippets",
+            weight=2.2 + min(4, int(row["use_count"] or 0) * 0.2),
+            preview=row["preview"],
+            meta={"use_count": int(row["use_count"] or 0), "created_at": row["created_at"]},
+            terms=terms,
+        )
+        add_link("group:snippets", node_id, "contains")
+
+    keyword_terms = [
+        term for term, count in sorted(keyword_counts.items(), key=lambda item: (-item[1], item[0]))
+        if count >= 2
+    ][:MEMORY_GRAPH_KEYWORD_NODES]
+    for term in keyword_terms:
+        keyword_id = f"keyword:{term}"
+        add_node(
+            keyword_id,
+            term,
+            "keyword",
+            group="keywords",
+            weight=1.8 + min(5, keyword_counts[term] * 0.4),
+            preview=f"{keyword_counts[term]} lokale Treffer",
+        )
+        add_link("hub:memory", keyword_id, "keyword", weight=0.6)
+        linked = 0
+        for node_id, terms in terms_by_node.items():
+            if term in terms and nodes.get(node_id, {}).get("type") not in {"hub", "group", "type", "keyword"}:
+                add_link(keyword_id, node_id, "mentions", weight=1.0 + min(2, keyword_counts[term] * 0.08))
+                linked += 1
+                if linked >= 14:
+                    break
+
+    content_node_ids = [
+        node_id for node_id, node in nodes.items()
+        if node.get("type") in {"note", "memory", "conversation", "routine", "snippet"}
+    ]
+    pair_links = 0
+    for index, left in enumerate(content_node_ids):
+        left_terms = terms_by_node.get(left) or set()
+        if not left_terms:
+            continue
+        for right in content_node_ids[index + 1:]:
+            overlap = left_terms.intersection(terms_by_node.get(right) or set())
+            if len(overlap) >= 2:
+                add_link(left, right, "related", weight=min(2.8, 0.8 + len(overlap) * 0.35))
+                pair_links += 1
+                if pair_links >= 80:
+                    break
+        if pair_links >= 80:
+            break
+
+    return {
+        "status": "ok",
+        "nodes": list(nodes.values()),
+        "links": links,
+        "counts": {
+            "nodes": len(nodes),
+            "links": len(links),
+            "notes": len(notes),
+            "memories": len(memories),
+            "conversations": len(conversations),
+            "routines": len(routines),
+            "snippets": len(snippets),
+            "keywords": len(keyword_terms),
+        },
+        "source": "local_sqlite_readonly",
+    }
 
 
 # ══════════════════════════════════════════════════

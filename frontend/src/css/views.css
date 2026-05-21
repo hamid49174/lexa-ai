@@ -979,6 +979,301 @@
   transform: translateX(20px);
 }
 
+/* Obsidian-style memory graph */
+#memory-view {
+  padding: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(139, 92, 246, 0.12), transparent 34%),
+    radial-gradient(circle at 78% 70%, rgba(45, 212, 191, 0.08), transparent 30%),
+    #06070d;
+}
+
+#memory-view.active {
+  display: flex;
+}
+
+.memory-graph-shell {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.memory-graph-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1px 1px at 10% 20%, rgba(255,255,255,0.22) 0, transparent 100%),
+    radial-gradient(1px 1px at 28% 76%, rgba(255,255,255,0.16) 0, transparent 100%),
+    radial-gradient(1px 1px at 56% 32%, rgba(255,255,255,0.13) 0, transparent 100%),
+    radial-gradient(1px 1px at 82% 18%, rgba(255,255,255,0.18) 0, transparent 100%),
+    radial-gradient(1px 1px at 90% 72%, rgba(255,255,255,0.12) 0, transparent 100%);
+  opacity: 0.72;
+}
+
+.memory-graph-toolbar {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 76px clamp(18px, 4vw, 54px) 14px;
+}
+
+.memory-graph-kicker {
+  color: rgba(198, 194, 220, 0.54);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.memory-graph-title-block h2 {
+  margin: 2px 0 0;
+  color: rgba(245, 243, 255, 0.96);
+  font-size: clamp(24px, 4vw, 46px);
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.memory-graph-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: min(420px, 46vw);
+}
+
+.memory-graph-search,
+.memory-graph-fit-btn {
+  height: 36px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 7px;
+  background: rgba(10, 11, 18, 0.72);
+  color: rgba(245, 243, 255, 0.9);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24);
+}
+
+.memory-graph-search {
+  flex: 1;
+  min-width: 0;
+  padding: 0 12px;
+  outline: none;
+}
+
+.memory-graph-search:focus,
+.memory-graph-fit-btn:focus-visible {
+  border-color: rgba(139, 156, 255, 0.72);
+  box-shadow: 0 0 0 2px rgba(139, 156, 255, 0.18);
+}
+
+.memory-graph-fit-btn {
+  padding: 0 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.memory-graph-stage {
+  position: relative;
+  z-index: 2;
+  min-height: 0;
+  margin: 0 clamp(8px, 2.8vw, 36px);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.memory-graph-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.024) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(circle at center, black 0%, black 62%, transparent 100%);
+}
+
+.memory-graph-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 520px;
+}
+
+.memory-graph-link {
+  stroke: rgba(139, 156, 255, 0.27);
+  stroke-linecap: round;
+  transition: opacity 0.16s ease, stroke 0.16s ease;
+}
+
+.memory-graph-link-related,
+.memory-graph-link-mentions {
+  stroke: rgba(52, 211, 153, 0.24);
+}
+
+.memory-graph-link.is-active {
+  stroke: rgba(245, 243, 255, 0.72);
+  opacity: 0.95;
+}
+
+.memory-graph-link.is-dim {
+  opacity: 0.08;
+}
+
+.memory-graph-node {
+  cursor: grab;
+  filter: url(#memory-graph-glow);
+  stroke: rgba(245, 243, 255, 0.62);
+  stroke-width: 1.1;
+  transition: opacity 0.16s ease, stroke-width 0.16s ease, filter 0.16s ease;
+}
+
+.memory-graph-node:hover,
+.memory-graph-node:focus-visible,
+.memory-graph-node.is-active {
+  stroke: #fff;
+  stroke-width: 2.2;
+}
+
+.memory-graph-node.is-neighbor {
+  stroke: rgba(255, 255, 255, 0.86);
+}
+
+.memory-graph-node.is-dim {
+  opacity: 0.16;
+  filter: none;
+}
+
+.memory-graph-label {
+  fill: rgba(245, 243, 255, 0.72);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: rgba(4, 5, 10, 0.92);
+  stroke-width: 3px;
+  transition: opacity 0.16s ease;
+}
+
+.memory-graph-label.is-visible {
+  opacity: 1;
+}
+
+.memory-graph-label.is-dim {
+  opacity: 0.08;
+}
+
+.memory-graph-inspector {
+  position: absolute;
+  right: clamp(14px, 2.8vw, 34px);
+  bottom: clamp(16px, 3vw, 36px);
+  z-index: 5;
+  width: min(360px, 44vw);
+  min-height: 94px;
+  border: 1px solid rgba(148, 163, 184, 0.17);
+  border-radius: 8px;
+  background: rgba(7, 8, 14, 0.72);
+  color: rgba(245, 243, 255, 0.9);
+  padding: 13px 15px;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+}
+
+.memory-graph-inspector-type {
+  color: rgba(139, 156, 255, 0.9);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.memory-graph-inspector-title {
+  margin-top: 6px;
+  color: rgba(255,255,255,0.96);
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.memory-graph-inspector-meta {
+  margin-top: 7px;
+  color: rgba(198, 194, 220, 0.7);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.memory-graph-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  color: rgba(198, 194, 220, 0.72);
+  font-weight: 600;
+  text-align: center;
+}
+
+.memory-graph-legend {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 12px clamp(18px, 4vw, 54px) 20px;
+  color: rgba(198, 194, 220, 0.68);
+  font-size: 11px;
+}
+
+.memory-graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.memory-graph-legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  box-shadow: 0 0 10px currentColor;
+}
+
+@media (max-width: 720px) {
+  .memory-graph-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    padding-top: 66px;
+  }
+
+  .memory-graph-controls {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .memory-graph-stage {
+    margin-inline: 0;
+    border-radius: 0;
+  }
+
+  .memory-graph-inspector {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    bottom: 12px;
+  }
+}
+
 .empty-state {
   text-align: center;
   padding: 32px;
