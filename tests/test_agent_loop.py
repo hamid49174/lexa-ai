@@ -65,19 +65,19 @@ class TestToolExecution(unittest.TestCase):
 
     @patch("backend.agent_loop.is_command_allowed", return_value="blocked")
     def test_blocked_command(self, mock_perm):
-        result = _run(_execute_tool("format_disk", {}))
+        result = _run(_execute_tool("system_info", {}))
         self.assertFalse(result["success"])
         self.assertIn("blockiert", result["error"])
 
     @patch("backend.agent_loop.is_command_allowed", return_value="confirmation_required")
     def test_confirmation_required(self, mock_perm):
-        result = _run(_execute_tool("shutdown", {}))
+        result = _run(_execute_tool("system_info", {}))
         self.assertFalse(result["success"])
         self.assertTrue(result.get("needs_confirmation"))
 
     @patch("backend.agent_loop.is_command_allowed", return_value="unknown")
     def test_unknown_command(self, mock_perm):
-        result = _run(_execute_tool("nonexistent_cmd", {}))
+        result = _run(_execute_tool("system_info", {}))
         self.assertFalse(result["success"])
         self.assertIn("Unbekannt", result["error"])
 
@@ -106,6 +106,26 @@ class TestToolExecution(unittest.TestCase):
 
         self.assertTrue(result["success"])
         self.assertEqual(result["data"], "personal_os_read_file:OS_MANIFEST.md")
+
+    @patch("backend.agent_loop.is_command_allowed", return_value="allowed")
+    @patch("companion.engine.companion")
+    def test_schema_invalid_wrong_type_does_not_execute(self, mock_companion, mock_perm):
+        result = _run(_execute_tool("app_open", {"name": 123}))
+
+        self.assertFalse(result["success"])
+        self.assertIn("Tool-Argumente ungueltig", result["error"])
+        mock_companion.execute.assert_not_called()
+        mock_perm.assert_not_called()
+
+    @patch("backend.agent_loop.is_command_allowed", return_value="allowed")
+    @patch("companion.engine.companion")
+    def test_schema_invalid_unknown_param_does_not_execute(self, mock_companion, mock_perm):
+        result = _run(_execute_tool("system_info", {"unexpected": "value"}))
+
+        self.assertFalse(result["success"])
+        self.assertIn("Tool-Argumente ungueltig", result["error"])
+        mock_companion.execute.assert_not_called()
+        mock_perm.assert_not_called()
 
 
 # ══════════════════════════════════════════════════

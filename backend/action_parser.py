@@ -40,6 +40,8 @@ _DEFAULT_PARAM_MAX_LEN: int = 5000
 # Heuristic limit: if text has more chars than this, skip expensive
 # bracket-counting extraction to avoid pathological inputs
 _JSON_EXTRACTION_CHAR_LIMIT: int = 100_000
+_PARAMS_MISSING = object()
+_TOOL_ARGUMENT_ERROR_REPLY = "Tool-Argumente ungueltig. Aktion wurde nicht ausgefuehrt."
 
 
 # ══════════════════════════════════════════════════
@@ -232,6 +234,80 @@ def _sanitize_params(params: dict) -> dict:
     return sanitized
 
 
+def _validate_llm_tool_params(
+    action_name: str,
+    raw_params,
+    *,
+    source: str,
+    allow_json_string: bool = False,
+) -> tuple[Optional[dict], Optional[str]]:
+    """Validate LLM-supplied tool args against the registry schema.
+
+    Missing params are treated as an empty object for zero-argument tools. Any
+    explicit non-object value is rejected so invalid tool calls never reach
+    execution. Native tool-call providers may supply JSON strings, so callers
+    can opt into parsing them here.
+    """
+    if raw_params is _PARAMS_MISSING:
+        params = {}
+    elif allow_json_string and isinstance(raw_params, str):
+        if not raw_params.strip():
+            params = {}
+        else:
+            try:
+                parsed = json.loads(raw_params)
+            except (json.JSONDecodeError, TypeError):
+                return None, "arguments must be a JSON object"
+            if not isinstance(parsed, dict):
+                return None, "arguments must be a JSON object"
+            params = parsed
+    elif not isinstance(raw_params, dict):
+        return None, "arguments must be an object"
+    else:
+        params = raw_params
+
+    try:
+        from backend.tool_registry import (
+            ToolSchemaValidationError,
+            validate_tool_arguments,
+        )
+
+        validated_params = validate_tool_arguments(action_name, params)
+    except ToolSchemaValidationError as exc:
+        return None, str(exc)
+    except Exception as exc:
+        logger.error(
+            "Tool schema validation failed unexpectedly for %s from %s: %s",
+            action_name,
+            source,
+            exc,
+            exc_info=True,
+        )
+        return None, "schema validation unavailable"
+
+    return _sanitize_params(validated_params), None
+
+
+def _reject_invalid_tool_args(
+    action_name: str,
+    *,
+    source: str,
+    reason: str,
+) -> tuple[str, None, bool]:
+    logger.warning(
+        "Rejected invalid LLM tool call %s from %s: %s",
+        action_name,
+        source,
+        reason,
+    )
+    audit_log(
+        action_name,
+        "tool_schema_invalid",
+        f"source={source} error={reason[:200]}",
+    )
+    return _TOOL_ARGUMENT_ERROR_REPLY, None, False
+
+
 # ══════════════════════════════════════════════════
 #  ACTION PROCESSING (shared by all chat endpoints)
 # ══════════════════════════════════════════════════
@@ -266,11 +342,18 @@ def process_ai_response(
         audit_log(action_name, "invalid_action_name", t("command.invalidName", name=action_name))
         return t("command.invalidNameFromAi"), None, False
 
-    # Sanitize params with per-field size limits
-    params = parsed.get("params", {})
-    if not isinstance(params, dict):
-        params = {}
-    parsed["params"] = _sanitize_params(params)
+    params, schema_error = _validate_llm_tool_params(
+        action_name,
+        parsed.get("params", _PARAMS_MISSING),
+        source=source,
+    )
+    if schema_error:
+        return _reject_invalid_tool_args(
+            action_name,
+            source=source,
+            reason=schema_error,
+        )
+    parsed["params"] = params or {}
 
     param_count = len(parsed["params"])
     logger.info(f"Extracted action: {action_name} (params={param_count})")
@@ -341,7 +424,7 @@ def process_tool_call(
     # Take the first tool call only (Phase 41 will support multiple)
     tc = tool_calls[0]
     action_name = tc.get("name", "")
-    params = tc.get("arguments", {})
+    raw_params = tc.get("arguments", _PARAMS_MISSING)
 
     if not action_name:
         return ai_message or "Keine Aktion erkannt.", None, False
@@ -351,11 +434,19 @@ def process_tool_call(
         audit_log(action_name, "invalid_action_name", t("command.invalidName", name=action_name))
         return t("command.invalidNameFromAi"), None, False
 
-    # Sanitize params
-    if not isinstance(params, dict):
-        params = {}
-    if isinstance(params, dict):
-        params = _sanitize_params(params)
+    params, schema_error = _validate_llm_tool_params(
+        action_name,
+        raw_params,
+        source=source,
+        allow_json_string=True,
+    )
+    if schema_error:
+        return _reject_invalid_tool_args(
+            action_name,
+            source=source,
+            reason=schema_error,
+        )
+    params = params or {}
 
     logger.info(f"Tool call: {action_name} (params={len(params)})")
 

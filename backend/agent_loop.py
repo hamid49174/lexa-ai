@@ -37,6 +37,8 @@ from backend.action_parser import _ACTION_NAME_PATTERN, _sanitize_params
 from backend.i18n import t
 
 logger = logging.getLogger("lexa.agent")
+_AGENT_ARGS_MISSING = object()
+_TOOL_ARGUMENT_ERROR_REPLY = "Tool-Argumente ungueltig. Aktion wurde nicht ausgefuehrt."
 
 
 # ══════════════════════════════════════════════════
@@ -295,6 +297,34 @@ def _finalize_agent_ledger(ledger, run: AgentRun) -> None:
 #  TOOL EXECUTION (sync, runs in thread pool)
 # ══════════════════════════════════════════════════
 
+def _reject_agent_tool_schema(action_name: str, reason: str) -> dict:
+    logger.warning(
+        "Rejected invalid agent tool call %s: %s",
+        action_name,
+        reason,
+    )
+    audit_log(action_name, "agent_tool_schema_invalid", reason[:200])
+    return {"success": False, "error": _TOOL_ARGUMENT_ERROR_REPLY}
+
+
+def _coerce_agent_tool_arguments(raw_params) -> tuple[Optional[dict], Optional[str]]:
+    if raw_params is _AGENT_ARGS_MISSING:
+        return {}, None
+    if isinstance(raw_params, str):
+        if not raw_params.strip():
+            return {}, None
+        try:
+            parsed = json.loads(raw_params)
+        except (json.JSONDecodeError, TypeError):
+            return None, "arguments must be a JSON object"
+        if not isinstance(parsed, dict):
+            return None, "arguments must be a JSON object"
+        return parsed, None
+    if not isinstance(raw_params, dict):
+        return None, "arguments must be an object"
+    return raw_params, None
+
+
 async def _execute_tool(action_name: str, params: dict) -> dict:
     """Execute a single tool call via CompanionEngine or a safe async bridge.
 
@@ -303,6 +333,26 @@ async def _execute_tool(action_name: str, params: dict) -> dict:
     # Validate action name (before any heavy imports)
     if not _ACTION_NAME_PATTERN.match(action_name):
         return {"success": False, "error": f"Ungueltiger Befehl: {action_name}"}
+
+    # Fail closed before permission checks or execution. The registry schema is
+    # the source of truth for allowed LLM tool arguments.
+    try:
+        from backend.tool_registry import (
+            ToolSchemaValidationError,
+            validate_tool_arguments,
+        )
+
+        schema_params = validate_tool_arguments(action_name, params)
+    except ToolSchemaValidationError as exc:
+        return _reject_agent_tool_schema(action_name, str(exc))
+    except Exception as exc:
+        logger.error(
+            "Agent tool schema validation failed unexpectedly for %s: %s",
+            action_name,
+            exc,
+            exc_info=True,
+        )
+        return _reject_agent_tool_schema(action_name, "schema validation unavailable")
 
     # Check permission (before any heavy imports)
     permission = is_command_allowed(action_name)
@@ -325,7 +375,7 @@ async def _execute_tool(action_name: str, params: dict) -> dict:
 
     # Validate and sanitize params
     try:
-        safe_params = validate_params(action_name, params)
+        safe_params = validate_params(action_name, schema_params)
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -541,13 +591,34 @@ async def run_agent(
                     break
 
                 action_name = tc.get("name", "")
-                params = tc.get("arguments", {})
+                params, argument_error = _coerce_agent_tool_arguments(
+                    tc.get("arguments", _AGENT_ARGS_MISSING)
+                )
 
-                if isinstance(params, str):
-                    try:
-                        params = json.loads(params)
-                    except (json.JSONDecodeError, TypeError):
-                        params = {}
+                if argument_error:
+                    logger.warning(
+                        "Rejected invalid agent tool call %s: %s",
+                        action_name,
+                        argument_error,
+                    )
+                    audit_log(action_name, "agent_tool_schema_invalid", argument_error[:200])
+                    step = AgentStep(
+                        index=step_count,
+                        action=action_name,
+                        params={},
+                        status=StepStatus.FAILED,
+                        error=_TOOL_ARGUMENT_ERROR_REPLY,
+                        started_at=time.time(),
+                    )
+                    step.duration_ms = (time.time() - step.started_at) * 1000
+                    run.steps.append(step)
+                    yield {"type": "step_done", "step": step.to_dict()}
+                    agent_messages.append({
+                        "role": "user",
+                        "content": f"[TOOL ERGEBNIS] {action_name}: {_TOOL_ARGUMENT_ERROR_REPLY}",
+                    })
+                    step_count += 1
+                    continue
 
                 step = AgentStep(
                     index=step_count,

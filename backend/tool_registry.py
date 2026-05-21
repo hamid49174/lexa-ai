@@ -17,6 +17,10 @@ TOOL_DEFINITIONS: list[dict] = []
 _TOOL_MAP: dict[str, dict] = {}  # name -> full tool definition
 
 
+class ToolSchemaValidationError(ValueError):
+    """Raised when LLM-supplied tool arguments do not match registry schema."""
+
+
 # ══════════════════════════════════════════════════
 #  BUILDER HELPERS
 # ══════════════════════════════════════════════════
@@ -831,6 +835,87 @@ def is_confirmation_tool(name: str) -> bool:
     if not tool:
         return True  # Unknown tools require confirmation by default
     return bool(tool.get("confirmation_required"))
+
+
+def validate_tool_arguments(name: str, arguments: dict) -> dict:
+    """Validate LLM tool-call arguments against the registry JSON schema.
+
+    This intentionally validates only the schema subset emitted by this registry:
+    object properties, required fields, additional-property rejection, primitive
+    types, arrays with simple item schemas, and enums. Runtime safety checks such
+    as path and URL policy still happen later in `backend.security.validate_params`.
+    """
+    tool = get_tool(name)
+    if not tool:
+        raise ToolSchemaValidationError(f"unknown tool: {name}")
+    if not isinstance(arguments, dict):
+        raise ToolSchemaValidationError("arguments must be an object")
+
+    parameters = tool.get("function", {}).get("parameters") or {
+        "type": "object",
+        "properties": {},
+    }
+    _validate_schema_object(parameters, arguments, path="arguments", reject_unknown=True)
+    return dict(arguments)
+
+
+def _validate_schema_object(schema: dict, value: dict, path: str, reject_unknown: bool) -> None:
+    if schema.get("type", "object") != "object":
+        raise ToolSchemaValidationError(f"{path} schema must be an object")
+
+    properties = schema.get("properties") or {}
+    if not isinstance(properties, dict):
+        raise ToolSchemaValidationError(f"{path} schema properties must be an object")
+
+    required = schema.get("required") or []
+    for key in required:
+        if key not in value:
+            raise ToolSchemaValidationError(f"{path}.{key} is required")
+
+    unknown = sorted(str(key) for key in value.keys() if key not in properties)
+    if reject_unknown and unknown:
+        raise ToolSchemaValidationError(f"{path} has unknown parameter(s): {', '.join(unknown)}")
+
+    for key, item in value.items():
+        if key not in properties:
+            continue
+        _validate_schema_value(properties[key], item, f"{path}.{key}")
+
+
+def _validate_schema_value(schema: dict, value: Any, path: str) -> None:
+    expected_type = schema.get("type")
+    if expected_type is None:
+        return
+
+    valid = False
+    if expected_type == "string":
+        valid = isinstance(value, str)
+    elif expected_type == "integer":
+        valid = isinstance(value, int) and not isinstance(value, bool)
+    elif expected_type == "number":
+        valid = isinstance(value, (int, float)) and not isinstance(value, bool)
+    elif expected_type == "boolean":
+        valid = isinstance(value, bool)
+    elif expected_type == "array":
+        valid = isinstance(value, list)
+    elif expected_type == "object":
+        valid = isinstance(value, dict)
+    else:
+        raise ToolSchemaValidationError(f"{path} has unsupported schema type: {expected_type}")
+
+    if not valid:
+        raise ToolSchemaValidationError(f"{path} must be {expected_type}")
+
+    enum = schema.get("enum")
+    if enum is not None and value not in enum:
+        raise ToolSchemaValidationError(f"{path} must be one of: {', '.join(map(str, enum))}")
+
+    if expected_type == "array" and isinstance(value, list) and isinstance(schema.get("items"), dict):
+        for index, item in enumerate(value):
+            _validate_schema_value(schema["items"], item, f"{path}[{index}]")
+
+    if expected_type == "object" and isinstance(value, dict):
+        _validate_schema_object(schema, value, path=path, reject_unknown=bool(schema.get("properties")))
 
 
 # ══════════════════════════════════════════════════

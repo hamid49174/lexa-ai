@@ -67,7 +67,7 @@ ap = _load_action_parser()
 class TestPermissionHandling(unittest.TestCase):
     """Verify that 'unknown' commands require confirmation, never auto-execute."""
 
-    def _call(self, permission: str, action_name: str = "test_cmd"):
+    def _call(self, permission: str, action_name: str = "system_info"):
         """Call process_ai_response with a faked is_command_allowed return."""
         ai_resp = f'{{"action": "{action_name}", "params": {{}}, "message": "ok"}}'
         with patch.object(ap, "is_command_allowed", return_value=permission), \
@@ -112,30 +112,130 @@ class TestPermissionHandling(unittest.TestCase):
             f"Expected warning in reply, got: {reply}",
         )
 
-    def test_json_action_null_params_becomes_empty_dict(self):
-        """Providers can emit null params; execution code expects a dict."""
+    def test_json_action_null_params_is_rejected(self):
+        """Explicit non-object params must not reach execution."""
         ai_resp = '{"action": "system_info", "params": null, "message": "ok"}'
         with patch.object(ap, "is_command_allowed", return_value="allowed"), \
              patch.object(ap, "validate_command_output", return_value=None), \
-             patch.object(ap, "audit_log"):
+             patch.object(ap, "audit_log") as mock_audit:
             _, action, requires_conf = ap.process_ai_response(ai_resp, source="chat")
-        self.assertIsNotNone(action)
+        self.assertIsNone(action)
         self.assertFalse(requires_conf)
-        self.assertEqual(action["params"], {})
+        mock_audit.assert_any_call(
+            "system_info",
+            "tool_schema_invalid",
+            "source=chat error=arguments must be an object",
+        )
 
-    def test_native_tool_call_null_arguments_becomes_empty_dict(self):
-        """Native tool calls can carry null arguments; keep parser defensive."""
+    def test_native_tool_call_null_arguments_is_rejected(self):
+        """Explicit non-object arguments must not reach execution."""
         with patch.object(ap, "is_command_allowed", return_value="allowed"), \
              patch.object(ap, "validate_command_output", return_value=None), \
-             patch.object(ap, "audit_log"):
+             patch.object(ap, "audit_log") as mock_audit:
             _, action, requires_conf = ap.process_tool_call(
                 [{"id": "x", "name": "system_info", "arguments": None}],
                 ai_message="",
                 source="chat_stream",
             )
+        self.assertIsNone(action)
+        self.assertFalse(requires_conf)
+        mock_audit.assert_any_call(
+            "system_info",
+            "tool_schema_invalid",
+            "source=chat_stream error=arguments must be an object",
+        )
+
+    def test_native_tool_call_valid_required_arguments_pass(self):
+        with patch.object(ap, "is_command_allowed", return_value="allowed"), \
+             patch.object(ap, "validate_command_output", return_value=None), \
+             patch.object(ap, "audit_log"):
+            _, action, requires_conf = ap.process_tool_call(
+                [{"id": "x", "name": "app_open", "arguments": {"name": "notepad"}}],
+                ai_message="",
+                source="chat_stream",
+            )
         self.assertIsNotNone(action)
         self.assertFalse(requires_conf)
-        self.assertEqual(action["params"], {})
+        self.assertEqual(action["params"], {"name": "notepad"})
+
+    def test_native_tool_call_json_string_arguments_pass(self):
+        with patch.object(ap, "is_command_allowed", return_value="allowed"), \
+             patch.object(ap, "validate_command_output", return_value=None), \
+             patch.object(ap, "audit_log"):
+            _, action, requires_conf = ap.process_tool_call(
+                [{"id": "x", "name": "app_open", "arguments": '{"name":"notepad"}'}],
+                ai_message="",
+                source="chat_stream",
+            )
+        self.assertIsNotNone(action)
+        self.assertFalse(requires_conf)
+        self.assertEqual(action["params"], {"name": "notepad"})
+
+    def test_native_tool_call_missing_required_argument_is_rejected(self):
+        with patch.object(ap, "is_command_allowed", return_value="allowed"), \
+             patch.object(ap, "validate_command_output", return_value=None), \
+             patch.object(ap, "audit_log") as mock_audit:
+            _, action, requires_conf = ap.process_tool_call(
+                [{"id": "x", "name": "app_open", "arguments": {}}],
+                ai_message="",
+                source="chat_stream",
+            )
+        self.assertIsNone(action)
+        self.assertFalse(requires_conf)
+        self.assertTrue(any(call.args[1] == "tool_schema_invalid" for call in mock_audit.call_args_list))
+
+    def test_native_tool_call_wrong_type_argument_is_rejected(self):
+        with patch.object(ap, "is_command_allowed", return_value="allowed"), \
+             patch.object(ap, "validate_command_output", return_value=None), \
+             patch.object(ap, "audit_log") as mock_audit:
+            _, action, requires_conf = ap.process_tool_call(
+                [{"id": "x", "name": "app_open", "arguments": {"name": 123}}],
+                ai_message="",
+                source="chat_stream",
+            )
+        self.assertIsNone(action)
+        self.assertFalse(requires_conf)
+        self.assertTrue(any(call.args[1] == "tool_schema_invalid" for call in mock_audit.call_args_list))
+
+    def test_native_tool_call_malicious_extra_argument_is_rejected(self):
+        with patch.object(ap, "is_command_allowed", return_value="allowed"), \
+             patch.object(ap, "validate_command_output", return_value=None), \
+             patch.object(ap, "audit_log") as mock_audit:
+            _, action, requires_conf = ap.process_tool_call(
+                [{
+                    "id": "x",
+                    "name": "app_open",
+                    "arguments": {"name": "notepad", "__proto__": {"polluted": True}},
+                }],
+                ai_message="",
+                source="chat_stream",
+            )
+        self.assertIsNone(action)
+        self.assertFalse(requires_conf)
+        self.assertTrue(any(call.args[1] == "tool_schema_invalid" for call in mock_audit.call_args_list))
+
+    def test_native_tool_call_hallucinated_tool_is_rejected(self):
+        with patch.object(ap, "is_command_allowed", return_value="allowed"), \
+             patch.object(ap, "validate_command_output", return_value=None), \
+             patch.object(ap, "audit_log") as mock_audit:
+            _, action, requires_conf = ap.process_tool_call(
+                [{"id": "x", "name": "hallucinated_tool", "arguments": {}}],
+                ai_message="",
+                source="chat_stream",
+            )
+        self.assertIsNone(action)
+        self.assertFalse(requires_conf)
+        self.assertTrue(any(call.args[1] == "tool_schema_invalid" for call in mock_audit.call_args_list))
+
+    def test_json_action_unknown_argument_is_rejected(self):
+        ai_resp = '{"action": "system_info", "params": {"unexpected": "value"}, "message": "ok"}'
+        with patch.object(ap, "is_command_allowed", return_value="allowed"), \
+             patch.object(ap, "validate_command_output", return_value=None), \
+             patch.object(ap, "audit_log") as mock_audit:
+            _, action, requires_conf = ap.process_ai_response(ai_resp, source="chat")
+        self.assertIsNone(action)
+        self.assertFalse(requires_conf)
+        self.assertTrue(any(call.args[1] == "tool_schema_invalid" for call in mock_audit.call_args_list))
 
 
 class TestJsonExtraction(unittest.TestCase):
