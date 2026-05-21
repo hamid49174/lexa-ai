@@ -1,7 +1,21 @@
 """Tests for backend/embeddings.py and Phase 42 semantic memory integration."""
 
+import logging
+import sqlite3
 import struct
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolate_memory_db(tmp_path, monkeypatch):
+    """Keep semantic-memory integration tests away from the real DB."""
+    import backend.memory as mem
+    mem.close_db()
+    tmp_db = tmp_path / "test_embeddings_memory.db"
+    monkeypatch.setattr(mem, "DB_PATH", tmp_db)
+    mem._tables_ready = False
+    yield
+    mem.close_db()
 
 
 # ═══════════════════════════════════════════════════
@@ -132,9 +146,12 @@ class TestCosineSimilarity:
         assert cosine_similarity([], []) == 0.0
         assert cosine_similarity([], [1.0]) == 0.0
 
-    def test_dimension_mismatch_returns_zero(self):
-        from backend.embeddings import cosine_similarity
-        assert cosine_similarity([1.0, 2.0], [1.0, 2.0, 3.0]) == 0.0
+    def test_dimension_mismatch_is_explicit(self, caplog):
+        from backend.embeddings import EmbeddingDimensionMismatchError, cosine_similarity
+        with caplog.at_level(logging.WARNING, logger="lexa.embeddings"):
+            with pytest.raises(EmbeddingDimensionMismatchError):
+                cosine_similarity([1.0, 2.0], [1.0, 2.0, 3.0])
+        assert "dimension mismatch" in caplog.text.lower()
 
     def test_zero_vector_returns_zero(self):
         from backend.embeddings import cosine_similarity
@@ -247,6 +264,39 @@ class TestProviderDetection:
 #  Batch Embeddings
 # ═══════════════════════════════════════════════════
 
+class TestEmbeddingMetadata:
+    def test_embed_text_with_metadata_records_local_provider(self, monkeypatch):
+        from backend.embeddings import LOCAL_EMBEDDING_DIMS, embed_text_with_metadata
+        monkeypatch.setattr("backend.embeddings._detect_provider", lambda: "local")
+        monkeypatch.setattr(
+            "backend.embeddings._embed_local",
+            lambda _text: [1.0] + [0.0] * (LOCAL_EMBEDDING_DIMS - 1),
+        )
+
+        result = embed_text_with_metadata("metadata local provider unique")
+
+        assert result["provider"] == "local"
+        assert result["model"] == "local-tfidf"
+        assert result["dimension"] == LOCAL_EMBEDDING_DIMS
+        assert len(result["vector"]) == LOCAL_EMBEDDING_DIMS
+
+    def test_openai_failure_records_local_fallback_metadata(self, monkeypatch):
+        from backend.embeddings import LOCAL_EMBEDDING_DIMS, embed_text_with_metadata
+        monkeypatch.setattr("backend.embeddings._detect_provider", lambda: "openai")
+        monkeypatch.setattr("backend.embeddings._embed_openai", lambda _text: None)
+        monkeypatch.setattr(
+            "backend.embeddings._embed_local",
+            lambda _text: [1.0] + [0.0] * (LOCAL_EMBEDDING_DIMS - 1),
+        )
+
+        result = embed_text_with_metadata("metadata openai fallback unique")
+
+        assert result["provider"] == "local"
+        assert result["model"] == "local-tfidf"
+        assert result["dimension"] == LOCAL_EMBEDDING_DIMS
+        assert len(result["vector"]) == LOCAL_EMBEDDING_DIMS
+
+
 class TestBatchEmbeddings:
     def test_embed_batch_empty(self):
         from backend.embeddings import embed_batch
@@ -272,6 +322,41 @@ class TestBatchEmbeddings:
 # ═══════════════════════════════════════════════════
 
 class TestMemorySemanticSearch:
+    def _insert_embedded_memory(
+        self,
+        *,
+        content: str,
+        vector: list[float] | None,
+        provider: str | None,
+        model: str | None,
+        dimension: int | None,
+        memory_type: str = "semantic",
+        bad_blob: bytes | None = None,
+    ) -> None:
+        from backend.embeddings import vector_to_blob
+        from backend.memory import _get_db
+        db = _get_db()
+        blob = bad_blob if bad_blob is not None else vector_to_blob(vector or [])
+        db.execute(
+            """INSERT INTO memories (
+                   content, category, memory_type, importance, source, embedding,
+                   embedding_provider, embedding_model, embedding_dimension,
+                   embedding_created_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))""",
+            (
+                content,
+                "fact",
+                memory_type,
+                7,
+                "test",
+                blob,
+                provider,
+                model,
+                dimension,
+            ),
+        )
+        db.commit()
+
     def test_search_semantic_empty_query(self):
         """Empty query should fall back gracefully."""
         from backend.memory import search_memory_semantic
@@ -290,6 +375,212 @@ class TestMemorySemanticSearch:
         assert "indexed_memories" in stats
         assert "unindexed_memories" in stats
         assert "coverage_pct" in stats
+        assert "embedding_metadata_missing" in stats
+        assert "embedding_provider_counts" in stats
+        assert "embedding_dimension_counts" in stats
+
+    def test_same_dimension_vector_comparison_works(self, monkeypatch):
+        from backend.memory import search_memory_semantic
+        self._insert_embedded_memory(
+            content="Semantic-only taco preference",
+            vector=[1.0, 0.0, 0.0],
+            provider="test",
+            model="test-model",
+            dimension=3,
+            memory_type="preference",
+        )
+
+        monkeypatch.setattr(
+            "backend.embeddings.embed_text_with_metadata",
+            lambda _query: {
+                "vector": [1.0, 0.0, 0.0],
+                "provider": "test",
+                "model": "test-model",
+                "dimension": 3,
+            },
+        )
+
+        results = search_memory_semantic("unrelated words")
+        assert results[0]["content"] == "Semantic-only taco preference"
+        assert results[0]["memory_type"] == "preference"
+
+    def test_openai_stored_local_query_falls_back_to_keyword(self, monkeypatch, caplog):
+        from backend.embeddings import LOCAL_EMBEDDING_DIMS, OPENAI_EMBEDDING_DIMS, OPENAI_EMBEDDING_MODEL
+        from backend.memory import search_memory_semantic
+        self._insert_embedded_memory(
+            content="OpenAI stored pizza marker",
+            vector=[1.0] + [0.0] * (OPENAI_EMBEDDING_DIMS - 1),
+            provider="openai",
+            model=OPENAI_EMBEDDING_MODEL,
+            dimension=OPENAI_EMBEDDING_DIMS,
+        )
+        monkeypatch.setattr(
+            "backend.embeddings.embed_text_with_metadata",
+            lambda _query: {
+                "vector": [1.0] + [0.0] * (LOCAL_EMBEDDING_DIMS - 1),
+                "provider": "local",
+                "model": "local-tfidf",
+                "dimension": LOCAL_EMBEDDING_DIMS,
+            },
+        )
+
+        with caplog.at_level(logging.WARNING, logger="lexa.memory"):
+            results = search_memory_semantic("pizza marker")
+
+        assert any(r["content"] == "OpenAI stored pizza marker" for r in results)
+        assert results[0]["memory_type"] == "semantic"
+        assert "degraded" in caplog.text.lower()
+        assert "skipped_incompatible" in caplog.text
+
+    def test_local_stored_openai_query_falls_back_to_keyword(self, monkeypatch, caplog):
+        from backend.embeddings import LOCAL_EMBEDDING_DIMS, OPENAI_EMBEDDING_DIMS, OPENAI_EMBEDDING_MODEL
+        from backend.memory import search_memory_semantic
+        self._insert_embedded_memory(
+            content="Local stored coffee marker",
+            vector=[1.0] + [0.0] * (LOCAL_EMBEDDING_DIMS - 1),
+            provider="local",
+            model="local-tfidf",
+            dimension=LOCAL_EMBEDDING_DIMS,
+        )
+        monkeypatch.setattr(
+            "backend.embeddings.embed_text_with_metadata",
+            lambda _query: {
+                "vector": [1.0] + [0.0] * (OPENAI_EMBEDDING_DIMS - 1),
+                "provider": "openai",
+                "model": OPENAI_EMBEDDING_MODEL,
+                "dimension": OPENAI_EMBEDDING_DIMS,
+            },
+        )
+
+        with caplog.at_level(logging.WARNING, logger="lexa.memory"):
+            results = search_memory_semantic("coffee marker")
+
+        assert any(r["content"] == "Local stored coffee marker" for r in results)
+        assert "degraded" in caplog.text.lower()
+
+    def test_missing_embedding_metadata_is_inferred_for_legacy_rows(self, monkeypatch, caplog):
+        from backend.embeddings import LOCAL_EMBEDDING_DIMS
+        from backend.memory import search_memory_semantic
+        self._insert_embedded_memory(
+            content="Legacy local metadata marker",
+            vector=[1.0] + [0.0] * (LOCAL_EMBEDDING_DIMS - 1),
+            provider=None,
+            model=None,
+            dimension=None,
+        )
+        monkeypatch.setattr(
+            "backend.embeddings.embed_text_with_metadata",
+            lambda _query: {
+                "vector": [1.0] + [0.0] * (LOCAL_EMBEDDING_DIMS - 1),
+                "provider": "local",
+                "model": "local-tfidf",
+                "dimension": LOCAL_EMBEDDING_DIMS,
+            },
+        )
+
+        with caplog.at_level(logging.WARNING, logger="lexa.memory"):
+            results = search_memory_semantic("not in content")
+
+        assert results[0]["content"] == "Legacy local metadata marker"
+        assert "inferred legacy embedding metadata" in caplog.text.lower()
+
+    def test_corrupted_vector_degrades_to_keyword_search(self, monkeypatch, caplog):
+        from backend.embeddings import LOCAL_EMBEDDING_DIMS
+        from backend.memory import search_memory_semantic
+        self._insert_embedded_memory(
+            content="Corrupt vector banana marker",
+            vector=None,
+            provider="local",
+            model="local-tfidf",
+            dimension=LOCAL_EMBEDDING_DIMS,
+            bad_blob=struct.pack("<I", LOCAL_EMBEDDING_DIMS) + b"\x00\x00",
+        )
+        monkeypatch.setattr(
+            "backend.embeddings.embed_text_with_metadata",
+            lambda _query: {
+                "vector": [1.0] + [0.0] * (LOCAL_EMBEDDING_DIMS - 1),
+                "provider": "local",
+                "model": "local-tfidf",
+                "dimension": LOCAL_EMBEDDING_DIMS,
+            },
+        )
+
+        with caplog.at_level(logging.WARNING, logger="lexa.memory"):
+            results = search_memory_semantic("banana marker")
+
+        assert any(r["content"] == "Corrupt vector banana marker" for r in results)
+        assert "skipped_corrupt=1" in caplog.text
+
+    def test_old_unembedded_memory_remains_discoverable(self, monkeypatch):
+        from backend.memory import add_memory, search_memory_semantic
+        monkeypatch.setattr("backend.config.EMBEDDING_ENABLED", False)
+        add_memory("Old unembedded mango marker", "fact", 5, "user", memory_type="semantic")
+        db = __import__("backend.memory", fromlist=["_get_db"])._get_db()
+        db.execute(
+            """UPDATE memories
+               SET embedding = NULL,
+                   embedding_provider = NULL,
+                   embedding_model = NULL,
+                   embedding_dimension = NULL,
+                   embedding_created_at = NULL"""
+        )
+        db.commit()
+        monkeypatch.setattr(
+            "backend.embeddings.embed_text_with_metadata",
+            lambda _query: {
+                "vector": [1.0, 0.0, 0.0],
+                "provider": "test",
+                "model": "test-model",
+                "dimension": 3,
+            },
+        )
+
+        results = search_memory_semantic("mango marker")
+        assert any(r["content"] == "Old unembedded mango marker" for r in results)
+        assert results[0]["memory_type"] == "semantic"
+
+    def test_legacy_embedding_metadata_migration_backfills_known_dimensions(self):
+        import backend.memory as mem
+        from backend.embeddings import LOCAL_EMBEDDING_DIMS, vector_to_blob
+        mem.close_db()
+        conn = sqlite3.connect(mem.DB_PATH)
+        conn.execute(
+            """CREATE TABLE memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                category TEXT DEFAULT 'fact',
+                importance INTEGER DEFAULT 5,
+                source TEXT DEFAULT 'auto',
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                embedding BLOB
+            )"""
+        )
+        conn.execute(
+            """INSERT INTO memories (content, category, importance, source, embedding)
+               VALUES (?, ?, ?, ?, ?)""",
+            (
+                "Legacy migration pear marker",
+                "fact",
+                5,
+                "test",
+                vector_to_blob([1.0] + [0.0] * (LOCAL_EMBEDDING_DIMS - 1)),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        mem._tables_ready = False
+
+        db = mem._get_db()
+        row = db.execute(
+            """SELECT memory_type, embedding_provider, embedding_model, embedding_dimension
+               FROM memories
+               WHERE content LIKE ?""",
+            ("%pear%",),
+        ).fetchone()
+        assert row["memory_type"] == "semantic"
+        assert row["embedding_provider"] == "local"
+        assert row["embedding_model"] == "local-tfidf"
+        assert row["embedding_dimension"] == LOCAL_EMBEDDING_DIMS
 
 
 class TestMemoryAutoEmbed:

@@ -321,7 +321,11 @@ _VALID_TABLES = frozenset({
 # Whitelist of valid column names per table (for restore validation)
 _VALID_COLUMNS = {
     "notes": {"id", "title", "content", "category", "created_at", "updated_at", "embedding"},
-    "memories": {"id", "content", "category", "memory_type", "importance", "source", "created_at", "embedding"},
+    "memories": {
+        "id", "content", "category", "memory_type", "importance", "source", "created_at",
+        "embedding", "embedding_provider", "embedding_model", "embedding_dimension",
+        "embedding_created_at",
+    },
     "user_profile": {"key", "value", "updated_at"},
     "interactions": {"id", "user_message", "ai_reply", "had_action", "created_at"},
     "routines": {"id", "name", "description", "schedule", "actions", "enabled", "last_run", "created_at"},
@@ -456,6 +460,93 @@ def _ensure_memory_type_schema(db: sqlite3.Connection) -> None:
         logger.warning(f"Memory type backfill skipped: {e}")
 
 
+def _ensure_embedding_metadata_schema(db: sqlite3.Connection) -> None:
+    """Add embedding metadata columns and backfill legacy vector rows safely."""
+    migrations = [
+        ("embedding_provider", "TEXT"),
+        ("embedding_model", "TEXT"),
+        ("embedding_dimension", "INTEGER"),
+        ("embedding_created_at", "TEXT"),
+    ]
+    for column, column_type in migrations:
+        try:
+            db.execute(f"SELECT {column} FROM memories LIMIT 1")
+        except sqlite3.OperationalError:
+            try:
+                db.execute(f"ALTER TABLE memories ADD COLUMN {column} {column_type}")
+                db.commit()
+                logger.info("Embedding metadata migration: added '%s' column", column)
+            except Exception as e:
+                logger.warning(f"Embedding metadata column migration skipped for {column}: {e}")
+
+    try:
+        db.execute("CREATE INDEX IF NOT EXISTS idx_memories_embedding_meta ON memories(embedding_provider, embedding_model, embedding_dimension)")
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Embedding metadata index migration skipped: {e}")
+
+    try:
+        _backfill_embedding_metadata(db)
+    except Exception as e:
+        logger.warning(f"Embedding metadata backfill skipped: {e}")
+
+
+def _backfill_embedding_metadata(db: sqlite3.Connection) -> int:
+    """Backfill legacy embedding metadata from vector dimensions when possible."""
+    try:
+        from backend.embeddings import blob_to_vector, infer_embedding_metadata_from_dimension
+    except ImportError:
+        return 0
+
+    rows = db.execute(
+        """SELECT id, embedding, embedding_provider, embedding_model,
+                  embedding_dimension, embedding_created_at, created_at
+           FROM memories
+           WHERE embedding IS NOT NULL"""
+    ).fetchall()
+    updated = 0
+    for row in rows:
+        existing_dimension = row["embedding_dimension"]
+        existing_provider = row["embedding_provider"]
+        existing_model = row["embedding_model"]
+        if existing_provider and existing_model and existing_dimension:
+            continue
+
+        vector = blob_to_vector(row["embedding"])
+        if vector is None:
+            logger.warning("Skipping corrupt legacy memory embedding metadata backfill: id=%s", row["id"])
+            continue
+        inferred = infer_embedding_metadata_from_dimension(len(vector))
+        if not inferred:
+            logger.warning(
+                "Skipping unknown legacy memory embedding metadata backfill: id=%s dimension=%s",
+                row["id"],
+                len(vector),
+            )
+            continue
+
+        db.execute(
+            """UPDATE memories
+               SET embedding_provider = ?,
+                   embedding_model = ?,
+                   embedding_dimension = ?,
+                   embedding_created_at = COALESCE(embedding_created_at, created_at, datetime('now', 'localtime'))
+               WHERE id = ?""",
+            (
+                inferred["provider"],
+                inferred["model"],
+                inferred["dimension"],
+                row["id"],
+            ),
+        )
+        updated += 1
+
+    if updated:
+        db.commit()
+        logger.info("Embedding metadata migration: backfilled %s memory rows", updated)
+    return updated
+
+
 def _init_tables(db: sqlite3.Connection) -> None:
     """Initialize all memory tables."""
     db.executescript("""
@@ -476,7 +567,12 @@ def _init_tables(db: sqlite3.Connection) -> None:
                 CHECK(memory_type IN ('working', 'episodic', 'semantic', 'procedural', 'preference', 'system')),
             importance INTEGER DEFAULT 5 CHECK(importance BETWEEN 1 AND 10),
             source TEXT DEFAULT 'auto',
-            created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            embedding BLOB,
+            embedding_provider TEXT,
+            embedding_model TEXT,
+            embedding_dimension INTEGER,
+            embedding_created_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS user_profile (
@@ -570,6 +666,20 @@ def _init_tables(db: sqlite3.Connection) -> None:
     db.commit()
     _ensure_memory_type_schema(db)
 
+    # Phase 42: Add embedding BLOB column to memories before FTS triggers
+    # exist, so legacy metadata backfill cannot trip stale FTS state.
+    try:
+        db.execute("SELECT embedding FROM memories LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            db.execute("ALTER TABLE memories ADD COLUMN embedding BLOB")
+            db.commit()
+            logger.info("Phase 42 migration: Added 'embedding' column to memories")
+        except Exception as e:
+            logger.warning(f"Embedding column migration skipped: {e}")
+
+    _ensure_embedding_metadata_schema(db)
+
     # FTS5 full-text search indexes
     try:
         db.executescript("""
@@ -619,17 +729,6 @@ def _init_tables(db: sqlite3.Connection) -> None:
         logger.warning(f"FTS5 setup skipped (not supported?): {e}")
 
     db.commit()
-
-    # Phase 42: Add embedding BLOB column to memories (migration-safe)
-    try:
-        db.execute("SELECT embedding FROM memories LIMIT 1")
-    except sqlite3.OperationalError:
-        try:
-            db.execute("ALTER TABLE memories ADD COLUMN embedding BLOB")
-            db.commit()
-            logger.info("Phase 42 migration: Added 'embedding' column to memories")
-        except Exception as e:
-            logger.warning(f"Embedding column migration skipped: {e}")
 
     # Phase 42: Add embedding BLOB column to notes (migration-safe)
     try:
@@ -1019,21 +1118,38 @@ def search_memory_semantic(query: str, limit: int = 5) -> list[dict]:
     - "Browser-Problem" → finds "Chrome stuerzt ab"
     """
     try:
-        from backend.embeddings import embed_text, cosine_similarity, blob_to_vector
+        from backend.embeddings import (
+            EmbeddingDimensionMismatchError,
+            blob_to_vector,
+            cosine_similarity,
+            embed_text_with_metadata,
+            embedding_metadata_compatible,
+            infer_embedding_metadata_from_dimension,
+        )
     except ImportError:
         logger.debug("Embeddings module not available, falling back to keyword search")
         return search_memory(query, limit)
 
     # Embed the query
-    query_vector = embed_text(query)
-    if query_vector is None:
+    query_result = embed_text_with_metadata(query)
+    if query_result is None:
+        logger.warning("Semantic memory search degraded: query embedding unavailable")
         return search_memory(query, limit)
+    query_vector = query_result["vector"]
+    query_metadata = {
+        "provider": query_result["provider"],
+        "model": query_result["model"],
+        "dimension": query_result["dimension"],
+    }
 
     db = _get_db()
 
     # Load memories with embeddings
     rows = db.execute(
-        "SELECT id, content, category, memory_type, importance, created_at, embedding FROM memories WHERE embedding IS NOT NULL"
+        """SELECT id, content, category, memory_type, importance, created_at, embedding,
+                  embedding_provider, embedding_model, embedding_dimension
+           FROM memories
+           WHERE embedding IS NOT NULL"""
     ).fetchall()
 
     if not rows:
@@ -1041,13 +1157,52 @@ def search_memory_semantic(query: str, limit: int = 5) -> list[dict]:
         logger.debug("No embedded memories found, falling back to keyword search")
         return search_memory(query, limit)
 
-    # Score each memory by cosine similarity
+    # Score each compatible memory by cosine similarity.
     scored: list[tuple[float, dict]] = []
+    skipped_incompatible = 0
+    skipped_corrupt = 0
+    skipped_missing_metadata = 0
     for row in rows:
         mem_vector = blob_to_vector(row["embedding"])
         if mem_vector is None:
+            skipped_corrupt += 1
             continue
-        sim = cosine_similarity(query_vector, mem_vector)
+        stored_dimension = row["embedding_dimension"]
+        try:
+            stored_dimension_int = int(stored_dimension or 0)
+        except (TypeError, ValueError):
+            stored_dimension_int = 0
+        stored_metadata = None
+        if (
+            row["embedding_provider"]
+            and row["embedding_model"]
+            and stored_dimension_int == len(mem_vector)
+        ):
+            stored_metadata = {
+                "provider": row["embedding_provider"],
+                "model": row["embedding_model"],
+                "dimension": stored_dimension_int,
+            }
+        else:
+            stored_metadata = infer_embedding_metadata_from_dimension(len(mem_vector))
+            if stored_metadata:
+                logger.warning(
+                    "Semantic memory search using inferred legacy embedding metadata: id=%s dimension=%s",
+                    row["id"],
+                    len(mem_vector),
+                )
+
+        if not stored_metadata:
+            skipped_missing_metadata += 1
+            continue
+        if not embedding_metadata_compatible(query_metadata, stored_metadata):
+            skipped_incompatible += 1
+            continue
+        try:
+            sim = cosine_similarity(query_vector, mem_vector)
+        except EmbeddingDimensionMismatchError:
+            skipped_incompatible += 1
+            continue
         scored.append((sim, {
             "content": row["content"],
             "category": row["category"],
@@ -1056,6 +1211,22 @@ def search_memory_semantic(query: str, limit: int = 5) -> list[dict]:
             "created_at": row["created_at"],
             "_similarity": round(sim, 4),
         }))
+
+    if skipped_corrupt or skipped_missing_metadata or skipped_incompatible:
+        logger.warning(
+            "Semantic memory search degraded: skipped_corrupt=%s skipped_missing_metadata=%s "
+            "skipped_incompatible=%s query_provider=%s query_model=%s query_dimension=%s",
+            skipped_corrupt,
+            skipped_missing_metadata,
+            skipped_incompatible,
+            query_metadata["provider"],
+            query_metadata["model"],
+            query_metadata["dimension"],
+        )
+
+    if not scored:
+        logger.warning("Semantic memory search degraded: no compatible embeddings, falling back to keyword search")
+        return search_memory(query, limit)
 
     # Sort by similarity descending
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -1091,11 +1262,26 @@ def _embed_memory_row(db: 'sqlite3.Connection', memory_id: int, content: str) ->
     Returns True if successful, False otherwise.
     """
     try:
-        from backend.embeddings import embed_text, vector_to_blob
-        vector = embed_text(content)
-        if vector:
-            blob = vector_to_blob(vector)
-            db.execute("UPDATE memories SET embedding = ? WHERE id = ?", (blob, memory_id))
+        from backend.embeddings import embed_text_with_metadata, vector_to_blob
+        result = embed_text_with_metadata(content)
+        if result:
+            blob = vector_to_blob(result["vector"])
+            db.execute(
+                """UPDATE memories
+                   SET embedding = ?,
+                       embedding_provider = ?,
+                       embedding_model = ?,
+                       embedding_dimension = ?,
+                       embedding_created_at = datetime('now', 'localtime')
+                   WHERE id = ?""",
+                (
+                    blob,
+                    result["provider"],
+                    result["model"],
+                    result["dimension"],
+                    memory_id,
+                ),
+            )
             return True
     except Exception as e:
         logger.debug(f"Failed to embed memory {memory_id}: {e}")
@@ -1108,7 +1294,7 @@ def reindex_embeddings(batch_size: int = 50) -> dict:
     Processes in batches for efficiency. Returns progress info.
     """
     try:
-        from backend.embeddings import embed_batch, vector_to_blob
+        from backend.embeddings import embed_batch_with_metadata, vector_to_blob
     except ImportError:
         return {"error": "Embeddings module not available"}
 
@@ -1116,7 +1302,13 @@ def reindex_embeddings(batch_size: int = 50) -> dict:
 
     # Count total and unindexed
     total = db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
-    unindexed = db.execute("SELECT COUNT(*) FROM memories WHERE embedding IS NULL").fetchone()[0]
+    unindexed = db.execute(
+        """SELECT COUNT(*) FROM memories
+           WHERE embedding IS NULL
+              OR embedding_provider IS NULL
+              OR embedding_model IS NULL
+              OR embedding_dimension IS NULL"""
+    ).fetchone()[0]
 
     if unindexed == 0:
         return {"total": total, "indexed": total, "newly_indexed": 0, "status": "complete"}
@@ -1127,7 +1319,12 @@ def reindex_embeddings(batch_size: int = 50) -> dict:
 
     while True:
         rows = db.execute(
-            "SELECT id, content FROM memories WHERE embedding IS NULL LIMIT ? OFFSET ?",
+            """SELECT id, content FROM memories
+               WHERE embedding IS NULL
+                  OR embedding_provider IS NULL
+                  OR embedding_model IS NULL
+                  OR embedding_dimension IS NULL
+               LIMIT ? OFFSET ?""",
             (batch_size, 0),  # Always offset 0 since we UPDATE them
         ).fetchall()
 
@@ -1137,12 +1334,27 @@ def reindex_embeddings(batch_size: int = 50) -> dict:
         texts = [row["content"] for row in rows]
         ids = [row["id"] for row in rows]
 
-        vectors = embed_batch(texts)
+        vectors = embed_batch_with_metadata(texts)
 
-        for row_id, vec in zip(ids, vectors):
-            if vec:
-                blob = vector_to_blob(vec)
-                db.execute("UPDATE memories SET embedding = ? WHERE id = ?", (blob, row_id))
+        for row_id, result in zip(ids, vectors):
+            if result:
+                blob = vector_to_blob(result["vector"])
+                db.execute(
+                    """UPDATE memories
+                       SET embedding = ?,
+                           embedding_provider = ?,
+                           embedding_model = ?,
+                           embedding_dimension = ?,
+                           embedding_created_at = datetime('now', 'localtime')
+                       WHERE id = ?""",
+                    (
+                        blob,
+                        result["provider"],
+                        result["model"],
+                        result["dimension"],
+                        row_id,
+                    ),
+                )
                 newly_indexed += 1
 
         db.commit()
@@ -1164,6 +1376,33 @@ def get_embedding_stats() -> dict:
     db = _get_db()
     total = db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
     indexed = db.execute("SELECT COUNT(*) FROM memories WHERE embedding IS NOT NULL").fetchone()[0]
+    metadata_missing = db.execute(
+        """SELECT COUNT(*) FROM memories
+           WHERE embedding IS NOT NULL
+             AND (
+                embedding_provider IS NULL
+                OR embedding_model IS NULL
+                OR embedding_dimension IS NULL
+             )"""
+    ).fetchone()[0]
+    by_provider = {
+        row["provider"]: row["c"]
+        for row in db.execute(
+            """SELECT COALESCE(embedding_provider, 'unknown') AS provider, COUNT(*) AS c
+               FROM memories
+               WHERE embedding IS NOT NULL
+               GROUP BY COALESCE(embedding_provider, 'unknown')"""
+        ).fetchall()
+    }
+    by_dimension = {
+        str(row["dimension"]): row["c"]
+        for row in db.execute(
+            """SELECT COALESCE(CAST(embedding_dimension AS TEXT), 'unknown') AS dimension, COUNT(*) AS c
+               FROM memories
+               WHERE embedding IS NOT NULL
+               GROUP BY COALESCE(CAST(embedding_dimension AS TEXT), 'unknown')"""
+        ).fetchall()
+    }
 
     try:
         from backend.embeddings import get_embedding_status
@@ -1175,6 +1414,9 @@ def get_embedding_stats() -> dict:
         "total_memories": total,
         "indexed_memories": indexed,
         "unindexed_memories": total - indexed,
+        "embedding_metadata_missing": metadata_missing,
+        "embedding_provider_counts": by_provider,
+        "embedding_dimension_counts": by_dimension,
         "coverage_pct": round(indexed / total * 100, 1) if total > 0 else 0.0,
         **provider_info,
     }
