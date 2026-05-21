@@ -1346,7 +1346,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   if (agentRunMeta) renderPersistedAgentRunMeta(body, agentRunMeta, text);
   body.appendChild(msgTextEl);
 
-  if (requiresConfirmation && action) {
+  if (action) {
     appendToolConfirmationUi(body, action);
   }
 
@@ -1383,6 +1383,19 @@ function denyAction(btn) {
   // Clear pending confirmation on the backend
   try { fetch(`${window.lexa.API_BASE}/chat/confirm-clear`, { method: "POST", credentials: "include" }); } catch (_) {}
   showToast(t("toast.actionCancelled"), "warning");
+}
+
+function handleChatToolActionBlocked(action, options = {}) {
+  const actionName = chatToolActionName(action);
+  console.info("[Chat] Blocked automatic local tool execution from chat", {
+    action: actionName,
+    param_keys: chatToolActionParamKeys(action),
+    source: options.source || "chat",
+  });
+  if (options.toast !== false) {
+    showToast(t("chat.localActionBlockedToast", { action: actionName }), "warning", 3200);
+  }
+  return false;
 }
 
 // ── FOLLOW-UP SUGGESTIONS ─────────────────────────
@@ -1810,33 +1823,8 @@ async function sendMessage() {
     }
 
     if (actionData) {
-      if (requiresConfirmation) {
-        // Show confirmation UI only for dangerous actions
-        appendToolConfirmationUi(body, actionData);
-      } else {
-        // Execute action and show REAL result in chat (not just toast)
-        try {
-          const execResult = await window.lexa.execute(actionData.action, actionData.params || {});
-          if (execResult.success) {
-            const resultText = toolResultDisplayText(execResult.data);
-            if (resultText) {
-              // Replace AI placeholder text with actual result
-              renderFormattedMessage(textEl, resultText);
-              fullText = resultText;
-            }
-            showToast(t("chat.actionDoneToast", {action: actionData.action}), "success", 2500);
-            sendNotification("Lexa AI", resultText || t("chat.actionDoneToast", {action: actionData.action}));
-          } else {
-            const errMsg = execResult.error || t("chat.actionFailedToast", {action: actionData.action});
-            renderFormattedMessage(textEl, errMsg);
-            fullText = errMsg;
-            showToast(errMsg, "error", 3000);
-          }
-        } catch (e) {
-          console.warn("[Chat] Action execution failed:", e.message || e);
-          showToast(t("chat.errorPrefix", {msg: e.message || e}), "error", 3000);
-        }
-      }
+      appendToolConfirmationUi(body, actionData);
+      handleChatToolActionBlocked(actionData);
     }
     // Show follow-up suggestion chips if response has substance
     if (fullText && fullText.length > 50 && !actionData) {
@@ -2265,28 +2253,17 @@ async function regenerateMessage(originalPrompt) {
 }
 
 async function confirmAction(btn, actionStr) {
-  const action = JSON.parse(decodeURIComponent(actionStr));
-  btn.textContent = t("chat.executing");
+  let action = null;
+  try {
+    action = JSON.parse(decodeURIComponent(actionStr));
+  } catch (_) {
+    action = { action: "unknown", params: {} };
+  }
+  btn.textContent = t("chat.localActionBlockedButton");
   btn.disabled = true;
   // Clear pending confirmation on the backend (user clicked the button)
   try { await fetch(`${window.lexa.API_BASE}/chat/confirm-clear`, { method: "POST", credentials: "include" }); } catch (_) {}
-  try {
-    const prepared = await window.lexa.prepareCompanionExecute(action.action, action.params || {});
-    if (!prepared.success) {
-      addMessage(t("common.error") + ": " + (prepared.error || prepared.message || ""), "system");
-      showToast(t("chat.actionFailed", {action: action.action}), "error");
-      return;
-    }
-    const safeSummary = confirmationActionSummaryText(action, prepared);
-    if (typeof window.confirm === "function" && !window.confirm(safeSummary)) {
-      addMessage(t("chat.denied"), "system");
-      showToast(t("toast.actionCancelled"), "warning");
-      return;
-    }
-    const res = await window.lexa.executeWithConfirmation(action.action, action.params || {}, prepared);
-    if (res.success) { addMessage(t("chat.executed", {data: JSON.stringify(res.data).substring(0, 200)}), "system"); showToast(t("chat.actionExecuted", {action: action.action}), "success"); }
-    else { addMessage(t("common.error") + ": " + res.error, "system"); showToast(t("chat.actionFailed", {action: action.action}), "error"); }
-  } catch (e) { console.error("[Chat] Confirm action execution error:", e.message || e); addMessage(t("chat.executionErrorMsg"), "system"); showToast(t("toast.executionError"), "error"); }
+  handleChatToolActionBlocked(action);
 }
 
 // ── SEND MODE (Enter vs Ctrl+Enter) ──────────────
@@ -3054,9 +3031,7 @@ async function voiceStreamChat(text) {
 
     if (fullText) {
       addMessage(fullText, "system", action, requiresConfirmation, true);
-      if (action && !requiresConfirmation) {
-        window.lexa.execute(action.action, action.params || {}).catch(() => {});
-      }
+      if (action) handleChatToolActionBlocked(action, { source: "voice", toast: false });
     }
     voiceStatusBarResetIfNoSpeechPending();
 
@@ -3248,26 +3223,7 @@ function handleChatResponse(res, ambient = false) {
     if (ambient) showOrbTranscript(undefined, res.reply);
     addMessage(res.reply, "system", res.action, res.requires_confirmation, ambient);
     playTTS(res.reply);
-    if (res.action && !res.requires_confirmation) {
-      window.lexa.execute(res.action.action, res.action.params || {}).then((execResult) => {
-        if (execResult.success) {
-          // Show REAL result in chat, not just AI text
-          const resultText = toolResultDisplayText(execResult.data);
-          if (resultText) {
-            // Find last system message and update its text
-            const msgs = chatMessages.querySelectorAll(".system-message .msg-text");
-            if (msgs.length > 0) {
-              const lastMsg = msgs[msgs.length - 1];
-              renderFormattedMessage(lastMsg, resultText);
-              setMessagePersistText(lastMsg.closest(".message"), resultText);
-            }
-          }
-          showToast(t("chat.actionDoneToast", {action: res.action.action}), "success", 2500);
-          sendNotification("Lexa AI", resultText || t("chat.actionDoneToast", {action: res.action.action}));
-        }
-        else { showToast(execResult.error || t("chat.actionFailedToast", {action: res.action.action}), "error", 3000); }
-      }).catch((e) => { console.warn("[Chat] Action execution failed:", e.message || e); showToast(t("toast.executionError"), "error"); });
-    }
+    if (res.action) handleChatToolActionBlocked(res.action, { source: "chat-response", toast: !ambient });
   }
 }
 
@@ -3763,7 +3719,7 @@ async function handleFileUpload(file) {
     if (res.detail) { addMessage(res.detail, "system"); showToast(t("toast.fileError"), "error"); }
     else {
       addFileUploadResponse(res);
-      if (res.action && !res.requires_confirmation) { try { const execResult = await window.lexa.execute(res.action.action, res.action.params || {}); if (execResult.success) { showToast(t("chat.actionDoneToast", {action: res.action.action}), "success", 2500); } else { showToast(execResult.error || t("chat.actionFailedToast", {action: res.action.action}), "error", 3000); } } catch (e) { console.warn("[Chat] File upload action execution failed:", e.message || e); showToast(t("toast.executionError"), "error"); } }
+      if (res.action) handleChatToolActionBlocked(res.action, { source: "file-upload" });
       playTTS(res.reply);
     }
   } catch (err) { hideTyping(); addMessage(t("chat.uploadErrorMsg", {error: err.message}), "system"); showToast(t("toast.uploadError"), "error"); }

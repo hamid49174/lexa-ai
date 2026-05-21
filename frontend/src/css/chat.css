@@ -372,6 +372,14 @@
   color: var(--accent2);
 }
 
+.msg-action .action-detail {
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 6px;
+}
+
 /* Confirmation buttons */
 .confirm-btn {
   background: var(--gradient);

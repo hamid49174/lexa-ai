@@ -1,6 +1,7 @@
 /**
- * Electron confirmation click smoke.
- * Uses the real renderer scripts with isolated userData and mock confirmation calls.
+ * Electron chat local-action block smoke.
+ * Uses the real renderer scripts and verifies chat does not surface native
+ * Allow/Deny confirmation or execute local tools from normal chat.
  * Run with: node tests\electron_confirmation_click_smoke.js
  */
 
@@ -121,6 +122,20 @@ async function main() {
         return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
       };
 
+      let nativeConfirmCalls = 0;
+      const originalConfirm = window.confirm;
+      window.confirm = () => {
+        nativeConfirmCalls += 1;
+        return true;
+      };
+
+      let prepareCalls = 0;
+      let executeWithConfirmationCalls = 0;
+      const originalPrepare = window.lexa.prepareCompanionExecute;
+      const originalExecuteWithConfirmation = window.lexa.executeWithConfirmation;
+      try { window.lexa.prepareCompanionExecute = () => { prepareCalls += 1; return Promise.resolve({ success: false }); }; } catch (_) {}
+      try { window.lexa.executeWithConfirmation = () => { executeWithConfirmationCalls += 1; return Promise.resolve({ success: false }); }; } catch (_) {}
+
       const action = {
         action: "personal_os_write",
         params: {
@@ -129,101 +144,58 @@ async function main() {
         },
       };
 
-      addMessage("Approval path needs confirmation", "system", action, true, true);
-      const approvalMessage = Array.from(document.querySelectorAll(".system-message")).at(-1);
-      const approvalCmd = approvalMessage?.querySelector(".action-cmd") || null;
-      const approvalButton = approvalMessage?.querySelector(".confirm-btn") || null;
-      const approvalBefore = {
-        actionText: approvalCmd?.textContent || "",
-        actionHtml: approvalCmd?.innerHTML || "",
-        confirmButtons: approvalMessage?.querySelectorAll(".confirm-btn").length || 0,
-        denyButtons: approvalMessage?.querySelectorAll(".deny-btn").length || 0,
+      addMessage("Local tool action from chat", "system", action, true, true);
+      const message = Array.from(document.querySelectorAll(".system-message")).at(-1);
+      const actionCard = message?.querySelector(".msg-action") || null;
+      const actionCmd = actionCard?.querySelector(".action-cmd") || null;
+      const actionDetail = actionCard?.querySelector(".action-detail") || null;
+      const rendered = {
+        label: actionCard?.querySelector(".action-label")?.textContent || "",
+        actionText: actionCmd?.textContent || "",
+        actionHtml: actionCmd?.innerHTML || "",
+        detailText: actionDetail?.textContent || "",
+        detailHtml: actionDetail?.innerHTML || "",
+        confirmButtons: message?.querySelectorAll(".confirm-btn").length || 0,
+        denyButtons: message?.querySelectorAll(".deny-btn").length || 0,
+        unsafeNodes: message?.querySelectorAll(".msg-action img,.msg-action script").length || 0,
+      };
+
+      const fakeButton = document.createElement("button");
+      fakeButton.textContent = "compat";
+      document.body.appendChild(fakeButton);
+      if (typeof confirmAction === "function") {
+        await confirmAction(fakeButton, encodeURIComponent(JSON.stringify(action)));
+      }
+      const compatibility = {
+        buttonDisabled: fakeButton.disabled === true,
+        buttonText: fakeButton.textContent || "",
         clearCalls: fetchCalls.filter((call) => call.url.endsWith("/chat/confirm-clear")).length,
+        nativeConfirmCalls,
+        prepareCalls,
+        executeWithConfirmationCalls,
+        executedMessages: Array.from(document.querySelectorAll(".system-message .msg-text")).filter((el) => /Ausgef|Executed/i.test(el.textContent || "")).length,
       };
-      const confirmPrompts = [];
-      const originalConfirm = window.confirm;
-      window.confirm = (message) => {
-        confirmPrompts.push(String(message || ""));
-        return true;
-      };
-      approvalButton?.click();
-      approvalButton?.click();
-      const approvalWait = await waitFor(() => Array.from(document.querySelectorAll(".system-message .msg-text")).some((el) => /Ausgef|Executed/i.test(el.textContent || "")));
+
+      try { window.lexa.prepareCompanionExecute = originalPrepare; } catch (_) {}
+      try { window.lexa.executeWithConfirmation = originalExecuteWithConfirmation; } catch (_) {}
       window.confirm = originalConfirm;
-      const approvalAfter = {
-        waitOk: approvalWait.ok,
-        buttonDisabled: approvalButton?.disabled === true,
-        buttonText: approvalButton?.textContent || "",
-        clearCalls: fetchCalls.filter((call) => call.url.endsWith("/chat/confirm-clear")).length,
-        executedMessages: Array.from(document.querySelectorAll(".system-message .msg-text")).filter((el) => /Ausgef|Executed/i.test(el.textContent || "")).length,
-        confirmPrompts,
-      };
-
-      clearRenderedChatMessages();
-      fetchCalls.length = 0;
-      addMessage("Deny path needs confirmation", "system", action, true, true);
-      const denyMessage = Array.from(document.querySelectorAll(".system-message")).at(-1);
-      const denyCmd = denyMessage?.querySelector(".action-cmd") || null;
-      const denyButton = denyMessage?.querySelector(".deny-btn") || null;
-      const denyBefore = {
-        actionText: denyCmd?.textContent || "",
-        actionHtml: denyCmd?.innerHTML || "",
-        confirmButtons: denyMessage?.querySelectorAll(".confirm-btn").length || 0,
-        denyButtons: denyMessage?.querySelectorAll(".deny-btn").length || 0,
-        clearCalls: fetchCalls.filter((call) => call.url.endsWith("/chat/confirm-clear")).length,
-      };
-      denyButton?.click();
-      const denyAfter = {
-        denyDisabled: denyButton?.disabled === true,
-        denyText: denyButton?.textContent || "",
-        confirmButtons: denyMessage?.querySelectorAll(".confirm-btn").length || 0,
-        denyButtons: denyMessage?.querySelectorAll(".deny-btn").length || 0,
-        clearCalls: fetchCalls.filter((call) => call.url.endsWith("/chat/confirm-clear")).length,
-        executedMessages: Array.from(document.querySelectorAll(".system-message .msg-text")).filter((el) => /Ausgef|Executed/i.test(el.textContent || "")).length,
-        actionCards: denyMessage?.querySelectorAll(".msg-action").length || 0,
-      };
-
-      clearRenderedChatMessages();
-      fetchCalls.length = 0;
-      addMessage("Window confirm cancel path", "system", action, true, true);
-      const cancelMessage = Array.from(document.querySelectorAll(".system-message")).at(-1);
-      const cancelButton = cancelMessage?.querySelector(".confirm-btn") || null;
-      const cancelPrompts = [];
-      window.confirm = (message) => {
-        cancelPrompts.push(String(message || ""));
-        return false;
-      };
-      cancelButton?.click();
-      const cancelWait = await waitFor(() => Array.from(document.querySelectorAll(".system-message .msg-text")).some((el) => /Abgebrochen|Cancelled/i.test(el.textContent || "")));
-      window.confirm = originalConfirm;
-      const cancelAfter = {
-        waitOk: cancelWait.ok,
-        buttonDisabled: cancelButton?.disabled === true,
-        clearCalls: fetchCalls.filter((call) => call.url.endsWith("/chat/confirm-clear")).length,
-        cancelledMessages: Array.from(document.querySelectorAll(".system-message .msg-text")).filter((el) => /Abgebrochen|Cancelled/i.test(el.textContent || "")).length,
-        executedMessages: Array.from(document.querySelectorAll(".system-message .msg-text")).filter((el) => /Ausgef|Executed/i.test(el.textContent || "")).length,
-        confirmPrompts: cancelPrompts,
-      };
-
       window.fetch = originalFetch;
-      return { approvalBefore, approvalAfter, denyBefore, denyAfter, cancelAfter };
+      return { rendered, compatibility };
     })();
   `);
 
-  console.log("\nConfirmation approval click:");
-  assert("approval confirmation renders escaped action params before click", /personal_os_write/.test(result.approvalBefore?.actionText || "") && /onerror=alert/.test(result.approvalBefore?.actionText || "") && !/<img|<script/i.test(result.approvalBefore?.actionHtml || "") && result.approvalBefore?.confirmButtons === 1 && result.approvalBefore?.denyButtons === 1, JSON.stringify(result.approvalBefore));
-  assert("approval click clears pending confirmation once", result.approvalBefore?.clearCalls === 0 && result.approvalAfter?.clearCalls === 1, JSON.stringify(result.approvalAfter));
-  assert("approval click uses mocked confirmation execution", result.approvalAfter?.waitOk === true && result.approvalAfter?.executedMessages === 1 && result.approvalAfter?.buttonDisabled === true, JSON.stringify(result.approvalAfter));
-  assert("approval prompt contains safe command summary", Array.isArray(result.approvalAfter?.confirmPrompts) && result.approvalAfter.confirmPrompts.length === 1 && /Command: personal_os_write/.test(result.approvalAfter.confirmPrompts[0] || "") && /Params:/.test(result.approvalAfter.confirmPrompts[0] || ""), JSON.stringify(result.approvalAfter?.confirmPrompts));
+  const rendered = result.rendered || {};
+  console.log("\nChat local-action block render:");
+  assert("chat renders a blocked local-action card", /BLOCKIERT|BLOCKED/i.test(rendered.label || "") && /personal_os_write/.test(rendered.actionText || ""), JSON.stringify(rendered));
+  assert("chat action card exposes parameter keys but not unsafe values", /body/.test(rendered.actionText || "") && /path/.test(rendered.actionText || "") && !/onerror=alert|<script/i.test(rendered.actionText || "") && !/onerror=alert|<script/i.test(rendered.actionHtml || ""), JSON.stringify(rendered));
+  assert("chat action card has no confirm or deny controls", Number(rendered.confirmButtons || 0) === 0 && Number(rendered.denyButtons || 0) === 0, JSON.stringify(rendered));
+  assert("unsafe action values are contained", Number(rendered.unsafeNodes || 0) === 0 && !/<img|<script/i.test(rendered.detailHtml || ""), JSON.stringify(rendered));
 
-  console.log("\nConfirmation deny button click:");
-  assert("deny confirmation renders escaped action params before click", /personal_os_write/.test(result.denyBefore?.actionText || "") && /onerror=alert/.test(result.denyBefore?.actionText || "") && !/<img|<script/i.test(result.denyBefore?.actionHtml || "") && result.denyBefore?.confirmButtons === 1 && result.denyBefore?.denyButtons === 1, JSON.stringify(result.denyBefore));
-  assert("deny click clears pending confirmation once", result.denyBefore?.clearCalls === 0 && result.denyAfter?.clearCalls === 1, JSON.stringify(result.denyAfter));
-  assert("deny click updates UI without execution", result.denyAfter?.denyDisabled === true && result.denyAfter?.confirmButtons === 0 && result.denyAfter?.denyButtons === 1 && result.denyAfter?.executedMessages === 0, JSON.stringify(result.denyAfter));
-
-  console.log("\nWindow confirm cancel path:");
-  assert("window cancel clears pending confirmation but does not execute", result.cancelAfter?.waitOk === true && result.cancelAfter?.clearCalls === 1 && result.cancelAfter?.cancelledMessages === 1 && result.cancelAfter?.executedMessages === 0 && result.cancelAfter?.buttonDisabled === true, JSON.stringify(result.cancelAfter));
-  assert("window cancel prompt contains safe command summary", Array.isArray(result.cancelAfter?.confirmPrompts) && result.cancelAfter.confirmPrompts.length === 1 && /Command: personal_os_write/.test(result.cancelAfter.confirmPrompts[0] || ""), JSON.stringify(result.cancelAfter?.confirmPrompts));
+  const compatibility = result.compatibility || {};
+  console.log("\nConfirm-action compatibility path:");
+  assert("legacy confirmAction fails closed without native confirm", compatibility.buttonDisabled === true && compatibility.nativeConfirmCalls === 0 && compatibility.executedMessages === 0, JSON.stringify(compatibility));
+  assert("legacy confirmAction does not prepare or execute companion action", compatibility.prepareCalls === 0 && compatibility.executeWithConfirmationCalls === 0, JSON.stringify(compatibility));
+  assert("legacy confirmAction only clears stale pending confirmation state", compatibility.clearCalls === 1, JSON.stringify(compatibility));
   assert("renderer produced no fatal console errors", rendererErrors.length === 0, JSON.stringify(rendererErrors));
 
   win.destroy();
