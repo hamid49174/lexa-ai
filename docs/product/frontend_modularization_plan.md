@@ -724,11 +724,12 @@ Current tail script order:
 
 1. `memory.js`
 2. `personal_os_display_helpers.js`
-3. `personal_os.js`
-4. `settings_helpers.js`
-5. `settings_provider_helpers.js`
-6. `settings.js`
-7. `devtools.js`
+3. `personal_os_review_helpers.js`
+4. `personal_os.js`
+5. `settings_helpers.js`
+6. `settings_provider_helpers.js`
+7. `settings.js`
+8. `devtools.js`
 
 What stayed in `personal_os.js`:
 
@@ -740,7 +741,74 @@ What stayed in `personal_os.js`:
 - graph DOM event handlers
 - all SDK write boundaries
 
-Next recommended target: a mocked Personal OS chat-handoff/review smoke that verifies prompt placement without approving, rejecting, applying, raw-submitting, cleaning up, or touching real OS files. OS drafts, OS cleanup, filesystem writes, Companion execution, SDK writes, Electron IPC, and provider calls remain stop-lined.
+Next recommended target at the time: a mocked Personal OS chat-handoff/review smoke that verifies prompt placement without approving, rejecting, applying, raw-submitting, cleaning up, or touching real OS files. That target is addressed in the following section; OS drafts, OS cleanup, filesystem writes, Companion execution, SDK writes, Electron IPC, and provider calls remain stop-lined.
+
+## Personal OS Chat-Handoff and Draft Review Smoke
+
+This sprint added mocked coverage for chat handoff and draft-review display before extracting only display-only review hint helpers.
+
+Personal OS handoff/review responsibility map:
+
+| Cluster | Location/functions | Dependencies/globals | Mutates state | Touches DOM | Backend/fetch/IPC | Current coverage | Risk | Recommended next action |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Review hint display helpers | `personal_os_review_helpers.js`: `renderPosApplyHint()`, `renderPosPromptHint()` | passed draft/review payloads, `escapeHtml()`, `posText()`, `posUiText()`, `personalOsReviewPromptMeta()`, `posMeterWidthClass()` | No | Returns display HTML only | No | `electron_personal_os_handoff_smoke.js`, `test_personal_os_prompt.js`, script-order static test | Low | Keep extracted; change only with direct display/handoff tests |
+| Chat handoff prompt placement | `personalOsPlacePromptInChat()`, `personalOsSendContextToChat()`, `personalOsSendReviewToChat()` | `chatInput`, `switchView()`, local chat draft storage, toast helpers | Yes, composer state only | Yes | No | `electron_personal_os_handoff_smoke.js`, `test_personal_os_prompt.js` | Medium | Keep in `personal_os.js`; do not auto-send or route to providers |
+| Draft review display | `renderPersonalOsDetail()` and review render helpers in `personal_os.js` | `PersonalOSState`, selected draft/review payloads, DOM | Yes, renderer state only | Yes | No direct fetch | `electron_personal_os_handoff_smoke.js`, `electron_personal_os_readonly_smoke.js` | Medium | Add read-call failure coverage before moving larger display regions |
+| Draft write controls | `decidePersonalOsDraft()`, `applyPersonalOsDraft()`, `submitPersonalOsRawInbox()` | modal input, SDK/backend write paths, bridge risk policy | Yes | Yes | Write/admin bridge calls | backend/router/OS gate tests only | High | Stop-line; no approve/reject/apply/raw-submit extraction in maintainability passes |
+
+Coverage added:
+
+- `tests/electron_personal_os_handoff_smoke.js` opens the real Personal OS view with isolated Electron `userData`, renders mocked context and draft-review payloads, clicks only context-to-chat and review-to-chat display/handoff controls, and verifies prompts are placed in the chat composer without auto-sending.
+- The smoke verifies unsafe context, draft, review, path, and diff text stays contained; draft-review prompt text includes no-auto-decision guidance; no renderer `fetch()` calls or chat send calls occur; and no Personal OS decision/apply/raw-submit, Companion/tool, provider, or secret bridge methods are called.
+- `tests/test_frontend_script_order_static.js` verifies `personal_os_review_helpers.js` is a classic script loaded after `personal_os_display_helpers.js` and before `personal_os.js`.
+- `tests/test_personal_os_prompt.js` reads the review helper file directly so localized review/apply hint labels remain covered after extraction.
+
+Extraction completed:
+
+| File | Before sprint | After sprint |
+| --- | ---: | ---: |
+| `frontend/src/personal_os.js` | 2371 lines / 112058 bytes | 2337 lines / 110749 bytes |
+| `frontend/src/personal_os_review_helpers.js` | new | 35 lines / 1396 bytes |
+
+Moved functions:
+
+- `renderPosApplyHint(review)`
+- `renderPosPromptHint(draft, review)`
+
+Why this boundary was safe:
+
+- It is display-only hint generation for already-rendered review payloads.
+- It does not read/write OS files, call the Personal OS SDK, create/approve/reject/apply drafts, raw-submit inbox items, run cleanup, execute Companion, call providers, call `fetch()`, or own chat send/stream/history behavior.
+- The new smoke covers the visible handoff/review surfaces while explicitly avoiding write-capable controls.
+
+Current UI behavior documented by the smoke:
+
+- pending draft approve/reject controls are visible according to existing behavior and are not clicked by this smoke
+- apply remains disabled for the mocked pending draft
+- the chat-review control is enabled only because a mocked review package is present
+
+What stayed in `personal_os.js`:
+
+- draft selection and detail state
+- bridge reads and all bridge writes
+- approve/reject/apply behavior
+- raw inbox submit behavior
+- context file reads and all chat handoff orchestration
+- prompt construction and prompt clipping
+- graph DOM event handlers and SDK write boundaries
+
+Current tail script order:
+
+1. `memory.js`
+2. `personal_os_display_helpers.js`
+3. `personal_os_review_helpers.js`
+4. `personal_os.js`
+5. `settings_helpers.js`
+6. `settings_provider_helpers.js`
+7. `settings.js`
+8. `devtools.js`
+
+Next recommended target: a Personal OS read-call failure smoke or provider/model backend contract coverage with fake provider responses. OS drafts, OS cleanup, approve/reject/apply/raw-submit, filesystem writes, Companion execution, SDK writes, Electron IPC, and provider calls remain stop-lined.
 
 ## Do Not Touch Yet
 

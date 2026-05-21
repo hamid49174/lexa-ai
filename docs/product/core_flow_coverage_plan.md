@@ -17,7 +17,8 @@ Goal: strengthen integration coverage for Lexa's internal daily-use core flows b
 | Tool-call display | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, backend action/parser tests, `electron_tool_confirmation_smoke.js`, `electron_tool_display_smoke.js`, `test_chat_tool_display_helpers.js` | Real Companion/tool execution remains outside renderer smoke coverage | Tool rendering refactors could expose unsafe labels, unsafe result content, or hide confirmation state | Keep render-only display smoke mocked; do not add real tool execution to renderer tests |
 | File upload / attachment display | `electron_file_upload_result_smoke.js`, `test_chat_file_display_helpers.js`, `test_chat_send_guards.js`, `test_frontend_script_order_static.js` | Real file upload execution, backend upload calls, filesystem reads/writes, and provider-backed file analysis remain intentionally outside renderer display smoke | File UI refactors could expose unsafe filenames/content, create live controls from history, or accidentally trigger upload/tool/provider paths | Keep display-only smoke mocked with in-memory `File` objects; add backend upload contract tests only with safe fixtures |
 | Confirmation happy path | `test_router_companion.py`, `test_companion_confirmation.py`, `electron_presence_challenge_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_confirmation_click_smoke.js` | Real Companion execution remains intentionally outside renderer smoke coverage | Confirmation UI refactors could call Companion incorrectly or lose safe denial behavior | Keep focused click smoke mocked; do not add real tool execution to renderer tests |
-| Personal OS cockpit read-only view | `electron_personal_os_readonly_smoke.js`, `test_personal_os_prompt.js`, `test_internal_daily_use_readiness_static.js`, `test_frontend_script_order_static.js` | Real OS root browsing, draft decisions, raw inbox submit, cleanup/archive/migration, SDK write operations, and real filesystem writes remain intentionally outside smoke coverage | Personal OS UI refactors could expose unsafe OS-like content, make the Internal surface confusing, or accidentally trigger write-capable bridge methods while opening the cockpit | Keep the read-only smoke mocked; do not click approve/reject/apply/raw-submit/cleanup paths without dedicated write-safe harness coverage |
+| Personal OS cockpit read-only view | `electron_personal_os_readonly_smoke.js`, `electron_personal_os_handoff_smoke.js`, `test_personal_os_prompt.js`, `test_internal_daily_use_readiness_static.js`, `test_frontend_script_order_static.js` | Real OS root browsing, draft decisions, raw inbox submit, cleanup/archive/migration, SDK write operations, and real filesystem writes remain intentionally outside smoke coverage | Personal OS UI refactors could expose unsafe OS-like content, make the Internal surface confusing, or accidentally trigger write-capable bridge methods while opening the cockpit | Keep the read-only and handoff smokes mocked; do not click approve/reject/apply/raw-submit/cleanup paths without dedicated write-safe harness coverage |
+| Personal OS chat handoff and draft-review display | `electron_personal_os_handoff_smoke.js`, `test_personal_os_prompt.js` | Real draft decision/write behavior, real OS files, real provider sends, and Companion execution remain intentionally outside smoke coverage | Handoff/review UI changes could auto-send prompts, lose no-auto-decision guidance, or accidentally invoke write-capable bridge methods | Keep handoff smoke focused on composer placement and display-only review controls; add a separate write-safe harness before testing decisions |
 | OS draft creation path | `test_personal_os_prompt.js`, `test_router_personal_os.py`, `test_personal_os_actions.py`, eval OS draft tests | Full renderer draft creation from chat handoff is not isolated | OS draft UI refactors could bypass Draft/Approval expectations | Add a mocked Personal OS draft handoff smoke only after core chat/history smokes are stable |
 | Settings persistence | `test_settings_voice_static.js`, `test_app_chat_input_wiring.js`, `electron_ui_visual_smoke.js`, `electron_settings_persistence_smoke.js`, `test_settings_helpers.js` | Provider/keyring/license persistence remains intentionally outside the local preference smoke | Settings refactors could silently stop saving local preferences, lose Beta/Internal labels, or apply corrupt localStorage values | Keep local preference smoke in settings gates; add provider/secret coverage only with explicit keyring-safe mocks |
 | Provider/model settings | `electron_provider_settings_smoke.js`, `test_settings_provider_helpers.js`, `test_frontend_script_order_static.js`, `test_preload_bridge_security_static.js` | Real provider calls, API-key/keyring writes, and backend contract edge cases remain intentionally outside the renderer smoke | Provider settings refactors could break model selection, expose unsafe labels, or accidentally touch secret/keyring paths | Keep provider smoke keyring-safe; add fake backend contract coverage before changing provider/model payload handling |
@@ -217,8 +218,39 @@ Remaining coverage gaps:
 - no SDK write operation coverage
 - no path-redaction assertion for arbitrary backend error detail; current coverage verifies escaping/containment, not semantic redaction
 
+## Added In Personal OS Chat-Handoff + Draft Review Smoke Sprint
+
+`tests/electron_personal_os_handoff_smoke.js` adds mocked renderer coverage for Personal OS prompt placement and draft-review display:
+
+- opens Personal OS through the real renderer view switch
+- renders a mocked context payload and clicks the real context-to-chat handoff button
+- verifies the chat composer receives the expected Personal OS context prompt without auto-sending
+- renders a mocked pending draft queue and draft review package
+- verifies draft title/body/path, review assist, prompt hint, apply boundary, audit history, target diff, and related context display safely
+- clicks only the review-to-chat button and verifies the draft-review prompt is placed in the chat composer
+- verifies the review prompt includes no-auto-decision guidance
+- verifies no renderer `fetch()` calls, send calls, Personal OS decision/apply/raw-submit calls, Companion/tool execution, provider, or secret bridge calls occur
+
+Extraction completed:
+
+- `frontend/src/personal_os_review_helpers.js` now owns the display-only review hint helpers `renderPosApplyHint()` and `renderPosPromptHint()`.
+- `frontend/src/personal_os.js` still owns draft selection, bridge reads/writes, approve/reject/apply, raw inbox submit, context file reads, chat handoff orchestration, and prompt construction.
+
+Current UI behavior documented by the smoke:
+
+- pending draft approve/reject controls are visible according to existing behavior and are not clicked by this smoke
+- apply remains disabled for the mocked pending draft
+- the chat-review control is enabled only because a mocked review package is present
+
+Remaining coverage gaps:
+
+- no real OS root access or filesystem mutation
+- no approve/reject/apply/raw-submit/cleanup/archive/migration clicks
+- no SDK write operation or Companion execution coverage
+- no real provider/chat send coverage from the handoff prompt
+
 ## Stop-line Before Refactors
 
 Do not extract or rewrite the full streaming lifecycle, send pipeline, conversation save/load/delete orchestration, active-conversation delete recovery, real file upload execution, backend upload contracts, filesystem writes, real tool execution, real confirmation approval execution, Companion execution, OS draft actions, Personal OS write paths, settings keyring/secret handling, voice runtime, license activation, backend/provider calls, or Electron IPC until focused integration coverage exists for the specific lifecycle being changed.
 
-Recommended next coverage target: provider/model backend contract coverage with fake provider responses, or a mocked Personal OS chat-handoff/draft review smoke that still avoids approve/reject/apply and real OS writes.
+Recommended next coverage target: provider/model backend contract coverage with fake provider responses, or a Personal OS read-call failure smoke that still avoids approve/reject/apply/raw-submit and real OS writes.
