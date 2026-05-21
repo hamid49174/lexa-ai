@@ -22,6 +22,24 @@ def test_execute_action_rejects_schema_invalid_args_before_companion():
     mock_reflect.assert_not_called()
 
 
+def test_execute_action_unknown_tool_rejects_before_reflection_or_companion():
+    with patch("backend.action_executor.is_command_allowed", return_value="allowed") as mock_perm, \
+         patch("backend.action_executor.reflect_action") as mock_reflect, \
+         patch("backend.action_executor.companion") as mock_companion, \
+         patch("backend.action_executor.audit_log"):
+        result = execute_action(
+            {"action": "hallucinated_tool", "params": {}},
+            source="test",
+        )
+
+    assert result["success"] is False
+    assert result["executed"] is False
+    assert "Tool-Argumente ungueltig" in result["error"]
+    mock_perm.assert_not_called()
+    mock_reflect.assert_not_called()
+    mock_companion.execute.assert_not_called()
+
+
 def test_execute_action_valid_args_still_execute():
     with patch("backend.action_executor.is_command_allowed", return_value="allowed"), \
          patch("backend.action_executor.validate_params", side_effect=lambda command, params: params), \
@@ -99,3 +117,30 @@ def test_execute_action_high_risk_tool_triggers_reflection():
         source="test",
     )
     mock_companion.execute.assert_not_called()
+
+
+def test_execute_action_validate_params_runs_after_positive_reflection():
+    decision = ReflectionDecision(
+        should_execute=True,
+        risk_level="medium",
+        confidence=0.8,
+        concerns=["unit"],
+        requires_confirmation=False,
+        verification_step="verify",
+        reason="unit_pass",
+    )
+    with patch("backend.action_executor.is_command_allowed", return_value="allowed"), \
+         patch("backend.action_executor.reflect_action", return_value=decision) as mock_reflect, \
+         patch("backend.action_executor.validate_params", side_effect=lambda command, params: {**params, "sanitized": True}) as mock_validate, \
+         patch("backend.action_executor.companion") as mock_companion, \
+         patch("backend.action_executor.audit_log"):
+        mock_companion.execute.return_value = {"success": True, "data": "ok"}
+        result = execute_action(
+            {"action": "clipboard_write", "params": {"text": "hello"}},
+            source="test",
+        )
+
+    assert result["success"] is True
+    mock_reflect.assert_called_once()
+    mock_validate.assert_called_once_with("clipboard_write", {"text": "hello"})
+    mock_companion.execute.assert_called_once_with("clipboard_write", {"text": "hello", "sanitized": True})

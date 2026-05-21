@@ -33,6 +33,7 @@ def client(mock_companion, disable_rate_limit):
     """Create test client with mocked companion and security."""
     with patch("backend.router_companion.companion", mock_companion), \
          patch("backend.router_companion.is_command_allowed") as mock_allowed, \
+         patch("backend.router_companion.check_rate_limit", lambda *a, **kw: True), \
          patch("backend.router_companion.audit_log"), \
          patch("backend.router_companion.validate_params", side_effect=lambda cmd, params: params):
 
@@ -209,6 +210,70 @@ class TestExecuteCommand:
         assert data["success"] is True
         assert data["data"] == "Personal OS result"
         assert calls == [("personal_os_query", {"areaPath": "00_System"})]
+        mock_comp.execute.assert_not_called()
+
+    def test_execute_personal_os_action_reflects_before_os_boundary(self, client, monkeypatch):
+        tc, mock_comp, _ = client
+        reflection_calls = []
+        os_calls = []
+
+        def fake_reflect(command, params, **kwargs):
+            reflection_calls.append((command, params, kwargs))
+            return None
+
+        async def fake_personal_os_action(command, params):
+            os_calls.append((command, params))
+            return {"success": True, "data": "Personal OS result"}
+
+        monkeypatch.setattr("backend.router_companion.reflect_action", fake_reflect)
+        monkeypatch.setattr("backend.router_companion.execute_personal_os_action", fake_personal_os_action)
+
+        res = tc.post("/companion/execute", json={
+            "command": "personal_os_query",
+            "params": {"areaPath": "00_System"},
+        })
+
+        assert res.status_code == 200
+        assert res.json()["success"] is True
+        assert reflection_calls == [(
+            "personal_os_query",
+            {"areaPath": "00_System"},
+            {"permission": "always_allowed", "source": "companion_execute"},
+        )]
+        assert os_calls == [("personal_os_query", {"areaPath": "00_System"})]
+        mock_comp.execute.assert_not_called()
+
+    def test_execute_reflection_block_prevents_personal_os_boundary(self, client, monkeypatch):
+        from backend.agent_reflection import ReflectionDecision
+
+        tc, mock_comp, _ = client
+        os_calls = []
+        monkeypatch.setattr(
+            "backend.router_companion.reflect_action",
+            lambda *args, **kwargs: ReflectionDecision(
+                should_execute=False,
+                risk_level="medium",
+                confidence=0.2,
+                concerns=["unit"],
+                safer_alternative={"mode": "read_only"},
+                requires_confirmation=False,
+                verification_step="verify first",
+                reason="unit_block",
+            ),
+        )
+        monkeypatch.setattr(
+            "backend.router_companion.execute_personal_os_action",
+            lambda command, params: os_calls.append((command, params)),
+        )
+
+        res = tc.post("/companion/execute", json={
+            "command": "personal_os_query",
+            "params": {"areaPath": "00_System"},
+        })
+
+        assert res.status_code == 200
+        assert res.json()["success"] is False
+        assert os_calls == []
         mock_comp.execute.assert_not_called()
 
     def test_execute_exception_handling(self, client):
@@ -440,6 +505,50 @@ class TestBatchExecution:
         assert data["success"] is False
         assert data["results"][0]["error"] == "Command execution failed. Details were logged locally."
         assert "Sensitive local path" not in data["results"][0]["error"]
+
+    def test_batch_rejects_malformed_args_before_reflection_or_execution(self, client, monkeypatch):
+        tc, mock_comp, _ = client
+        monkeypatch.setattr(
+            "backend.router_companion.reflect_action",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("reflection should not run")),
+        )
+
+        res = tc.post("/companion/execute/batch", json={
+            "commands": [{"command": "app_open", "params": {"name": 123}}],
+        })
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is False
+        assert data["results"][0]["success"] is False
+        assert data["results"][0]["error"] == "Tool arguments are invalid. Action was not executed."
+        mock_comp.execute.assert_not_called()
+
+    def test_batch_safe_plus_confirmation_required_plan_only_executes_safe_mock(self, client):
+        tc, mock_comp, mock_allowed = client
+
+        def _permission(command):
+            if command == "process_kill":
+                return "confirmation_required"
+            return "always_allowed"
+
+        mock_allowed.side_effect = _permission
+
+        res = tc.post("/companion/execute/batch", json={
+            "commands": [
+                {"command": "system_info"},
+                {"command": "process_kill", "params": {"pid": 123}},
+            ],
+            "stop_on_error": False,
+        })
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is False
+        assert data["results"][0]["success"] is True
+        assert data["results"][1]["success"] is False
+        assert "Best" in data["results"][1]["error"]
+        mock_comp.execute.assert_called_once_with("system_info", {})
 
     def test_batch_reflection_block_prevents_companion_call(self, client, monkeypatch):
         from backend.agent_reflection import ReflectionDecision

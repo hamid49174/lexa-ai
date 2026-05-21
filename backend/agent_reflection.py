@@ -23,7 +23,7 @@ CONFIDENCE_MAX = 1.0
 
 _FALSE_VALUES = {"0", "false", "no", "off", "disabled"}
 _SENSITIVE_KEY_RE = re.compile(
-    r"(api[_-]?key|token|secret|password|passphrase|credential|auth|bearer|private)",
+    r"(api[_-]?key|token|secret|password|passphrase|credential|auth|authorization|bearer|private|path|file)",
     re.IGNORECASE,
 )
 _WRITE_MARKERS = (

@@ -125,3 +125,49 @@ def test_scheduler_reflection_block_prevents_execution(monkeypatch):
     }))
 
     assert calls == []
+
+
+def test_scheduler_confirmation_required_action_does_not_execute_side_effect(monkeypatch):
+    from backend import scheduler
+
+    calls = []
+    reflections = []
+    monkeypatch.setattr(scheduler, "_companion_execute", lambda command, params: calls.append((command, params)))
+    monkeypatch.setattr(scheduler, "is_command_allowed", lambda command: "confirmation_required")
+    monkeypatch.setattr(scheduler.memory, "_get_db", lambda: _FakeDb())
+    monkeypatch.setattr(scheduler, "audit_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scheduler, "reflect_action", lambda *args, **kwargs: reflections.append((args, kwargs)) or None)
+
+    _run(scheduler._run_routine({
+        "name": "dangerous-routine",
+        "actions": [{"command": "process_kill", "params": {"pid": 123}}],
+    }))
+
+    assert calls == []
+    assert len(reflections) == 1
+    assert reflections[0][0][0] == "process_kill"
+
+
+def test_scheduler_safe_plus_blocked_plan_only_executes_safe_mock(monkeypatch):
+    from backend import scheduler
+
+    calls = []
+    monkeypatch.setattr(scheduler, "_companion_execute", lambda command, params: calls.append((command, params)))
+    monkeypatch.setattr(
+        scheduler,
+        "is_command_allowed",
+        lambda command: "blocked" if command == "process_kill" else "allowed",
+    )
+    monkeypatch.setattr(scheduler, "validate_params", lambda command, params: params)
+    monkeypatch.setattr(scheduler.memory, "_get_db", lambda: _FakeDb())
+    monkeypatch.setattr(scheduler, "audit_log", lambda *args, **kwargs: None)
+
+    _run(scheduler._run_routine({
+        "name": "mixed-routine",
+        "actions": [
+            {"command": "system_info", "params": {}},
+            {"command": "process_kill", "params": {"pid": 123}},
+        ],
+    }))
+
+    assert calls == [("system_info", {})]

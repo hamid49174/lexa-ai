@@ -40,6 +40,26 @@ This snapshot was run locally against commit `d77db0ea8e7fb402c7ec33660048fae511
 | PublicRC checker | `powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target PublicRC -SkipFullQualityGate -AllowMissingOS -AllowMissingWebsite` | exit 1; decision: `Blocked`; blockers include remote CI, VM installer proof, signing, website target/CDN/CSP/SRI review, OS cleanup review, and remote artifact-policy proof |
 | PublicRelease checker | `powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target PublicRelease -SkipFullQualityGate -AllowMissingOS -AllowMissingWebsite` | exit 1; decision: `Blocked`; PublicRC blockers plus privacy/trace consent approval and public release workflow requirements |
 
+## Agent Reflection Abuse Coverage Snapshot
+
+This snapshot was run locally on 2026-05-21 after baseline commit `54ba7b71ad81a15c9476842f7463e1cd51c474a2`. It is additional local safety evidence for Agent Reflection v1 only. It does not prove external PublicRC/PublicRelease blockers and does not change release status.
+
+| Area | Command | Result |
+| --- | --- | --- |
+| Python compile | `venv\Scripts\python.exe -m py_compile backend\agent_reflection.py backend\agent_loop.py backend\action_executor.py backend\scheduler.py backend\router_companion.py backend\workflows.py` | exit 0 |
+| Reflection/security focused tests | `venv\Scripts\python.exe -m pytest -q tests/test_agent_reflection.py tests/test_action_executor_schema_validation.py tests/test_agent_loop.py tests/test_scheduler_schema_validation.py tests/test_router_companion.py tests/test_workflows.py tests/test_companion_confirmation.py tests/test_security.py tests/test_action_parser.py` | `163 passed, 1 warning` |
+| Full Python suite | `venv\Scripts\python.exe -m pytest -q` | `886 passed, 1 skipped, 1 warning` |
+| Eval suite | `venv\Scripts\python.exe evals\runners\run_eval_suite.py --all` | `65/65 passed, 0 failed` |
+| Eval regression gate | `powershell -ExecutionPolicy Bypass -File scripts\run_eval_regression_gate.ps1` | passed; `0 blocking` regressions |
+| Risky artifact check | `powershell -ExecutionPolicy Bypass -File scripts\check_risky_artifacts.ps1 -Mode Strict` | passed; warnings: 0 |
+| Git whitespace safety | `git -c core.autocrlf=false diff --check` | passed |
+
+New local evidence added:
+
+- `docs/product/agent_reflection_coverage.md` maps executable paths and remaining gaps.
+- Abuse tests cover unknown tools, malformed args, low-confidence risky calls, multi-step reflection, Personal OS boundaries, scheduler/routine paths, workflow `_step_tool`, blocked Reflection decisions, and confirmation-required behavior.
+- Audit redaction tests verify Reflection audit entries include risk/confidence/reason/arg-key metadata but not argument values, prompt-injection strings, nested action payloads, file paths, API keys, tokens, authorization strings, passwords, secrets, or credentials.
+
 JS static/unit exact results:
 
 - `node tests/test_app_chat_input_wiring.js`: `183 tests: 183 passed, 0 failed`
