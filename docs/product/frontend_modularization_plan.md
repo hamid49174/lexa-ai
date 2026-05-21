@@ -193,13 +193,15 @@ Current chat script order:
 5. `chat_export.js`
 6. `chat_composer_helpers.js`
 7. `chat_message_actions.js`
-8. `chat_input_helpers.js`
-9. `chat_tool_confirmation_ui.js`
-10. `chat_tool_display_ui.js`
-11. `chat_confirmation_state.js`
-12. `chat_history_ui.js`
-13. `chat_streaming_helpers.js`
-14. `chat.js`
+8. `chat_message_actions_controller.js`
+9. `chat_input_helpers.js`
+10. `chat_tool_confirmation_ui.js`
+11. `chat_tool_display_ui.js`
+12. `chat_confirmation_state.js`
+13. `chat_history_ui.js`
+14. `chat_streaming_helpers.js`
+15. `chat_file_display_ui.js`
+16. `chat.js`
 
 Remaining high-risk clusters: streaming send/abort, conversation history switching/deletion/persistence orchestration, real tool execution/result lifecycle, confirmation approval execution, Companion execution, voice/STT/TTS/orb behavior, Personal OS draft apply/approve/reject flows, Electron preload IPC, Electron backend lifecycle, signing/update behavior, and OS cleanup.
 
@@ -809,6 +811,75 @@ Current tail script order:
 8. `devtools.js`
 
 Next recommended target: a Personal OS read-call failure smoke or provider/model backend contract coverage with fake provider responses. OS drafts, OS cleanup, approve/reject/apply/raw-submit, filesystem writes, Companion execution, SDK writes, Electron IPC, and provider calls remain stop-lined.
+
+## Chat Architecture Upgrade Pass 1
+
+This pass chose the message action controller boundary because it is a visible, coherent responsibility already covered by focused renderer and static tests. It moves the answer-action controller surface out of `frontend/src/chat.js` while leaving send, stream, history, tool execution, confirmation approval, provider, voice, and Personal OS write lifecycles untouched.
+
+Boundary moved to `frontend/src/chat_message_actions_controller.js`:
+
+- message action icon setup and overflow menu behavior
+- workspace draft handoff button creation and guarded start path
+- continue-from-answer prompt placement
+- verify-answer handoff button creation and guarded start path
+- save-as-memory button behavior
+- previous user prompt lookup for regenerate
+- regenerate button guarded start path
+- button feedback flash behavior
+- copy-to-clipboard fallback and copy helpers
+- markdown export button behavior
+
+Moved functions:
+
+- `setIconButton()`
+- `setMessageActionMenuOpen()`
+- `closeMessageActionMenus()`
+- `ensureMessageActionMenuDismiss()`
+- `createMessageActionOverflowMenu()`
+- `startWorkspaceDraftFromMessage()`
+- `createWorkspaceHandoffButton()`
+- `startContinueFromMessage()`
+- `createContinueFromMessageButton()`
+- `startVerifyAnswerFromMessage()`
+- `createVerifyAnswerButton()`
+- `saveMessageAsMemory()`
+- `previousUserPromptForMessage()`
+- `startRegenerateMessage()`
+- `flashIconButton()`
+- `copyTextToClipboard()`
+- `copyCode()`
+- `copyMessage()`
+- `exportMessageMarkdown()`
+- `createMessageExportButton()`
+
+Size snapshot before and after Chat Architecture Upgrade Pass 1:
+
+| File | Before pass | After pass |
+| --- | ---: | ---: |
+| `frontend/src/chat.js` | 4322 lines / 180895 chars | 3958 lines / 169032 chars |
+| `frontend/src/chat_message_actions_controller.js` | new | 363 lines / 13516 chars |
+
+Tests covering this boundary:
+
+- `tests/electron_message_actions_smoke.js` loads the real renderer with isolated Electron `userData`, renders real assistant action buttons, and uses mocks/spies for clipboard, export download, agent handoff, regenerate, and renderer `fetch()`.
+- The smoke verifies copy, export, continue, verify, workspace, and regenerate action behavior without real provider calls, Companion execution, OS writes, or network calls.
+- `tests/test_app_chat_input_wiring.js` verifies the message-action call sites still exist and that controller-owned helpers preserve raw Markdown fidelity, accepted feedback, overflow behavior, memory/save failure handling, and regenerate prompt recovery.
+- `tests/test_chat_send_guards.js` verifies regenerate uses the guarded shared handler from the new controller.
+- `tests/test_frontend_script_order_static.js` verifies `chat_message_actions_controller.js` is a classic script loaded after prompt helpers and before `chat.js`.
+
+What stayed in `chat.js`:
+
+- message rendering and DOM insertion
+- `sendMessage()` and the send pipeline
+- streaming fetch/abort/recovery lifecycle
+- conversation history save/load/delete/switch orchestration
+- real tool execution/result lifecycle
+- confirmation approval/denial execution
+- provider/model settings interaction
+- voice/STT/TTS hooks
+- Personal OS write-capable boundaries
+
+Next recommended architecture target: either a smaller history controller extraction after adding direct conversation-switch/delete recovery coverage, or a tool UI controller split limited to render-only and mocked click behavior. The send pipeline and full streaming lifecycle remain stop-lined until stronger end-to-end coverage exists for their orchestration.
 
 ## Do Not Touch Yet
 

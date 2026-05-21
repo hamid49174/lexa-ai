@@ -12,6 +12,7 @@ Goal: strengthen integration coverage for Lexa's internal daily-use core flows b
 | Auth/local health | `electron_startup_health_smoke.js`, `test_local_auth.py`, preload security static tests | No remote CI proof; no signed installer proof | Bridge/auth regressions could weaken local-only guard behavior | Keep startup health smoke and preload static checks together |
 | Chat input submit | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, `electron_core_chat_flow_smoke.js` | Browser-level manual typing with a live backend is not covered | Send-pipeline refactors could break user-message insertion or input reset | `electron_core_chat_flow_smoke.js` submits text through the real send button with a mocked stream |
 | Mocked assistant response rendering | `test_chat_rendering.js`, `electron_core_chat_flow_smoke.js` | Does not cover every markdown feature through the full send pipeline | Renderer refactors could break streaming-to-final formatted output | Keep mocked SSE response in `electron_core_chat_flow_smoke.js` and rendering unit coverage in `test_chat_rendering.js` |
+| Assistant message actions | `electron_message_actions_smoke.js`, `test_app_chat_input_wiring.js`, `test_chat_send_guards.js`, `test_frontend_script_order_static.js` | Save-as-memory click is not executed in the smoke because the preload bridge method is not safely replaceable; real agent/provider sends remain intentionally mocked | Message-action refactors could break copy/export/continue/verify/workspace/regenerate controls, accidentally auto-send prompts, or trigger network/provider/tool side effects | Keep action smoke mocked and side-effect-free; add a bridge-safe memory-save harness before clicking the memory action |
 | Streaming response lifecycle | `test_chat_send_guards.js`, `electron_core_chat_flow_smoke.js`, `electron_streaming_robustness_smoke.js`, `electron_ui_visual_smoke.js`, `test_chat_streaming_helpers.js` | Real provider/network behavior and full send-pipeline orchestration remain outside local smoke coverage | Streaming refactors could strand loading state, disabled buttons, duplicate partial text, or unsafe malformed stream output | Keep robustness smoke in required gates before moving any larger streaming lifecycle code |
 | Conversation history save/load | `test_router_conversations.py`, `test_chat_send_guards.js`, `electron_ui_visual_smoke.js`, `electron_core_chat_flow_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_history_lifecycle_smoke.js`, `electron_history_failure_smoke.js` | Real backend persistence and active-conversation delete edge cases still need focused coverage | History refactors could drop raw markdown, duplicate messages, corrupt active selection, or crash on malformed history payloads | Keep failure-path smoke in required gates before moving save/load/delete orchestration |
 | Tool-call display | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, backend action/parser tests, `electron_tool_confirmation_smoke.js`, `electron_tool_display_smoke.js`, `test_chat_tool_display_helpers.js` | Real Companion/tool execution remains outside renderer smoke coverage | Tool rendering refactors could expose unsafe labels, unsafe result content, or hide confirmation state | Keep render-only display smoke mocked; do not add real tool execution to renderer tests |
@@ -248,6 +249,33 @@ Remaining coverage gaps:
 - no approve/reject/apply/raw-submit/cleanup/archive/migration clicks
 - no SDK write operation or Companion execution coverage
 - no real provider/chat send coverage from the handoff prompt
+
+## Added In Chat Architecture Upgrade Pass 1
+
+`tests/electron_message_actions_smoke.js` adds focused renderer coverage for the assistant message action controller boundary:
+
+- loads the real renderer with isolated Electron `userData`
+- renders an assistant message with the real visible action buttons
+- verifies copy uses only a mocked clipboard and preserves the raw persisted answer
+- verifies markdown export uses mocked `Blob`/object URL/download clicks and does not navigate
+- verifies continue places a prompt into the composer and local draft storage without auto-sending
+- verifies verify and workspace handoff use only mocked `sendAgentMessage()` calls
+- verifies regenerate uses the previous user prompt through a mocked `regenerateMessage()`
+- verifies unsafe assistant text remains inert
+- verifies no renderer `fetch()` calls occur in the message-action path
+
+Extraction completed:
+
+- `frontend/src/chat_message_actions_controller.js` now owns the message-action controller helpers for copy, export, continue, verify, workspace handoff, save-as-memory button state, regenerate start, icon feedback, and overflow menu behavior.
+- `frontend/src/chat.js` still owns message insertion/rendering, send pipeline, streaming lifecycle, history orchestration, real tool execution, confirmation execution, provider interaction, voice hooks, and Personal OS write-capable boundaries.
+
+Remaining coverage gaps:
+
+- save-as-memory click is intentionally not executed by the smoke because the preload bridge method is not safely replaceable in the renderer smoke harness
+- no real provider/chat sends
+- no real Companion/tool execution
+- no OS writes or Personal OS draft decisions
+- no full send/stream/history lifecycle extraction coverage beyond the existing focused smokes
 
 ## Stop-line Before Refactors
 

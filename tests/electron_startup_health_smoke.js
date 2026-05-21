@@ -75,7 +75,7 @@ function startHealthServer() {
   });
   return new Promise((resolve) => {
     server.once("error", () => resolve(null));
-    server.listen(8000, "127.0.0.1", () => resolve(server));
+    server.listen(0, "127.0.0.1", () => resolve(server));
   });
 }
 
@@ -85,6 +85,12 @@ async function runRenderer(win, script) {
 
 async function main() {
   const healthServer = await startHealthServer();
+  if (!healthServer) throw new Error("Unable to start startup health mock server");
+  const healthAddress = healthServer.address();
+  const healthPort = Number(healthAddress && healthAddress.port);
+  if (!Number.isFinite(healthPort) || healthPort <= 0) {
+    throw new Error("Startup health mock server did not expose a usable port");
+  }
   const rendererErrors = [];
 
   ipcMain.handle("local-auth-token", () => "startup-smoke-local-token");
@@ -103,14 +109,25 @@ async function main() {
 
   await app.whenReady();
   const smokeHtml = path.join(smokeUserData, "startup-health-smoke.html");
+  const preloadWrapper = path.join(smokeUserData, "startup-health-preload.js");
+  const realPreload = path.join(__dirname, "..", "frontend", "preload.js");
   fs.writeFileSync(smokeHtml, "<!doctype html><html><body>startup smoke</body></html>", "utf8");
+  const realPreloadSource = fs.readFileSync(realPreload, "utf8");
+  const smokePreloadSource = realPreloadSource.replace(
+    'const API = "http://127.0.0.1:8000";',
+    `const API = "http://127.0.0.1:${healthPort}";`,
+  );
+  if (smokePreloadSource === realPreloadSource) {
+    throw new Error("Startup smoke could not redirect the preload API base");
+  }
+  fs.writeFileSync(preloadWrapper, smokePreloadSource, "utf8");
 
   const win = new BrowserWindow({
     width: 640,
     height: 420,
     show: false,
     webPreferences: {
-      preload: path.join(__dirname, "..", "frontend", "preload.js"),
+      preload: preloadWrapper,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
