@@ -170,6 +170,32 @@ async function main() {
       document.getElementById("memory-graph-fit-btn")?.click();
       await new Promise((resolve) => setTimeout(resolve, 80));
 
+      if (filter) {
+        filter.value = "";
+        filter.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      const fallbackData = buildMemoryGraphFallbackData({
+        stats: { memories: 2 },
+        conversations: {
+          conversations: [
+            { id: 701, title: "Fallback Chat <img src=x onerror=alert(3)>", message_count: 4, last_message: "Shared graph fallback topic" },
+          ],
+        },
+        notes: {
+          notes: [
+            { id: 702, title: "Fallback Note", content: "Shared graph fallback note" },
+          ],
+        },
+        snippets: { snippets: [] },
+        routines: { routines: [] },
+      });
+      renderMemoryGraph(fallbackData);
+      await waitFor(() => document.querySelectorAll("#memory-graph-svg .memory-graph-node").length >= 4);
+      const fallbackLabels = Array.from(document.querySelectorAll("#memory-graph-svg .memory-graph-label")).map((el) => ({
+        text: el.textContent || "",
+        html: el.innerHTML || "",
+      }));
+
       const unsafeExecutableNodes = document.querySelectorAll("#memory-view script, #memory-view img[onerror]").length;
       const viewBox = svg?.getAttribute("viewBox") || "";
       const active = document.getElementById("memory-view")?.classList.contains("active") || false;
@@ -186,6 +212,12 @@ async function main() {
         oldVisibleSections,
         inspectorState,
         dimAfterFilter,
+        fallback: {
+          source: fallbackData.source,
+          nodes: fallbackData.nodes.length,
+          links: fallbackData.links.length,
+          labels: fallbackLabels,
+        },
         unsafeExecutableNodes,
         fetchCalls,
       };
@@ -201,6 +233,8 @@ async function main() {
   assert("Unsafe graph labels render as inert text", result.labels.some((label) => label.text.includes("<img src=x onerror=alert(1)>") && /&lt;img src=x onerror=alert\(1\)&gt;/.test(label.html || "")), JSON.stringify(result.labels));
   assert("Inspector displays unsafe preview without executable nodes", result.inspectorState?.text?.includes("<script>alert(1)</script>") && !/<script/i.test(result.inspectorState?.html || ""), JSON.stringify(result.inspectorState));
   assert("Graph filter dims unrelated nodes", Number(result.dimAfterFilter || 0) >= 1, JSON.stringify(result.dimAfterFilter));
+  assert("Legacy read-endpoint fallback builds a non-empty graph", result.fallback?.source === "frontend_fallback_readonly" && result.fallback.nodes >= 4 && result.fallback.links >= 3, JSON.stringify(result.fallback));
+  assert("Fallback graph labels remain inert text", result.fallback?.labels?.some((label) => label.text.includes("<img src=x onerror=alert(3)>") && /&lt;img src=x onerror=alert\(3\)&gt;/.test(label.html || "")), JSON.stringify(result.fallback?.labels || []));
   assert("Graph view does not create executable unsafe elements", Number(result.unsafeExecutableNodes || 0) === 0, JSON.stringify(result.unsafeExecutableNodes));
   assert("Memory graph smoke did not perform renderer fetch calls", Array.isArray(result.fetchCalls) && result.fetchCalls.length === 0, JSON.stringify(result.fetchCalls || []));
   assert("Memory graph bridge stayed read-only and did not request presence", presenceRequests.length === 0 && bridgeAudits.every((entry) => entry?.method !== "execute" && entry?.method !== "personalOsDraftApply"), JSON.stringify({ bridgeAudits, presenceRequests }));

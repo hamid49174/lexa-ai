@@ -50,6 +50,8 @@ assert("memoryGraph bridge calls the read-only backend endpoint", preloadSrc.inc
 assert("Smoke mock includes unsafe graph text for renderer escaping coverage", preloadSrc.includes("note:unsafe-smoke") && preloadSrc.includes("<script>alert(1)</script>"));
 
 assert("Renderer fetches and renders memoryGraph payload", memorySrc.includes("window.lexa.memoryGraph(180)") && memorySrc.includes("function renderMemoryGraph(data)"));
+assert("Renderer falls back to legacy read endpoints when graph endpoint is unavailable", memorySrc.includes("function loadMemoryGraphFallbackData(") && memorySrc.includes("function buildMemoryGraphFallbackData(") && memorySrc.includes("await loadMemoryGraphFallbackData()"));
+assert("Fallback graph uses only existing read surfaces", ["window.lexa.memoryStats", "window.lexa.notes", "window.lexa.snippets", "window.lexa.routines", "window.lexa.conversations"].every((needle) => memorySrc.includes(needle)));
 assert("Renderer uses SVG DOM APIs rather than innerHTML for graph nodes", memorySrc.includes("document.createElementNS(MEMORY_GRAPH_NS") && memorySrc.includes("label.textContent = node.label") && !memorySrc.includes("memory-graph-svg.innerHTML"));
 assert("Renderer sanitizes graph class tokens", memorySrc.includes("function memoryGraphClassToken(") && memorySrc.includes("replace(/[^a-z0-9_-]+/g"));
 assert("Renderer supports Obsidian-style focus/filter/fit interactions", memorySrc.includes("function memoryGraphApplyFocus(") && memorySrc.includes('document.getElementById("memory-graph-filter")') && memorySrc.includes('document.getElementById("memory-graph-fit-btn")'));

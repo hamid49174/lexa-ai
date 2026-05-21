@@ -90,6 +90,208 @@ function memoryGraphSafeLinks(links = [], nodeMap = new Map()) {
     }));
 }
 
+function memoryGraphCompactText(value, limit = 120) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 1)).trim()}…`;
+}
+
+function memoryGraphFallbackTerms(...values) {
+  const stopWords = new Set([
+    "und", "oder", "der", "die", "das", "den", "dem", "ein", "eine", "ist", "mit", "for",
+    "the", "and", "oder", "von", "aus", "auf", "ich", "du", "wir", "you", "that", "this",
+  ]);
+  const seen = new Set();
+  const terms = [];
+  values.forEach((value) => {
+    String(value || "").toLowerCase().replace(/[a-z0-9äöüß_-]{3,}/gi, (term) => {
+      const normalized = term.trim();
+      if (stopWords.has(normalized) || seen.has(normalized)) return "";
+      seen.add(normalized);
+      terms.push(normalized);
+      return "";
+    });
+  });
+  return terms.slice(0, 8);
+}
+
+function buildMemoryGraphFallbackData(payloads = {}) {
+  const nodes = [];
+  const links = [];
+  const termsByNode = new Map();
+  const termCounts = new Map();
+  const addNode = (node) => {
+    if (!node?.id || nodes.some((existing) => existing.id === node.id)) return;
+    const compact = {
+      ...node,
+      label: memoryGraphCompactText(node.label || node.id, 80),
+      preview: memoryGraphCompactText(node.preview || "", 160),
+    };
+    nodes.push(compact);
+    const terms = new Set(memoryGraphFallbackTerms(compact.label, compact.preview, compact.type, compact.group));
+    termsByNode.set(compact.id, terms);
+    terms.forEach((term) => termCounts.set(term, (termCounts.get(term) || 0) + 1));
+  };
+  const addLink = (source, target, kind = "contains", weight = 1) => {
+    if (!source || !target || source === target) return;
+    if (!nodes.some((node) => node.id === source) || !nodes.some((node) => node.id === target)) return;
+    if (links.some((link) => link.source === source && link.target === target && link.kind === kind)) return;
+    links.push({ source, target, kind, weight });
+  };
+
+  addNode({
+    id: "hub:memory",
+    label: "Lexa Gedächtnis",
+    type: "hub",
+    group: "hub",
+    weight: 10,
+    preview: "Rückwärtskompatibler lokaler Graph aus vorhandenen Read-Endpoints.",
+  });
+  [
+    ["group:conversations", "Chats", "conversations"],
+    ["group:notes", "Notizen", "notes"],
+    ["group:memories", "Erinnerungen", "memories"],
+    ["group:routines", "Routinen", "routines"],
+    ["group:snippets", "Snippets", "snippets"],
+  ].forEach(([id, label, group]) => {
+    addNode({ id, label, type: "group", group, weight: 5 });
+    addLink("hub:memory", id, "contains", 2);
+  });
+
+  const conversations = Array.isArray(payloads.conversations?.conversations) ? payloads.conversations.conversations : [];
+  conversations.slice(0, 90).forEach((conversation, index) => {
+    const id = `conversation:${conversation.id ?? index}`;
+    addNode({
+      id,
+      label: conversation.title || "Chat",
+      type: "conversation",
+      group: "conversations",
+      weight: 2.2 + Math.min(5, Math.log((Number(conversation.message_count) || 0) + 1)),
+      preview: conversation.last_message || "",
+      meta: { message_count: Number(conversation.message_count) || 0 },
+    });
+    addLink("group:conversations", id, "contains", 1.2);
+  });
+
+  const notes = Array.isArray(payloads.notes?.notes) ? payloads.notes.notes : [];
+  notes.slice(0, 60).forEach((note, index) => {
+    const id = `note:${note.id ?? index}`;
+    addNode({
+      id,
+      label: note.title || "Notiz",
+      type: "note",
+      group: "notes",
+      weight: 3,
+      preview: note.content || note.category || "",
+      meta: { category: note.category || "" },
+    });
+    addLink("group:notes", id, "contains", 1.2);
+  });
+
+  const snippets = Array.isArray(payloads.snippets?.snippets) ? payloads.snippets.snippets : [];
+  snippets.slice(0, 40).forEach((snippet, index) => {
+    const id = `snippet:${snippet.name || index}`;
+    addNode({
+      id,
+      label: snippet.name || "Snippet",
+      type: "snippet",
+      group: "snippets",
+      weight: 2.2 + Math.min(4, Number(snippet.use_count || 0) * 0.2),
+      preview: snippet.text || "",
+      meta: { use_count: Number(snippet.use_count || 0) },
+    });
+    addLink("group:snippets", id, "contains", 1);
+  });
+
+  const routines = Array.isArray(payloads.routines?.routines) ? payloads.routines.routines : [];
+  routines.slice(0, 40).forEach((routine, index) => {
+    const id = `routine:${routine.id ?? index}`;
+    addNode({
+      id,
+      label: routine.name || "Routine",
+      type: "routine",
+      group: "routines",
+      weight: routine.enabled ? 3.4 : 2.4,
+      preview: routine.description || routine.schedule || "",
+      meta: { enabled: Boolean(routine.enabled), schedule: routine.schedule || "" },
+    });
+    addLink("group:routines", id, "contains", 1);
+  });
+
+  const stats = payloads.stats || {};
+  const memoryCount = Number(stats.memories || 0);
+  if (memoryCount > 0 && !nodes.some((node) => node.type === "memory")) {
+    const id = "memory:summary";
+    addNode({
+      id,
+      label: `${memoryCount} Erinnerungen`,
+      type: "memory",
+      group: "memories",
+      weight: 2.8 + Math.min(5, Math.log(memoryCount + 1)),
+      preview: "Backend ohne Detail-Graph: vorhandene Erinnerungen werden als lokaler Summary-Knoten angezeigt.",
+      meta: { count: memoryCount },
+    });
+    addLink("group:memories", id, "contains", 1.4);
+  }
+
+  const keywordTerms = [...termCounts.entries()]
+    .filter(([, count]) => count >= 2)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 16);
+  keywordTerms.forEach(([term, count]) => {
+    const keywordId = `keyword:${term}`;
+    addNode({
+      id: keywordId,
+      label: term,
+      type: "keyword",
+      group: "keywords",
+      weight: 1.6 + Math.min(4, count * 0.3),
+      preview: `${count} lokale Treffer`,
+    });
+    addLink("hub:memory", keywordId, "keyword", 0.6);
+    let linked = 0;
+    termsByNode.forEach((terms, nodeId) => {
+      if (linked >= 10) return;
+      if (terms.has(term) && !nodeId.startsWith("group:") && !nodeId.startsWith("hub:") && nodeId !== keywordId) {
+        addLink(keywordId, nodeId, "mentions", 1);
+        linked += 1;
+      }
+    });
+  });
+
+  return {
+    status: "ok",
+    nodes,
+    links,
+    counts: {
+      nodes: nodes.length,
+      links: links.length,
+      conversations: conversations.length,
+      notes: notes.length,
+      snippets: snippets.length,
+      routines: routines.length,
+      memories: memoryCount,
+    },
+    source: "frontend_fallback_readonly",
+  };
+}
+
+async function loadMemoryGraphFallbackData() {
+  const [stats, notes, snippets, routines, conversations] = await Promise.allSettled([
+    typeof window.lexa.memoryStats === "function" ? window.lexa.memoryStats() : {},
+    typeof window.lexa.notes === "function" ? window.lexa.notes() : { notes: [] },
+    typeof window.lexa.snippets === "function" ? window.lexa.snippets() : { snippets: [] },
+    typeof window.lexa.routines === "function" ? window.lexa.routines() : { routines: [] },
+    typeof window.lexa.conversations === "function" ? window.lexa.conversations() : { conversations: [] },
+  ]);
+  return buildMemoryGraphFallbackData({
+    stats: stats.status === "fulfilled" ? stats.value : {},
+    notes: notes.status === "fulfilled" ? notes.value : { notes: [] },
+    snippets: snippets.status === "fulfilled" ? snippets.value : { snippets: [] },
+    routines: routines.status === "fulfilled" ? routines.value : { routines: [] },
+    conversations: conversations.status === "fulfilled" ? conversations.value : { conversations: [] },
+  });
+}
+
 function renderMemoryGraphEmpty(message) {
   const empty = document.getElementById("memory-graph-empty");
   const svg = document.getElementById("memory-graph-svg");
@@ -435,10 +637,18 @@ async function refreshMemoryGraphView() {
     const data = typeof window.lexa.memoryGraph === "function"
       ? await window.lexa.memoryGraph(180)
       : { nodes: [], links: [] };
-    renderMemoryGraph(data);
+    const graphData = Array.isArray(data?.nodes) && data.nodes.length > 0
+      ? data
+      : await loadMemoryGraphFallbackData();
+    renderMemoryGraph(graphData);
   } catch (error) {
     console.warn("[Memory] Graph render failed:", error.message || error);
-    renderMemoryGraphEmpty("Gedächtnis-Graph konnte nicht geladen werden.");
+    try {
+      renderMemoryGraph(await loadMemoryGraphFallbackData());
+    } catch (fallbackError) {
+      console.warn("[Memory] Graph fallback failed:", fallbackError.message || fallbackError);
+      renderMemoryGraphEmpty("Gedächtnis-Graph konnte nicht geladen werden.");
+    }
   }
 }
 
