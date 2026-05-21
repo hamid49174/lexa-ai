@@ -240,6 +240,112 @@ class TestSearchMemory:
         assert len(results) <= 3
 
 
+class TestMemoryRanking:
+    def _set_created_at(self, content_like: str, modifier: str) -> None:
+        import backend.memory as mem
+        db = mem._get_db()
+        db.execute(
+            "UPDATE memories SET created_at = datetime('now', ?, 'localtime') WHERE content LIKE ?",
+            (modifier, f"%{content_like}%"),
+        )
+        db.commit()
+
+    def test_recent_important_memory_outranks_old_generic(self, monkeypatch):
+        """Recent critical memories should outrank old generic matches."""
+        monkeypatch.setattr("backend.config.EMBEDDING_ENABLED", False)
+        from backend.memory import add_memory, search_memory
+        add_memory("Project Alpha generic planning note", "fact", 3)
+        add_memory("Project Alpha critical launch blocker", "explicit", 10)
+        self._set_created_at("generic", "-400 days")
+        self._set_created_at("critical", "-1 hours")
+
+        results = search_memory("project alpha")
+
+        assert results[0]["content"] == "Project Alpha critical launch blocker"
+        assert results[0]["memory_type"] == "working"
+
+    def test_preference_memory_ranks_high_for_personalization_query(self, monkeypatch):
+        monkeypatch.setattr("backend.config.EMBEDDING_ENABLED", False)
+        from backend.memory import add_memory, search_memory
+        add_memory("Coffee prefer is a useful general fact", "fact", 8)
+        add_memory("Praeferenz: coffee prefer dunkel geroestet", "preference", 5)
+
+        results = search_memory("coffee prefer")
+
+        assert results[0]["memory_type"] == "preference"
+        assert "coffee" in results[0]["content"]
+
+    def test_procedural_memory_ranks_high_for_workflow_query(self, monkeypatch):
+        monkeypatch.setattr("backend.config.EMBEDDING_ENABLED", False)
+        from backend.memory import add_memory, search_memory
+        add_memory("volume_set exists in the audio system", "fact", 8)
+        add_memory("Der Befehl volume_set setzt die Lautstaerke", "command", 5)
+
+        results = search_memory("how do I use volume_set workflow")
+
+        assert results[0]["memory_type"] == "procedural"
+
+    def test_episodic_memory_ranks_high_for_event_query(self, monkeypatch):
+        monkeypatch.setattr("backend.config.EMBEDDING_ENABLED", False)
+        from backend.memory import add_memory, search_memory
+        add_memory("Roadmap review is a general planning topic", "fact", 8)
+        add_memory("Meeting: Roadmap Review mit Alex", "event", 5)
+
+        results = search_memory("roadmap review meeting history")
+
+        assert results[0]["memory_type"] == "episodic"
+
+    def test_semantic_memory_ranks_high_for_factual_query(self, monkeypatch):
+        monkeypatch.setattr("backend.config.EMBEDDING_ENABLED", False)
+        from backend.memory import add_memory, search_memory
+        add_memory("System: Python provider diagnostic note", "system", 8, "system")
+        add_memory("Python ist eine Programmiersprache", "fact", 6)
+
+        results = search_memory("what fact Python")
+
+        assert results[0]["memory_type"] == "semantic"
+
+    def test_ranking_metadata_is_opt_in(self, monkeypatch):
+        monkeypatch.setattr("backend.config.EMBEDDING_ENABLED", False)
+        from backend.memory import add_memory, search_memory
+        add_memory("Praeferenz: mag gruene Tasse", "preference", 6)
+
+        default_results = search_memory("tasse preference")
+        debug_results = search_memory("tasse preference", include_ranking=True)
+
+        assert "_ranking" not in default_results[0]
+        ranking = debug_results[0]["_ranking"]
+        assert set(ranking) == {
+            "lexical_score",
+            "semantic_score",
+            "recency_score",
+            "importance_score",
+            "access_score",
+            "memory_type_weight",
+            "final_score",
+        }
+
+    def test_access_tracking_updates_returned_memory(self, monkeypatch):
+        monkeypatch.setattr("backend.config.EMBEDDING_ENABLED", False)
+        from backend.memory import add_memory, search_memory, _get_db
+        add_memory("Access tracking kiwi marker", "fact", 5)
+
+        search_memory("kiwi marker")
+
+        row = _get_db().execute(
+            "SELECT access_count, last_accessed_at FROM memories WHERE content LIKE ?",
+            ("%kiwi%",),
+        ).fetchone()
+        assert row["access_count"] >= 1
+        assert row["last_accessed_at"]
+
+    def test_stop_words_cover_german_and_english(self):
+        from backend.memory import _extract_search_terms
+
+        assert _extract_search_terms("the and about python memory") == ["python", "memory"]
+        assert "und" not in _extract_search_terms("und der python speicher")
+
+
 # ---------------------------------------------------------------------------
 #  Memory stats
 # ---------------------------------------------------------------------------
@@ -353,11 +459,13 @@ class TestRestoreDatabase:
 
         db = mem._get_db()
         row = db.execute(
-            "SELECT category, memory_type FROM memories WHERE content LIKE ?",
+            "SELECT category, memory_type, access_count, last_accessed_at FROM memories WHERE content LIKE ?",
             ("%Tee%",),
         ).fetchone()
         assert row["category"] == "fact"
         assert row["memory_type"] == "preference"
+        assert row["access_count"] == 0
+        assert row["last_accessed_at"] is None
 
     def test_restore_wraps_in_transaction(self):
         """restore_database should not lose data on partial failure."""

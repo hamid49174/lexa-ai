@@ -28,6 +28,7 @@ import sqlite3
 import logging
 import json
 import re
+import math
 from pathlib import Path
 from datetime import datetime
 from contextlib import contextmanager
@@ -122,6 +123,15 @@ _MEMORY_PREFERENCE_MARKERS: tuple[str, ...] = (
     "interesse",
     "hobby",
 )
+_MEMORY_RANKING_WEIGHTS: dict[str, float] = {
+    "lexical_score": 0.34,
+    "semantic_score": 0.24,
+    "recency_score": 0.10,
+    "importance_score": 0.14,
+    "access_score": 0.06,
+    "memory_type_weight": 0.12,
+}
+_MEMORY_ACCESS_THROTTLE_SECONDS = 30
 
 
 # ══════════════════════════════════════════════════
@@ -149,6 +159,43 @@ _GERMAN_STOP_WORDS: frozenset = frozenset({
     "bei", "nach", "über", "unter", "vor", "hinter", "zwischen",
     "durch", "gegen", "ohne", "bis", "seit", "während",
 })
+_ENGLISH_STOP_WORDS: frozenset = frozenset({
+    "the", "a", "an", "and", "or", "not", "no", "yes", "to", "of", "for",
+    "with", "without", "in", "on", "at", "by", "from", "about", "into",
+    "over", "under", "between", "through", "since", "during", "is", "are",
+    "was", "were", "be", "been", "being", "have", "has", "had", "do", "does",
+    "did", "can", "could", "should", "would", "will", "just", "please", "my",
+    "your", "his", "her", "their", "our", "me", "you", "we", "they", "it",
+    "this", "that", "these", "those", "what", "when", "where", "why", "how",
+})
+_MEMORY_STOP_WORDS: frozenset = _GERMAN_STOP_WORDS | _ENGLISH_STOP_WORDS
+_MEMORY_QUERY_TYPE_MARKERS: dict[str, tuple[str, ...]] = {
+    "preference": (
+        "preference", "preferences", "prefer", "favorite", "favourite",
+        "personality", "personalization", "like", "love", "mag", "liebe",
+        "lieblings", "praeferenz", "präferenz", "vorliebe", "geschmack",
+    ),
+    "procedural": (
+        "how", "workflow", "tool", "command", "steps", "process", "procedure",
+        "use", "wie", "befehl", "ablauf", "schritte", "anleitung", "nutze",
+    ),
+    "episodic": (
+        "meeting", "event", "history", "happened", "timeline", "appointment",
+        "termin", "ereignis", "verlauf", "wann", "gestern", "heute", "morgen",
+    ),
+    "semantic": (
+        "fact", "facts", "know", "knowledge", "explain", "what", "fakt",
+        "wissen", "erkläre", "erklaere",
+    ),
+    "system": (
+        "system", "config", "configuration", "diagnostic", "diagnostics",
+        "lexa", "provider", "konfiguration", "diagnose",
+    ),
+    "working": (
+        "todo", "task", "remember", "note", "scratch", "aufgabe", "merkzettel",
+        "notiz", "erinner",
+    ),
+}
 
 
 def _escape_fts5_query(terms: list[str]) -> str:
@@ -182,7 +229,7 @@ def _extract_search_terms(query: str) -> list[str]:
         w = w.strip(".,;:!?\"'()[]{}/-")
         if len(w) < 3:
             continue
-        if w in _GERMAN_STOP_WORDS:
+        if w in _MEMORY_STOP_WORDS:
             continue
         if w not in keywords:  # deduplicate
             keywords.append(w)
@@ -213,6 +260,191 @@ def _score_memory_relevance(memory_content: str, query_keywords: list[str],
     # Combined score: 70% keyword match, 30% importance
     score = 0.7 * keyword_ratio + 0.3 * importance_factor
     return min(1.0, score)
+
+
+def _score_memory_lexical(memory_content: str, query_keywords: list[str], query: str = "") -> float:
+    """Score direct lexical overlap without importance or recency weighting."""
+    if not query_keywords:
+        return 0.0
+    content_lower = str(memory_content or "").lower()
+    matches = sum(1 for kw in query_keywords if kw in content_lower)
+    if matches == 0:
+        return 0.0
+    score = matches / len(query_keywords)
+    query_lower = str(query or "").strip().lower()
+    if query_lower and len(query_lower) >= 8 and query_lower in content_lower:
+        score = max(score, 1.0)
+    return min(1.0, score)
+
+
+def _parse_memory_timestamp(value: Any) -> Optional[datetime]:
+    """Parse SQLite localtime strings for deterministic ranking."""
+    if not value:
+        return None
+    text = str(value).strip()
+    for candidate in (text, text.replace(" ", "T", 1)):
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            continue
+    return None
+
+
+def _score_memory_recency(created_at: Any) -> float:
+    """Score recent memories higher while keeping old memories discoverable."""
+    created = _parse_memory_timestamp(created_at)
+    if created is None:
+        return 0.0
+    age_days = max(0.0, (datetime.now() - created).total_seconds() / 86400.0)
+    if age_days <= 1:
+        return 1.0
+    if age_days <= 7:
+        return 0.85
+    if age_days <= 30:
+        return 0.60
+    if age_days <= 90:
+        return 0.35
+    if age_days <= 365:
+        return 0.15
+    return 0.05
+
+
+def _score_memory_importance(importance: Any) -> float:
+    try:
+        value = int(importance)
+    except (TypeError, ValueError):
+        value = 5
+    return max(0.1, min(1.0, value / 10.0))
+
+
+def _score_memory_access(access_count: Any) -> float:
+    try:
+        count = max(0, int(access_count or 0))
+    except (TypeError, ValueError):
+        count = 0
+    if count <= 0:
+        return 0.0
+    return min(1.0, math.log1p(count) / math.log1p(20))
+
+
+def _detect_memory_query_types(query: str, keywords: list[str]) -> set[str]:
+    query_lower = str(query or "").lower()
+    keyword_text = " ".join(keywords).lower()
+    detected: set[str] = set()
+    for memory_type, markers in _MEMORY_QUERY_TYPE_MARKERS.items():
+        if any(marker in query_lower or marker in keyword_text for marker in markers):
+            detected.add(memory_type)
+    return detected
+
+
+def _score_memory_type_weight(memory_type: str, query_types: set[str]) -> float:
+    normalized = normalize_memory_type(memory_type) or "semantic"
+    if normalized in query_types:
+        return 1.0
+    if normalized == "system":
+        return 0.20 if "system" in query_types else 0.05
+    if query_types:
+        return 0.35
+    return 0.50 if normalized != "system" else 0.10
+
+
+def _rank_memory_results(
+    memories: list[dict],
+    query: str,
+    keywords: list[str],
+    *,
+    include_ranking: bool = False,
+) -> list[dict]:
+    """Apply Memory Ranking v1 to memory result dictionaries."""
+    query_types = _detect_memory_query_types(query, keywords)
+    ranked: list[dict] = []
+    for mem in memories:
+        lexical_score = _score_memory_lexical(mem.get("content", ""), keywords, query)
+        semantic_score = max(0.0, min(1.0, float(mem.get("_semantic_score", 0.0) or 0.0)))
+        recency_score = _score_memory_recency(mem.get("created_at"))
+        importance_score = _score_memory_importance(mem.get("importance", 5))
+        access_score = _score_memory_access(mem.get("access_count", 0))
+        memory_type_weight = _score_memory_type_weight(mem.get("memory_type", "semantic"), query_types)
+        final_score = (
+            _MEMORY_RANKING_WEIGHTS["lexical_score"] * lexical_score
+            + _MEMORY_RANKING_WEIGHTS["semantic_score"] * semantic_score
+            + _MEMORY_RANKING_WEIGHTS["recency_score"] * recency_score
+            + _MEMORY_RANKING_WEIGHTS["importance_score"] * importance_score
+            + _MEMORY_RANKING_WEIGHTS["access_score"] * access_score
+            + _MEMORY_RANKING_WEIGHTS["memory_type_weight"] * memory_type_weight
+        )
+        mem["_final_score"] = round(final_score, 6)
+        if include_ranking:
+            mem["_ranking"] = {
+                "lexical_score": round(lexical_score, 6),
+                "semantic_score": round(semantic_score, 6),
+                "recency_score": round(recency_score, 6),
+                "importance_score": round(importance_score, 6),
+                "access_score": round(access_score, 6),
+                "memory_type_weight": round(memory_type_weight, 6),
+                "final_score": round(final_score, 6),
+            }
+        ranked.append(mem)
+    ranked.sort(
+        key=lambda m: (
+            m.get("_final_score", 0.0),
+            _score_memory_importance(m.get("importance", 5)),
+            str(m.get("created_at") or ""),
+        ),
+        reverse=True,
+    )
+    return ranked
+
+
+def _track_memory_access(db: sqlite3.Connection, memory_ids: list[int]) -> None:
+    """Track returned-memory access with a short write throttle."""
+    ids = sorted({int(memory_id) for memory_id in memory_ids if memory_id})
+    if not ids:
+        return
+    placeholders = ", ".join(["?"] * len(ids))
+    db.execute(
+        f"""UPDATE memories
+            SET access_count = COALESCE(access_count, 0) + 1,
+                last_accessed_at = datetime('now', 'localtime')
+            WHERE id IN ({placeholders})
+              AND (
+                last_accessed_at IS NULL
+                OR last_accessed_at < datetime('now', '-' || ? || ' seconds', 'localtime')
+              )""",
+        ids + [_MEMORY_ACCESS_THROTTLE_SECONDS],
+    )
+    db.commit()
+
+
+def _finalize_memory_results(
+    db: sqlite3.Connection,
+    memories: list[dict],
+    *,
+    include_ranking: bool = False,
+    expose_id: bool = False,
+    track_access: bool = True,
+) -> list[dict]:
+    """Strip internal ranking fields and optionally track returned memories."""
+    returned = memories
+    if track_access:
+        _track_memory_access(db, [m.get("id") for m in returned if m.get("id")])
+    finalized: list[dict] = []
+    for mem in returned:
+        item = dict(mem)
+        if not expose_id:
+            item.pop("id", None)
+        for key in (
+            "_final_score",
+            "_semantic_score",
+            "source",
+            "access_count",
+            "last_accessed_at",
+        ):
+            item.pop(key, None)
+        if not include_ranking:
+            item.pop("_ranking", None)
+        finalized.append(item)
+    return finalized
 
 
 def _normalize_for_dedup(content: str) -> str:
@@ -324,7 +556,7 @@ _VALID_COLUMNS = {
     "memories": {
         "id", "content", "category", "memory_type", "importance", "source", "created_at",
         "embedding", "embedding_provider", "embedding_model", "embedding_dimension",
-        "embedding_created_at",
+        "embedding_created_at", "access_count", "last_accessed_at",
     },
     "user_profile": {"key", "value", "updated_at"},
     "interactions": {"id", "user_message", "ai_reply", "had_action", "created_at"},
@@ -547,6 +779,30 @@ def _backfill_embedding_metadata(db: sqlite3.Connection) -> int:
     return updated
 
 
+def _ensure_memory_ranking_schema(db: sqlite3.Connection) -> None:
+    """Add lightweight ranking/access tracking columns to existing DBs."""
+    migrations = [
+        ("access_count", "INTEGER DEFAULT 0"),
+        ("last_accessed_at", "TEXT"),
+    ]
+    for column, column_type in migrations:
+        try:
+            db.execute(f"SELECT {column} FROM memories LIMIT 1")
+        except sqlite3.OperationalError:
+            try:
+                db.execute(f"ALTER TABLE memories ADD COLUMN {column} {column_type}")
+                db.commit()
+                logger.info("Memory ranking migration: added '%s' column", column)
+            except Exception as e:
+                logger.warning(f"Memory ranking column migration skipped for {column}: {e}")
+
+    try:
+        db.execute("CREATE INDEX IF NOT EXISTS idx_memories_access ON memories(access_count DESC, last_accessed_at DESC)")
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Memory ranking index migration skipped: {e}")
+
+
 def _init_tables(db: sqlite3.Connection) -> None:
     """Initialize all memory tables."""
     db.executescript("""
@@ -572,7 +828,9 @@ def _init_tables(db: sqlite3.Connection) -> None:
             embedding_provider TEXT,
             embedding_model TEXT,
             embedding_dimension INTEGER,
-            embedding_created_at TEXT
+            embedding_created_at TEXT,
+            access_count INTEGER DEFAULT 0,
+            last_accessed_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS user_profile (
@@ -665,6 +923,7 @@ def _init_tables(db: sqlite3.Connection) -> None:
 
     db.commit()
     _ensure_memory_type_schema(db)
+    _ensure_memory_ranking_schema(db)
 
     # Phase 42: Add embedding BLOB column to memories before FTS triggers
     # exist, so legacy metadata backfill cannot trip stale FTS state.
@@ -782,7 +1041,9 @@ def full_text_search(query: str, limit: int = 20) -> dict:
     db = _get_db()
     try:
         # Escape user query for FTS5 safety
-        terms = [w.strip(".,;:!?\"'()[]{}/-") for w in query.split() if len(w.strip(".,;:!?\"'()[]{}/-")) >= 2]
+        terms = _extract_search_terms(query)
+        if not terms:
+            terms = [w.strip(".,;:!?\"'()[]{}/-") for w in query.split() if len(w.strip(".,;:!?\"'()[]{}/-")) >= 2]
         fts_query = _escape_fts5_query(terms)
         if not fts_query:
             return _like_search_all(db, query, limit)
@@ -791,9 +1052,14 @@ def full_text_search(query: str, limit: int = 20) -> dict:
             (fts_query, limit)
         ).fetchall()]
         memories = [dict(r) for r in db.execute(
-            "SELECT m.* FROM memories m JOIN memories_fts f ON m.id = f.rowid WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?",
+            """SELECT m.id, m.content, m.category, m.memory_type, m.importance, m.source,
+                      m.created_at, m.access_count, m.last_accessed_at
+               FROM memories m JOIN memories_fts f ON m.id = f.rowid
+               WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?""",
             (fts_query, limit)
         ).fetchall()]
+        memories = _rank_memory_results(memories, query, terms)
+        memories = _finalize_memory_results(db, memories[:limit], expose_id=True)
         return {"notes": notes, "memories": memories, "total": len(notes) + len(memories)}
     except Exception as e:
         logger.warning(f"FTS search failed, falling back to LIKE: {e}")
@@ -803,7 +1069,9 @@ def full_text_search(query: str, limit: int = 20) -> dict:
 
 def _like_search_all(db: sqlite3.Connection, query: str, limit: int = 20) -> dict:
     """Fallback LIKE search for when FTS5 is unavailable."""
-    words = query.lower().split()
+    words = _extract_search_terms(query)
+    if not words:
+        words = query.lower().split()
     if not words:
         return {"notes": [], "memories": [], "total": 0, "fallback": True}
 
@@ -827,9 +1095,13 @@ def _like_search_all(db: sqlite3.Connection, query: str, limit: int = 20) -> dic
     mem_params = [f"%{w}%" for w in words]
     try:
         memories = [dict(r) for r in db.execute(
-            f"SELECT * FROM memories WHERE {mem_conditions} ORDER BY importance DESC LIMIT ?",
+            f"""SELECT id, content, category, memory_type, importance, source,
+                       created_at, access_count, last_accessed_at
+                FROM memories WHERE {mem_conditions} ORDER BY importance DESC LIMIT ?""",
             mem_params + [limit],
         ).fetchall()]
+        memories = _rank_memory_results(memories, query, words)
+        memories = _finalize_memory_results(db, memories[:limit], expose_id=True)
     except Exception:
         memories = []
 
@@ -1037,7 +1309,14 @@ def add_memory(
     return "Gemerkt."
 
 
-def search_memory(query: str, limit: int = 5) -> list[dict]:
+def search_memory(
+    query: str,
+    limit: int = 5,
+    *,
+    include_ranking: bool = False,
+    track_access: bool = True,
+    expose_id: bool = False,
+) -> list[dict]:
     """Search memories by content using intelligent keyword extraction.
 
     Uses _extract_search_terms() to filter out German stop words and extract
@@ -1062,7 +1341,8 @@ def search_memory(query: str, limit: int = 5) -> list[dict]:
         if not fts_query:
             raise ValueError("No safe keywords")
         rows = db.execute(
-            """SELECT m.content, m.category, m.memory_type, m.importance, m.created_at
+            """SELECT m.id, m.content, m.category, m.memory_type, m.importance, m.source,
+                      m.created_at, m.access_count, m.last_accessed_at
                FROM memories m
                JOIN memories_fts ON m.id = memories_fts.rowid
                WHERE memories_fts MATCH ?
@@ -1078,7 +1358,8 @@ def search_memory(query: str, limit: int = 5) -> list[dict]:
         conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in keywords])
         params: list[Any] = [f"%{w}%" for w in keywords]
         rows = db.execute(
-            f"""SELECT content, category, memory_type, importance, created_at
+            f"""SELECT id, content, category, memory_type, importance, source,
+                       created_at, access_count, last_accessed_at
                 FROM memories
                 WHERE {conditions}
                 LIMIT ?""",
@@ -1086,24 +1367,27 @@ def search_memory(query: str, limit: int = 5) -> list[dict]:
         ).fetchall()
         results = [dict(r) for r in rows]
 
-    # Re-rank by relevance score instead of just importance
-    for mem in results:
-        mem["_relevance"] = _score_memory_relevance(
-            mem["content"], keywords, mem.get("importance", 5)
-        )
-    results.sort(key=lambda m: m["_relevance"], reverse=True)
-
-    # Remove internal scoring field before returning
-    for mem in results[:limit]:
-        mem.pop("_relevance", None)
-    return results[:limit]
+    ranked = _rank_memory_results(results, query, keywords, include_ranking=include_ranking)
+    return _finalize_memory_results(
+        db,
+        ranked[:limit],
+        include_ranking=include_ranking,
+        expose_id=expose_id,
+        track_access=track_access,
+    )
 
 
 # ══════════════════════════════════════════════════
 #  SEMANTIC MEMORY SEARCH (Phase 42)
 # ══════════════════════════════════════════════════
 
-def search_memory_semantic(query: str, limit: int = 5) -> list[dict]:
+def search_memory_semantic(
+    query: str,
+    limit: int = 5,
+    *,
+    include_ranking: bool = False,
+    track_access: bool = True,
+) -> list[dict]:
     """Search memories using embedding-based semantic similarity.
 
     Flow:
@@ -1136,6 +1420,9 @@ def search_memory_semantic(query: str, limit: int = 5) -> list[dict]:
         logger.warning("Semantic memory search degraded: query embedding unavailable")
         return search_memory(query, limit)
     query_vector = query_result["vector"]
+    keywords = _extract_search_terms(query)
+    if not keywords:
+        keywords = [w.strip(".,;:!?\"'()[]{}/-") for w in query.lower().split() if len(w.strip(".,;:!?\"'()[]{}/-")) >= 2][:3]
     query_metadata = {
         "provider": query_result["provider"],
         "model": query_result["model"],
@@ -1146,8 +1433,9 @@ def search_memory_semantic(query: str, limit: int = 5) -> list[dict]:
 
     # Load memories with embeddings
     rows = db.execute(
-        """SELECT id, content, category, memory_type, importance, created_at, embedding,
-                  embedding_provider, embedding_model, embedding_dimension
+        """SELECT id, content, category, memory_type, importance, source, created_at,
+                  access_count, last_accessed_at, embedding, embedding_provider,
+                  embedding_model, embedding_dimension
            FROM memories
            WHERE embedding IS NOT NULL"""
     ).fetchall()
@@ -1204,12 +1492,16 @@ def search_memory_semantic(query: str, limit: int = 5) -> list[dict]:
             skipped_incompatible += 1
             continue
         scored.append((sim, {
+            "id": row["id"],
             "content": row["content"],
             "category": row["category"],
             "memory_type": row["memory_type"],
             "importance": row["importance"],
+            "source": row["source"],
             "created_at": row["created_at"],
-            "_similarity": round(sim, 4),
+            "access_count": row["access_count"],
+            "last_accessed_at": row["last_accessed_at"],
+            "_semantic_score": round(sim, 6),
         }))
 
     if skipped_corrupt or skipped_missing_metadata or skipped_incompatible:
@@ -1228,23 +1520,23 @@ def search_memory_semantic(query: str, limit: int = 5) -> list[dict]:
         logger.warning("Semantic memory search degraded: no compatible embeddings, falling back to keyword search")
         return search_memory(query, limit)
 
-    # Sort by similarity descending
-    scored.sort(key=lambda x: x[0], reverse=True)
-
     # Take top results with minimum similarity threshold
     min_similarity = 0.1
     results = []
-    for sim, mem in scored[:limit * 2]:
+    for sim, mem in scored:
         if sim < min_similarity:
-            break
-        mem.pop("_similarity", None)
+            continue
         results.append(mem)
-        if len(results) >= limit:
-            break
 
     # If semantic search returned too few results, supplement with keyword search
     if len(results) < limit:
-        keyword_results = search_memory(query, limit - len(results))
+        keyword_results = search_memory(
+            query,
+            limit - len(results),
+            include_ranking=include_ranking,
+            track_access=False,
+            expose_id=True,
+        )
         # Deduplicate by content
         existing_content = {m["content"][:80] for m in results}
         for km in keyword_results:
@@ -1253,7 +1545,13 @@ def search_memory_semantic(query: str, limit: int = 5) -> list[dict]:
                 if len(results) >= limit:
                     break
 
-    return results[:limit]
+    ranked = _rank_memory_results(results, query, keywords, include_ranking=include_ranking)
+    return _finalize_memory_results(
+        db,
+        ranked[:limit],
+        include_ranking=include_ranking,
+        track_access=track_access,
+    )
 
 
 def _embed_memory_row(db: 'sqlite3.Connection', memory_id: int, content: str) -> bool:
@@ -1832,13 +2130,15 @@ def snippet_use(name: str) -> "str | None":
 #  GLOBAL SEARCH
 # ══════════════════════════════════════════════════
 
-def global_search(query: str, limit: int = 30) -> dict:
+def global_search(query: str, limit: int = 30, *, include_ranking: bool = False) -> dict:
     """Search across conversations, notes, and memories.
 
     Uses FTS5 for notes/memories when available, LIKE for conversations.
     """
     db = _get_db()
-    words = query.lower().split()
+    words = _extract_search_terms(query)
+    if not words:
+        words = query.lower().split()
     if not words:
         return {"conversations": [], "notes": [], "memories": []}
 
@@ -1891,7 +2191,8 @@ def global_search(query: str, limit: int = 30) -> dict:
         if not fts_query:
             raise ValueError("No safe keywords")
         mem_rows = db.execute(
-            """SELECT m.id, m.content, m.category, m.memory_type, m.importance, m.created_at
+            """SELECT m.id, m.content, m.category, m.memory_type, m.importance, m.source,
+                      m.created_at, m.access_count, m.last_accessed_at
                FROM memories m JOIN memories_fts f ON m.id = f.rowid
                WHERE memories_fts MATCH ?
                ORDER BY rank LIMIT ?""",
@@ -1903,11 +2204,19 @@ def global_search(query: str, limit: int = 30) -> dict:
         mem_conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in words])
         mem_params = [f"%{w}%" for w in words]
         mem_rows = db.execute(
-            f"SELECT id, content, category, memory_type, importance, created_at FROM memories "
+            f"SELECT id, content, category, memory_type, importance, source, "
+            f"created_at, access_count, last_accessed_at FROM memories "
             f"WHERE {mem_conditions} ORDER BY importance DESC LIMIT ?",
             mem_params + [limit],
         ).fetchall()
         mems_list = [dict(r) for r in mem_rows]
+    mems_list = _rank_memory_results(mems_list, query, words, include_ranking=include_ranking)
+    mems_list = _finalize_memory_results(
+        db,
+        mems_list[:limit],
+        include_ranking=include_ranking,
+        expose_id=True,
+    )
 
     return {
         "conversations": [dict(r) for r in convs],

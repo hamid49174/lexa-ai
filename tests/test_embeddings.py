@@ -511,6 +511,46 @@ class TestMemorySemanticSearch:
         assert any(r["content"] == "Corrupt vector banana marker" for r in results)
         assert "skipped_corrupt=1" in caplog.text
 
+    def test_degraded_semantic_search_ranks_keyword_fallback(self, monkeypatch, caplog):
+        from backend.embeddings import LOCAL_EMBEDDING_DIMS, OPENAI_EMBEDDING_DIMS, OPENAI_EMBEDDING_MODEL
+        from backend.memory import _get_db, search_memory_semantic
+        self._insert_embedded_memory(
+            content="Fallback ranking marker coffee generic note",
+            vector=[1.0] + [0.0] * (LOCAL_EMBEDDING_DIMS - 1),
+            provider="local",
+            model="local-tfidf",
+            dimension=LOCAL_EMBEDDING_DIMS,
+        )
+        self._insert_embedded_memory(
+            content="Fallback ranking marker coffee preference details",
+            vector=[1.0] + [0.0] * (LOCAL_EMBEDDING_DIMS - 1),
+            provider="local",
+            model="local-tfidf",
+            dimension=LOCAL_EMBEDDING_DIMS,
+            memory_type="preference",
+        )
+        db = _get_db()
+        db.execute(
+            "UPDATE memories SET created_at = datetime('now', '-400 days', 'localtime') WHERE content LIKE ?",
+            ("%generic%",),
+        )
+        db.commit()
+        monkeypatch.setattr(
+            "backend.embeddings.embed_text_with_metadata",
+            lambda _query: {
+                "vector": [1.0] + [0.0] * (OPENAI_EMBEDDING_DIMS - 1),
+                "provider": "openai",
+                "model": OPENAI_EMBEDDING_MODEL,
+                "dimension": OPENAI_EMBEDDING_DIMS,
+            },
+        )
+
+        with caplog.at_level(logging.WARNING, logger="lexa.memory"):
+            results = search_memory_semantic("fallback ranking marker coffee preferences")
+
+        assert results[0]["memory_type"] == "preference"
+        assert "degraded" in caplog.text.lower()
+
     def test_old_unembedded_memory_remains_discoverable(self, monkeypatch):
         from backend.memory import add_memory, search_memory_semantic
         monkeypatch.setattr("backend.config.EMBEDDING_ENABLED", False)
