@@ -162,7 +162,7 @@ async function main() {
 
       const streamWait = await waitFor(() =>
         !LexaState.get("isLoading")
-        && document.querySelectorAll(".system-message .msg-action").length >= 1
+        && document.querySelectorAll(".system-message:not(.typing-message)").length >= 1
         && !document.querySelector(".streaming-text")
       );
       const streamedMessage = Array.from(document.querySelectorAll(".system-message")).at(-1);
@@ -245,17 +245,16 @@ async function main() {
 
   const streamed = result.streamedFlow || {};
   console.log("\nTool confirmation streamed response:");
-  assert("mocked stream renders blocked local-action UI", streamed.waitOk === true && streamed.streamRequests === 1, JSON.stringify(streamed));
-  assert("blocked local-action language is visible", /BLOCKIERT|BLOCKED/i.test(streamed.confirmationText || ""), streamed.confirmationText);
-  assert("tool command and param keys are visible as text", /personal_os_write/.test(streamed.actionText || "") && /body/.test(streamed.actionText || "") && /path/.test(streamed.actionText || ""), streamed.actionText);
-  assert("unsafe tool params are not rendered in confirmation UI", Number(streamed.unsafeNodes || 0) === 0 && !/<img|<script|onerror=alert/i.test(`${streamed.actionHtml || ""} ${streamed.actionText || ""} ${streamed.detailHtml || ""}`), JSON.stringify(streamed));
+  assert("mocked stream completes without local-action UI", streamed.waitOk === true && streamed.streamRequests === 1, JSON.stringify(streamed));
+  assert("blocked local-action language is not shown in normal chat", !streamed.confirmationText && !streamed.actionText, JSON.stringify(streamed));
+  assert("unsafe tool params are not rendered in normal chat", Number(streamed.unsafeNodes || 0) === 0 && !/<img|<script|onerror=alert/i.test(`${streamed.actionHtml || ""} ${streamed.actionText || ""} ${streamed.detailHtml || ""}`), JSON.stringify(streamed));
   assert("chat local-action block does not render confirm or deny controls", streamed.confirmButtons === 0 && streamed.denyButtons === 0 && streamed.confirmText.length === 0 && streamed.denyText.length === 0, JSON.stringify(streamed));
   assert("confirmation smoke does not execute or clear pending tools", streamed.confirmClearCalls === 0, JSON.stringify(streamed));
 
   const direct = result.directFlow || {};
   console.log("\nTool confirmation direct render:");
-  assert("direct addMessage blocked local-action UI renders", /BLOCKIERT|BLOCKED/i.test(direct.confirmationText || "") && direct.confirmButtons === 0 && direct.denyButtons === 0, JSON.stringify(direct));
-  assert("direct local-action command is escaped text", /personal_os_write/.test(direct.actionText || "") && /body/.test(direct.actionText || "") && /path/.test(direct.actionText || "") && Number(direct.unsafeNodes || 0) === 0 && !/<img|<script|onerror=alert/i.test(`${direct.actionHtml || ""} ${direct.actionText || ""} ${direct.detailHtml || ""}`), JSON.stringify(direct));
+  assert("direct addMessage suppresses local-action UI", !direct.confirmationText && !direct.actionText && direct.confirmButtons === 0 && direct.denyButtons === 0, JSON.stringify(direct));
+  assert("direct local-action params stay invisible", Number(direct.unsafeNodes || 0) === 0 && !/<img|<script|onerror=alert/i.test(`${direct.actionHtml || ""} ${direct.actionText || ""} ${direct.detailHtml || ""}`), JSON.stringify(direct));
 
   const history = result.historyFlow || {};
   const rendered = Array.isArray(history.renderedMessages) ? history.renderedMessages : [];

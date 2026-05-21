@@ -224,16 +224,16 @@ async function main() {
   const success = result.successFlow || {};
   console.log("\nNon-confirmed tool action display:");
   assert("non-confirmed smoke uses mocked stream and smoke bridge only", success.waitOk === true && success.fetchCalls === 1, JSON.stringify(success));
-  assert("chat does not auto-execute non-confirmed tool actions", success.waitOk === true && /Tool placeholder/.test(success.text || "") && success.actionCards === 1, JSON.stringify(success));
+  assert("chat does not auto-execute non-confirmed tool actions", success.waitOk === true && /Tool placeholder/.test(success.text || "") && success.actionCards === 0, JSON.stringify(success));
   assert("non-confirmed tool action renders no confirm controls", success.confirmButtons === 0 && success.denyButtons === 0, JSON.stringify(success));
-  assert("non-confirmed tool action card hides unsafe param values", /system_info/.test(success.actionText || "") && /query/.test(success.actionText || "") && !/<script|alert/i.test(`${success.actionText || ""} ${success.actionHtml || ""} ${success.actionDetailHtml || ""}`), JSON.stringify(success));
+  assert("non-confirmed tool action details stay invisible", !success.actionText && !success.actionHtml && !success.actionDetailHtml, JSON.stringify(success));
   assert("non-confirmed tool action recovers composer state", success.sendEnabled === true && success.inputCleared === true && success.systemMessageCount === 1, JSON.stringify(success));
 
   const noDisplay = result.noDisplayFlow || {};
   console.log("\nNon-confirmed unsafe tool action display:");
   assert("mocked no-result tool keeps safe placeholder text", noDisplay.waitOk === true && /Tool placeholder/.test(noDisplay.text || "") && Number(noDisplay.scriptTags || 0) === 0 && !/<script|<img/i.test(noDisplay.html || ""), JSON.stringify(noDisplay));
-  assert("mocked no-result tool display creates only blocked action card", noDisplay.confirmButtons === 0 && noDisplay.denyButtons === 0 && noDisplay.actionCards === 1 && noDisplay.systemMessageCount === 1, JSON.stringify(noDisplay));
-  assert("unsafe action name and params remain contained", /unknown_tool/.test(noDisplay.actionText || "") && /path/.test(noDisplay.actionText || "") && !/<script|<img/i.test(`${noDisplay.actionHtml || ""} ${noDisplay.actionDetailHtml || ""}`), JSON.stringify(noDisplay));
+  assert("mocked no-result tool display creates no live or blocked action card", noDisplay.confirmButtons === 0 && noDisplay.denyButtons === 0 && noDisplay.actionCards === 0 && noDisplay.systemMessageCount === 1, JSON.stringify(noDisplay));
+  assert("unsafe action name and params stay invisible", !noDisplay.actionText && !noDisplay.actionHtml && !noDisplay.actionDetailHtml, JSON.stringify(noDisplay));
 
   const history = result.historyFlow || {};
   console.log("\nPersisted tool result display:");

@@ -150,6 +150,7 @@ async function main() {
       const actionCmd = actionCard?.querySelector(".action-cmd") || null;
       const actionDetail = actionCard?.querySelector(".action-detail") || null;
       const rendered = {
+        messageText: message?.querySelector(".msg-text")?.textContent || "",
         label: actionCard?.querySelector(".action-label")?.textContent || "",
         actionText: actionCmd?.textContent || "",
         actionHtml: actionCmd?.innerHTML || "",
@@ -185,11 +186,11 @@ async function main() {
   `);
 
   const rendered = result.rendered || {};
-  console.log("\nChat local-action block render:");
-  assert("chat renders a blocked local-action card", /BLOCKIERT|BLOCKED/i.test(rendered.label || "") && /personal_os_write/.test(rendered.actionText || ""), JSON.stringify(rendered));
-  assert("chat action card exposes parameter keys but not unsafe values", /body/.test(rendered.actionText || "") && /path/.test(rendered.actionText || "") && !/onerror=alert|<script/i.test(rendered.actionText || "") && !/onerror=alert|<script/i.test(rendered.actionHtml || ""), JSON.stringify(rendered));
-  assert("chat action card has no confirm or deny controls", Number(rendered.confirmButtons || 0) === 0 && Number(rendered.denyButtons || 0) === 0, JSON.stringify(rendered));
-  assert("unsafe action values are contained", Number(rendered.unsafeNodes || 0) === 0 && !/<img|<script/i.test(rendered.detailHtml || ""), JSON.stringify(rendered));
+  console.log("\nChat local-action suppression:");
+  assert("chat keeps assistant text visible", /Local tool action from chat/.test(rendered.messageText || ""), JSON.stringify(rendered));
+  assert("chat suppresses blocked local-action card", !rendered.label && !rendered.actionText && !rendered.detailText, JSON.stringify(rendered));
+  assert("chat renders no confirm or deny controls", Number(rendered.confirmButtons || 0) === 0 && Number(rendered.denyButtons || 0) === 0, JSON.stringify(rendered));
+  assert("unsafe action values are not rendered", Number(rendered.unsafeNodes || 0) === 0 && !/<img|<script|onerror=alert/i.test(`${rendered.actionHtml || ""} ${rendered.detailHtml || ""}`), JSON.stringify(rendered));
 
   const compatibility = result.compatibility || {};
   console.log("\nConfirm-action compatibility path:");

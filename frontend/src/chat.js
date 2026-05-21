@@ -1346,7 +1346,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   if (agentRunMeta) renderPersistedAgentRunMeta(body, agentRunMeta, text);
   body.appendChild(msgTextEl);
 
-  if (action) {
+  if (action && options?.showLocalActionCard) {
     appendToolConfirmationUi(body, action);
   }
 
@@ -1392,7 +1392,7 @@ function handleChatToolActionBlocked(action, options = {}) {
     param_keys: chatToolActionParamKeys(action),
     source: options.source || "chat",
   });
-  if (options.toast !== false) {
+  if (options.toast === true) {
     showToast(t("chat.localActionBlockedToast", { action: actionName }), "warning", 3200);
   }
   return false;
@@ -1823,7 +1823,6 @@ async function sendMessage() {
     }
 
     if (actionData) {
-      appendToolConfirmationUi(body, actionData);
       handleChatToolActionBlocked(actionData);
     }
     // Show follow-up suggestion chips if response has substance
