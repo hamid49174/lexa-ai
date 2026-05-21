@@ -574,6 +574,24 @@ _MAX_RETRIES = 3
 _BACKOFF_BASE = 1  # 1s -> 2s -> 4s
 
 
+def _provider_tool_payload(tools: list[dict] | None) -> list[dict]:
+    """Return provider-safe OpenAI tool definitions without Lexa metadata."""
+    payload: list[dict] = []
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        function = tool.get("function")
+        if not isinstance(function, dict) or not function.get("name"):
+            continue
+        clean_function = {
+            key: function[key]
+            for key in ("name", "description", "parameters")
+            if key in function
+        }
+        payload.append({"type": tool.get("type") or "function", "function": clean_function})
+    return payload
+
+
 def _groq_api_call(
     messages: list[dict],
     model: str,
@@ -596,8 +614,9 @@ def _groq_api_call(
         stream=stream,
         timeout=timeout,
     )
-    if tools:
-        kwargs["tools"] = tools
+    provider_tools = _provider_tool_payload(tools)
+    if provider_tools:
+        kwargs["tools"] = provider_tools
         kwargs["tool_choice"] = "auto"
     return client.chat.completions.create(**kwargs)
 
@@ -669,8 +688,9 @@ def _openai_compatible_api_call(
         stream=stream,
         timeout=timeout,
     )
-    if tools:
-        kwargs["tools"] = tools
+    provider_tools = _provider_tool_payload(tools)
+    if provider_tools:
+        kwargs["tools"] = provider_tools
         kwargs["tool_choice"] = "auto"
     return client.chat.completions.create(**kwargs)
 

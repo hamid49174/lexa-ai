@@ -61,6 +61,7 @@ def _tool(
 
     tool_def = {
         "type": "function",
+        "confirmation_required": bool(confirmation_required),
         "function": {
             "name": name,
             "description": desc,
@@ -825,11 +826,11 @@ def get_tool_count() -> int:
 
 
 def is_confirmation_tool(name: str) -> bool:
-    """Check if a tool requires user confirmation (has ⚠️ in description)."""
+    """Check if a tool requires user confirmation."""
     tool = get_tool(name)
     if not tool:
         return True  # Unknown tools require confirmation by default
-    return "⚠️" in tool["function"]["description"]
+    return bool(tool.get("confirmation_required"))
 
 
 # ══════════════════════════════════════════════════
