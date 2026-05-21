@@ -46,6 +46,83 @@ _tables_lock = _threading.Lock()
 _DATA_DIR = os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent))
 DB_PATH = Path(_DATA_DIR) / "lexa_memory.db"
 
+MEMORY_TYPES: tuple[str, ...] = (
+    "working",
+    "episodic",
+    "semantic",
+    "procedural",
+    "preference",
+    "system",
+)
+_VALID_MEMORY_TYPES: frozenset[str] = frozenset(MEMORY_TYPES)
+_MEMORY_TYPE_CATEGORY_MAP: dict[str, str] = {
+    "preference": "preference",
+    "preferences": "preference",
+    "explicit": "working",
+    "task": "working",
+    "todo": "working",
+    "reminder": "working",
+    "working": "working",
+    "scratch": "working",
+    "session": "working",
+    "event": "episodic",
+    "meeting": "episodic",
+    "appointment": "episodic",
+    "calendar": "episodic",
+    "routine": "procedural",
+    "procedure": "procedural",
+    "workflow": "procedural",
+    "howto": "procedural",
+    "command": "procedural",
+    "system": "system",
+    "config": "system",
+    "diagnostic": "system",
+    "fact": "semantic",
+    "identity": "semantic",
+    "person": "semantic",
+}
+_MEMORY_SYSTEM_PREFIXES: tuple[str, ...] = (
+    "system:",
+    "lexa:",
+    "config:",
+    "configuration:",
+    "diagnostic:",
+)
+_MEMORY_WORKING_PREFIXES: tuple[str, ...] = (
+    "merkzettel:",
+    "todo:",
+    "aufgabe:",
+    "notiz:",
+    "scratch:",
+)
+_MEMORY_EPISODIC_MARKERS: tuple[str, ...] = (
+    "termin:",
+    "meeting:",
+    "event:",
+    "gestern",
+    "heute",
+    "morgen",
+)
+_MEMORY_PROCEDURAL_MARKERS: tuple[str, ...] = (
+    "der befehl ",
+    "befehl ",
+    "command ",
+    "workflow:",
+    "routine:",
+    "how to ",
+    "wie man ",
+    "schritt ",
+)
+_MEMORY_PREFERENCE_MARKERS: tuple[str, ...] = (
+    "praeferenz:",
+    "präferenz:",
+    "lieblings",
+    "ich mag ",
+    "ich liebe ",
+    "interesse",
+    "hobby",
+)
+
 
 # ══════════════════════════════════════════════════
 #  GERMAN STOP WORDS & INTELLIGENT TEXT PROCESSING
@@ -189,6 +266,45 @@ def _similarity_ratio(a: str, b: str) -> float:
     return common / len(longer) if len(longer) > 0 else 0.0
 
 
+def normalize_memory_type(memory_type: str | None) -> str | None:
+    """Return a valid canonical memory type, or None for unknown input."""
+    value = str(memory_type or "").strip().lower()
+    return value if value in _VALID_MEMORY_TYPES else None
+
+
+def classify_memory_type(content: str, category: str = "fact", source: str = "user") -> str:
+    """Classify a memory into Lexa's explicit memory type taxonomy.
+
+    The legacy category remains the user-facing/domain category. This helper adds
+    a deterministic type layer used for search, migration, and future UI filters.
+    """
+    source_key = str(source or "").strip().lower()
+    category_key = str(category or "").strip().lower()
+    category_type = _MEMORY_TYPE_CATEGORY_MAP.get(category_key)
+    text = str(content or "").strip().lower()
+
+    if source_key == "system":
+        return "system"
+    if category_type and category_type != "semantic":
+        return category_type
+    if any(text.startswith(prefix) for prefix in _MEMORY_SYSTEM_PREFIXES):
+        return "system"
+    if any(text.startswith(prefix) for prefix in _MEMORY_WORKING_PREFIXES):
+        return "working"
+    if any(marker in text for marker in _MEMORY_PREFERENCE_MARKERS):
+        return "preference"
+    if any(marker in text for marker in _MEMORY_PROCEDURAL_MARKERS):
+        return "procedural"
+    if (
+        any(marker in text for marker in _MEMORY_EPISODIC_MARKERS)
+        or re.search(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b", text)
+    ):
+        return "episodic"
+    if category_type:
+        return category_type
+    return "semantic"
+
+
 # ══════════════════════════════════════════════════
 #  CONNECTION MANAGEMENT
 # ══════════════════════════════════════════════════
@@ -205,7 +321,7 @@ _VALID_TABLES = frozenset({
 # Whitelist of valid column names per table (for restore validation)
 _VALID_COLUMNS = {
     "notes": {"id", "title", "content", "category", "created_at", "updated_at", "embedding"},
-    "memories": {"id", "content", "category", "importance", "source", "created_at", "embedding"},
+    "memories": {"id", "content", "category", "memory_type", "importance", "source", "created_at", "embedding"},
     "user_profile": {"key", "value", "updated_at"},
     "interactions": {"id", "user_message", "ai_reply", "had_action", "created_at"},
     "routines": {"id", "name", "description", "schedule", "actions", "enabled", "last_run", "created_at"},
@@ -286,6 +402,60 @@ def close_db() -> None:
         _thread_local.db = None
 
 
+def _backfill_memory_types(db: sqlite3.Connection, *, force: bool = False) -> int:
+    """Backfill missing/invalid memory_type values from existing row data."""
+    rows = db.execute(
+        "SELECT id, content, category, source, memory_type FROM memories"
+    ).fetchall()
+    updated = 0
+    for row in rows:
+        current = normalize_memory_type(row["memory_type"])
+        if current and not force:
+            continue
+        resolved = classify_memory_type(
+            row["content"],
+            row["category"],
+            row["source"],
+        )
+        if current != resolved:
+            db.execute(
+                "UPDATE memories SET memory_type = ? WHERE id = ?",
+                (resolved, row["id"]),
+            )
+            updated += 1
+    if updated:
+        db.commit()
+        logger.info("Memory type migration: backfilled %s memory rows", updated)
+    return updated
+
+
+def _ensure_memory_type_schema(db: sqlite3.Connection) -> None:
+    """Add memory_type to existing DBs and keep the new index migration-safe."""
+    added_column = False
+    try:
+        db.execute("SELECT memory_type FROM memories LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            db.execute("ALTER TABLE memories ADD COLUMN memory_type TEXT DEFAULT 'semantic'")
+            db.commit()
+            added_column = True
+            logger.info("Memory migration: added 'memory_type' column to memories")
+        except Exception as e:
+            logger.warning(f"Memory type column migration skipped: {e}")
+            return
+
+    try:
+        db.execute("CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type)")
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Memory type index migration skipped: {e}")
+
+    try:
+        _backfill_memory_types(db, force=added_column)
+    except Exception as e:
+        logger.warning(f"Memory type backfill skipped: {e}")
+
+
 def _init_tables(db: sqlite3.Connection) -> None:
     """Initialize all memory tables."""
     db.executescript("""
@@ -302,6 +472,8 @@ def _init_tables(db: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             content TEXT NOT NULL,
             category TEXT DEFAULT 'fact',
+            memory_type TEXT DEFAULT 'semantic'
+                CHECK(memory_type IN ('working', 'episodic', 'semantic', 'procedural', 'preference', 'system')),
             importance INTEGER DEFAULT 5 CHECK(importance BETWEEN 1 AND 10),
             source TEXT DEFAULT 'auto',
             created_at TEXT DEFAULT (datetime('now', 'localtime'))
@@ -394,6 +566,9 @@ def _init_tables(db: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_conv_summary_conv ON conversation_summaries(conversation_id);
     """)
+
+    db.commit()
+    _ensure_memory_type_schema(db)
 
     # FTS5 full-text search indexes
     try:
@@ -678,7 +853,13 @@ def note_delete(title: str) -> str:
 #  GEDÄCHTNIS (Auto-Learning Memories)
 # ══════════════════════════════════════════════════
 
-def add_memory(content: str, category: str = "fact", importance: int = 5, source: str = "user") -> str:
+def add_memory(
+    content: str,
+    category: str = "fact",
+    importance: int = 5,
+    source: str = "user",
+    memory_type: str | None = None,
+) -> str:
     """Add a memory entry with intelligent deduplication.
 
     Dedup strategy:
@@ -694,6 +875,10 @@ def add_memory(content: str, category: str = "fact", importance: int = 5, source
     content_stripped = content.strip()
     if not content_stripped:
         return "Leerer Inhalt."
+    resolved_memory_type = (
+        normalize_memory_type(memory_type)
+        or classify_memory_type(content_stripped, category, source)
+    )
 
     # 1. Exact full-content match — definite duplicate
     exact_match = db.execute(
@@ -731,8 +916,8 @@ def add_memory(content: str, category: str = "fact", importance: int = 5, source
                     return "Bereits bekannt."
 
     db.execute(
-        "INSERT INTO memories (content, category, importance, source) VALUES (?, ?, ?, ?)",
-        (content_stripped, category, importance, source),
+        "INSERT INTO memories (content, category, memory_type, importance, source) VALUES (?, ?, ?, ?, ?)",
+        (content_stripped, category, resolved_memory_type, importance, source),
     )
     db.commit()
 
@@ -778,7 +963,7 @@ def search_memory(query: str, limit: int = 5) -> list[dict]:
         if not fts_query:
             raise ValueError("No safe keywords")
         rows = db.execute(
-            """SELECT m.content, m.category, m.importance, m.created_at
+            """SELECT m.content, m.category, m.memory_type, m.importance, m.created_at
                FROM memories m
                JOIN memories_fts ON m.id = memories_fts.rowid
                WHERE memories_fts MATCH ?
@@ -794,7 +979,7 @@ def search_memory(query: str, limit: int = 5) -> list[dict]:
         conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in keywords])
         params: list[Any] = [f"%{w}%" for w in keywords]
         rows = db.execute(
-            f"""SELECT content, category, importance, created_at
+            f"""SELECT content, category, memory_type, importance, created_at
                 FROM memories
                 WHERE {conditions}
                 LIMIT ?""",
@@ -848,7 +1033,7 @@ def search_memory_semantic(query: str, limit: int = 5) -> list[dict]:
 
     # Load memories with embeddings
     rows = db.execute(
-        "SELECT id, content, category, importance, created_at, embedding FROM memories WHERE embedding IS NOT NULL"
+        "SELECT id, content, category, memory_type, importance, created_at, embedding FROM memories WHERE embedding IS NOT NULL"
     ).fetchall()
 
     if not rows:
@@ -866,6 +1051,7 @@ def search_memory_semantic(query: str, limit: int = 5) -> list[dict]:
         scored.append((sim, {
             "content": row["content"],
             "category": row["category"],
+            "memory_type": row["memory_type"],
             "importance": row["importance"],
             "created_at": row["created_at"],
             "_similarity": round(sim, 4),
@@ -1463,7 +1649,7 @@ def global_search(query: str, limit: int = 30) -> dict:
         if not fts_query:
             raise ValueError("No safe keywords")
         mem_rows = db.execute(
-            """SELECT m.id, m.content, m.category, m.importance, m.created_at
+            """SELECT m.id, m.content, m.category, m.memory_type, m.importance, m.created_at
                FROM memories m JOIN memories_fts f ON m.id = f.rowid
                WHERE memories_fts MATCH ?
                ORDER BY rank LIMIT ?""",
@@ -1475,7 +1661,7 @@ def global_search(query: str, limit: int = 30) -> dict:
         mem_conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in words])
         mem_params = [f"%{w}%" for w in words]
         mem_rows = db.execute(
-            f"SELECT id, content, category, importance, created_at FROM memories "
+            f"SELECT id, content, category, memory_type, importance, created_at FROM memories "
             f"WHERE {mem_conditions} ORDER BY importance DESC LIMIT ?",
             mem_params + [limit],
         ).fetchall()
@@ -1576,6 +1762,12 @@ def get_memory_stats() -> dict:
     db = _get_db()
     notes = db.execute("SELECT COUNT(*) as c FROM notes").fetchone()["c"]
     memories = db.execute("SELECT COUNT(*) as c FROM memories").fetchone()["c"]
+    memory_types = {
+        row["memory_type"]: row["c"]
+        for row in db.execute(
+            "SELECT memory_type, COUNT(*) as c FROM memories GROUP BY memory_type"
+        ).fetchall()
+    }
     interactions = db.execute("SELECT COUNT(*) as c FROM interactions").fetchone()["c"]
     routines = db.execute("SELECT COUNT(*) as c FROM routines").fetchone()["c"]
     conversations = db.execute("SELECT COUNT(*) as c FROM conversations").fetchone()["c"]
@@ -1583,6 +1775,7 @@ def get_memory_stats() -> dict:
     return {
         "notes": notes,
         "memories": memories,
+        "memory_types": memory_types,
         "interactions": interactions,
         "routines": routines,
         "conversations": conversations,
@@ -1824,6 +2017,16 @@ def restore_database(data: dict) -> dict:
             # Insert backup data with validated column names
             inserted = 0
             for row in rows:
+                if table == "memories":
+                    row = dict(row)
+                    row["memory_type"] = (
+                        normalize_memory_type(row.get("memory_type"))
+                        or classify_memory_type(
+                            row.get("content", ""),
+                            row.get("category", "fact"),
+                            row.get("source", "user"),
+                        )
+                    )
                 raw_cols = list(row.keys())
                 safe_cols = _validate_column_names(table, raw_cols)
                 if not safe_cols:

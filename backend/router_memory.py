@@ -109,13 +109,21 @@ async def add_memory(req: Request):
     data = await parse_json_body(req)
     content = str(data.get("content", ""))[:MAX_MEMORY_CONTENT]
     category = str(data.get("category", "general"))[:MAX_MEMORY_CATEGORY]
+    memory_type = data.get("memory_type")
     try:
         importance = min(10, max(1, int(data.get("importance", 5))))
     except (ValueError, TypeError):
         importance = 5
     if not content:
         raise HTTPException(status_code=400, detail="content fehlt.")
-    result = await asyncio.to_thread(memory.add_memory, content, category, importance)
+    result = await asyncio.to_thread(
+        memory.add_memory,
+        content,
+        category,
+        importance,
+        "user",
+        memory_type,
+    )
     return {"status": "ok", "result": result}
 
 

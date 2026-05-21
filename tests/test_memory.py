@@ -5,6 +5,7 @@ is never touched.
 """
 
 import pytest
+import sqlite3
 from pathlib import Path
 
 
@@ -157,6 +158,14 @@ class TestAddMemory:
         result = add_memory("Python ist toll", "fact", 7, "user")
         assert result == "Gemerkt."
 
+    def test_add_memory_accepts_explicit_memory_type(self):
+        """Explicit valid memory_type overrides deterministic classification."""
+        from backend.memory import add_memory, search_memory
+        add_memory("Manual override memory entry", "fact", 5, "user", memory_type="working")
+        results = search_memory("override memory")
+        assert results[0]["category"] == "fact"
+        assert results[0]["memory_type"] == "working"
+
     def test_deduplication_blocks_same_prefix(self):
         """add_memory rejects a second entry whose first 80 chars match."""
         from backend.memory import add_memory
@@ -168,6 +177,29 @@ class TestAddMemory:
         assert result == "Bereits bekannt."
 
 
+class TestMemoryTypeClassification:
+    def test_classifies_each_memory_type(self):
+        """Deterministic rules cover every explicit memory type."""
+        from backend.memory import classify_memory_type
+        examples = {
+            "working": ("Merkzettel: Follow up with Alex", "explicit", "auto"),
+            "episodic": ("Meeting: Projektstand am Montag", "event", "auto"),
+            "semantic": ("Python ist eine Programmiersprache", "fact", "user"),
+            "procedural": ("Der Befehl volume_set setzt die Lautstaerke", "fact", "user"),
+            "preference": ("Praeferenz: mag Kaffee", "fact", "auto"),
+            "system": ("Lexa: fallback provider configured", "fact", "system"),
+        }
+        for expected_type, (content, category, source) in examples.items():
+            assert classify_memory_type(content, category, source) == expected_type
+
+    def test_invalid_explicit_memory_type_falls_back_to_classification(self):
+        """Unknown memory_type values do not enter the database."""
+        from backend.memory import add_memory, search_memory
+        add_memory("Praeferenz: mag Tee", "fact", 5, "user", memory_type="unknown")
+        results = search_memory("Tee")
+        assert results[0]["memory_type"] == "preference"
+
+
 class TestSearchMemory:
     def test_search_finds_matching_memory(self):
         """search_memory returns entries whose content matches the query."""
@@ -177,6 +209,22 @@ class TestSearchMemory:
         results = search_memory("KI")
         assert len(results) == 1
         assert "KI" in results[0]["content"]
+
+    def test_search_returns_memory_type_and_preserves_category(self):
+        """Search includes memory_type without replacing the legacy category."""
+        from backend.memory import add_memory, search_memory
+        add_memory("Lieblingssprache: Python", "preference", 7)
+        results = search_memory("Python")
+        assert results[0]["category"] == "preference"
+        assert results[0]["memory_type"] == "preference"
+
+    def test_global_search_returns_memory_type(self):
+        """Global search exposes the new type for memory results."""
+        from backend.memory import add_memory, global_search
+        add_memory("Der Befehl volume_set setzt die Lautstaerke", "command", 7)
+        results = global_search("volume_set")
+        assert results["memories"][0]["category"] == "command"
+        assert results["memories"][0]["memory_type"] == "procedural"
 
     def test_search_empty_query_returns_empty(self):
         """search_memory with empty string returns an empty list."""
@@ -280,6 +328,37 @@ class TestDedupLikeEscape:
 # ---------------------------------------------------------------------------
 
 class TestRestoreDatabase:
+    def test_old_memory_table_migrates_memory_type(self):
+        """Existing DBs without memory_type are classified during init."""
+        import backend.memory as mem
+        mem.close_db()
+        conn = sqlite3.connect(mem.DB_PATH)
+        conn.execute(
+            """CREATE TABLE memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                category TEXT DEFAULT 'fact',
+                importance INTEGER DEFAULT 5,
+                source TEXT DEFAULT 'auto',
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO memories (content, category, importance, source) VALUES (?, ?, ?, ?)",
+            ("Praeferenz: mag Tee", "fact", 6, "auto"),
+        )
+        conn.commit()
+        conn.close()
+        mem._tables_ready = False
+
+        db = mem._get_db()
+        row = db.execute(
+            "SELECT category, memory_type FROM memories WHERE content LIKE ?",
+            ("%Tee%",),
+        ).fetchone()
+        assert row["category"] == "fact"
+        assert row["memory_type"] == "preference"
+
     def test_restore_wraps_in_transaction(self):
         """restore_database should not lose data on partial failure."""
         from backend.memory import note_create, note_list, restore_database
@@ -308,6 +387,24 @@ class TestRestoreDatabase:
         assert result["status"] == "ok"
         # Notes should still be there (empty rows = skip)
         assert len(note_list()) == 1
+
+    def test_restore_old_memory_rows_classifies_missing_memory_type(self):
+        """Old backups without memory_type restore with classified types."""
+        from backend.memory import restore_database, search_memory
+        result = restore_database({
+            "memories": [
+                {
+                    "content": "Der Befehl volume_set setzt die Lautstaerke",
+                    "category": "fact",
+                    "importance": 7,
+                    "source": "user",
+                }
+            ]
+        })
+        assert result["status"] == "ok"
+        rows = search_memory("volume_set")
+        assert rows[0]["category"] == "fact"
+        assert rows[0]["memory_type"] == "procedural"
 
 
 # ---------------------------------------------------------------------------
