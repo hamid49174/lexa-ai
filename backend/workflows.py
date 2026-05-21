@@ -436,12 +436,17 @@ class WorkflowEngine:
         logger.info(f"Workflow gestartet: '{wf_data['name']}' (ID: {workflow_id})")
         started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         step_results: list[dict] = []
-        context: dict[str, Any] = {"prev_result": None, "workflow_id": workflow_id}
+        workflow_steps = wf_data.get("steps", [])
+        context: dict[str, Any] = {
+            "prev_result": None,
+            "workflow_id": workflow_id,
+            "workflow_step_count": len(workflow_steps),
+        }
         overall_status = "success"
         error_msg = None
 
         try:
-            for i, step in enumerate(wf_data.get("steps", [])):
+            for i, step in enumerate(workflow_steps):
                 step_num = i + 1
                 logger.info(f"  Step {step_num}/{len(wf_data['steps'])}: {step.get('type', 'unknown')}")
 
@@ -539,15 +544,43 @@ class WorkflowEngine:
         # Template-Variablen ersetzen
         args = self._resolve_templates(args, context)
 
-        # Sicherheits-Check: nur erlaubte Tools
-        from backend.security import is_command_allowed
+        from backend.agent_reflection import reflect_action
+        from backend.security import audit_log, is_command_allowed, validate_params
+        from backend.tool_registry import ToolSchemaValidationError, validate_tool_arguments
+
+        try:
+            schema_args = validate_tool_arguments(tool_name, args)
+        except ToolSchemaValidationError as exc:
+            audit_log(tool_name, "workflow_tool_schema_invalid", f"error={str(exc)[:200]}")
+            raise PermissionError("Workflow tool arguments are invalid.")
+
+        # Permission classification is read-only; enforcement happens after reflection.
         permission = is_command_allowed(tool_name)
+        reflection = reflect_action(
+            tool_name,
+            schema_args,
+            permission=permission,
+            source="workflow",
+            plan_length=int(context.get("workflow_step_count") or 1),
+        )
+        if reflection is not None and not reflection.should_execute:
+            audit_log(tool_name, "workflow_reflection_blocked", f"reason={reflection.reason[:120]}")
+            raise PermissionError("Workflow tool blocked by safety reflection.")
+
         if permission == "blocked":
             raise PermissionError(f"Tool '{tool_name}' ist blockiert.")
+        if permission in {"confirmation_required", "unknown"}:
+            raise PermissionError(f"Tool '{tool_name}' erfordert Bestaetigung und wird im Workflow nicht automatisch ausgefuehrt.")
+
+        try:
+            safe_args = validate_params(tool_name, schema_args)
+        except ValueError as exc:
+            audit_log(tool_name, "workflow_param_blocked", str(exc)[:200])
+            raise PermissionError(str(exc))
 
         # Tool ausfuehren via CompanionEngine
         if self._companion_execute:
-            result = await asyncio.to_thread(self._companion_execute, tool_name, args)
+            result = await asyncio.to_thread(self._companion_execute, tool_name, safe_args)
             return result
         else:
             raise RuntimeError("CompanionEngine nicht verfuegbar. Backend noch nicht vollstaendig gestartet?")

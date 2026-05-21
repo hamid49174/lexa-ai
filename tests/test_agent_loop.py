@@ -14,6 +14,7 @@ from backend.agent_loop import (
     AgentStep, AgentRun, StepStatus,
     _execute_tool, _format_tool_result,
 )
+from backend.agent_reflection import ReflectionDecision
 from backend.config import AGENT_MAX_STEPS
 
 
@@ -110,32 +111,60 @@ class TestToolExecution(unittest.TestCase):
     @patch("backend.agent_loop.is_command_allowed", return_value="allowed")
     @patch("companion.engine.companion")
     def test_schema_invalid_wrong_type_does_not_execute(self, mock_companion, mock_perm):
-        result = _run(_execute_tool("app_open", {"name": 123}))
+        with patch("backend.agent_loop.reflect_action") as mock_reflect:
+            result = _run(_execute_tool("app_open", {"name": 123}))
 
         self.assertFalse(result["success"])
         self.assertIn("Tool-Argumente ungueltig", result["error"])
         mock_companion.execute.assert_not_called()
         mock_perm.assert_not_called()
+        mock_reflect.assert_not_called()
 
     @patch("backend.agent_loop.is_command_allowed", return_value="allowed")
     @patch("companion.engine.companion")
     def test_schema_invalid_unknown_param_does_not_execute(self, mock_companion, mock_perm):
-        result = _run(_execute_tool("system_info", {"unexpected": "value"}))
+        with patch("backend.agent_loop.reflect_action") as mock_reflect:
+            result = _run(_execute_tool("system_info", {"unexpected": "value"}))
 
         self.assertFalse(result["success"])
         self.assertIn("Tool-Argumente ungueltig", result["error"])
         mock_companion.execute.assert_not_called()
         mock_perm.assert_not_called()
+        mock_reflect.assert_not_called()
 
     @patch("backend.agent_loop.is_command_allowed", return_value="allowed")
     @patch("companion.engine.companion")
     def test_schema_invalid_hallucinated_tool_does_not_execute(self, mock_companion, mock_perm):
-        result = _run(_execute_tool("hallucinated_tool", {}))
+        with patch("backend.agent_loop.reflect_action") as mock_reflect:
+            result = _run(_execute_tool("hallucinated_tool", {}))
 
         self.assertFalse(result["success"])
         self.assertIn("Tool-Argumente ungueltig", result["error"])
         mock_companion.execute.assert_not_called()
         mock_perm.assert_not_called()
+        mock_reflect.assert_not_called()
+
+    @patch("backend.agent_loop.is_command_allowed", return_value="allowed")
+    @patch("companion.engine.companion")
+    def test_direct_execute_tool_reflection_block_does_not_execute(self, mock_companion, mock_perm):
+        blocked = ReflectionDecision(
+            should_execute=False,
+            risk_level="medium",
+            confidence=0.2,
+            concerns=["unit"],
+            safer_alternative={"mode": "read_only"},
+            requires_confirmation=False,
+            verification_step="verify first",
+            reason="unit_block",
+        )
+        with patch("backend.agent_loop.reflect_action", return_value=blocked) as mock_reflect:
+            result = _run(_execute_tool("system_info", {}))
+
+        self.assertFalse(result["success"])
+        self.assertTrue(result.get("reflection_blocked"))
+        self.assertEqual(result["reflection"]["reason"], "unit_block")
+        mock_reflect.assert_called_once()
+        mock_companion.execute.assert_not_called()
 
 
 # ══════════════════════════════════════════════════

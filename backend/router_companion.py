@@ -17,6 +17,7 @@ from backend.companion_confirmation import (
 from backend.security import is_command_allowed, check_rate_limit, audit_log, validate_params, read_recent_audit_entries
 from backend.i18n import t
 from backend.personal_os_actions import execute_personal_os_action, is_personal_os_action
+from backend.agent_reflection import reflect_action
 from backend.tool_registry import ToolSchemaValidationError, validate_tool_arguments
 
 logger = logging.getLogger("lexa.companion")
@@ -153,6 +154,20 @@ async def execute_command(req: CommandRequest):
     schema_params, schema_error = _validate_registry_params(command, req.params, "tool_schema_invalid")
     if schema_error:
         return CommandResponse(success=False, error=GENERIC_INVALID_TOOL_ARGUMENTS)
+
+    reflection = reflect_action(
+        command,
+        schema_params,
+        permission=permission,
+        source="companion_execute",
+    )
+    if reflection is not None and not reflection.should_execute:
+        audit_log(command, "reflection_blocked", f"source=companion_execute reason={reflection.reason[:120]}")
+        return CommandResponse(
+            success=False,
+            error="Action was blocked by safety reflection.",
+            requires_confirmation=reflection.requires_confirmation,
+        )
 
     # Validate params for safety
     try:
@@ -321,6 +336,22 @@ async def execute_batch(req: BatchCommandRequest):
         )
         if schema_error:
             entry = {"command": cmd.command, "success": False, "error": GENERIC_INVALID_TOOL_ARGUMENTS}
+            results.append(entry)
+            all_ok = False
+            if req.stop_on_error:
+                break
+            continue
+
+        reflection = reflect_action(
+            cmd.command,
+            schema_params,
+            permission=permission,
+            source="companion_batch",
+            plan_length=len(req.commands),
+        )
+        if reflection is not None and not reflection.should_execute:
+            audit_log(cmd.command, "reflection_blocked", f"source=companion_batch reason={reflection.reason[:120]}")
+            entry = {"command": cmd.command, "success": False, "error": "Action was blocked by safety reflection."}
             results.append(entry)
             all_ok = False
             if req.stop_on_error:

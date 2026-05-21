@@ -10,6 +10,7 @@ import re
 from datetime import datetime
 
 from backend import memory
+from backend.agent_reflection import reflect_action
 from backend.security import is_command_allowed, audit_log, validate_params
 from backend.tool_registry import ToolSchemaValidationError, validate_tool_arguments
 from backend.i18n import t
@@ -84,24 +85,38 @@ async def _run_routine(routine: dict):
         if not command:
             continue
 
+        try:
+            schema_params = validate_tool_arguments(command, params)
+        except ToolSchemaValidationError as e:
+            logger.warning("Scheduler: invalid tool args for %s in routine %s: %s", command, name, e)
+            audit_log("scheduler", "tool_schema_invalid", f"CMD={command} ROUTINE={name} ERR={str(e)[:200]}")
+            continue
+
         permission = is_command_allowed(command)
+        reflection = reflect_action(
+            command,
+            schema_params,
+            permission=permission,
+            source="scheduler",
+            plan_length=len(actions),
+        )
+        if reflection is not None and not reflection.should_execute:
+            logger.warning("Scheduler: reflection blocked %s in routine %s: %s", command, name, reflection.reason)
+            audit_log("scheduler", "reflection_blocked", f"CMD={command} ROUTINE={name} REASON={reflection.reason[:120]}")
+            continue
+
         if permission == "blocked":
             logger.warning(t("scheduler.blocked", command=command, name=name))
             audit_log("scheduler", "blocked", f"CMD={command} ROUTINE={name}")
             continue
 
-        if permission == "confirmation_required":
+        if permission in {"confirmation_required", "unknown"}:
             logger.info(t("scheduler.needsConfirmation", command=command))
             audit_log("scheduler", "skipped_confirmation", f"CMD={command} ROUTINE={name}")
             continue
 
         try:
-            schema_params = validate_tool_arguments(command, params)
             safe_params = validate_params(command, schema_params)
-        except ToolSchemaValidationError as e:
-            logger.warning("Scheduler: invalid tool args for %s in routine %s: %s", command, name, e)
-            audit_log("scheduler", "tool_schema_invalid", f"CMD={command} ROUTINE={name} ERR={str(e)[:200]}")
-            continue
         except ValueError as e:
             logger.warning("Scheduler: blocked params for %s in routine %s: %s", command, name, e)
             audit_log("scheduler", "param_blocked", f"CMD={command} ROUTINE={name} ERR={str(e)[:200]}")

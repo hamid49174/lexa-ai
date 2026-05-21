@@ -32,6 +32,7 @@ from backend.config import (
     MAX_HISTORY,
     TOOL_USE_MAX_TOOLS,
 )
+from backend.agent_reflection import reflect_action
 from backend.security import is_command_allowed, audit_log, validate_params
 from backend.action_parser import _ACTION_NAME_PATTERN, _sanitize_params
 from backend.i18n import t
@@ -325,7 +326,7 @@ def _coerce_agent_tool_arguments(raw_params) -> tuple[Optional[dict], Optional[s
     return raw_params, None
 
 
-async def _execute_tool(action_name: str, params: dict) -> dict:
+async def _execute_tool(action_name: str, params: dict, *, plan_length: int = 1, low_confidence: bool = False) -> dict:
     """Execute a single tool call via CompanionEngine or a safe async bridge.
 
     Returns: {"success": bool, "data": ..., "error": ...}
@@ -354,8 +355,25 @@ async def _execute_tool(action_name: str, params: dict) -> dict:
         )
         return _reject_agent_tool_schema(action_name, "schema validation unavailable")
 
-    # Check permission (before any heavy imports)
+    # Permission classification is read-only; enforcement happens after reflection.
     permission = is_command_allowed(action_name)
+
+    reflection = reflect_action(
+        action_name,
+        schema_params,
+        permission=permission,
+        source="agent_loop",
+        plan_length=plan_length,
+        low_confidence=low_confidence,
+    )
+    if reflection is not None and not reflection.should_execute:
+        audit_log(action_name, "agent_reflection_blocked", f"reason={reflection.reason[:120]}")
+        return {
+            "success": False,
+            "error": "Aktion wurde nach Sicherheitsreflexion nicht ausgefuehrt.",
+            "reflection_blocked": True,
+            "reflection": reflection.to_dict(),
+        }
 
     if permission == "blocked":
         audit_log(action_name, "agent_blocked")
@@ -706,8 +724,16 @@ async def run_agent(
 
                 # Execute the tool
                 try:
+                    execute_kwargs = {}
+                    try:
+                        import inspect
+
+                        if "plan_length" in inspect.signature(_execute_tool).parameters:
+                            execute_kwargs["plan_length"] = len(tool_calls)
+                    except (TypeError, ValueError):
+                        execute_kwargs = {}
                     exec_result = await asyncio.wait_for(
-                        _execute_tool(action_name, params),
+                        _execute_tool(action_name, params, **execute_kwargs),
                         timeout=AGENT_STEP_TIMEOUT,
                     )
                 except asyncio.TimeoutError:

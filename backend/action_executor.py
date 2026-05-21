@@ -14,6 +14,7 @@ import logging
 from typing import Optional
 
 from companion.engine import companion
+from backend.agent_reflection import reflect_action
 from backend.security import is_command_allowed, validate_params, audit_log
 from backend.tool_registry import ToolSchemaValidationError, validate_tool_arguments
 
@@ -59,8 +60,24 @@ def execute_action(
             "requires_confirmation": False,
         }
 
-    # Permission check
+    # Permission classification is read-only; enforcement happens after reflection.
     permission = is_command_allowed(action_name)
+
+    reflection = reflect_action(
+        action_name,
+        schema_params,
+        permission=permission,
+        source=source,
+    )
+    if reflection is not None and not reflection.should_execute:
+        audit_log(action_name, "reflection_blocked", f"source={source} reason={reflection.reason[:120]}")
+        return {
+            "success": False,
+            "error": "Aktion wurde nach Sicherheitsreflexion nicht ausgefuehrt.",
+            "executed": False,
+            "requires_confirmation": reflection.requires_confirmation,
+            "reflection": reflection.to_dict(),
+        }
 
     if permission == "blocked":
         audit_log(action_name, "blocked", f"source={source}")

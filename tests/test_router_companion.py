@@ -125,9 +125,42 @@ class TestExecuteCommand:
         assert res.status_code == 200
         mock_comp.execute.assert_called_once_with("app_open", {"name": "notepad"})
 
-    def test_execute_rejects_schema_invalid_params(self, client):
+    def test_execute_reflection_block_prevents_companion_call(self, client, monkeypatch):
+        from backend.agent_reflection import ReflectionDecision
+
+        tc, mock_comp, _ = client
+        monkeypatch.setattr(
+            "backend.router_companion.reflect_action",
+            lambda *args, **kwargs: ReflectionDecision(
+                should_execute=False,
+                risk_level="medium",
+                confidence=0.2,
+                concerns=["unit"],
+                safer_alternative={"mode": "read_only"},
+                requires_confirmation=False,
+                verification_step="verify first",
+                reason="unit_block",
+            ),
+        )
+
+        res = tc.post("/companion/execute", json={
+            "command": "app_open",
+            "params": {"name": "notepad"},
+        })
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is False
+        assert data["error"] == "Action was blocked by safety reflection."
+        mock_comp.execute.assert_not_called()
+
+    def test_execute_rejects_schema_invalid_params(self, client, monkeypatch):
         tc, mock_comp, mock_allowed = client
         mock_allowed.return_value = "always_allowed"
+        monkeypatch.setattr(
+            "backend.router_companion.reflect_action",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("reflection should not run")),
+        )
 
         res = tc.post("/companion/execute", json={
             "command": "app_open",
@@ -407,6 +440,34 @@ class TestBatchExecution:
         assert data["success"] is False
         assert data["results"][0]["error"] == "Command execution failed. Details were logged locally."
         assert "Sensitive local path" not in data["results"][0]["error"]
+
+    def test_batch_reflection_block_prevents_companion_call(self, client, monkeypatch):
+        from backend.agent_reflection import ReflectionDecision
+
+        tc, mock_comp, _ = client
+        monkeypatch.setattr(
+            "backend.router_companion.reflect_action",
+            lambda *args, **kwargs: ReflectionDecision(
+                should_execute=False,
+                risk_level="medium",
+                confidence=0.2,
+                concerns=["unit"],
+                safer_alternative={"mode": "read_only"},
+                requires_confirmation=False,
+                verification_step="verify first",
+                reason="unit_block",
+            ),
+        )
+
+        res = tc.post("/companion/execute/batch", json={
+            "commands": [{"command": "app_open", "params": {"name": "notepad"}}],
+        })
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is False
+        assert data["results"][0]["error"] == "Action was blocked by safety reflection."
+        mock_comp.execute.assert_not_called()
 
 
 # ══════════════════════════════════════════════════
