@@ -171,6 +171,19 @@ class TestPermissionHandling(unittest.TestCase):
         self.assertFalse(requires_conf)
         self.assertEqual(action["params"], {"name": "notepad"})
 
+    def test_native_tool_call_malformed_string_arguments_are_rejected(self):
+        with patch.object(ap, "is_command_allowed", return_value="allowed"), \
+             patch.object(ap, "validate_command_output", return_value=None), \
+             patch.object(ap, "audit_log") as mock_audit:
+            _, action, requires_conf = ap.process_tool_call(
+                [{"id": "x", "name": "system_info", "arguments": '{"unexpected":'}],
+                ai_message="",
+                source="chat_stream",
+            )
+        self.assertIsNone(action)
+        self.assertFalse(requires_conf)
+        self.assertTrue(any(call.args[1] == "tool_schema_invalid" for call in mock_audit.call_args_list))
+
     def test_native_tool_call_missing_required_argument_is_rejected(self):
         with patch.object(ap, "is_command_allowed", return_value="allowed"), \
              patch.object(ap, "validate_command_output", return_value=None), \
@@ -259,6 +272,10 @@ class TestJsonExtraction(unittest.TestCase):
 
     def test_no_json_returns_none(self):
         r = self._extract("Just a plain text response without any JSON.")
+        self.assertIsNone(r)
+
+    def test_malformed_json_action_returns_none(self):
+        r = self._extract('{"action":"system_info","params":')
         self.assertIsNone(r)
 
     def test_non_action_json_returns_none(self):

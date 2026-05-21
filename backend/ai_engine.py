@@ -457,17 +457,21 @@ def _summarize_messages_local(messages: list[dict]) -> str:
 #  SHARED RESPONSE PROCESSING (DRY — used by all providers)
 # ══════════════════════════════════════════════════
 
+def _parse_tool_arguments(raw_arguments):
+    if raw_arguments in (None, ""):
+        return {}
+    try:
+        return json.loads(raw_arguments)
+    except (json.JSONDecodeError, TypeError):
+        return raw_arguments
+
+
 def _parse_tool_calls_from_message(msg) -> list[dict]:
     """Extract tool calls from an API response message object.
     Shared by Groq, OpenAI, and Gemini response processing."""
     tool_calls = []
     for tc in msg.tool_calls:
-        try:
-            args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-        except (json.JSONDecodeError, TypeError):
-            args = {}
-        if not isinstance(args, dict):
-            args = {}
+        args = _parse_tool_arguments(tc.function.arguments)
         tool_calls.append({
             "id": tc.id,
             "name": tc.function.name,
@@ -898,7 +902,7 @@ def _process_anthropic_response(result: dict) -> Optional[dict]:
                 {
                     "id": block.get("id") or "",
                     "name": block.get("name") or "",
-                    "arguments": block.get("input") or {},
+                    "arguments": block["input"] if "input" in block else {},
                 }
             )
 
@@ -1409,13 +1413,13 @@ def chat_stream(
                 for idx in sorted(tool_call_chunks.keys()):
                     tc = tool_call_chunks[idx]
                     args_str = "".join(tc["arguments_parts"])
-                    try:
-                        args = json.loads(args_str) if args_str else {}
-                    except (json.JSONDecodeError, TypeError) as parse_err:
-                        logger.warning(f"Failed to parse tool call args for '{tc['name']}': {parse_err} — raw: {args_str[:200]}")
-                        args = {}
+                    args = _parse_tool_arguments(args_str)
                     if not isinstance(args, dict):
-                        args = {}
+                        logger.warning(
+                            "Invalid streamed tool call args for '%s' kept for schema rejection: %s",
+                            tc["name"],
+                            str(args)[:200],
+                        )
                     tool_calls.append({
                         "id": tc["id"],
                         "name": tc["name"],

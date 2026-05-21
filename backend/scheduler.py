@@ -10,7 +10,8 @@ import re
 from datetime import datetime
 
 from backend import memory
-from backend.security import is_command_allowed, audit_log
+from backend.security import is_command_allowed, audit_log, validate_params
+from backend.tool_registry import ToolSchemaValidationError, validate_tool_arguments
 from backend.i18n import t
 
 logger = logging.getLogger("lexa.scheduler")
@@ -95,8 +96,20 @@ async def _run_routine(routine: dict):
             continue
 
         try:
+            schema_params = validate_tool_arguments(command, params)
+            safe_params = validate_params(command, schema_params)
+        except ToolSchemaValidationError as e:
+            logger.warning("Scheduler: invalid tool args for %s in routine %s: %s", command, name, e)
+            audit_log("scheduler", "tool_schema_invalid", f"CMD={command} ROUTINE={name} ERR={str(e)[:200]}")
+            continue
+        except ValueError as e:
+            logger.warning("Scheduler: blocked params for %s in routine %s: %s", command, name, e)
+            audit_log("scheduler", "param_blocked", f"CMD={command} ROUTINE={name} ERR={str(e)[:200]}")
+            continue
+
+        try:
             if _companion_execute:
-                result = _companion_execute(command, params)
+                result = _companion_execute(command, safe_params)
                 logger.info(f"Scheduler: {command} -> OK")
                 audit_log("scheduler", "executed", f"CMD={command} ROUTINE={name}")
             else:

@@ -17,10 +17,12 @@ from backend.companion_confirmation import (
 from backend.security import is_command_allowed, check_rate_limit, audit_log, validate_params, read_recent_audit_entries
 from backend.i18n import t
 from backend.personal_os_actions import execute_personal_os_action, is_personal_os_action
+from backend.tool_registry import ToolSchemaValidationError, validate_tool_arguments
 
 logger = logging.getLogger("lexa.companion")
 router = APIRouter(prefix="/companion", tags=["companion"])
 GENERIC_EXECUTION_ERROR = "Command execution failed. Details were logged locally."
+GENERIC_INVALID_TOOL_ARGUMENTS = "Tool arguments are invalid. Action was not executed."
 
 
 class CommandRequest(BaseModel):
@@ -86,6 +88,15 @@ def _validate_result(result) -> dict:
     return normalized
 
 
+def _validate_registry_params(command: str, params: dict, status: str) -> tuple[dict | None, str | None]:
+    try:
+        return validate_tool_arguments(command, params), None
+    except ToolSchemaValidationError as exc:
+        logger.warning("Rejected invalid tool args for %s: %s", command, exc)
+        audit_log(command, status, str(exc)[:200])
+        return None, str(exc)
+
+
 @router.post("/execute/prepare")
 async def prepare_command(req: PrepareCommandRequest):
     if not check_rate_limit("execute"):
@@ -101,8 +112,15 @@ async def prepare_command(req: PrepareCommandRequest):
         audit_log(command, "prepare_unknown")
         raise HTTPException(status_code=400, detail={"code": "unknown_command", "message": t("command.needsConfirmation", command=command)})
 
+    schema_params, schema_error = _validate_registry_params(command, req.params, "prepare_tool_schema_invalid")
+    if schema_error:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_tool_arguments", "message": GENERIC_INVALID_TOOL_ARGUMENTS},
+        )
+
     try:
-        safe_params = validate_params(command, req.params)
+        safe_params = validate_params(command, schema_params)
     except ValueError as e:
         audit_log(command, "prepare_param_blocked", str(e))
         raise HTTPException(status_code=400, detail={"code": "invalid_params", "message": str(e)})
@@ -132,9 +150,13 @@ async def execute_command(req: CommandRequest):
 
     action_scope = _permission_scope(permission)
 
+    schema_params, schema_error = _validate_registry_params(command, req.params, "tool_schema_invalid")
+    if schema_error:
+        return CommandResponse(success=False, error=GENERIC_INVALID_TOOL_ARGUMENTS)
+
     # Validate params for safety
     try:
-        safe_params = validate_params(command, req.params)
+        safe_params = validate_params(command, schema_params)
     except ValueError as e:
         audit_log(command, "param_blocked", str(e))
         return CommandResponse(success=False, error=str(e))
@@ -292,8 +314,21 @@ async def execute_batch(req: BatchCommandRequest):
                 break
             continue
 
+        schema_params, schema_error = _validate_registry_params(
+            cmd.command,
+            cmd.params,
+            "batch_tool_schema_invalid",
+        )
+        if schema_error:
+            entry = {"command": cmd.command, "success": False, "error": GENERIC_INVALID_TOOL_ARGUMENTS}
+            results.append(entry)
+            all_ok = False
+            if req.stop_on_error:
+                break
+            continue
+
         try:
-            safe_params = validate_params(cmd.command, cmd.params)
+            safe_params = validate_params(cmd.command, schema_params)
         except ValueError as e:
             audit_log(cmd.command, "param_blocked", str(e))
             entry = {"command": cmd.command, "success": False, "error": str(e)}

@@ -217,7 +217,7 @@ def test_auditlog_redacts_tokens_and_full_sensitive_params(companion_confirmatio
     client, _, audit_entries = companion_confirmation_client
     params = {
         "to": "person@example.com",
-        "token": "SECRET_TOKEN_123456",
+        "subject": "Sensitive subject",
         "body": "private contents that must not be written fully",
     }
     prepared = _prepare(client, command="email_send", params=params)
@@ -231,10 +231,10 @@ def test_auditlog_redacts_tokens_and_full_sensitive_params(companion_confirmatio
 
     assert res.status_code == 200
     audit_text = "\n".join(f"{command} {status} {details}" for command, status, details in audit_entries)
-    assert "SECRET_TOKEN_123456" not in audit_text
     assert "private contents that must not be written fully" not in audit_text
+    assert "Sensitive subject" not in audit_text
     assert "person@example.com" not in audit_text
-    assert "params=[body,to,token]" in audit_text
+    assert "params=[body,subject,to]" in audit_text
 
 
 def test_prepare_without_local_auth_token_is_401(monkeypatch):

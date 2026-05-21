@@ -465,6 +465,46 @@ class TestAnthropicProvider:
             "arguments": {"minutes": 25},
         }
 
+    def test_openai_tool_argument_parse_preserves_malformed_args_for_schema_rejection(self):
+        from backend.ai_engine import _parse_tool_calls_from_message
+
+        class Fn:
+            name = "system_info"
+            arguments = '{"unexpected":'
+
+        class ToolCall:
+            id = "call_1"
+            function = Fn()
+
+        class Message:
+            tool_calls = [ToolCall()]
+
+        parsed = _parse_tool_calls_from_message(Message())
+
+        assert parsed == [{
+            "id": "call_1",
+            "name": "system_info",
+            "arguments": '{"unexpected":',
+        }]
+
+    def test_openai_tool_argument_parse_preserves_non_object_args_for_schema_rejection(self):
+        from backend.ai_engine import _parse_tool_calls_from_message
+
+        class Fn:
+            name = "system_info"
+            arguments = '["not", "an", "object"]'
+
+        class ToolCall:
+            id = "call_1"
+            function = Fn()
+
+        class Message:
+            tool_calls = [ToolCall()]
+
+        parsed = _parse_tool_calls_from_message(Message())
+
+        assert parsed[0]["arguments"] == ["not", "an", "object"]
+
     def test_anthropic_chat_routes_through_unified_provider(self, monkeypatch):
         from backend import ai_engine
 

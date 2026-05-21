@@ -15,6 +15,11 @@ logger = logging.getLogger("lexa.tool_registry")
 # ── Storage ──
 TOOL_DEFINITIONS: list[dict] = []
 _TOOL_MAP: dict[str, dict] = {}  # name -> full tool definition
+_DANGEROUS_ARGUMENT_KEYS: frozenset[str] = frozenset({
+    "__proto__",
+    "constructor",
+    "prototype",
+})
 
 
 class ToolSchemaValidationError(ValueError):
@@ -851,12 +856,25 @@ def validate_tool_arguments(name: str, arguments: dict) -> dict:
     if not isinstance(arguments, dict):
         raise ToolSchemaValidationError("arguments must be an object")
 
+    _validate_no_dangerous_argument_keys(arguments)
     parameters = tool.get("function", {}).get("parameters") or {
         "type": "object",
         "properties": {},
     }
     _validate_schema_object(parameters, arguments, path="arguments", reject_unknown=True)
     return dict(arguments)
+
+
+def _validate_no_dangerous_argument_keys(value: Any, path: str = "arguments") -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key)
+            if key_text in _DANGEROUS_ARGUMENT_KEYS:
+                raise ToolSchemaValidationError(f"{path}.{key_text} is not allowed")
+            _validate_no_dangerous_argument_keys(item, f"{path}.{key_text}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_no_dangerous_argument_keys(item, f"{path}[{index}]")
 
 
 def _validate_schema_object(schema: dict, value: dict, path: str, reject_unknown: bool) -> None:

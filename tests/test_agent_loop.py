@@ -127,6 +127,16 @@ class TestToolExecution(unittest.TestCase):
         mock_companion.execute.assert_not_called()
         mock_perm.assert_not_called()
 
+    @patch("backend.agent_loop.is_command_allowed", return_value="allowed")
+    @patch("companion.engine.companion")
+    def test_schema_invalid_hallucinated_tool_does_not_execute(self, mock_companion, mock_perm):
+        result = _run(_execute_tool("hallucinated_tool", {}))
+
+        self.assertFalse(result["success"])
+        self.assertIn("Tool-Argumente ungueltig", result["error"])
+        mock_companion.execute.assert_not_called()
+        mock_perm.assert_not_called()
+
 
 # ══════════════════════════════════════════════════
 #  RESULT FORMATTING

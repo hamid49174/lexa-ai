@@ -125,6 +125,34 @@ class TestExecuteCommand:
         assert res.status_code == 200
         mock_comp.execute.assert_called_once_with("app_open", {"name": "notepad"})
 
+    def test_execute_rejects_schema_invalid_params(self, client):
+        tc, mock_comp, mock_allowed = client
+        mock_allowed.return_value = "always_allowed"
+
+        res = tc.post("/companion/execute", json={
+            "command": "app_open",
+            "params": {"name": 123},
+        })
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is False
+        assert data["error"] == "Tool arguments are invalid. Action was not executed."
+        mock_comp.execute.assert_not_called()
+
+    def test_prepare_rejects_schema_invalid_params(self, client):
+        tc, mock_comp, mock_allowed = client
+        mock_allowed.return_value = "confirmation_required"
+
+        res = tc.post("/companion/execute/prepare", json={
+            "command": "shutdown",
+            "params": {"delay": "1"},
+        })
+
+        assert res.status_code == 400
+        assert res.json()["detail"]["code"] == "invalid_tool_arguments"
+        mock_comp.execute.assert_not_called()
+
     def test_execute_personal_os_action_routes_without_companion(self, client, monkeypatch):
         tc, mock_comp, _ = client
         calls = []

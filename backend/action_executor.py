@@ -15,6 +15,7 @@ from typing import Optional
 
 from companion.engine import companion
 from backend.security import is_command_allowed, validate_params, audit_log
+from backend.tool_registry import ToolSchemaValidationError, validate_tool_arguments
 
 logger = logging.getLogger("lexa.executor")
 
@@ -46,6 +47,18 @@ def execute_action(
     if not action_name:
         return {"success": False, "error": "Kein Aktionsname.", "executed": False, "requires_confirmation": False}
 
+    try:
+        schema_params = validate_tool_arguments(action_name, params)
+    except ToolSchemaValidationError as e:
+        logger.warning("Rejected invalid action args for %s from %s: %s", action_name, source, e)
+        audit_log(action_name, "tool_schema_invalid", f"source={source} error={str(e)[:200]}")
+        return {
+            "success": False,
+            "error": "Tool-Argumente ungueltig. Aktion wurde nicht ausgefuehrt.",
+            "executed": False,
+            "requires_confirmation": False,
+        }
+
     # Permission check
     permission = is_command_allowed(action_name)
 
@@ -64,7 +77,7 @@ def execute_action(
 
     # Validate params
     try:
-        safe_params = validate_params(action_name, params)
+        safe_params = validate_params(action_name, schema_params)
     except ValueError as e:
         audit_log(action_name, "param_blocked", str(e))
         return {"success": False, "error": str(e), "executed": False, "requires_confirmation": False}
