@@ -316,9 +316,23 @@ const EXTERNAL_LEXA_BACKEND = "__external_lexa_backend__";
 const AUTH_MISMATCH_LEXA_BACKEND = "__auth_mismatch_lexa_backend__";
 const HEALTH_CHECK_BODY_LIMIT = 64 * 1024;
 const HEALTH_CHECK_TIMEOUT_MS = 2000;
+const LOCAL_AUTH_HEADER = "X-Lexa-Local-Token";
 const LOCAL_AUTH_COOKIE = "lexa_local_auth";
 const INSTANCE_TOKEN = crypto.randomBytes(16).toString("hex");
 let backendRestartAttempts = 0;
+
+function installLocalAuthRequestHeaders(ses = session.defaultSession) {
+  if (!ses?.webRequest || ses.__lexaLocalAuthHeaderInstalled) return;
+  ses.__lexaLocalAuthHeaderInstalled = true;
+  ses.webRequest.onBeforeSendHeaders(
+    { urls: ["http://127.0.0.1:8000/*", "http://localhost:8000/*"] },
+    (details, callback) => {
+      const requestHeaders = { ...(details.requestHeaders || {}) };
+      requestHeaders[LOCAL_AUTH_HEADER] = INSTANCE_TOKEN;
+      callback({ requestHeaders });
+    },
+  );
+}
 
 async function installLocalAuthCookie() {
   await session.defaultSession.cookies.set({
@@ -1267,6 +1281,7 @@ app.whenReady().then(async () => {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   process.env.LEXA_DATA_DIR = dataDir;
   console.log("[App] Data directory:", dataDir);
+  installLocalAuthRequestHeaders();
   await installLocalAuthCookie();
 
   // Initialize trial license on first launch
