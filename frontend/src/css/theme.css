@@ -57,6 +57,10 @@
   /* Shadows */
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
   --shadow-glow: 0 0 30px rgba(124, 106, 239, 0.06);
+
+  /* Scrollbar standard tokens */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.08);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.14);
 }
 
 /* ── LIGHT THEME ──────────────────────────────── */
@@ -84,6 +88,10 @@
   --card-bg: rgba(255, 255, 255, 0.90);
   --shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
   --shadow-glow: none;
+
+  /* Scrollbar standard tokens */
+  --scrollbar-thumb: rgba(0, 0, 0, 0.10);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.18);
 }
 
 /* ── ACCENT VARIANTS ─────────────────────────── */
@@ -154,13 +162,31 @@ html[data-font-size="16"] body { font-size: 16px; }
 }
 
 /* ── SCROLLBARS ───────────────────────────────── */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 3px;
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.14); }
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 99px;
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.2s ease;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Global scrollbar for Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
 
 /* ── SELECTION ────────────────────────────────── */
 ::selection {

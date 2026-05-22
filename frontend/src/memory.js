@@ -475,8 +475,7 @@ function renderMemoryGraphLegend(graph) {
     const item = document.createElement("span");
     item.className = "memory-graph-legend-item";
     const dot = document.createElement("span");
-    dot.className = "memory-graph-legend-dot";
-    dot.style.background = memoryGraphColor(type);
+    dot.className = `memory-graph-legend-dot memory-graph-legend-dot-${memoryGraphClassToken(type, "node")}`;
     const label = document.createElement("span");
     label.textContent = type;
     item.append(dot, label);

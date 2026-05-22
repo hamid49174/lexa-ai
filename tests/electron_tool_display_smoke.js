@@ -117,9 +117,9 @@ async function main() {
 
       const sse = (payload) => "data: " + JSON.stringify(payload) + "\\n\\n";
       const okJsonResponse = () => new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
-      const streamResponse = (action) => new Response(new ReadableStream({
+      const streamResponse = (action, reply = "Tool placeholder before execution") => new Response(new ReadableStream({
         start(controller) {
-          controller.enqueue(encoder.encode(sse({ c: "Tool placeholder before execution" })));
+          controller.enqueue(encoder.encode(sse({ c: reply })));
           controller.enqueue(encoder.encode(sse({ done: true, action, rc: false })));
           controller.close();
         },
@@ -146,13 +146,13 @@ async function main() {
         send.disabled = false;
       }
 
-      async function runToolScenario(prompt, action) {
+      async function runToolScenario(prompt, action, reply) {
         await resetChat();
         const fetchCalls = [];
         window.fetch = async (url, options = {}) => {
           const urlText = String(url || "");
           fetchCalls.push({ url: urlText, body: typeof options.body === "string" ? options.body : "" });
-          if (urlText.endsWith("/chat/stream")) return streamResponse(action);
+          if (urlText.endsWith("/chat/stream")) return streamResponse(action, reply);
           return okJsonResponse();
         };
         const input = document.getElementById("chat-input");
@@ -199,6 +199,12 @@ async function main() {
       };
       const noDisplayFlow = await runToolScenario("Show mocked no-result tool", noDisplayAction);
 
+      const technicalAction = {
+        action: "app_open",
+        params: { name: "notepad" },
+      };
+      const technicalFallbackFlow = await runToolScenario("Open a local app", technicalAction, "Fuehre 'app_open' aus.");
+
       await resetChat();
       renderPersistedConversationMessages([
         { role: "user", content: "History request" },
@@ -217,7 +223,7 @@ async function main() {
 
       window.fetch = originalFetch;
       window.playTTS = originalTts;
-      return { successFlow, noDisplayFlow, historyFlow };
+      return { successFlow, noDisplayFlow, technicalFallbackFlow, historyFlow };
     })();
   `);
 
@@ -234,6 +240,11 @@ async function main() {
   assert("mocked no-result tool keeps safe placeholder text", noDisplay.waitOk === true && /Tool placeholder/.test(noDisplay.text || "") && Number(noDisplay.scriptTags || 0) === 0 && !/<script|<img/i.test(noDisplay.html || ""), JSON.stringify(noDisplay));
   assert("mocked no-result tool display creates no live or blocked action card", noDisplay.confirmButtons === 0 && noDisplay.denyButtons === 0 && noDisplay.actionCards === 0 && noDisplay.systemMessageCount === 1, JSON.stringify(noDisplay));
   assert("unsafe action name and params stay invisible", !noDisplay.actionText && !noDisplay.actionHtml && !noDisplay.actionDetailHtml, JSON.stringify(noDisplay));
+
+  const technical = result.technicalFallbackFlow || {};
+  console.log("\nTechnical local action fallback display:");
+  assert("technical local action fallback is product-friendly", technical.waitOk === true && /Ich bin da|I am here/i.test(technical.text || "") && !/app_open|Fuehre|Führe|LOKALE AKTION BLOCKIERT|lokale Aktion|local action|PC-Aktionen|PC actions/i.test(technical.text || "") && technical.actionCards === 0, JSON.stringify(technical));
+  assert("technical local action fallback keeps action details invisible", technical.confirmButtons === 0 && technical.denyButtons === 0 && !technical.actionText && !technical.actionHtml && !technical.actionDetailHtml, JSON.stringify(technical));
 
   const history = result.historyFlow || {};
   console.log("\nPersisted tool result display:");

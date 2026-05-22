@@ -3,6 +3,7 @@ import re
 
 
 FRONTEND_SRC = Path(__file__).resolve().parents[1] / "frontend" / "src"
+IGNORED_EXTERNAL_DIRS = {"vendor"}
 
 
 BLOCKERS = {
@@ -20,6 +21,8 @@ BLOCKERS = {
 def test_frontend_has_no_inline_style_or_csp_bypass_regressions():
     findings = []
     for path in FRONTEND_SRC.rglob("*"):
+        if any(part in IGNORED_EXTERNAL_DIRS for part in path.relative_to(FRONTEND_SRC).parts):
+            continue
         if path.suffix.lower() not in {".html", ".js", ".css"}:
             continue
         text = path.read_text(encoding="utf-8")
@@ -30,6 +33,12 @@ def test_frontend_has_no_inline_style_or_csp_bypass_regressions():
                     findings.append(f"{rel}:{line_no}: {label}: {line.strip()}")
 
     assert not findings, "CSP/static inline-style blockers found:\n" + "\n".join(findings)
+
+
+def test_index_does_not_depend_on_ignored_local_vendor_assets():
+    index_html = FRONTEND_SRC / "index.html"
+    text = index_html.read_text(encoding="utf-8")
+    assert "./vendor/" not in text and "/vendor/" not in text
 
 
 def test_index_csp_has_electron_defense_in_depth_directives():

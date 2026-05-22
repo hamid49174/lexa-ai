@@ -15,13 +15,16 @@ class LexaOrb3D {
       baseScale: 3.5,
       detail: 12,
       wobbleSpeed: 0.0005,
-      baseWobble: 0.015,
+      baseWobble: 0.02,
       audioImpactMultiplier: 0.7,
       maxPixelRatio: 1.5,
-      geometryUpdateMs: 34,
-      colorUpdateMs: 50,
-      normalUpdateMs: 520
+      geometryUpdateMs: 0,
+      colorUpdateMs: 0,
+      normalUpdateMs: 0
     }, options);
+
+    // Dynamic runtime clamp to prevent millions of CPU loop calculations and eliminate main thread stutter
+    this.options.detail = 4;
 
     this.simplex = new SimplexNoise();
     this.originalVertices = [];
@@ -50,14 +53,14 @@ class LexaOrb3D {
     this.RELEASE = 0.06;
     this.PEAK_DECAY = 0.03;
 
-    // Hotspot definitions (positions will be set relative to R)
+    // Hotspot definitions (positions will be set relative to R) using strictly the Fuchsia/Cyan/Violet palette
     this.hotspots = [
-      { color: new THREE.Color(0x7c3aed), dir: new THREE.Vector3(-0.6, 0.65, 0.5).normalize() },   // Violet
-      { color: new THREE.Color(0xd946ef), dir: new THREE.Vector3(0.5, 0.6, 0.55).normalize() },     // Fuchsia
-      { color: new THREE.Color(0xf59e0b), dir: new THREE.Vector3(0.55, -0.5, 0.6).normalize() }     // Amber
+      { color: new THREE.Color(0x00f0ff), dir: new THREE.Vector3(-0.6, 0.65, 0.5).normalize() },   // Neon Cyan
+      { color: new THREE.Color(0xff00a0), dir: new THREE.Vector3(0.5, 0.6, 0.55).normalize() },     // Vibrant Fuchsia
+      { color: new THREE.Color(0x8a2be2), dir: new THREE.Vector3(0.55, -0.5, 0.6).normalize() }     // Deep Violet
     ];
-    // Base dot color: visible enough to read on the dark app background.
-    this.baseColor = new THREE.Color(0x4c2a78);
+    // Base dot color: dark glowing indigo-violet that blends elegantly with the obsidian core.
+    this.baseColor = new THREE.Color(0x2a144a);
 
     // Store base light values for audio modulation
     this._baseLights = {
@@ -90,7 +93,7 @@ class LexaOrb3D {
     this.scene.add(this.group);
 
     // ── LAYER 1: Dark metallic core — catches PointLight specular highlights ──
-    const coreGeo = new THREE.SphereGeometry(R * 0.92, 56, 56);
+    const coreGeo = new THREE.SphereGeometry(R * 0.92, 32, 32);
     const corePos = coreGeo.attributes.position;
     for (let i = 0; i < corePos.count; i++) {
       this.coreOriginalVertices.push(new THREE.Vector3(
@@ -98,27 +101,71 @@ class LexaOrb3D {
       ));
     }
     const coreMat = new THREE.MeshPhongMaterial({
-      color: 0x120326,
-      specular: 0x8c6ad8,
-      shininess: 120,
+      color: 0x05010a,       // Very dark pitch-black liquid obsidian core
+      specular: 0x3a2266,    // Elegant, subtle dark violet highlights
+      shininess: 150,        // High-end glossy reflection sheen
       transparent: true,
-      opacity: 0.9
+      opacity: 0.95
     });
     this.core = new THREE.Mesh(coreGeo, coreMat);
+    this.core.visible = false; // Hide the old solid metallic core completely for hollow stardust look
     this.group.add(this.core);
 
-    // ── LAYER 2: Dot-grid shell with vertex colors (Icosahedron = even distribution) ──
-    const shellGeo = new THREE.IcosahedronGeometry(R, this.options.detail);
+    // ── LAYER 1B: Volumetric Holographic Glass Shell — adds premium depth, fresnel-like sheen ──
+    const glassGeo = new THREE.SphereGeometry(R * 0.96, 32, 32);
+    const glassMat = new THREE.MeshPhongMaterial({
+      color: 0x0a0114,       // Deep dark glowing indigo glass
+      emissive: 0x06000c,    // Extremely deep dark ambient glow
+      specular: 0xffffff,    // Bright glistening glass specular reflection
+      shininess: 160,
+      transparent: true,
+      opacity: 0.22,
+      blending: THREE.AdditiveBlending
+    });
+    this.glassShell = new THREE.Mesh(glassGeo, glassMat);
+    this.glassShell.visible = false; // Hide the glass shell completely for a beautiful hollow particle sphere
+    this.group.add(this.glassShell);
+
+    // ── LAYER 2: Dot-grid shell with custom organic random distribution matching serioushomebrew/js-3d-particlesphere ──
+    const shellGeo = new THREE.BufferGeometry();
+    const vertices = [];
+    const numPoints = 1800; // Dense and beautiful stardust cloud
+    const RADIAN = Math.PI / 180;
+
+    for (let i = 0; i < numPoints; i++) {
+      // Exact mathematical distribution from serioushomebrew/js-3d-particlesphere
+      const t1 = 360 * Math.random() * RADIAN;
+      const t2 = (180 * Math.random() - 90) * RADIAN;
+      // Add subtle volumetric thickness variation for high-end stardust volumetric depth
+      const pR = R * (0.96 + Math.random() * 0.08);
+      const xx = pR * Math.cos(t2) * Math.sin(t1);
+      const yy = pR * Math.sin(t2);
+      const zz = pR * Math.cos(t2) * Math.cos(t1);
+      vertices.push(xx, yy, zz);
+    }
+    shellGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
     const shellPos = shellGeo.attributes.position;
     const vertexCount = shellPos.count;
 
-    // Store original vertices
+    // Store original vertices and initialize vibrant particle base colors matching the user's screenshot
+    this.vertexBaseColors = [];
     for (let i = 0; i < vertexCount; i++) {
       const vertex = new THREE.Vector3(
         shellPos.getX(i), shellPos.getY(i), shellPos.getZ(i)
       );
       this.originalVertices.push(vertex);
       this.originalVertexDirs.push(vertex.clone().normalize());
+
+      const rand = Math.random();
+      let color;
+      if (rand < 0.38) {
+        color = new THREE.Color(0x00f0ff); // Neon Cyan / Blue
+      } else if (rand < 0.73) {
+        color = new THREE.Color(0xff00a0); // Vibrant Fuchsia / Pink
+      } else {
+        color = new THREE.Color(0x8a2be2); // Deep Blue Violet
+      }
+      this.vertexBaseColors.push(color);
     }
 
     // Create vertex colors buffer
@@ -129,10 +176,12 @@ class LexaOrb3D {
     this._computeVertexColors(colors, 0, 0);
 
     const dotsMat = new THREE.PointsMaterial({
-      size: 0.07,
+      size: 0.08,             // Perfectly proportioned tiny sharp pixels
       sizeAttenuation: true,
       transparent: true,
-      opacity: 1,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
       vertexColors: true
     });
     this.dots = new THREE.Points(shellGeo, dotsMat);
@@ -157,13 +206,26 @@ class LexaOrb3D {
     // Resize handler
     this.onResize = () => {
       if (!this.container) return;
-      const w = this.container.clientWidth;
-      const h = this.container.clientHeight;
+      const w = this.container.clientWidth || 1;
+      const h = this.container.clientHeight || 1;
       this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
+
+      const dpr = Math.min(window.devicePixelRatio || 1, this.options.maxPixelRatio);
+      if (this.renderer.getPixelRatio() !== dpr) {
+        this.renderer.setPixelRatio(dpr);
+      }
       this.renderer.setSize(w, h);
     };
     window.addEventListener("resize", this.onResize);
+
+    // Watch container size changes (compact class toggle, CSS transitions, layout flex)
+    if (typeof ResizeObserver !== "undefined") {
+      this.resizeObserver = new ResizeObserver(() => {
+        this.onResize();
+      });
+      this.resizeObserver.observe(this.container);
+    }
   }
 
   // Compute vertex colors based on proximity to hotspot directions
@@ -179,8 +241,8 @@ class LexaOrb3D {
       const v = this.originalVertices[i];
       const vertDir = this.originalVertexDirs[i];
 
-      // Start with base color
-      tmpColor.copy(this.baseColor);
+      // Start with beautiful, pre-calculated random base color matching the user's reference image
+      tmpColor.copy(this.vertexBaseColors[i] || this.baseColor);
 
       // Blend in each hotspot based on angular proximity
       for (const hs of this.hotspots) {
@@ -252,9 +314,14 @@ class LexaOrb3D {
           ? 0.86
           : 0.46;
     const energy = Math.min(1.35, 0.72 + sv * 0.48 + stateRotBoost * 0.13);
+
+    // Continuous base rotation like a real particle globe (restores js-3d-particlesphere function)
+    this._baseRotY = (this._baseRotY || 0) + 0.0012 * stateSpeed * energy;
+    this._baseRotX = (this._baseRotX || 0) + 0.0006 * stateSpeed * energy;
+
     const listenLean = convState === "listening" ? 0.045 : 0;
-    const targetX = this._organicDrift(now, stateSpeed, 1) * 0.115 * energy - listenLean * 0.5;
-    const targetY = this._organicDrift(now, stateSpeed, 2) * 0.165 * energy + listenLean;
+    const targetX = this._baseRotX + this._organicDrift(now, stateSpeed, 1) * 0.115 * energy - listenLean * 0.5;
+    const targetY = this._baseRotY + this._organicDrift(now, stateSpeed, 2) * 0.165 * energy + listenLean;
     const targetZ = this._organicDrift(now, stateSpeed, 3) * 0.052 * energy;
     const ease = convState === "processing" ? 0.042 : 0.028;
 
@@ -265,6 +332,8 @@ class LexaOrb3D {
 
   animate() {
     this.animationFrameId = requestAnimationFrame(this.animate);
+    // Avoid costly 3D rendering while the app is hidden.
+    if (document.hidden) return;
     if (!this.dots || !this.core) return;
 
     const now = performance.now();
@@ -341,12 +410,13 @@ class LexaOrb3D {
     // orb read like a short looping video.
     this._applyOrganicOrientation(now, convState, sv, stateRotBoost);
 
-    // ── Scale pulse: state base + volume ──
-    const scalePulse = stateScaleBase + sv * 0.15;
+    // ── Scale pulse: state base + volume (Boosted heavily for point cloud impact) ──
+    const scalePulse = stateScaleBase + sv * 0.45;
     this.group.scale.setScalar(scalePulse);
 
     const time = now * this.options.wobbleSpeed;
-    const wobbleStrength = this.options.baseWobble + stateWobbleExtra + sv * this.options.audioImpactMultiplier;
+    const baseWobbleBreath = this.options.baseWobble + 0.005 * Math.sin(now * 0.0016);
+    const wobbleStrength = baseWobbleBreath + stateWobbleExtra + sv * this.options.audioImpactMultiplier;
 
     // ── Breathing value for idle detection ──
     const breathVal = Math.sin(time * 2) * 0.5;
@@ -372,43 +442,33 @@ class LexaOrb3D {
           v.z * 0.59 + Math.sin(time * 0.8 + this._statePhase) * 0.55
         );
         const listeningShape = convState === "listening"
-          ? 1 + stateShapeWarp * (
+          ? 1 + stateShapeWarp * 2.5 * (
             Math.sin(now * 0.0019 + v.y * 1.05 + this._statePhase) * 0.44
             + Math.sin(now * 0.0031 + v.x * 0.72 + this._statePhaseB) * 0.31
             + (v.x / this.options.baseScale) * 0.26
             - (v.z / this.options.baseScale) * 0.19
           )
           : 1;
-        const d = listeningShape * (1 + (noise * 0.15 * wobbleStrength));
+        const speechRipple = convState === "speaking"
+          ? 0.15 * Math.sin(v.y * 3.2 - now * 0.012) * Math.cos(v.x * 2.2 + now * 0.009) * ev
+          : 0;
+        const d = listeningShape * (1 + (noise * 0.35 * wobbleStrength) + speechRipple);
         dotPos.setXYZ(i, v.x * d, v.y * d, v.z * d);
       }
       dotPos.needsUpdate = true;
 
-      // Deform core (slightly less)
-      const corePos = this.core.geometry.attributes.position;
-      for (let i = 0; i < corePos.count; i++) {
-        const v = this.coreOriginalVertices[i];
-        const noise = this.simplex.noise3D(
-          v.x * 0.58 + time * 1.05 + this._statePhase * 0.13,
-          v.y * 0.62 - time * 0.66 + this._statePhaseB * 0.09,
-          v.z * 0.54 + Math.sin(time * 0.75 + this._statePhaseB) * 0.42
-        );
-        const coreListeningShape = convState === "listening"
-          ? 1 + stateShapeWarp * 0.68 * (
-            Math.sin(now * 0.0017 + v.y * 0.86 + this._statePhase) * 0.38
-            + Math.sin(now * 0.0028 + v.x * 0.64 + this._statePhaseB) * 0.24
-            + (v.x / this.options.baseScale) * 0.22
-            - (v.z / this.options.baseScale) * 0.14
-          )
-          : 1;
-        const d = coreListeningShape * (1 + (noise * 0.13 * wobbleStrength));
-        corePos.setXYZ(i, v.x * d, v.y * d, v.z * d);
-      }
-      corePos.needsUpdate = true;
+      // Deform core and glass shell (Optimized out since they are hidden for the stardust particle sphere)
+      // const corePos = this.core.geometry.attributes.position;
+      // ...
+      // corePos.needsUpdate = true;
+      // if (glassPos) { glassPos.needsUpdate = true; }
       this._normalFrame = (this._normalFrame + 1) % 3;
       if (now - this._lastNormalUpdate >= normalInterval) {
         this._lastNormalUpdate = now;
         this.core.geometry.computeVertexNormals();
+        if (this.glassShell) {
+          this.glassShell.geometry.computeVertexNormals();
+        }
       }
     }
 
@@ -421,10 +481,29 @@ class LexaOrb3D {
     }
 
     // ── Audio-reactive dot size ──
-    this.dots.material.size = 0.07 + ev * 0.035;
+    this.dots.material.size = 0.08 + ev * 0.04;
 
     // ── Audio-reactive core specular boost ──
     this.core.material.shininess = 120 + ev * 70;
+
+    // ── Swirling dynamic light orbits for organic reflections ──
+    const tLight = now * 0.0006;
+    const R = this.options.baseScale;
+    this.lightViolet.position.set(
+      -R * 0.6 + Math.sin(tLight) * 0.35,
+      R * 0.65 + Math.cos(tLight * 0.8) * 0.35,
+      R * 0.5 + Math.sin(tLight * 1.2) * 0.25
+    );
+    this.lightFuchsia.position.set(
+      R * 0.5 + Math.cos(tLight * 1.1) * 0.35,
+      R * 0.6 + Math.sin(tLight * 0.9) * 0.35,
+      R * 0.55 + Math.cos(tLight * 0.7) * 0.25
+    );
+    this.lightAmber.position.set(
+      R * 0.55 + Math.sin(tLight * 0.9) * 0.35,
+      -R * 0.5 + Math.cos(tLight * 1.2) * 0.35,
+      R * 0.6 + Math.sin(tLight * 0.8) * 0.25
+    );
 
     // ── Audio-reactive lights: intensity and range boost ──
     const breathe = Math.sin(now * 0.001) * 0.2 + 1;
@@ -457,6 +536,34 @@ class LexaOrb3D {
   destroy() {
     this.stop();
     window.removeEventListener("resize", this.onResize);
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+    }
+
+    // Traverse and dispose of all Three.js resources to prevent memory leaks
+    if (this.scene) {
+      this.scene.traverse((object) => {
+        if (object.geometry) {
+          object.geometry.dispose();
+        }
+        if (object.material) {
+          if (Array.isArray(object.material)) {
+            object.material.forEach((mat) => mat.dispose());
+          } else {
+            object.material.dispose();
+          }
+        }
+      });
+    }
+
+    if (this.renderer) {
+      this.renderer.dispose();
+    }
+
+    if (this.glowTexture) {
+      this.glowTexture.dispose();
+    }
+
     if (this.container && this.renderer) {
       this.container.removeChild(this.renderer.domElement);
     }

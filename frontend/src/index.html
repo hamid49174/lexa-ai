@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- CSP: Allow cdnjs.cloudflare.com for Three.js and SimplexNoise -->
+  <!-- CSP: Allow pinned CDN dependencies for Three.js and SimplexNoise. -->
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; connect-src 'self' http://127.0.0.1:8000 ws://127.0.0.1:8000; style-src 'self' https://fonts.googleapis.com; img-src 'self' data: blob: http: https:; font-src https://fonts.gstatic.com; media-src blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none';">
   <title>Lexa AI</title>
@@ -22,8 +22,12 @@
   <link rel="stylesheet" href="./css/premium_animations.css">
 
   <!-- 3D Visualization Dependencies -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+    integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu"
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"
+    integrity="sha384-jjHgEv1aKR4CNMJrTCxr7j6K3HOexCFlAqN92iFyiRIoR/GsQUs2rjFGIVpswZAL"
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="./i18n/i18n.js"></script>
   <script src="./app.js" defer></script>
 </head>
@@ -185,7 +189,7 @@
               <path d="M8 9h8M8 13h5M16 13l2 2 3-4" />
             </svg>
             <span>OS</span>
-            <span class="readiness-chip readiness-chip-internal" data-readiness="internal" title="Personal OS is internal">Internal</span>
+            <span class="readiness-chip readiness-chip-internal" data-readiness="internal" title="Personal OS ist intern">Intern</span>
             <span class="sidebar-badge hidden" id="nav-pos-badge"></span>
           </button>
           <button type="button" class="sidebar-btn" data-view="settings" role="tab" aria-label="Einstellungen">

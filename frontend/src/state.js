@@ -74,10 +74,17 @@ const LexaState = (() => {
       }
     },
 
-    // Interval management (prevents leaks)
+    // Interval management (prevents leaks & optimized for battery/performance when hidden)
     setInterval(name, fn, ms) {
       this.clearInterval(name);
-      _state._intervals[name] = window.setInterval(fn, ms);
+      const isCritical = ["pomodoro", "timerCheck", "healthCheck", "autoSave"].includes(name);
+      const wrappedFn = () => {
+        if (document.hidden && !isCritical) {
+          return; // Skip execution when backgrounded to save CPU and battery
+        }
+        fn();
+      };
+      _state._intervals[name] = window.setInterval(wrappedFn, ms);
     },
 
     clearInterval(name) {

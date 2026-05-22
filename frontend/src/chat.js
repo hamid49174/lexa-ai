@@ -1803,6 +1803,9 @@ async function sendMessage() {
     clearTimeout(_streamTimeout);
     streamRenderActive = false;
     textEl.classList.remove("streaming-text");
+    if (actionData && typeof chatActionDisplayReply === "function") {
+      fullText = chatActionDisplayReply({ reply: fullText, action: actionData });
+    }
     if (fullText) {
       renderFormattedMessage(textEl, fullText);
       if (streamStoppedByUser || streamTimedOut || streamError) {
@@ -1890,6 +1893,12 @@ function _needsAgentMode(text) {
 }
 
 // Triggered by auto-detection or /agent prefix
+function agentUserFacingError(message) {
+  const text = String(message || "").trim();
+  if (!text || /^unknown$/i.test(text)) return t("chat.agentErrorGeneric");
+  return t("chat.agentError", { msg: text });
+}
+
 async function sendAgentMessage(text, options) {
   const agentText = String(text || "").trim();
   const displayText = String(options?.displayText || agentText).trim();
@@ -2034,7 +2043,7 @@ async function sendAgentMessage(text, options) {
     if (!response.ok) {
       msgEl.removeAttribute("aria-busy");
       summaryEl.classList.remove("agent-status");
-      summaryEl.textContent = t("chat.agentError", {msg: response.statusText || "Unknown"});
+      summaryEl.textContent = agentUserFacingError(response.statusText);
       setMessagePersistText(msgEl, summaryEl.textContent);
       copyBtn.disabled = false;
       memoryBtn.disabled = false;
@@ -2199,7 +2208,7 @@ async function sendAgentMessage(text, options) {
 
           if (event.type === "error") {
             summaryEl.classList.remove("agent-status");
-            summaryEl.textContent = event.message || t("chat.agentErrorGeneric");
+            summaryEl.textContent = agentUserFacingError(event.message);
             setMessagePersistText(msgEl, summaryEl.textContent);
             msgEl.removeAttribute("aria-busy");
           }
@@ -3029,7 +3038,10 @@ async function voiceStreamChat(text) {
     if (timeout) { clearTimeout(timeout); timeout = null; }
 
     if (fullText) {
-      addMessage(fullText, "system", action, requiresConfirmation, true);
+      const displayText = action && typeof chatActionDisplayReply === "function"
+        ? chatActionDisplayReply({ reply: fullText, action })
+        : fullText;
+      addMessage(displayText, "system", action, requiresConfirmation, true);
       if (action) handleChatToolActionBlocked(action, { source: "voice", toast: false });
     }
     voiceStatusBarResetIfNoSpeechPending();
@@ -3219,10 +3231,11 @@ function handleChatResponse(res, ambient = false) {
       if (res.detail.includes("Zu viele")) showToast(t("toast.rateLimitHit"), "warning");
   }
   else {
-    if (ambient) showOrbTranscript(undefined, res.reply);
-    addMessage(res.reply, "system", res.action, res.requires_confirmation, ambient);
-    playTTS(res.reply);
-    if (res.action) handleChatToolActionBlocked(res.action, { source: "chat-response", toast: !ambient });
+    const displayReply = typeof chatActionDisplayReply === "function" ? chatActionDisplayReply(res) : res.reply;
+    if (ambient) showOrbTranscript(undefined, displayReply);
+    addMessage(displayReply, "system", res.action, res.requires_confirmation, ambient);
+    playTTS(displayReply);
+    if (res.action) handleChatToolActionBlocked(res.action, { source: "chat-response", toast: false });
   }
 }
 

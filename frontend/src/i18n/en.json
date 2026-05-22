@@ -1519,8 +1519,8 @@
   "chat.starterMsgGoodMusic": "Play me good music",
 
   "chat.agentBadge": "AGENT",
-  "chat.agentError": "Agent error: {{msg}}",
-  "chat.agentErrorGeneric": "Agent error",
+  "chat.agentError": "Lexa could not start the agent run right now: {{msg}}",
+  "chat.agentErrorGeneric": "Lexa could not start the agent run right now.",
   "chat.agentStarting": "Agent starting...",
   "chat.agentWorking": "Agent working...",
   "chat.agentCompleted": "Agent completed.",

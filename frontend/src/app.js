@@ -56,6 +56,10 @@ function initLexaAmbientCanvas() {
   };
 
   const draw = (time = 0) => {
+    if (document.hidden) {
+      if (!reducedMotion) _ambientCanvasRaf = requestAnimationFrame(draw);
+      return;
+    }
     frame += 1;
     const tWave = reducedMotion ? 18 : time * 0.00035;
     ctx.clearRect(0, 0, width, height);
@@ -402,7 +406,7 @@ async function init() {
         window.dashboardOrb = new LexaOrb3D('voice-orb-canvas', {
           baseScale: 3.5,
           wobbleSpeed: 0.0005,
-          baseWobble: 0.3
+          baseWobble: 0.02
         });
       }
     }, 100);
@@ -909,6 +913,11 @@ function switchView(view) {
     LexaState.setInterval("dashboard", refreshDashboard, LexaConfig.DASHBOARD_REFRESH_INTERVAL);
   } else if (view === "chat") {
     if (chatContainer) chatContainer.classList.remove("hidden");
+    if (window.dashboardOrb && typeof window.dashboardOrb.onResize === "function") {
+      setTimeout(() => {
+        window.dashboardOrb.onResize();
+      }, 0);
+    }
   } else if (view === "system") {
     document.getElementById("system-view-ext").classList.add("active");
     refreshSystemView();

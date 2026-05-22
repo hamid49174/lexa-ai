@@ -6,6 +6,46 @@
    Extracted from tools.js
    ════════════════════════════════════════════════ */
 
+function translateDiagnosticsText(text) {
+  if (!text) return "";
+  try {
+    if (typeof t !== "undefined" && t._locale && t._locale.startsWith("en")) {
+      return text;
+    }
+  } catch (_) {}
+  const mappings = {
+    // Labels
+    "Missing tool": "Fehlendes Tool",
+    "Voice check": "Voice-Check",
+    "Wake engine": "Wake-Engine",
+    "Realtime provider": "Echtzeit-Provider",
+    "Backend": "Backend",
+    "AI providers": "KI-Provider",
+    "Hermes": "Hermes",
+    "Voice path": "Sprachpfad",
+    "Memory store": "Speicher",
+    "Local tools": "Lokale Tools",
+    "MCP": "MCP-Server",
+    "Signal": "Signal",
+    "Tooling": "Werkzeuge",
+
+    // Details & Status summaries
+    "Voice stack is ready.": "Sprach-Stack ist bereit.",
+    "Voice stack is usable but needs attention.": "Sprach-Stack ist nutzbar, benötigt aber Aufmerksamkeit.",
+    "Voice stack has a blocking issue.": "Sprach-Stack hat ein blockierendes Problem.",
+    "Backend offline.": "Backend offline.",
+    "Backend healthy.": "Backend gesund."
+  };
+
+  if (mappings[text]) return mappings[text];
+
+  let translated = text;
+  Object.entries(mappings).forEach(([key, val]) => {
+    translated = translated.replaceAll(key, val);
+  });
+  return translated;
+}
+
 // ── SETTINGS VIEW ────────────────────────────────
 async function refreshSettingsView() {
   // Desktop settings (work even when backend is offline)
@@ -55,7 +95,7 @@ async function refreshSettingsView() {
   const diagnostics = diagnosticsRes.status === "fulfilled" ? diagnosticsRes.value : {};
   const hermesAutostart = hermesAutostartRes.status === "fulfilled"
     ? hermesAutostartRes.value
-    : { supported: false, enabled: false, can_enable: false, error: "Autostart status nicht verfuegbar." };
+    : { supported: false, enabled: false, can_enable: false, error: "Autostart-Status nicht verfügbar." };
   renderVoiceDiagnostics(voice);
   renderHermesGatewayAutostart(hermesAutostart);
   renderSystemReadiness(buildSystemReadinessModel({
@@ -197,7 +237,7 @@ function hermesReadinessSignal(diagnostics, health) {
   const compact = health?.hermes && typeof health.hermes === "object" ? health.hermes : {};
   const rawState = full.health_state || compact.state || "unknown";
   const state = rawState === "ready" ? "ready" : rawState === "blocked" ? "blocked" : "attention";
-  const summary = diagnosticsClipLines(full.summary || compact.summary || "Hermes status nicht verfuegbar.", 2);
+  const summary = diagnosticsClipLines(full.summary || compact.summary || "Hermes-Status nicht verfügbar.", 2);
   const canRun = Boolean(full.can_run_tasks ?? compact.can_run_tasks);
   const gateway = full.gateway && typeof full.gateway === "object" ? full.gateway : {};
   const telegramConfigured = Boolean(gateway.configured ?? compact.telegram_configured);
@@ -247,7 +287,7 @@ function buildSystemReadinessModel({ ai, voice, health, mem, toolHealth, mcp, di
   checks.push({
     label: "AI providers",
     state: aiReady ? (aiReadyCount >= 2 ? "ready" : "attention") : "blocked",
-    detail: `${aiReadyCount}/4 Provider verfuegbar. Aktiv: ${ai?.active_provider || ai?.selected_provider || "unknown"}. Fallbacks: ${fallbackAvailable}.`,
+    detail: `${aiReadyCount}/4 Provider verfügbar. Aktiv: ${ai?.active_provider || ai?.selected_provider || "unknown"}. Fallbacks: ${fallbackAvailable}.`,
   });
   checks.push({
     label: "Hermes",
@@ -257,7 +297,7 @@ function buildSystemReadinessModel({ ai, voice, health, mem, toolHealth, mcp, di
   checks.push({
     label: "Voice path",
     state: voiceReady ? "ready" : voiceAttention ? "attention" : "blocked",
-    detail: diagnosticsClipLines(voice?.summary || voice?.error || "Voice status nicht verfuegbar."),
+    detail: diagnosticsClipLines(voice?.summary || voice?.error || "Voice-Status nicht verfügbar."),
   });
   checks.push({
     label: "Memory store",
@@ -267,7 +307,7 @@ function buildSystemReadinessModel({ ai, voice, health, mem, toolHealth, mcp, di
   checks.push({
     label: "Local tools",
     state: toolsReady ? "ready" : toolsAttention ? "attention" : "blocked",
-    detail: `${toolHealth?.available_count || 0}/${toolHealth?.total_count || 0} Tools verfuegbar (${toolPct}%).`,
+    detail: `${toolHealth?.available_count || 0}/${toolHealth?.total_count || 0} Tools verfügbar (${toolPct}%).`,
   });
   checks.push({
     label: "MCP",
@@ -320,7 +360,7 @@ function buildSystemReadinessModel({ ai, voice, health, mem, toolHealth, mcp, di
     {
       label: "Tooling",
       value: `${toolPct}%`,
-      meta: `${toolHealth?.available_count || 0}/${toolHealth?.total_count || 0} lokal verfuegbar`,
+      meta: `${toolHealth?.available_count || 0}/${toolHealth?.total_count || 0} lokal verfügbar`,
       state: toolsReady ? "ready" : toolsAttention ? "attention" : "blocked",
     },
     {
@@ -367,7 +407,7 @@ function renderSystemReadiness(model) {
     statusEl.textContent = diagnosticsLabel(model?.state);
     statusEl.className = "setting-status " + diagnosticsBadgeClass(model?.state);
   }
-  if (summaryEl) summaryEl.textContent = settingsClip(model?.summary || "Diagnostics nicht verfuegbar.", 220);
+  if (summaryEl) summaryEl.textContent = settingsClip(model?.summary || "Diagnostics nicht verfügbar.", 220);
 
   if (gridEl) {
     gridEl.replaceChildren();
@@ -379,7 +419,7 @@ function renderSystemReadiness(model) {
       head.className = "readiness-card-head";
       const label = document.createElement("span");
       label.className = "readiness-card-label";
-      label.textContent = card.label || "Signal";
+      label.textContent = translateDiagnosticsText(card.label || "Signal");
       const pill = document.createElement("span");
       pill.className = "readiness-pill " + (voiceDiagnosticState({ state: card.state }) === "blocked" ? "blocked" : voiceDiagnosticState({ state: card.state }) === "attention" ? "warn" : "ok");
       pill.textContent = diagnosticsLabel(card.state);
@@ -388,11 +428,11 @@ function renderSystemReadiness(model) {
 
       const value = document.createElement("div");
       value.className = "readiness-card-value";
-      value.textContent = settingsClip(card.value || "--", 36);
+      value.textContent = translateDiagnosticsText(settingsClip(card.value || "--", 36));
 
       const meta = document.createElement("div");
       meta.className = "readiness-card-meta";
-      meta.textContent = settingsClip(card.meta || "", 120);
+      meta.textContent = translateDiagnosticsText(settingsClip(card.meta || "", 120));
 
       item.appendChild(head);
       item.appendChild(value);
@@ -614,12 +654,12 @@ function appendVoiceDiagnosticRow(panelEl, check) {
 
   const title = document.createElement("div");
   title.className = "voice-diagnostic-check-title";
-  title.textContent = settingsClip(check?.label || check?.id || "Voice check", 48);
+  title.textContent = translateDiagnosticsText(settingsClip(check?.label || check?.id || "Voice check", 48));
   row.appendChild(title);
 
   const detail = document.createElement("div");
   detail.className = "voice-diagnostic-check-detail";
-  detail.textContent = settingsClip(check?.detail || check?.state || "", 160);
+  detail.textContent = translateDiagnosticsText(settingsClip(check?.detail || check?.state || "", 160));
   row.appendChild(detail);
 
   panelEl.appendChild(row);
@@ -640,7 +680,7 @@ function renderVoiceDiagnostics(diagnostics) {
   if (summaryEl) {
     const summary = voiceDiagnosticsWakeWordOnly(diagnostics)
       ? "Voice core ready. Wake Word ist ausgeschaltet."
-      : diagnostics?.summary || diagnostics?.error || "Voice status nicht verfuegbar.";
+      : diagnostics?.summary || diagnostics?.error || "Voice-Status nicht verfügbar.";
     summaryEl.textContent = settingsClip(summary);
   }
   if (!panelEl) return;

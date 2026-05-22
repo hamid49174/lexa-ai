@@ -1,6 +1,37 @@
+const MESSAGE_ACTION_ICON_SVGS = {
+  "\u2398": '<svg class="msg-action-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2.5"></rect><path d="M15 8V6.5A2.5 2.5 0 0 0 12.5 4h-6A2.5 2.5 0 0 0 4 6.5v6A2.5 2.5 0 0 0 6.5 15H8"></path></svg>',
+  "\u2605": '<svg class="msg-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 22V10"></path><path d="M15 6.2 14 10h5.4a2 2 0 0 1 1.9 2.5l-1.6 6A3 3 0 0 1 16.8 21H7"></path><path d="M7 10H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"></path><path d="M15 6.2V4.5A2.5 2.5 0 0 0 12.5 2L9 10"></path></svg>',
+  "\u21BB": '<svg class="msg-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 4v6h-6"></path></svg>',
+  "\u270E": '<svg class="msg-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="m16.5 3.5 4 4L8 20l-5 1 1-5 12.5-12.5Z"></path></svg>',
+  "\u00D7": '<svg class="msg-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>',
+  "\u22EF": '<svg class="msg-action-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="19" cy="12" r="1.7"></circle></svg>',
+  "\u25A3": '<svg class="msg-action-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M8 8h8"></path><path d="M8 12h5"></path><path d="M8 16h7"></path></svg>',
+  "\u21AA": '<svg class="msg-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h13"></path><path d="m12 7 5 5-5 5"></path></svg>',
+  "?": '<svg class="msg-action-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4.2-4.2"></path><path d="m8.5 11 1.8 1.8 3.7-4.1"></path></svg>',
+  "\u21E9": '<svg class="msg-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"></path><path d="m7 9 5-5 5 5"></path><path d="M5 20h14"></path></svg>',
+  "\u2713": '<svg class="msg-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4 10-10"></path></svg>',
+};
+
+function messageActionIconSvg(icon) {
+  return MESSAGE_ACTION_ICON_SVGS[String(icon || "")] || "";
+}
+
+function renderIconButtonVisual(button, icon) {
+  if (!button?.matches?.(".msg-copy-btn, .msg-thumbs-btn, .msg-action-btn")) return;
+  button.querySelector(".msg-action-icon")?.remove();
+  const svg = messageActionIconSvg(icon);
+  if (!svg) {
+    delete button.dataset.svgIcon;
+    return;
+  }
+  button.insertAdjacentHTML("afterbegin", svg);
+  button.dataset.svgIcon = "true";
+}
+
 function setIconButton(button, icon, label) {
   button.textContent = "";
   button.dataset.icon = icon;
+  renderIconButtonVisual(button, icon);
   button.title = label;
   button.setAttribute("aria-label", label);
 }
@@ -181,6 +212,7 @@ async function saveMessageAsMemory(btn, msg) {
     await window.lexa.memoryAdd(t("chat.helpfulAnswer", {snippet}), "learned", 5);
     if (btn) {
       btn.dataset.icon = "\u2713";
+      renderIconButtonVisual(btn, "\u2713");
       btn.setAttribute("aria-label", t("toast.savedAsMemory"));
       btn.title = t("toast.savedAsMemory");
       btn.removeAttribute("aria-busy");
@@ -242,6 +274,7 @@ function flashIconButton(button, icon, restoreIcon, durationMs, feedbackLabel) {
   const originalText = button._lexaOriginalText || "";
   button.textContent = originalText.trim() ? originalText : "";
   button.dataset.icon = icon;
+  renderIconButtonVisual(button, icon);
   if (feedbackLabel) {
     button.setAttribute("aria-label", feedbackLabel);
     button.title = feedbackLabel;
@@ -250,6 +283,7 @@ function flashIconButton(button, icon, restoreIcon, durationMs, feedbackLabel) {
   button._lexaIconTimer = setTimeout(() => {
     button.dataset.icon = originalIcon;
     button.textContent = originalText;
+    renderIconButtonVisual(button, originalIcon);
     if (button._lexaOriginalAriaLabel) button.setAttribute("aria-label", button._lexaOriginalAriaLabel);
     else button.removeAttribute("aria-label");
     if (button._lexaOriginalTitle) button.title = button._lexaOriginalTitle;

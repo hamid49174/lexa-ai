@@ -13,6 +13,34 @@ function chatToolActionParamKeys(action) {
   return Object.keys(params).sort();
 }
 
+function chatActionReplyLooksLikeToolExecution(reply, action) {
+  const text = String(reply || "").trim();
+  if (!text) return true;
+
+  const actionName = chatToolActionName(action).toLowerCase();
+  const normalized = text.toLowerCase();
+  const mentionsAction = actionName && normalized.includes(actionName);
+  const executionPhrase = /\b(fuehre|führe|execute|run|running|starte|start)\b/i.test(text) || /\baus\b/i.test(text);
+  return Boolean(mentionsAction && executionPhrase);
+}
+
+function chatActionFallbackText() {
+  const docLang = typeof document !== "undefined" ? document.documentElement?.lang : "";
+  const navLang = typeof navigator !== "undefined" ? navigator.language : "";
+  const lang = String(docLang || navLang || "de").toLowerCase();
+  if (lang.startsWith("en")) {
+    return "I am here. Tell me what you want to do next.";
+  }
+  return "Ich bin da. Sag mir kurz, was ich als Naechstes machen soll.";
+}
+
+function chatActionDisplayReply(response) {
+  const reply = String(response?.reply || "").trim();
+  if (!response?.action) return reply;
+  if (chatActionReplyLooksLikeToolExecution(reply, response.action)) return chatActionFallbackText();
+  return reply;
+}
+
 function appendToolConfirmationUi(body, action) {
   if (!body || !action) return null;
 

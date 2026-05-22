@@ -101,18 +101,24 @@
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  border-radius: var(--radius-xs);
-  transition: all 0.15s;
+  border-radius: 6px;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .tb-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text);
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  transform: translateY(-1px) scale(1.04);
+}
+
+.tb-btn:active {
+  transform: translateY(0) scale(0.96);
 }
 
 .tb-close:hover {
-  background: var(--error);
+  background: rgba(239, 68, 68, 0.9);
   color: #fff;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
 }
 
 /* ── MAIN LAYOUT ───────────────────────────────── */
@@ -354,8 +360,6 @@
   gap: 2px;
   max-height: 180px;
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
 }
 
 .conv-item {
