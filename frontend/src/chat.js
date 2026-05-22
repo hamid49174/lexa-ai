@@ -219,6 +219,33 @@ function saveAgentRunAttentionResolvedHistory(items) {
   }
 }
 
+function agentAttentionLooksTechnicalTitle(title) {
+  const text = String(title || "").trim().toLowerCase();
+  if (!text) return true;
+  return (
+    /\bagent\s+(run|attention|task)\b/.test(text) ||
+    /\b(blocked|reloaded|clean)\s+agent\b/.test(text) ||
+    /\bneeds\s+confirmation\b/.test(text)
+  );
+}
+
+function agentAttentionDisplayTitle(title) {
+  const raw = String(title || "").trim();
+  if (agentAttentionLooksTechnicalTitle(raw)) return t("chat.agentAttentionFallbackTitle");
+  return raw.length > 80 ? raw.slice(0, 77) + "..." : raw;
+}
+
+function agentAttentionStatusSummary(failed, blocked) {
+  const failedCount = Math.max(0, Number(failed || 0));
+  const blockedCount = Math.max(0, Number(blocked || 0));
+  if (failedCount > 0 && blockedCount > 0) {
+    return t("chat.agentAttentionStatusBoth", { failed: failedCount, blocked: blockedCount });
+  }
+  if (failedCount > 0) return t("chat.agentAttentionStatusReview", { count: failedCount });
+  if (blockedCount > 0) return t("chat.agentAttentionStatusApproval", { count: blockedCount });
+  return t("chat.agentAttentionStatusClear");
+}
+
 function agentRunAttentionResolvedHistory() {
   try {
     const parsed = JSON.parse(localStorage.getItem(agentRunAttentionResolvedHistoryCacheKey()) || "[]");
@@ -415,7 +442,15 @@ function agentRunAttentionForConversation(conv) {
     }
   });
   if (!totals.runs) return null;
-  return { convId, title: conv.title || t("chat.newChatTitle"), keys, ...totals };
+  const title = conv.title || t("chat.newChatTitle");
+  return {
+    convId,
+    title,
+    displayTitle: agentAttentionDisplayTitle(title),
+    statusSummary: agentAttentionStatusSummary(totals.failed, totals.blocked),
+    keys,
+    ...totals,
+  };
 }
 
 function agentRunAttentionListForConversations(convList) {
@@ -519,6 +554,8 @@ function renderAgentAttentionPanel(container, convList) {
   list.className = "agent-attention-list";
   list.setAttribute("role", "list");
   attention.forEach((item) => {
+    const displayTitle = item.displayTitle || agentAttentionDisplayTitle(item.title);
+    const statusSummary = item.statusSummary || agentAttentionStatusSummary(item.failed, item.blocked);
     const row = document.createElement("div");
     row.className = "agent-attention-row";
     row.setAttribute("role", "listitem");
@@ -526,24 +563,25 @@ function renderAgentAttentionPanel(container, convList) {
     btn.type = "button";
     btn.className = "agent-attention-item";
     btn.setAttribute("aria-label", t("chat.agentAttentionOpenLabel", {
-      title: item.title,
+      title: displayTitle,
       failed: item.failed,
       blocked: item.blocked,
+      summary: statusSummary,
     }));
     const label = document.createElement("span");
     label.className = "agent-attention-conv";
-    label.textContent = item.title;
+    label.textContent = displayTitle;
     const count = document.createElement("span");
     count.className = "agent-attention-count";
-    count.textContent = t("chat.agentAttentionCounts", { failed: item.failed, blocked: item.blocked });
+    count.textContent = statusSummary;
     btn.appendChild(label);
     btn.appendChild(count);
     btn.addEventListener("click", () => switchConversation(item.convId));
     const resolveBtn = document.createElement("button");
     resolveBtn.type = "button";
     resolveBtn.className = "agent-attention-resolve-btn";
-    resolveBtn.title = t("chat.agentAttentionResolveLabel", { title: item.title });
-    resolveBtn.setAttribute("aria-label", t("chat.agentAttentionResolveLabel", { title: item.title }));
+    resolveBtn.title = t("chat.agentAttentionResolveLabel", { title: displayTitle });
+    resolveBtn.setAttribute("aria-label", t("chat.agentAttentionResolveLabel", { title: displayTitle }));
     resolveBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>';
     resolveBtn.addEventListener("click", () => resolveAgentAttentionForConversation(item.convId, item.title));
     row.appendChild(btn);
@@ -579,6 +617,8 @@ function renderAgentResolvedHistoryPanel(container, convList) {
   list.className = "agent-resolved-list";
   list.setAttribute("role", "list");
   items.forEach((item) => {
+    const displayTitle = agentAttentionDisplayTitle(item.title);
+    const statusSummary = agentAttentionStatusSummary(item.failed, item.blocked);
     const row = document.createElement("div");
     row.className = "agent-resolved-row";
     row.setAttribute("role", "listitem");
@@ -586,24 +626,25 @@ function renderAgentResolvedHistoryPanel(container, convList) {
     openBtn.type = "button";
     openBtn.className = "agent-resolved-item";
     openBtn.setAttribute("aria-label", t("chat.agentResolvedOpenLabel", {
-      title: item.title,
+      title: displayTitle,
       failed: item.failed,
       blocked: item.blocked,
+      summary: statusSummary,
     }));
     const label = document.createElement("span");
     label.className = "agent-resolved-conv";
-    label.textContent = item.title;
+    label.textContent = displayTitle;
     const count = document.createElement("span");
     count.className = "agent-resolved-count";
-    count.textContent = t("chat.agentResolvedCounts", { failed: item.failed, blocked: item.blocked });
+    count.textContent = statusSummary;
     openBtn.appendChild(label);
     openBtn.appendChild(count);
     openBtn.addEventListener("click", () => switchConversation(item.convId));
     const restoreBtn = document.createElement("button");
     restoreBtn.type = "button";
     restoreBtn.className = "agent-resolved-restore-btn";
-    restoreBtn.title = t("chat.agentResolvedRestoreLabel", { title: item.title });
-    restoreBtn.setAttribute("aria-label", t("chat.agentResolvedRestoreLabel", { title: item.title }));
+    restoreBtn.title = t("chat.agentResolvedRestoreLabel", { title: displayTitle });
+    restoreBtn.setAttribute("aria-label", t("chat.agentResolvedRestoreLabel", { title: displayTitle }));
     restoreBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>';
     restoreBtn.addEventListener("click", () => restoreAgentAttentionHistoryItem(item));
     row.appendChild(openBtn);
