@@ -1585,7 +1585,7 @@
   "chat.agentCompletionResolveUndoButton": "Undo resolved",
   "chat.agentCompletionResolveUndoTooltip": "Restore this Agent attention",
   "chat.agentCompletionResolveEmpty": "No Agent attention is available to resolve.",
-  "chat.agentSteps": "{{count}} steps in {{ms}}ms",
+  "chat.agentSteps": "{{count}} steps completed",
 
   "app.commandsReady": "{{count}} commands ready",
   "app.chatsSaved": "{{count}} chats saved",
