@@ -3676,7 +3676,7 @@ function buildFileInfoBadge(fileInfo) {
 }
 
 function addFileUploadResponse(res) {
-  addMessage(res.reply || "", "system", res.action, res.requires_confirmation);
+  addMessage(fileUploadDisplayReply(res), "system", null, false);
   if (!res.file_info) return;
   const messages = chatMessages.querySelectorAll(".message.system-message");
   const msg = messages[messages.length - 1];
@@ -3719,7 +3719,7 @@ async function handleFileUpload(file) {
     else {
       addFileUploadResponse(res);
       if (res.action) handleChatToolActionBlocked(res.action, { source: "file-upload" });
-      playTTS(res.reply);
+      playTTS(fileUploadDisplayReply(res));
     }
   } catch (err) { hideTyping(); addMessage(t("chat.uploadErrorMsg", {error: err.message}), "system"); showToast(t("toast.uploadError"), "error"); }
   saveChatHistory(); saveCurrentConversation(); LexaState.set("isLoading", false); sendBtn.disabled = false;

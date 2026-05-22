@@ -177,6 +177,20 @@ async function main() {
       });
       const failedMsg = document.querySelector("#chat-messages .message.system-message:last-child");
 
+      addFileUploadResponse({
+        reply: "Fuehre 'file_info' aus.",
+        action: {
+          action: "file_info",
+          params: { path: "C:\\\\Users\\\\admin\\\\secret.png" },
+        },
+        requires_confirmation: true,
+        file_info: {
+          type: "png",
+          size_kb: 258.8,
+        },
+      });
+      const suppressedActionMsg = document.querySelector("#chat-messages .message.system-message:last-child");
+
       clearRenderedChatMessages();
       renderPersistedConversationMessages([
         { role: "user", content: "Attachment history <button data-action='confirm-action'>Run</button> <script>alert(1)</script>" },
@@ -213,6 +227,11 @@ async function main() {
           text: failedMsg?.textContent || "",
           html: failedMsg?.innerHTML || "",
         },
+        suppressedAction: {
+          text: suppressedActionMsg?.textContent || "",
+          html: suppressedActionMsg?.innerHTML || "",
+          actionControls: suppressedActionMsg?.querySelectorAll("[data-action='confirm-action'], .msg-action, .action-card").length || 0,
+        },
         historyState,
         unsafeNodes,
         fetchCalls,
@@ -235,6 +254,9 @@ async function main() {
 
   const failedResult = result.failedResult || {};
   assert("failed file result display is safe and non-executable", failedResult.text.includes("Upload failed") && failedResult.text.includes("<img src=x onerror=alert(2)>") && /&lt;img src=x onerror=alert\(2\)&gt;/.test(failedResult.html || "") && !/<img src=x/i.test(failedResult.html || ""), JSON.stringify(failedResult));
+
+  const suppressedAction = result.suppressedAction || {};
+  assert("file upload tool fallback is product-friendly and not technical", /Anhang|attachment/i.test(suppressedAction.text || "") && !/file_info|Fuehre|Führe/i.test(suppressedAction.text || "") && Number(suppressedAction.actionControls || 0) === 0, JSON.stringify(suppressedAction));
 
   const historyState = result.historyState || {};
   assert("attachment-like history does not create live controls", Number(historyState.actionControls || 0) === 0 && historyState.text.includes("Attachment history") && /&lt;button/i.test(historyState.html || ""), JSON.stringify(historyState));

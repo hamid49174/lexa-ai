@@ -20,3 +20,31 @@ function fileInfoBadgeText(fileInfo) {
   if (fileInfo?.line_count) parts.push(t("chat.fileLines", {count: fileInfo.line_count}));
   return parts.join(" \u00b7 ");
 }
+
+function fileUploadActionFallbackText() {
+  const locale = String(t?._locale || navigator.language || "de").toLowerCase();
+  if (locale.startsWith("de")) {
+    return "Ich habe den Anhang bereit. Sag mir kurz, was ich daran prüfen soll.";
+  }
+  return "I have the attachment ready. Tell me what you want me to check.";
+}
+
+function fileUploadReplyLooksLikeToolExecution(reply, action) {
+  const text = String(reply || "").trim();
+  if (!text) return true;
+  const actionName = chatToolActionName(action).toLowerCase();
+  const normalized = text.toLowerCase();
+  const mentionsAction = actionName && normalized.includes(actionName);
+  const looksLikeExecute = /\b(fuehre|führe|execute|run)\b/i.test(text)
+    || /\bausf(?:ue|ü)hren\b/i.test(text);
+  return Boolean(mentionsAction && looksLikeExecute);
+}
+
+function fileUploadDisplayReply(res) {
+  const reply = String(res?.reply || "").trim();
+  if (!res?.action) return reply;
+  if (fileUploadReplyLooksLikeToolExecution(reply, res.action)) {
+    return fileUploadActionFallbackText();
+  }
+  return reply;
+}
