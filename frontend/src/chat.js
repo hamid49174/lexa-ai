@@ -1903,8 +1903,13 @@ function _needsAgentMode(text) {
 // Triggered by auto-detection or /agent prefix
 function agentUserFacingError(message) {
   const text = String(message || "").trim();
-  if (!text || /^unknown$/i.test(text)) return t("chat.agentErrorGeneric");
-  return t("chat.agentError", { msg: text });
+  if (!text || /^(unknown|undefined|null)$/i.test(text)) return t("chat.agentErrorGeneric");
+  if (
+    /^\d{3}\b/.test(text) ||
+    /\b(unauthorized|forbidden|not found|internal server error|bad gateway|gateway timeout)\b/i.test(text) ||
+    /\b(failed to fetch|networkerror|econn|socket|timeout|ipc|handler failed)\b/i.test(text)
+  ) return t("chat.agentErrorGeneric");
+  return t("chat.agentError", { msg: clipAgentStepText(text, 120) });
 }
 
 async function sendAgentMessage(text, options) {

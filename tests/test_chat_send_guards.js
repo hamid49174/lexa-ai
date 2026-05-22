@@ -195,7 +195,9 @@ function assert(desc, ok, detail = "") {
   assert("does not set isLoading before agent route", !state.events.some((event) => event[0] === "set" && event[1] === "isLoading"));
 
   const agentSource = extractFn(src, "sendAgentMessage");
+  const agentErrorSource = extractFn(src, "agentUserFacingError");
   assert("agent stream read has timeout guard", agentSource.includes("AGENT_STREAM_TIMEOUT_MS") && agentSource.includes("Promise.race") && agentSource.includes("agentReader.cancel"));
+  assert("agent user-facing errors hide common technical statuses", agentErrorSource.includes("unknown|undefined|null") && agentErrorSource.includes("unauthorized|forbidden|not found|internal server error") && agentErrorSource.includes("failed to fetch|networkerror|econn|socket|timeout|ipc|handler failed") && agentErrorSource.includes("clipAgentStepText(text, 120)"));
   assert("agent timeout uses translated UI message", agentSource.includes('t("chat.agentTimeout")') && deI18n.includes('"chat.agentTimeout"') && enI18n.includes('"chat.agentTimeout"'));
   assert("agent mode has user stop control", agentSource.includes("agent-stop-btn") && agentSource.includes("agentStoppedByUser") && agentSource.includes("agent_stream_stopped"));
   assert("agent stop cancels stream reader", agentSource.includes("await agentReader.cancel()") && agentSource.includes('t("chat.agentStopped")'));
