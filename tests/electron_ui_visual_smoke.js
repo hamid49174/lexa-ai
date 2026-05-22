@@ -117,7 +117,7 @@ async function runBridgeSecurityProbe() {
   return {
     preloadReady,
     readOnlyWorks: readResult === false,
-    highRiskBlocked: highRiskResult?.ok === false && /explicit user presence|presence/i.test(String(highRiskResult?.code || highRiskResult?.message || "")),
+    highRiskBlocked: highRiskResult?.ok === false && /explicit user presence|presence|Sicherheitsfreigabe|safety gate|local action was not started/i.test(String(highRiskResult?.code || highRiskResult?.message || "")),
     highRiskDidNotExecute: smokeAutostartWrites === beforeWrites,
     auditUnderUserData: auditPath.startsWith(app.getPath("userData")) && fs.existsSync(auditPath),
     noRepoBridgeAudit: !fs.existsSync(repoAuditPath),

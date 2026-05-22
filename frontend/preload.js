@@ -542,8 +542,43 @@ function auditBridgeDecision(policy, allowed, reason, argsHash, argKeys, challen
   } catch (_error) {}
 }
 
-function bridgeSecurityError(message, code = "bridge_security_denied") {
-  const error = new Error(message);
+const BRIDGE_SECURITY_MESSAGES = {
+  de: {
+    bridge_policy_missing: "Diese lokale Aktion ist in Lexa nicht freigegeben.",
+    bridge_privacy_denied: "Diese lokale Aktion ist durch Lexas Sicherheitsregeln gesperrt.",
+    bridge_batch_denied: "Diese lokale Aktion wurde nicht gestartet. Stapelaktionen duerfen hier nur sichere Leseaktionen enthalten.",
+    bridge_presence_denied: "Diese lokale Aktion wurde nicht gestartet. Lexa konnte die Sicherheitsfreigabe nicht bestaetigen.",
+    bridge_presence_invalid: "Diese lokale Aktion wurde nicht gestartet. Die Sicherheitsfreigabe ist abgelaufen.",
+    bridge_security_denied: "Diese lokale Aktion wurde nicht gestartet.",
+  },
+  en: {
+    bridge_policy_missing: "This local action is not enabled in Lexa.",
+    bridge_privacy_denied: "This local action is blocked by Lexa safety rules.",
+    bridge_batch_denied: "This local action was not started. Batch actions here may only contain safe read-only actions.",
+    bridge_presence_denied: "This local action was not started. Lexa could not verify the safety gate.",
+    bridge_presence_invalid: "This local action was not started. The safety gate expired.",
+    bridge_security_denied: "This local action was not started.",
+  },
+};
+
+function bridgeSecurityLocale() {
+  try {
+    const lang = String(navigator?.language || "").toLowerCase();
+    if (lang.startsWith("de")) return "de";
+  } catch (_error) {}
+  return "en";
+}
+
+function bridgeSecurityDisplayMessage(code = "bridge_security_denied") {
+  const locale = bridgeSecurityLocale();
+  return BRIDGE_SECURITY_MESSAGES[locale]?.[code]
+    || BRIDGE_SECURITY_MESSAGES.en[code]
+    || BRIDGE_SECURITY_MESSAGES[locale]?.bridge_security_denied
+    || BRIDGE_SECURITY_MESSAGES.en.bridge_security_denied;
+}
+
+function bridgeSecurityError(_message, code = "bridge_security_denied") {
+  const error = new Error(bridgeSecurityDisplayMessage(code));
   error.name = "BridgeSecurityError";
   error.code = code;
   return error;
@@ -582,20 +617,20 @@ function validateExecuteBatchCommands(commands) {
 
 async function guardedBridgeCall(method, args, executor, options = {}) {
   const policy = classifyBridgeCall(method, args);
-  if (!policy) throw bridgeSecurityError(`Blocked unclassified bridge method: ${method}`, "bridge_policy_missing");
+  if (!policy) throw bridgeSecurityError("", "bridge_policy_missing");
 
   const argsHash = await bridgeArgsHash(args);
   const argKeys = bridgeArgKeys(args);
   if (policy.blocked) {
     auditBridgeDecision(policy, false, policy.classification_reason || "blocked_by_policy", argsHash, argKeys);
-    throw bridgeSecurityError("Bridge call blocked by privacy policy", "bridge_privacy_denied");
+    throw bridgeSecurityError("", "bridge_privacy_denied");
   }
 
   if (method === "executeBatch") {
     const batchCheck = validateExecuteBatchCommands(args[0]);
     if (!batchCheck.ok) {
       auditBridgeDecision(policy, false, batchCheck.reason, argsHash, argKeys);
-      throw bridgeSecurityError("executeBatch only allows explicitly read-only companion commands", "bridge_batch_denied");
+      throw bridgeSecurityError("", "bridge_batch_denied");
     }
   }
 
@@ -615,7 +650,7 @@ async function guardedBridgeCall(method, args, executor, options = {}) {
     });
     if (!challenge?.ok || !challenge.challenge_id) {
       auditBridgeDecision(policy, false, challenge?.reason || "presence_denied", argsHash, argKeys);
-      throw bridgeSecurityError("High-risk action requires explicit user presence", "bridge_presence_denied");
+      throw bridgeSecurityError("", "bridge_presence_denied");
     }
     challengeId = challenge.challenge_id;
     const consumed = await invokeMainBridge("bridge:presence:consume", {
@@ -625,7 +660,7 @@ async function guardedBridgeCall(method, args, executor, options = {}) {
     });
     if (!consumed?.ok) {
       auditBridgeDecision(policy, false, consumed?.reason || "presence_consume_failed", argsHash, argKeys, challengeId);
-      throw bridgeSecurityError("User presence challenge could not be consumed", "bridge_presence_invalid");
+      throw bridgeSecurityError("", "bridge_presence_invalid");
     }
   }
 

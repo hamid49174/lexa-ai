@@ -165,7 +165,7 @@ async function main() {
       }
     })();
   `);
-  assert("high-risk bridge call without gate is blocked", highRisk.ok === false && /presence|denied/i.test(`${highRisk.code || ""} ${highRisk.message || ""}`), JSON.stringify(highRisk));
+  assert("high-risk bridge call without gate is blocked", highRisk.ok === false && /Sicherheitsfreigabe|safety gate|presence|denied/i.test(`${highRisk.code || ""} ${highRisk.message || ""}`), JSON.stringify(highRisk));
 
   await new Promise((resolve) => setTimeout(resolve, 100));
   const auditPath = path.join(app.getPath("userData"), "bridge-audit.log");

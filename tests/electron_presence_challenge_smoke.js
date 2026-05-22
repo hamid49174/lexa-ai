@@ -128,7 +128,9 @@ async function expectRejected(win, desc, script, expectedError = "") {
       }
     })();
   `);
+  const haystack = `${result.code || ""} ${result.message || ""}`;
   const matchesExpected = !expectedError
+    || (expectedError instanceof RegExp && expectedError.test(haystack))
     || result.code === expectedError
     || String(result.message || "").includes(expectedError);
   assert(desc, result.ok === false && matchesExpected, JSON.stringify(result));
@@ -168,10 +170,10 @@ async function main() {
   }
 
   presenceMode = "deny";
-  await expectRejected(win, "high-risk bridge call without challenge is blocked", "window.lexa.setAutostart(true)", "explicit user presence");
+  await expectRejected(win, "high-risk bridge call without challenge is blocked", "window.lexa.setAutostart(true)", /Sicherheitsfreigabe|safety gate/i);
 
   presenceMode = "main_error";
-  await expectRejected(win, "structured main-process IPC error fails closed", "window.lexa.setAutostart(true)", "explicit user presence");
+  await expectRejected(win, "structured main-process IPC error fails closed", "window.lexa.setAutostart(true)", /Sicherheitsfreigabe|safety gate/i);
 
   const beforeReads = presenceRequests;
   const readResult = await runRenderer(win, "window.lexa.getAutostart()");
@@ -182,19 +184,19 @@ async function main() {
   assert("high-risk bridge call with challenge is allowed once", autostartWrites === 1);
 
   presenceMode = "replay";
-  await expectRejected(win, "replayed challenge is rejected", "window.lexa.setAutostart(true)", "challenge could not be consumed");
+  await expectRejected(win, "replayed challenge is rejected", "window.lexa.setAutostart(true)", /abgelaufen|expired/i);
 
   presenceMode = "wrong_args";
-  await expectRejected(win, "challenge bound to another args_hash is rejected", "window.lexa.setAutostart(true)", "challenge could not be consumed");
+  await expectRejected(win, "challenge bound to another args_hash is rejected", "window.lexa.setAutostart(true)", /abgelaufen|expired/i);
 
   presenceMode = "expired";
-  await expectRejected(win, "expired challenge is rejected", "window.lexa.setAutostart(true)", "challenge could not be consumed");
+  await expectRejected(win, "expired challenge is rejected", "window.lexa.setAutostart(true)", /abgelaufen|expired/i);
 
   await expectRejected(
     win,
     "executeBatch mutating command is blocked before backend call",
     "window.lexa.executeBatch([{ command: 'file_write', params: { token: 'SECRET_TOKEN_FROM_SMOKE' } }])",
-    "executeBatch only allows explicitly read-only companion commands",
+    /sichere Leseaktionen|safe read-only actions/i,
   );
 
   await new Promise((resolve) => setTimeout(resolve, 100));
