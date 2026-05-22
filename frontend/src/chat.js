@@ -826,7 +826,7 @@ function clipAgentStepText(value, limit = 64) {
 
 function agentStepParamSummary(params) {
   if (!params || typeof params !== "object") return "";
-  const preferredKeys = ["url", "query", "path", "file_path", "dir_path", "title", "name", "command", "message", "prompt"];
+  const preferredKeys = ["url", "query", "title", "message", "prompt", "path", "file_path", "dir_path", "name", "command"];
   for (const key of preferredKeys) {
     const value = params[key];
     if (value === undefined || value === null || value === "") continue;
@@ -837,6 +837,13 @@ function agentStepParamSummary(params) {
       } catch (_e) {
         return clipAgentStepText(value, 54);
       }
+    }
+    if (key === "path" || key === "file_path" || key === "dir_path") {
+      const parts = String(value).split(/[\\/]+/).filter(Boolean);
+      return clipAgentStepText(parts[parts.length - 1] || value, 54);
+    }
+    if (key === "name" || key === "command") {
+      return clipAgentStepText(String(value).replace(/[_-]+/g, " "), 54);
     }
     return clipAgentStepText(value, 54);
   }
@@ -993,7 +1000,7 @@ function agentCompletionContinuePrompt(run, counts, summaryText) {
   const unresolved = steps
     .filter((step) => ["failed", "blocked", "needs_confirmation"].includes(String(step?.status || "").toLowerCase()) || ["failed", "blocked"].includes(agentStepOutcomeKind(step)))
     .slice(0, 8);
-  const stepLines = unresolved.map((step) => `- ${agentStepDisplayLabel(step)} | ${agentStepOutcomeLabel(agentStepOutcomeKind(step))} | ${agentStepTechnicalLabel(step)}`);
+  const stepLines = unresolved.map((step) => `- ${agentStepDisplayLabel(step)} | ${agentStepOutcomeLabel(agentStepOutcomeKind(step))}`);
   const outcomeLine = agentCompletionOutcomeSummary(counts) || t("chat.agentCompletionContinueNoOutcomes");
   const rawSummary = String(summaryText || run?.summary || "").trim();
   const lead = `${prefix}${t("chat.agentCompletionContinuePromptIntro")}\n\n${t("chat.agentCompletionContinueNextRequest")} `;
@@ -1197,8 +1204,9 @@ function renderAgentStepOutcome(stepEl, step) {
   if (duration) stepEl.insertBefore(badge, duration);
   else stepEl.appendChild(badge);
   const visibleLabel = stepEl.querySelector(".agent-step-label")?.textContent || t("chat.agentStepUnknown");
-  const technicalLabel = stepEl.title || agentStepTechnicalLabel(step);
-  stepEl.setAttribute("aria-label", `${visibleLabel}. ${badge.textContent}. ${technicalLabel}`);
+  const technicalLabel = stepEl.dataset?.technicalLabel || agentStepTechnicalLabel(step);
+  stepEl.dataset.technicalLabel = technicalLabel;
+  stepEl.setAttribute("aria-label", `${visibleLabel}. ${badge.textContent}`);
 }
 
 function renderPersistedAgentRunMeta(body, meta, summaryText) {
@@ -1243,7 +1251,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   const isUser = type === "user";
   const agentRunMeta = !isUser ? setMessageAgentRunMeta(msg, options?.agentRunMeta) : null;
   const avatarClass = isUser ? "user" : "system";
-  const nameText = isUser ? t("chat.userNameYou") : (agentRunMeta ? `${t("chat.systemNameLexa")} Agent` : t("chat.systemNameLexa"));
+  const nameText = isUser ? t("chat.userNameYou") : t("chat.systemNameLexa");
   const timeStr = new Date().toLocaleTimeString(t._locale || "de-DE", { hour: "2-digit", minute: "2-digit" });
 
   const avatar = document.createElement("div");
@@ -1948,7 +1956,7 @@ async function sendAgentMessage(text, options) {
   header.className = "msg-header";
   const nameSpan = document.createElement("span");
   nameSpan.className = "msg-name";
-  nameSpan.textContent = t("chat.systemNameLexa") + " Agent";
+  nameSpan.textContent = t("chat.systemNameLexa");
   const badge = document.createElement("span");
   badge.className = "agent-badge";
   badge.textContent = t("chat.agentBadge");
@@ -2123,8 +2131,9 @@ async function sendAgentMessage(text, options) {
             const label = document.createElement("span");
             label.className = "agent-step-label";
             label.textContent = readableLabel;
-            stepEl.title = technicalLabel;
-            stepEl.setAttribute("aria-label", `${readableLabel}. ${technicalLabel}`);
+            stepEl.dataset.technicalLabel = technicalLabel;
+            stepEl.title = readableLabel;
+            stepEl.setAttribute("aria-label", readableLabel);
             stepEl.appendChild(icon);
             stepEl.appendChild(label);
             stepsContainer.appendChild(stepEl);

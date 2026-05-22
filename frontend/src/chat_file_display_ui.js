@@ -18,6 +18,9 @@ function fileInfoBadgeText(fileInfo) {
     `${fileInfo?.size_kb || 0} KB`,
   ];
   if (fileInfo?.line_count) parts.push(t("chat.fileLines", {count: fileInfo.line_count}));
+  const status = String(fileInfo?.analysis_status || "");
+  if (status === "vision_provider_required") parts.push(t("chat.fileVisionPendingBadge"));
+  else if (status === "analyzed" || status === "text_analyzed") parts.push(t("chat.fileAnalyzedBadge"));
   return parts.join(" \u00b7 ");
 }
 
@@ -41,6 +44,11 @@ function fileUploadReplyLooksLikeToolExecution(reply, action) {
 }
 
 function fileUploadDisplayReply(res) {
+  if (String(res?.analysis_status || res?.file_info?.analysis_status || "") === "vision_provider_required") {
+    return t("chat.fileVisionProviderRequired", {
+      filename: String(res?.file_info?.filename || t("chat.fileAttachmentFallback")),
+    });
+  }
   const reply = String(res?.reply || "").trim();
   if (!res?.action) return reply;
   if (fileUploadReplyLooksLikeToolExecution(reply, res.action)) {

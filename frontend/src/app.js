@@ -678,22 +678,40 @@ function setupKeyboardShortcuts() {
 }
 
 // ── SCREENSHOT ANALYSIS (Ctrl+Shift+S) ──────────
+function visionStatusPayload(result) {
+  return result?.data && typeof result.data === "object" ? result.data : (result || {});
+}
+
+function visionIsReady(status) {
+  return Boolean(status?.available);
+}
+
 async function triggerScreenshotAnalysis() {
-  if (typeof showToast === "function") showToast("Screenshot wird analysiert...", "info");
   try {
+    if (window.lexa && typeof window.lexa.visionStatus === "function") {
+      const statusResult = await window.lexa.visionStatus();
+      const status = visionStatusPayload(statusResult);
+      if (!visionIsReady(status)) {
+        const message = t("vision.providerRequiredChat");
+        if (typeof addMessage === "function") addMessage(message, "system");
+        if (typeof showToast === "function") showToast(t("vision.providerRequiredToast"), "info");
+        return;
+      }
+    }
+
+    if (typeof showToast === "function") showToast(t("vision.analyzing"), "info");
     const result = await window.lexa.visionAnalyze("Beschreibe detailliert was auf diesem Screenshot zu sehen ist. Antworte auf Deutsch.");
     if (result && result.success && result.data && result.data.analysis) {
       if (typeof addMessage === "function") {
-        addMessage("[Vision] " + result.data.analysis, "system");
+        addMessage(result.data.analysis, "system");
       }
-      if (typeof showToast === "function") showToast("Screenshot analysiert", "success");
+      if (typeof showToast === "function") showToast(t("vision.analysisComplete"), "success");
     } else {
-      const errMsg = (result && result.error) ? result.error : "Vision-Analyse fehlgeschlagen";
-      if (typeof showToast === "function") showToast(errMsg, "error");
+      if (typeof showToast === "function") showToast(t("vision.analysisFailed"), "error");
     }
   } catch (e) {
     console.error("[Vision] Screenshot analysis failed:", e);
-    if (typeof showToast === "function") showToast("Vision-Analyse Fehler: " + (e.message || e), "error");
+    if (typeof showToast === "function") showToast(t("vision.analysisFailed"), "error");
   }
 }
 

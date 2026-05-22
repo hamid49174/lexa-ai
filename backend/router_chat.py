@@ -133,6 +133,45 @@ def extract_file_content(filepath: Path, original_name: str) -> dict:
 #  CHAT ENDPOINTS
 # ══════════════════════════════════════════════════
 
+def chat_file_public_info(file_info: dict, *, analysis_status: str | None = None) -> dict:
+    """Return the stable file metadata payload exposed to the renderer."""
+    payload = {
+        "filename": file_info["filename"],
+        "size_kb": file_info["size_kb"],
+        "type": file_info["type"],
+        "extension": file_info["extension"],
+        "mime": file_info["mime"],
+        "line_count": file_info.get("line_count"),
+        "preview": file_info["preview"],
+    }
+    if analysis_status:
+        payload["analysis_status"] = analysis_status
+    return payload
+
+
+def image_upload_provider_required_reply(file_info: dict) -> str:
+    """Friendly, non-fake fallback when an uploaded image cannot be analyzed yet."""
+    return (
+        f"Ich habe das Bild '{file_info['filename']}' erhalten "
+        f"({file_info['size_kb']} KB). Die Bildanalyse ist vorbereitet, "
+        "aber aktuell ist kein Vision-Provider fuer Uploads verbunden. "
+        "Sobald ein Vision-Provider konfiguriert ist, kann ich Bildinhalt, "
+        "UI, Text und Details direkt auswerten."
+    )
+
+
+def chat_file_vision_available() -> bool:
+    """Check whether image uploads can be routed to the Vision pipeline."""
+    try:
+        from backend.vision import get_vision_status
+
+        status = get_vision_status()
+        return bool(status.get("available"))
+    except Exception as e:
+        logger.info("Vision status unavailable for chat file upload: %s", e)
+        return False
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(req: ChatRequest):
     """Standard chat endpoint (non-streaming)."""
@@ -301,6 +340,37 @@ async def chat_file_endpoint(
         file_info = extract_file_content(tmp_path, file.filename or "upload")
         user_msg = sanitize_input(message) if message else "Analysiere diese Datei."
 
+        if file_info["type"] == "image":
+            analysis_status = "vision_provider_required"
+            reply = image_upload_provider_required_reply(file_info)
+            if chat_file_vision_available():
+                try:
+                    from backend.vision import analyze_image
+
+                    reply = await analyze_image(
+                        image_input=content,
+                        prompt=user_msg,
+                        quality_mode=False,
+                    )
+                    analysis_status = "analyzed"
+                except RuntimeError as e:
+                    logger.warning("Vision image upload unavailable: %s", e)
+                    reply = image_upload_provider_required_reply(file_info)
+                except Exception:
+                    logger.exception("Vision image upload analysis failed")
+                    raise HTTPException(status_code=502, detail="Bildanalyse fehlgeschlagen. Bitte erneut versuchen.")
+
+            audit_log("chat_file", analysis_status, f"FILE={file_info['filename']}")
+            return {
+                "status": "ok",
+                "reply": reply,
+                "action": None,
+                "requires_confirmation": False,
+                "analysis_status": analysis_status,
+                "analysis_kind": "image",
+                "file_info": chat_file_public_info(file_info, analysis_status=analysis_status),
+            }
+
         if file_info["content"]:
             file_context = (
                 f"[Datei: {file_info['filename']} | {file_info['size_kb']} KB | "
@@ -308,11 +378,6 @@ async def chat_file_endpoint(
                 f"```\n{file_info['content']}\n```"
             )
             full_prompt = f"{user_msg}\n\n{file_context}"
-        elif file_info["type"] == "image":
-            full_prompt = (
-                f"{user_msg}\n\n[Bild hochgeladen: {file_info['filename']} "
-                f"({file_info['size_kb']} KB, {file_info['mime']})]"
-            )
         else:
             full_prompt = (
                 f"{user_msg}\n\n[Datei: {file_info['filename']} "
@@ -344,14 +409,11 @@ async def chat_file_endpoint(
             "reply": reply,
             "action": action,
             "requires_confirmation": requires_confirmation,
-            "file_info": {
-                "filename": file_info["filename"],
-                "size_kb": file_info["size_kb"],
-                "type": file_info["type"],
-                "extension": file_info["extension"],
-                "line_count": file_info.get("line_count"),
-                "preview": file_info["preview"],
-            },
+            "analysis_status": "text_analyzed" if file_info["type"] == "text" else "metadata_only",
+            "file_info": chat_file_public_info(
+                file_info,
+                analysis_status="text_analyzed" if file_info["type"] == "text" else "metadata_only",
+            ),
         }
     finally:
         try:

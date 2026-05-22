@@ -26,7 +26,14 @@ function assert(desc, ok, detail = "") {
 const context = {
   Number,
   String,
-  t: (key, params = {}) => key === "chat.fileLines" ? `${params.count} lines` : key,
+  t: (key, params = {}) => {
+    if (key === "chat.fileLines") return `${params.count} lines`;
+    if (key === "chat.fileVisionPendingBadge") return "Vision ready";
+    if (key === "chat.fileAnalyzedBadge") return "Analyzed";
+    if (key === "chat.fileAttachmentFallback") return "attachment";
+    if (key === "chat.fileVisionProviderRequired") return `Vision provider needed for ${params.filename}`;
+    return key;
+  },
 };
 vm.createContext(context);
 vm.runInContext(helperSrc, context, { filename: "chat_file_display_ui.js" });
@@ -42,8 +49,11 @@ assert("file extension helper falls back when no suffix exists", context.fileUpl
 assert("file extension helper preserves unsafe suffix as text", context.fileUploadExtension({ name: "bad.<script>" }) === "<SCRIPT>");
 assert("file info badge text includes type and size", context.fileInfoBadgeText({ type: "md", size_kb: 12 }) === "MD \u00b7 12 KB");
 assert("file info badge text includes line count when present", context.fileInfoBadgeText({ type: "txt", size_kb: 4, line_count: 7 }) === "TXT \u00b7 4 KB \u00b7 7 lines");
+assert("file info badge text marks pending vision provider state", context.fileInfoBadgeText({ type: "png", size_kb: 20, analysis_status: "vision_provider_required" }) === "PNG \u00b7 20 KB \u00b7 Vision ready");
+assert("file info badge text marks analyzed state", context.fileInfoBadgeText({ type: "txt", size_kb: 2, analysis_status: "text_analyzed" }) === "TXT \u00b7 2 KB \u00b7 Analyzed");
 assert("file info badge text handles missing payload", context.fileInfoBadgeText(null) === "FILE \u00b7 0 KB");
 assert("unsafe file info remains plain text for renderer insertion", context.fileInfoBadgeText({ type: "<img src=x onerror=alert(1)>", size_kb: "<script>alert(1)</script>" }).includes("<script>alert(1)</script>"));
+assert("vision provider fallback reply names the pending image", context.fileUploadDisplayReply({ analysis_status: "vision_provider_required", file_info: { filename: "screen.png" } }) === "Vision provider needed for screen.png");
 assert("helper script remains classic", !/(^|\n)\s*(import|export)\b/.test(helperSrc));
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);

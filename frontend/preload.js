@@ -939,6 +939,7 @@ if (isLexaSmokeMockAllowed()) {
     deepgramDeleteKey: async () => ok(),
     cartesiaSetKey: async () => ok(),
     cartesiaDeleteKey: async () => ok(),
+    visionStatus: async () => ({ success: true, data: { available: false, providers: [], screenshot: true, details: "smoke mock" } }),
     visionAnalyze: async () => ({ text: "" }),
     personalOsDiagnostics: async () => emptyPersonalOs(),
     personalOsDrafts: async () => emptyPersonalOs(),

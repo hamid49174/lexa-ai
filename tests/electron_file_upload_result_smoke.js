@@ -191,6 +191,20 @@ async function main() {
       });
       const suppressedActionMsg = document.querySelector("#chat-messages .message.system-message:last-child");
 
+      addFileUploadResponse({
+        analysis_status: "vision_provider_required",
+        reply: "Fuehre 'vision_analyze' aus.",
+        file_info: {
+          filename: "screen <img src=x onerror=alert(3)>.png",
+          type: "png",
+          size_kb: 258.8,
+          analysis_status: "vision_provider_required",
+        },
+      });
+      const visionPendingMsg = document.querySelector("#chat-messages .message.system-message:last-child");
+      const visionPendingBadge = visionPendingMsg?.querySelector(".file-info-badge");
+      const visionPendingText = visionPendingMsg?.querySelector(".msg-text");
+
       clearRenderedChatMessages();
       renderPersistedConversationMessages([
         { role: "user", content: "Attachment history <button data-action='confirm-action'>Run</button> <script>alert(1)</script>" },
@@ -207,6 +221,7 @@ async function main() {
         size: fileUploadSizeLabel(file),
         extension: fileUploadExtension(file),
         badge: fileInfoBadgeText({ type: "txt", size_kb: 2, line_count: 4 }),
+        visionBadge: fileInfoBadgeText({ type: "png", size_kb: 258.8, analysis_status: "vision_provider_required" }),
       };
 
       window.fetch = originalFetch;
@@ -231,6 +246,13 @@ async function main() {
           text: suppressedActionMsg?.textContent || "",
           html: suppressedActionMsg?.innerHTML || "",
           actionControls: suppressedActionMsg?.querySelectorAll("[data-action='confirm-action'], .msg-action, .action-card").length || 0,
+        },
+        visionPending: {
+          text: visionPendingMsg?.textContent || "",
+          html: visionPendingMsg?.innerHTML || "",
+          badgeText: visionPendingBadge?.textContent || "",
+          bodyText: visionPendingText?.textContent || "",
+          bodyHtml: visionPendingText?.innerHTML || "",
         },
         historyState,
         unsafeNodes,
@@ -258,10 +280,14 @@ async function main() {
   const suppressedAction = result.suppressedAction || {};
   assert("file upload tool fallback is product-friendly and not technical", /Anhang|attachment/i.test(suppressedAction.text || "") && !/file_info|Fuehre|Führe/i.test(suppressedAction.text || "") && Number(suppressedAction.actionControls || 0) === 0, JSON.stringify(suppressedAction));
 
+  const visionPending = result.visionPending || {};
+  assert("image upload without provider uses honest vision-ready fallback", /Vision|Bildanalyse|image analysis/i.test(visionPending.bodyText || "") && /screen <img src=x onerror=alert\(3\)>\.png/.test(visionPending.bodyText || "") && /Vision bereit|Vision ready/i.test(visionPending.badgeText || ""), JSON.stringify(visionPending));
+  assert("vision fallback image name remains escaped", /&lt;img src=x onerror=alert\(3\)&gt;/.test(visionPending.bodyHtml || "") && !/<img src=x/i.test(visionPending.bodyHtml || ""), JSON.stringify(visionPending));
+
   const historyState = result.historyState || {};
   assert("attachment-like history does not create live controls", Number(historyState.actionControls || 0) === 0 && historyState.text.includes("Attachment history") && /&lt;button/i.test(historyState.html || ""), JSON.stringify(historyState));
   assert("unsafe file/history content does not create executable nodes", Number(result.unsafeNodes || 0) === 0, JSON.stringify(result.unsafeNodes));
-  assert("display helpers are available without upload execution", result.displayHelpers?.extension === "MD" && /4/.test(result.displayHelpers?.badge || ""), JSON.stringify(result.displayHelpers || {}));
+  assert("display helpers are available without upload execution", result.displayHelpers?.extension === "MD" && /4/.test(result.displayHelpers?.badge || "") && /Vision bereit|Vision ready/i.test(result.displayHelpers?.visionBadge || ""), JSON.stringify(result.displayHelpers || {}));
   assert("render-only file display smoke did not perform renderer fetch calls", Array.isArray(result.fetchCalls) && result.fetchCalls.length === 0, JSON.stringify(result.fetchCalls || []));
   const forbiddenBridgeMethods = new Set([
     "chatFile",

@@ -613,15 +613,17 @@ File/attachment responsibility map:
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | File metadata display | `chat_file_display_ui.js` | passed file/file-info payloads, `t()` for line count label | No | No | No | `test_chat_file_display_helpers.js`, `electron_file_upload_result_smoke.js` | Low | Keep extracted; adjust only with direct helper tests |
 | Upload card rendering | `buildFileUploadCard()`, `addFileUploadMessage()` in `chat.js` | file object, `chatMessages`, DOM helper functions | DOM only | Yes | No | `electron_file_upload_result_smoke.js`, `test_chat_send_guards.js` | Low-medium | Keep render-only; do not mix with upload execution |
-| File result badge/rendering | `buildFileInfoBadge()`, `addFileUploadResponse()` in `chat.js` | file result payload, `addMessage()`, chat DOM | DOM only | Yes | No direct fetch | `electron_file_upload_result_smoke.js`, `test_chat_send_guards.js` | Low-medium | Keep display-only until backend contracts are covered |
-| Upload orchestration | `handleFileUpload()` in `chat.js` | `LexaState`, `window.lexa.chatFile()`, title/history, send button, TTS | Yes | Yes | Backend bridge call | static guards only | High | Stop-line; add safe fixture/backend contract coverage before changes |
+| File result badge/rendering | `buildFileInfoBadge()`, `addFileUploadResponse()` in `chat.js` | file result payload, `addMessage()`, chat DOM | DOM only | Yes | No direct fetch | `electron_file_upload_result_smoke.js`, `test_chat_file_display_helpers.js`, `test_chat_send_guards.js` | Low-medium | Keep display-only; provider status badges are covered directly |
+| Upload orchestration | `handleFileUpload()` in `chat.js`, `/chat/file` in `backend/router_chat.py` | `LexaState`, `window.lexa.chatFile()`, title/history, send button, TTS, backend upload contract | Yes | Yes | Backend bridge call and safe upload fixture tests | `test_router_chat_file_upload_vision.py`, static guards | Medium-high | Keep orchestration small; real provider/API work remains stop-lined until API selection is configured |
 | Attachment-like history | `renderPersistedConversationMessages()` | history payloads, message formatter | DOM only | Yes | No | `electron_file_upload_result_smoke.js`, history smokes | Medium | Keep history orchestration in `chat.js` |
 
 Coverage added:
 
 - `tests/electron_file_upload_result_smoke.js` loads the real renderer with isolated Electron `userData` and uses in-memory `File` objects only.
-- It verifies safe filename rendering, file extension/size metadata, file result badge text, unsafe result content containment, failed result display safety, attachment-like history not becoming live controls, no executable nodes, no renderer fetch calls, and no upload/tool/provider/OS bridge methods.
-- `tests/test_chat_file_display_helpers.js` directly covers size labels, extension fallback, unsafe suffix handling, badge text with line counts, missing payloads, unsafe text preservation for renderer escaping, and classic-script constraints.
+- It verifies safe filename rendering, file extension/size metadata, file result badge text, provider-required image fallback text, unsafe result content containment, failed result display safety, attachment-like history not becoming live controls, no executable nodes, no renderer fetch calls, and no upload/tool/provider/OS bridge methods.
+- `tests/electron_vision_readiness_smoke.js` verifies screenshot analysis does not enter the critical `visionAnalyze` confirmation path when no Vision provider is configured.
+- `tests/test_chat_file_display_helpers.js` directly covers size labels, extension fallback, unsafe suffix handling, badge text with line counts and analysis status, missing payloads, unsafe text preservation for renderer escaping, and classic-script constraints.
+- `tests/test_router_chat_file_upload_vision.py` covers the backend `/chat/file` split between image Vision readiness and existing text-file analysis.
 
 Extraction completed:
 
@@ -672,7 +674,7 @@ Current chat script order:
 14. `chat_file_display_ui.js`
 15. `chat.js`
 
-Next recommended target: provider/model backend contract coverage with fake provider responses, or a read-only Personal OS cockpit smoke. Real file uploads, filesystem writes, OS drafts, Companion execution, provider calls, Electron IPC, send pipeline, and full streaming lifecycle remain stop-lined.
+Next recommended target at the time was provider/model backend contract coverage with fake provider responses, or a read-only Personal OS cockpit smoke. Those areas now have separate coverage; real provider/API selection and full Vision behavior remain a future functional milestone.
 
 ## Read-only Personal OS Cockpit Coverage and Display Helper Extraction
 
@@ -881,11 +883,47 @@ What stayed in `chat.js`:
 
 Next recommended architecture target: either a smaller history controller extraction after adding direct conversation-switch/delete recovery coverage, or a tool UI controller split limited to render-only and mocked click behavior. The send pipeline and full streaming lifecycle remain stop-lined until stronger end-to-end coverage exists for their orchestration.
 
+## Vision Readiness and Agent UX Hardening
+
+This pass did not add provider/API integration and did not extract another large controller. It hardened two visible product seams:
+
+- image uploads now return an honest `vision_provider_required` fallback when no Vision provider is configured, instead of routing image metadata into the normal text-chat path as if analysis had happened
+- image uploads with a mocked Vision provider use the existing Vision pipeline and return `analysis_status: analyzed`
+- screenshot analysis now preflights provider readiness and avoids the critical `visionAnalyze` bridge/presence path when no provider is ready
+- file display helpers now surface `Vision ready` / `Analyzed` status badges for upload results
+- agent messages use the normal Lexa sender name and a softer `Plan` badge instead of exposing `Lexa Agent`
+- agent step titles and aria labels now use readable labels; technical tool names remain in `data-technical-label` for debugging but are no longer visible chat chrome
+- continuation prompts for blocked/failed agent steps omit raw technical tool labels
+
+Files touched in this pass:
+
+| File | Current lines after pass | Responsibility kept |
+| --- | ---: | --- |
+| `backend/router_chat.py` | 632 | `/chat/file` upload contract, Vision readiness split, existing text-file analysis path |
+| `frontend/src/app.js` | 1592 | screenshot/Vision readiness UX and global action wiring |
+| `frontend/src/chat.js` | 3666 | agent runtime UI, message insertion, send/stream/history orchestration |
+| `frontend/src/chat_file_display_ui.js` | 52 | pure file/result display labels |
+
+Tests covering this pass:
+
+- `tests/test_router_chat_file_upload_vision.py` covers image no-provider fallback, mocked provider analysis, and unchanged text upload analysis.
+- `tests/electron_vision_readiness_smoke.js` verifies missing Vision provider UX does not call the critical analysis bridge or request a confirmation.
+- `tests/electron_file_upload_result_smoke.js` verifies the provider-required image fallback and unsafe filename containment.
+- `tests/test_chat_file_display_helpers.js` directly covers status badges and provider-required fallback text.
+- `tests/test_app_chat_input_wiring.js` and `tests/test_chat_send_guards.js` guard the friendlier agent labels while preserving hidden technical detail.
+
+Remaining stop-lines:
+
+- no real Vision provider/API selection yet
+- no real provider calls, API keys, keyring writes, or secret handling
+- no filesystem write/upload expansion beyond safe upload fixtures
+- no send pipeline, streaming lifecycle, history orchestration, tool execution, Personal OS write path, Electron IPC, signing, or release-gate change
+
 ## Do Not Touch Yet
 
 - streaming send and abort lifecycle beyond pure parser helpers
 - conversation history switching/deletion persistence orchestration
-- real file upload execution, backend upload contracts, and filesystem writes
+- real file upload expansion beyond safe fixtures, filesystem writes, and provider/API execution
 - real tool execution/result lifecycle and confirmation approval execution
 - voice/STT/TTS/orb behavior
 - settings keyring/API-key handling, voice runtime behavior, license activation/removal, backend/provider contracts/calls, and Electron IPC

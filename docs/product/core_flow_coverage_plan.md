@@ -16,7 +16,7 @@ Goal: strengthen integration coverage for Lexa's internal daily-use core flows b
 | Streaming response lifecycle | `test_chat_send_guards.js`, `electron_core_chat_flow_smoke.js`, `electron_streaming_robustness_smoke.js`, `electron_ui_visual_smoke.js`, `test_chat_streaming_helpers.js` | Real provider/network behavior and full send-pipeline orchestration remain outside local smoke coverage | Streaming refactors could strand loading state, disabled buttons, duplicate partial text, or unsafe malformed stream output | Keep robustness smoke in required gates before moving any larger streaming lifecycle code |
 | Conversation history save/load | `test_router_conversations.py`, `test_chat_send_guards.js`, `electron_ui_visual_smoke.js`, `electron_core_chat_flow_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_history_lifecycle_smoke.js`, `electron_history_failure_smoke.js` | Real backend persistence and active-conversation delete edge cases still need focused coverage | History refactors could drop raw markdown, duplicate messages, corrupt active selection, or crash on malformed history payloads | Keep failure-path smoke in required gates before moving save/load/delete orchestration |
 | Tool-call display | `test_chat_send_guards.js`, `test_app_chat_input_wiring.js`, backend action/parser tests, `electron_tool_confirmation_smoke.js`, `electron_tool_display_smoke.js`, `test_chat_tool_display_helpers.js` | Real Companion/tool execution remains outside renderer smoke coverage | Tool rendering refactors could expose unsafe labels, unsafe result content, or hide confirmation state | Keep render-only display smoke mocked; do not add real tool execution to renderer tests |
-| File upload / attachment display | `electron_file_upload_result_smoke.js`, `test_chat_file_display_helpers.js`, `test_chat_send_guards.js`, `test_frontend_script_order_static.js` | Real file upload execution, backend upload calls, filesystem reads/writes, and provider-backed file analysis remain intentionally outside renderer display smoke | File UI refactors could expose unsafe filenames/content, create live controls from history, or accidentally trigger upload/tool/provider paths | Keep display-only smoke mocked with in-memory `File` objects; add backend upload contract tests only with safe fixtures |
+| File upload / attachment display | `electron_file_upload_result_smoke.js`, `electron_vision_readiness_smoke.js`, `test_chat_file_display_helpers.js`, `test_router_chat_file_upload_vision.py`, `test_chat_send_guards.js`, `test_frontend_script_order_static.js` | Real provider-backed file analysis still depends on future Vision provider/API configuration; renderer smokes still avoid real filesystem writes and real provider calls | File UI refactors could expose unsafe filenames/content, create live controls from history, fake image analysis, or accidentally trigger upload/tool/provider paths | Keep display-only smoke mocked with in-memory `File` objects; keep backend upload contract tests on safe fixtures; do not claim real Vision is production until provider/API selection is configured |
 | Confirmation happy path | `test_router_companion.py`, `test_companion_confirmation.py`, `electron_presence_challenge_smoke.js`, `electron_tool_confirmation_smoke.js`, `electron_confirmation_click_smoke.js` | Real Companion execution remains intentionally outside renderer smoke coverage | Confirmation UI refactors could call Companion incorrectly or lose safe denial behavior | Keep focused click smoke mocked; do not add real tool execution to renderer tests |
 | Personal OS cockpit read-only view | `electron_personal_os_readonly_smoke.js`, `electron_personal_os_handoff_smoke.js`, `test_personal_os_prompt.js`, `test_internal_daily_use_readiness_static.js`, `test_frontend_script_order_static.js` | Real OS root browsing, draft decisions, raw inbox submit, cleanup/archive/migration, SDK write operations, and real filesystem writes remain intentionally outside smoke coverage | Personal OS UI refactors could expose unsafe OS-like content, make the Internal surface confusing, or accidentally trigger write-capable bridge methods while opening the cockpit | Keep the read-only and handoff smokes mocked; do not click approve/reject/apply/raw-submit/cleanup paths without dedicated write-safe harness coverage |
 | Personal OS chat handoff and draft-review display | `electron_personal_os_handoff_smoke.js`, `test_personal_os_prompt.js` | Real draft decision/write behavior, real OS files, real provider sends, and Companion execution remain intentionally outside smoke coverage | Handoff/review UI changes could auto-send prompts, lose no-auto-decision guidance, or accidentally invoke write-capable bridge methods | Keep handoff smoke focused on composer placement and display-only review controls; add a separate write-safe harness before testing decisions |
@@ -183,17 +183,26 @@ Extraction completed:
 - verifies file result badges render unsafe type/size metadata as inert text
 - verifies result content keeps Markdown rendering while escaping unsafe HTML-like input
 - verifies failed file-result display is non-executable
+- verifies image uploads without a configured Vision provider render an honest provider-required fallback instead of pretending analysis ran
 - verifies attachment-like history content does not create live action controls
 - verifies no renderer `fetch()` calls occur
 - verifies no upload/tool/provider/OS bridge methods are called
 
-`tests/test_chat_file_display_helpers.js` directly covers the extracted file display helpers for size labels, extension fallback, unsafe suffix handling, badge text, missing payloads, and classic-script constraints.
+`tests/electron_vision_readiness_smoke.js` covers screenshot analysis readiness. When no Vision provider is configured, the renderer calls the safe status/readiness path, shows a friendly chat/toast fallback, does not call the critical `visionAnalyze` bridge method, and does not request a presence confirmation.
+
+`tests/test_chat_file_display_helpers.js` directly covers the extracted file display helpers for size labels, extension fallback, unsafe suffix handling, badge text, provider-required/analyzed status badges, missing payloads, and classic-script constraints.
+
+`tests/test_router_chat_file_upload_vision.py` adds backend upload contract coverage for image uploads:
+
+- image upload with no provider returns `analysis_status: vision_provider_required` and does not route the image into normal text chat
+- image upload with a mocked provider uses the Vision pipeline and returns `analysis_status: analyzed`
+- text upload keeps the existing chat-backed analysis path with `analysis_status: text_analyzed`
 
 Extraction completed:
 
 - `frontend/src/chat_file_display_ui.js` now owns only `fileUploadSizeLabel()`, `fileUploadExtension()`, and `fileInfoBadgeText()`.
 - `frontend/src/chat.js` still owns `handleFileUpload()`, in-memory card insertion, upload orchestration, backend calls, action handling, history persistence, and send/streaming state.
-- Real filesystem upload execution, backend file analysis, Companion execution, OS draft/apply behavior, provider calls, and Electron IPC remain untouched.
+- Real filesystem upload execution outside safe upload fixtures, Companion execution, OS draft/apply behavior, real provider calls, API-key/keyring setup, and Electron IPC remain untouched.
 
 ## Added In Read-only Personal OS Cockpit Sprint
 
