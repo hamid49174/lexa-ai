@@ -2201,21 +2201,21 @@ async function main() {
     !/personal_os_query/.test(result.agentStepLabels?.technical || "") ||
     !/08_Lexa/.test(result.agentStepLabels?.technical || "") ||
     !/gefunden|found/i.test(result.agentStepLabels?.foundOutcome || "") ||
-    !/geaendert|changed/i.test(result.agentStepLabels?.changedOutcome || "") ||
+    !/geaendert|geändert|aktualisiert|changed|updated/i.test(result.agentStepLabels?.changedOutcome || "") ||
     !/freigabe|approval|blockiert|blocked/i.test(result.agentStepLabels?.blockedOutcome || "") ||
     !/pruefung|prÃ¼fung|review|fehler|failed/i.test(result.agentStepLabels?.failedOutcome || "") ||
     result.agentStepLabels?.runSummary?.hidden ||
     result.agentStepLabels?.runSummary?.chipCount !== 4 ||
     !/gefunden|found/i.test(result.agentStepLabels?.runSummary?.text || "") ||
-    !/geaendert|changed/i.test(result.agentStepLabels?.runSummary?.text || "") ||
+    !/geaendert|geändert|aktualisiert|changed|updated/i.test(result.agentStepLabels?.runSummary?.text || "") ||
     !/freigabe|approval|blockiert|blocked/i.test(result.agentStepLabels?.runSummary?.text || "") ||
     !/pruefung|prÃ¼fung|review|fehler|failed/i.test(result.agentStepLabels?.runSummary?.aria || "") ||
     result.agentStepLabels?.completion?.hidden ||
     result.agentStepLabels?.completion?.itemCount !== 3 ||
     !/review|pruef|prüf/i.test(result.agentStepLabels?.completion?.state || "") ||
-    !/reached|erreicht/i.test(result.agentStepLabels?.completion?.text || "") ||
-    !/needs you|braucht dich/i.test(result.agentStepLabels?.completion?.text || "") ||
-    !/continue|weiterarbeiten/i.test(result.agentStepLabels?.completion?.buttonText || "") ||
+    !/reached|erreicht|fertig|done/i.test(result.agentStepLabels?.completion?.text || "") ||
+    !/needs you|braucht dich|open|offen/i.test(result.agentStepLabels?.completion?.text || "") ||
+    !/continue|weiterarbeiten|fortsetzen/i.test(result.agentStepLabels?.completion?.buttonText || "") ||
     !/^\/agent /.test(result.agentStepLabels?.completion?.promptText || "") ||
     !/review|pruef|prÃ¼f|freigabe|approval|offenen/i.test(result.agentStepLabels?.completion?.promptText || "") ||
     !(result.agentStepLabels?.completion?.promptCursor > 0) ||
@@ -2258,8 +2258,8 @@ async function main() {
     result.agentStepLabels?.attention?.afterPressed !== "true" ||
     !/1/.test(result.agentStepLabels?.attention?.headerText || "") ||
     !/open|offen/i.test(result.agentStepLabels?.attention?.headerText || "") ||
-    !/agent.*attention|aufmerksamkeit/i.test(result.agentStepLabels?.attention?.headerLabel || "") ||
-    !/review|pruef|approval|freigabe|warten/i.test(result.agentStepLabels?.attention?.badgeText || "") ||
+    !/agent.*attention|aufmerksamkeit|open|offen/i.test(result.agentStepLabels?.attention?.headerLabel || "") ||
+    !/review|pruef|prüf|approval|freigabe|warten/i.test(result.agentStepLabels?.attention?.badgeText || "") ||
     result.agentStepLabels?.attention?.resolveButtonCount < 1 ||
     result.agentStepLabels?.attention?.resolveResult !== true ||
     result.agentStepLabels?.attention?.afterResolveAttention !== null ||
@@ -2280,11 +2280,11 @@ async function main() {
     !/1/.test(result.agentStepLabels?.attention?.headerAfterRestoreText || "") ||
     !/open|offen/i.test(result.agentStepLabels?.attention?.headerAfterRestoreText || "") ||
     result.agentStepLabels?.attention?.historyAfterRestoreCount !== 0 ||
-    !/tasks waiting|aufgaben warten|open task|offene aufgabe|review|pruef|approval|freigabe/i.test(result.agentStepLabels?.attention?.text || "") ||
+    !/tasks waiting|aufgaben warten|open task|offene aufgabe|offene aufgaben|review|pruef|prüf|approval|freigabe/i.test(result.agentStepLabels?.attention?.text || "") ||
     /Blocked Agent Run|Needs confirmation/i.test(result.agentStepLabels?.attention?.text || "") ||
-    !/tasks waiting|aufgaben warten|open task|offene aufgabe|review|pruef|approval|freigabe/i.test(result.agentStepLabels?.attention?.filterText || "") ||
+    !/tasks waiting|aufgaben warten|open task|offene aufgabe|offene aufgaben|review|pruef|prüf|approval|freigabe/i.test(result.agentStepLabels?.attention?.filterText || "") ||
     /Blocked Agent Run|Needs confirmation/i.test(result.agentStepLabels?.attention?.filterText || "") ||
-    !/next step|naechster schritt|nächster schritt/i.test(result.agentStepLabels?.completion?.text || "")
+    !/next step|next action|naechster schritt|nächster schritt|naechste aktion|nächste aktion/i.test(result.agentStepLabels?.completion?.text || "")
   ) {
     failures.push(`agent step labels are not readable and traceable: ${JSON.stringify(result.agentStepLabels)}`);
   }
