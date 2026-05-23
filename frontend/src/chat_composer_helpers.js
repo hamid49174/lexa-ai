@@ -1,7 +1,7 @@
 /* Composer command metadata and search helpers loaded before chat.js. Keep this file free of module syntax. */
 
 const LEXA_COMPOSER_COMMANDS = [
-  { id: "agent", icon: "command", hint: "/agent", aliases: ["a", "plan", "multi", "multi-step", "mehrschritt"], prefixKey: "composer.agent.prefix", labelKey: "composer.agent.label", descKey: "composer.agent.desc", fallbackPrefix: "/agent ", fallbackLabel: "Agent Mode", fallbackDesc: "Plan and execute a multi-step task." },
+  { id: "agent", icon: "command", hint: "/agent", aliases: ["a", "plan", "multi", "multi-step", "mehrschritt"], prefixKey: "composer.agent.prefix", labelKey: "composer.agent.label", descKey: "composer.agent.desc", fallbackPrefix: "/agent ", fallbackLabel: "Plan", fallbackDesc: "Handle a multi-step task clearly." },
   { id: "clone", icon: "image", hint: "/clone", aliases: ["cl", "cloneui", "screenshotui"], prefixKey: "composer.clone.prefix", labelKey: "composer.clone.label", descKey: "composer.clone.desc", fallbackPrefix: "/agent Clone or recreate this UI from the supplied screenshot. Preserve layout intent, accessibility, responsive behavior, and Lexa's product style: ", fallbackLabel: "Clone UI", fallbackDesc: "Generate UI from a screenshot." },
   { id: "figma", icon: "figma", hint: "/figma", aliases: ["fg", "design"], prefixKey: "composer.figma.prefix", labelKey: "composer.figma.label", descKey: "composer.figma.desc", fallbackPrefix: "/agent Import or translate this Figma design into Lexa-ready UI. Keep components accessible, responsive, and consistent with the existing codebase: ", fallbackLabel: "Import Figma", fallbackDesc: "Turn a design into UI." },
   { id: "page", icon: "monitor", hint: "/page", aliases: ["p", "seite", "webpage"], prefixKey: "composer.page.prefix", labelKey: "composer.page.label", descKey: "composer.page.desc", fallbackPrefix: "/agent Create a production-ready page or screen for Lexa. Include layout, states, accessibility, responsive behavior, and tests where useful: ", fallbackLabel: "Create Page", fallbackDesc: "Generate a new app page." },
@@ -49,6 +49,29 @@ function composerCommandHintText(command) {
     .filter((value) => value && value.length <= 3 && value !== normalizedPrimary && value !== command?.id);
   const shortAlias = shortAliases.find((value) => value.length > 1) || shortAliases[0];
   return shortAlias ? `${primary} /${shortAlias}` : primary;
+}
+
+function composerCommandSentence(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.!?]+$/g, "");
+}
+
+function composerCommandAssistiveText(label, desc, prefixHint) {
+  const cleanLabel = composerCommandSentence(label);
+  const cleanDesc = composerCommandSentence(desc);
+  const cleanHint = String(prefixHint || "").trim();
+  const summary = cleanDesc ? `${cleanLabel}: ${cleanDesc}` : cleanLabel;
+  return cleanHint ? `${summary}. ${cleanHint}` : summary;
+}
+
+function composerCommandTitleText(label, desc, prefixHint) {
+  const cleanLabel = composerCommandSentence(label);
+  const cleanDesc = composerCommandSentence(desc);
+  const cleanHint = String(prefixHint || "").trim();
+  const summary = cleanDesc ? `${cleanLabel}: ${cleanDesc}` : cleanLabel;
+  return cleanHint ? `${summary} (${cleanHint})` : summary;
 }
 
 function composerCommandAliasValues(command) {

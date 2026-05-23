@@ -2066,6 +2066,19 @@ async function main() {
   ) {
     failures.push(`composer workflow alias hints are incomplete: ${JSON.stringify(result.composer.aliasRows)}`);
   }
+  const composerAriaLabels = [
+    result.composer.slashState?.activeOptionLabel,
+    ...Object.values(result.composer.aliasRows || {}).map((row) => row?.aria),
+    result.composer.contextAliasSearchState?.aria,
+    result.composer.reviewAliasSearchState?.aria,
+    result.composer.skillAliasSearchState?.aria,
+    result.composer.thinkAliasSearchState?.aria,
+    result.composer.shipAliasSearchState?.aria,
+    result.composer.aliasSearchState?.aria,
+  ].filter(Boolean);
+  if (composerAriaLabels.some((label) => /Agent Mode/i.test(label) || /\.\.\s*\//.test(label))) {
+    failures.push(`composer command labels still look technical or duplicated: ${JSON.stringify(composerAriaLabels)}`);
+  }
   if (
     result.composer.contextAliasSearchState?.inputExpanded !== "true" ||
     result.composer.contextAliasSearchState?.paletteHidden !== "false" ||

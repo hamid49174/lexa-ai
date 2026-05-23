@@ -2458,8 +2458,8 @@ function renderComposerCommandPalette(query = composerCommandQuery()) {
     row.className = "composer-command-item" + (index === _composerCommandIdx ? " selected" : "");
     row.setAttribute("role", "option");
     row.setAttribute("aria-selected", index === _composerCommandIdx ? "true" : "false");
-    row.setAttribute("aria-label", `${label}: ${desc}. ${prefixHint}`);
-    row.title = `${label}: ${desc} (${prefixHint})`;
+    row.setAttribute("aria-label", composerCommandAssistiveText(label, desc, prefixHint));
+    row.title = composerCommandTitleText(label, desc, prefixHint);
     row.dataset.commandId = command.id;
     row.innerHTML = `
       <span class="composer-command-icon" aria-hidden="true">${composerCommandIconSvg(command.icon)}</span>
