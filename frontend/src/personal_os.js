@@ -19,6 +19,7 @@ const PersonalOSState = {
   isDeciding: false,
   isApplying: false,
 };
+let personalOsRefreshSeq = 0;
 
 async function personalOsOpenIndex() {
   const area = document.getElementById("pos-area-input")?.value?.trim() || ".";
@@ -425,12 +426,13 @@ async function findPersonalOsDraft() {
 async function refreshPersonalOsView(options = null) {
   const { preferredPath, auto } = posRefreshOptions(options);
   if (auto && !personalOsCanAutoRefresh()) return false;
-  if (PersonalOSState.isRefreshing) return false;
+  if (auto && PersonalOSState.isRefreshing) return false;
+  const requestId = ++personalOsRefreshSeq;
 
   const list = document.getElementById("pos-draft-list");
   const detail = document.getElementById("pos-draft-detail");
   const filter = document.getElementById("pos-approval-filter");
-  if (!list || !detail) return;
+  if (!list || !detail) return false;
 
   PersonalOSState.isRefreshing = true;
   setPersonalOsEmptyState(list, posUiText("pos.loadingDraftQueue", "Loading draft queue..."));
@@ -442,6 +444,7 @@ async function refreshPersonalOsView(options = null) {
       window.lexa.personalOsDiagnostics(),
       window.lexa.personalOsDrafts(approval, true),
     ]);
+    if (requestId !== personalOsRefreshSeq) return false;
     const status = diagnostics?.status || { status: "offline", tools_count: 0, draft_review: false };
     PersonalOSState.lastRefreshAt = Date.now();
     renderPersonalOsStatus(status, { ...queue, counts: diagnostics?.counts || queue?.counts || {} }, diagnostics);
@@ -459,12 +462,13 @@ async function refreshPersonalOsView(options = null) {
       posRenderBadge(posQueueCounts({ counts: diagnostics?.counts || {} }).pending);
     }
   } catch (e) {
+    if (requestId !== personalOsRefreshSeq) return false;
     const diagnostics = posOfflineDiagnostics({ error: e.message || String(e) }, posUiText("pos.draftQueueFailed", "Draft queue failed"));
     renderPersonalOsStatus(diagnostics.status, { ok: false, drafts: [], counts: diagnostics.counts }, diagnostics);
     setPersonalOsEmptyState(list, diagnostics.summary);
     clearPersonalOsDraftDetail(diagnostics.summary);
   } finally {
-    PersonalOSState.isRefreshing = false;
+    if (requestId === personalOsRefreshSeq) PersonalOSState.isRefreshing = false;
   }
   return true;
 }
