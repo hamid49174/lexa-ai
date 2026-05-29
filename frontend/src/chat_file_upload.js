@@ -171,6 +171,7 @@ async function handleFileUpload(file) {
     }
   }
   const userMsg = chatInput.value.trim();
+  if (!window._chatViewOpen && typeof toggleChatView === "function") toggleChatView();
   addFileUploadMessage(file, userMsg);
   chatInput.value = ""; syncChatInputSize();
   const isFirst = chatMessages.querySelectorAll(".user-message").length <= 1;
