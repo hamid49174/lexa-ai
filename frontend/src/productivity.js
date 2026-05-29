@@ -11,6 +11,7 @@ const _habitMutationRunning = new Set();
 let _todoCreateRunning = false;
 let _habitCreateRunning = false;
 let _todoExportRunning = false;
+let _prodStatsRefreshSeq = 0;
 let _todoRefreshSeq = 0;
 let _habitRefreshSeq = 0;
 let _pomodoroRefreshSeq = 0;
@@ -237,7 +238,9 @@ async function refreshProductivityView() {
 
 async function refreshProdStats() {
   try {
+    const refreshSeq = ++_prodStatsRefreshSeq;
     const stats = await window.lexa.productivityStats();
+    if (refreshSeq !== _prodStatsRefreshSeq) return;
     const bar = document.getElementById("prod-stats-bar");
     if (!bar) return;
     const habitsDone = productivityDisplayCount(stats.habits_done_today);
