@@ -30,6 +30,7 @@ const MEMORY_GRAPH_NS = "http://www.w3.org/2000/svg";
 let memoryGraphState = null;
 let _clipboardHistoryRevealRunning = false;
 let _memoryCleanupRunning = false;
+let _routineToggleRunning = false;
 
 function setMemoryActionBusy(button, busy) {
   if (!button) return;
@@ -871,7 +872,7 @@ async function refreshMemoryView() {
         info.appendChild(schedule);
         card.appendChild(info);
         card.appendChild(toggle);
-        toggle.addEventListener("click", () => toggleRoutine(r.name));
+        toggle.addEventListener("click", () => toggleRoutine(r.name, toggle));
         routinesList.appendChild(card);
       });
     } else {
@@ -1039,10 +1040,22 @@ async function createRoutine() {
   chatInput.focus();
 }
 
-async function toggleRoutine(name) {
-  await window.lexa.execute("routine_toggle", { name }, true);
-  showToast(t("memory.routineToggled", {name}), "info");
-  refreshMemoryView();
+async function toggleRoutine(name, triggerBtn) {
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  if (_routineToggleRunning) return;
+  _routineToggleRunning = true;
+  setMemoryActionBusy(triggerBtn, true);
+  try {
+    await window.lexa.execute("routine_toggle", { name }, true);
+    showToast(t("memory.routineToggled", {name}), "info");
+    refreshMemoryView();
+  } catch (e) {
+    console.warn("[Memory] Failed to toggle routine:", e.message || e);
+    showToast(t("toast.executionError"), "error", 2200);
+  } finally {
+    _routineToggleRunning = false;
+    if (triggerBtn?.isConnected) setMemoryActionBusy(triggerBtn, false);
+  }
 }
 
 function filterNotes(query) {
