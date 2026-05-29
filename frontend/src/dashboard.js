@@ -5,6 +5,8 @@
    ════════════════════════════════════════════════ */
 
 // ── DASHBOARD ───────────────────────────────────
+let _dashboardRefreshSeq = 0;
+
 function setDashboardAiStatusMessage(target, message, className = "") {
   if (!target) return;
   const span = document.createElement("span");
@@ -190,6 +192,7 @@ function renderDashboardMemoryStats(target, mem) {
 }
 
 async function refreshDashboard() {
+  const refreshSeq = ++_dashboardRefreshSeq;
   const versionLabel = `v${LexaState.get("backendVersion") || "1.0.0"}`;
 
   // Greeting based on time of day
@@ -227,6 +230,7 @@ async function refreshDashboard() {
     window.lexa.aiModels(),
     window.lexa.weeklyStats(7),
   ]);
+  if (refreshSeq !== _dashboardRefreshSeq) return;
 
   // Greeting subtitle with model name
   const subEl = document.getElementById("dash-greeting-sub");
