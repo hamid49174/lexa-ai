@@ -380,6 +380,7 @@ function filterTodosLocal(query) {
 
 function startTodoInlineEdit(id, titleEl, currentTitle) {
   if (titleEl.querySelector("input")) return; // already editing
+  const key = String(id || "");
   const input = document.createElement("input");
   input.type = "text";
   input.value = currentTitle || "";
@@ -388,18 +389,43 @@ function startTodoInlineEdit(id, titleEl, currentTitle) {
   titleEl.appendChild(input);
   input.focus();
   input.select();
+  let editClosed = false;
+  const closeEdit = () => {
+    if (editClosed) return;
+    editClosed = true;
+    input.removeEventListener("blur", save);
+    refreshTodos();
+  };
   const save = async () => {
+    if (editClosed) return;
     const newTitle = input.value.trim();
-    if (newTitle && newTitle !== currentTitle) {
+    if (!newTitle || newTitle === currentTitle) { closeEdit(); return; }
+    if (!key || _todoMutationRunning.has(key)) return;
+    if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+    _todoMutationRunning.add(key);
+    input.disabled = true;
+    input.setAttribute("aria-busy", "true");
+    try {
       await window.lexa.todoUpdate(id, { title: newTitle });
       showToast(t("todo.updated"), "success");
+      closeEdit();
+    } catch (e) {
+      console.warn("[Productivity] Failed to update todo title:", e.message || e);
+      showToast(t("toast.executionError"), "error", 2200);
+      if (input.isConnected) {
+        input.disabled = false;
+        input.removeAttribute("aria-busy");
+        input.focus();
+        input.select();
+      }
+    } finally {
+      _todoMutationRunning.delete(key);
     }
-    refreshTodos();
   };
   input.addEventListener("blur", save);
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); save(); }
-    if (e.key === "Escape") { refreshTodos(); }
+    if (e.key === "Escape") { closeEdit(); }
   });
 }
 
