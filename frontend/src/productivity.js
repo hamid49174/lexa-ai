@@ -6,6 +6,8 @@
 
 // ── PRODUCTIVITY VIEW ────────────────────────────
 
+const _todoMutationRunning = new Set();
+
 function productivityLocale() {
   try {
     if (typeof t === "function" && t._locale) return t._locale;
@@ -42,6 +44,17 @@ function createProductivityEmptyState(message) {
   empty.className = "empty-state";
   empty.textContent = String(message || "");
   return empty;
+}
+
+function setTodoRowBusy(triggerBtn, busy) {
+  const row = triggerBtn?.closest?.(".todo-item");
+  if (row) row.setAttribute("aria-busy", busy ? "true" : "false");
+  const buttons = row ? row.querySelectorAll("button") : (triggerBtn ? [triggerBtn] : []);
+  buttons.forEach((button) => {
+    button.disabled = Boolean(busy);
+    if (busy) button.setAttribute("aria-busy", "true");
+    else button.removeAttribute("aria-busy");
+  });
 }
 
 function renderTimeTrackingLiveStatus(target, label, timeText, currentApp) {
@@ -223,7 +236,7 @@ async function refreshTodos() {
       checkBtn.title = t("productivity.complete");
       checkBtn.setAttribute("aria-label", t("productivity.completeTodoLabel", { title: td.title || "" }));
       checkBtn.textContent = statusIcon;
-      checkBtn.addEventListener("click", () => completeTodo(td.id));
+      checkBtn.addEventListener("click", () => completeTodo(td.id, checkBtn));
       item.appendChild(checkBtn);
 
       // Content area (double-click to inline edit)
@@ -284,7 +297,7 @@ async function refreshTodos() {
         progressBtn.title = t("productivity.inProgress");
         progressBtn.setAttribute("aria-label", t("productivity.markTodoInProgressLabel", { title: td.title || "" }));
         progressBtn.textContent = "\u25b6";
-        progressBtn.addEventListener("click", () => setTodoStatus(td.id, "in_progress"));
+        progressBtn.addEventListener("click", () => setTodoStatus(td.id, "in_progress", progressBtn));
         actions.appendChild(progressBtn);
       }
       const delBtn = document.createElement("button");
@@ -293,7 +306,7 @@ async function refreshTodos() {
       delBtn.title = t("productivity.deleteBtn");
       delBtn.setAttribute("aria-label", t("productivity.deleteTodoLabel", { title: td.title || "" }));
       delBtn.textContent = "\u2715";
-      delBtn.addEventListener("click", () => deleteTodo(td.id));
+      delBtn.addEventListener("click", () => deleteTodo(td.id, delBtn));
       actions.appendChild(delBtn);
       item.appendChild(actions);
 
@@ -452,23 +465,62 @@ function createTodo(prefillTitle = "") {
   titleInput.focus();
 }
 
-async function completeTodo(id) {
-  await window.lexa.todoComplete(id);
-  showToast(t("todo.completed"), "success");
-  refreshTodos();
-  refreshProdStats();
+async function completeTodo(id, triggerBtn) {
+  const key = String(id || "");
+  if (!key || _todoMutationRunning.has(key)) return;
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  _todoMutationRunning.add(key);
+  setTodoRowBusy(triggerBtn, true);
+  try {
+    await window.lexa.todoComplete(id);
+    showToast(t("todo.completed"), "success");
+    refreshTodos();
+    refreshProdStats();
+  } catch (e) {
+    console.warn("[Productivity] Failed to complete todo:", e.message || e);
+    showToast(t("toast.executionError"), "error", 2200);
+  } finally {
+    _todoMutationRunning.delete(key);
+    if (triggerBtn?.isConnected) setTodoRowBusy(triggerBtn, false);
+  }
 }
 
-async function setTodoStatus(id, status) {
-  await window.lexa.todoUpdate(id, { status });
-  refreshTodos();
+async function setTodoStatus(id, status, triggerBtn) {
+  const key = String(id || "");
+  if (!key || _todoMutationRunning.has(key)) return;
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  _todoMutationRunning.add(key);
+  setTodoRowBusy(triggerBtn, true);
+  try {
+    await window.lexa.todoUpdate(id, { status });
+    refreshTodos();
+  } catch (e) {
+    console.warn("[Productivity] Failed to update todo status:", e.message || e);
+    showToast(t("toast.executionError"), "error", 2200);
+  } finally {
+    _todoMutationRunning.delete(key);
+    if (triggerBtn?.isConnected) setTodoRowBusy(triggerBtn, false);
+  }
 }
 
-async function deleteTodo(id) {
-  await window.lexa.todoDelete(id);
-  showToast(t("todo.deleted"), "info");
-  refreshTodos();
-  refreshProdStats();
+async function deleteTodo(id, triggerBtn) {
+  const key = String(id || "");
+  if (!key || _todoMutationRunning.has(key)) return;
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  _todoMutationRunning.add(key);
+  setTodoRowBusy(triggerBtn, true);
+  try {
+    await window.lexa.todoDelete(id);
+    showToast(t("todo.deleted"), "info");
+    refreshTodos();
+    refreshProdStats();
+  } catch (e) {
+    console.warn("[Productivity] Failed to delete todo:", e.message || e);
+    showToast(t("toast.executionError"), "error", 2200);
+  } finally {
+    _todoMutationRunning.delete(key);
+    if (triggerBtn?.isConnected) setTodoRowBusy(triggerBtn, false);
+  }
 }
 
 async function exportTodos() {
