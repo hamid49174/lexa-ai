@@ -5,6 +5,7 @@
  */
 
 const path = require("path");
+require("./electron_smoke_safe_io");
 
 if (!process.versions.electron) {
   const { spawnSync } = require("child_process");
@@ -127,6 +128,8 @@ async function main() {
         && typeof personalOsReviewPrompt === "function"
         && typeof renderPosPromptHint === "function"
         && typeof renderPosApplyHint === "function"
+        && typeof clearChatVolatileState === "function"
+        && typeof getChatDraft === "function"
         && document.getElementById("chat-input")
         && document.getElementById("personal-os-view")
       );
@@ -146,11 +149,7 @@ async function main() {
       };
 
       if (typeof clearRenderedChatMessages === "function") clearRenderedChatMessages();
-      try {
-        localStorage.removeItem("lexa-chat-history");
-        localStorage.removeItem("lexa-active-conversation");
-        localStorage.removeItem("lexa-chat-draft");
-      } catch (_) {}
+      clearChatVolatileState();
       if (typeof LexaState !== "undefined") {
         LexaState.set("backendOnline", true);
         LexaState.set("isLoading", false);
@@ -183,7 +182,7 @@ async function main() {
         buttonExists: Boolean(contextButton),
         currentView: LexaState.get("currentView"),
         inputValue: contextPrompt,
-        inputDraft: localStorage.getItem("lexa-chat-draft") || "",
+        inputDraft: getChatDraft() || "",
         messages: document.querySelectorAll("#chat-messages .message").length,
         unsafeNodes: document.querySelectorAll("#chat-messages script,#chat-messages img[onerror],#personal-os-view script,#personal-os-view img[onerror]").length,
       };
@@ -260,7 +259,7 @@ async function main() {
       const reviewState = {
         currentView: LexaState.get("currentView"),
         inputValue: reviewPrompt,
-        inputDraft: localStorage.getItem("lexa-chat-draft") || "",
+        inputDraft: getChatDraft() || "",
         messages: document.querySelectorAll("#chat-messages .message").length,
         unsafeNodes: document.querySelectorAll("#chat-messages script,#chat-messages img[onerror],#personal-os-view script,#personal-os-view img[onerror]").length,
       };

@@ -652,6 +652,52 @@ async function refreshMemoryGraphView() {
 }
 
 // ── MEMORY VIEW ──────────────────────────────────
+function createMemoryEmptyState(message) {
+  const empty = document.createElement("div");
+  empty.className = "empty-state";
+  empty.textContent = message || "";
+  return empty;
+}
+
+function memoryDisplayCount(value) {
+  const count = Number(value);
+  if (!Number.isFinite(count) || count < 0) return "0";
+  return String(Math.floor(count));
+}
+
+function createMemoryInfoCard(label, value) {
+  const card = document.createElement("div");
+  card.className = "info-card";
+  const labelEl = document.createElement("div");
+  labelEl.className = "info-card-label";
+  labelEl.textContent = label || "";
+  const valueEl = document.createElement("div");
+  valueEl.className = "info-card-value";
+  valueEl.textContent = memoryDisplayCount(value);
+  card.appendChild(labelEl);
+  card.appendChild(valueEl);
+  return card;
+}
+
+function createMemoryProviderCard(label, detail, available) {
+  const card = document.createElement("div");
+  card.className = "info-card provider-card";
+  const dot = document.createElement("span");
+  dot.className = "provider-dot " + (available ? "active" : "inactive");
+  const body = document.createElement("div");
+  const labelEl = document.createElement("div");
+  labelEl.className = "fw-600 text-norm";
+  labelEl.textContent = label || "";
+  const detailEl = document.createElement("div");
+  detailEl.className = "fs-11 text-muted";
+  detailEl.textContent = available ? String(detail || t("memory.providerReady")) : t("memory.providerOffline");
+  body.appendChild(labelEl);
+  body.appendChild(detailEl);
+  card.appendChild(dot);
+  card.appendChild(body);
+  return card;
+}
+
 async function refreshMemoryView() {
   await refreshMemoryGraphView();
   return;
@@ -670,21 +716,21 @@ async function refreshMemoryView() {
   const stats = statsRes.status === "fulfilled" ? statsRes.value : {};
   const statsGrid = document.getElementById("memory-stats-grid");
   if (statsGrid) {
-    statsGrid.innerHTML = `
-      <div class="info-card"><div class="info-card-label">${t("memory.statsNotes")}</div><div class="info-card-value">${stats.notes || 0}</div></div>
-      <div class="info-card"><div class="info-card-label">${t("memory.statsMemories")}</div><div class="info-card-value">${stats.memories || 0}</div></div>
-      <div class="info-card"><div class="info-card-label">${t("memory.statsChats")}</div><div class="info-card-value">${stats.conversations || 0}</div></div>
-      <div class="info-card"><div class="info-card-label">${t("memory.statsInteractions")}</div><div class="info-card-value">${stats.interactions || 0}</div></div>
-      <div class="info-card"><div class="info-card-label">${t("memory.statsRoutines")}</div><div class="info-card-value">${stats.routines || 0}</div></div>
-      <div class="info-card"><div class="info-card-label">${t("memory.statsClipboard")}</div><div class="info-card-value">${stats.clipboard_entries || 0}</div></div>
-    `;
+    statsGrid.replaceChildren(
+      createMemoryInfoCard(t("memory.statsNotes"), stats.notes),
+      createMemoryInfoCard(t("memory.statsMemories"), stats.memories),
+      createMemoryInfoCard(t("memory.statsChats"), stats.conversations),
+      createMemoryInfoCard(t("memory.statsInteractions"), stats.interactions),
+      createMemoryInfoCard(t("memory.statsRoutines"), stats.routines),
+      createMemoryInfoCard(t("memory.statsClipboard"), stats.clipboard_entries),
+    );
   }
 
   const notesData = notesRes.status === "fulfilled" ? notesRes.value : { notes: [] };
   const notesList = document.getElementById("notes-list");
   if (notesList) {
     if (notesData.notes?.length > 0) {
-      notesList.innerHTML = "";
+      notesList.replaceChildren();
       notesData.notes.forEach(n => {
         const card = document.createElement("div");
         card.className = "note-card note-card-clickable";
@@ -722,7 +768,7 @@ async function refreshMemoryView() {
         notesList.appendChild(card);
       });
     } else {
-      notesList.innerHTML = '<div class="empty-state">' + escapeHtml(t("memory.emptyNotes")) + '</div>';
+      notesList.replaceChildren(createMemoryEmptyState(t("memory.emptyNotes")));
     }
   }
 
@@ -732,7 +778,7 @@ async function refreshMemoryView() {
     const snippetsList = document.getElementById("snippets-list");
     if (snippetsList) {
       if (snippetsData.snippets?.length > 0) {
-        snippetsList.innerHTML = "";
+        snippetsList.replaceChildren();
         snippetsData.snippets.forEach(s => {
           const card = document.createElement("div");
           card.className = "note-card snippet-card";
@@ -761,7 +807,7 @@ async function refreshMemoryView() {
           snippetsList.appendChild(card);
         });
       } else {
-        snippetsList.innerHTML = '<div class="empty-state">' + escapeHtml(t("memory.emptySnippets")) + '</div>';
+        snippetsList.replaceChildren(createMemoryEmptyState(t("memory.emptySnippets")));
       }
     }
   } catch (e) { console.warn("[Memory] Failed to render snippets:", e.message || e); }
@@ -778,17 +824,18 @@ async function refreshMemoryView() {
       ["openai", "OpenAI API", aiStatus.openai?.model_name || t("memory.openaiFallback")],
       ["gemini", "Gemini API", aiStatus.gemini?.model_name || t("memory.geminiFallback")],
     ];
-    aiPanel.innerHTML = providers.map(([key, label, detail]) => {
-      const ok = aiStatus[key]?.available;
-      return `<div class="info-card provider-card"><span class="provider-dot ${ok ? "active" : "inactive"}"></span><div><div class="fw-600 text-norm">${label}</div><div class="fs-11 text-muted">${ok ? escapeHtml(String(detail || t("memory.providerReady"))) : t("memory.providerOffline")}</div></div></div>`;
-    }).join("");
+    const fragment = document.createDocumentFragment();
+    providers.forEach(([key, label, detail]) => {
+      fragment.appendChild(createMemoryProviderCard(label, detail, Boolean(aiStatus[key]?.available)));
+    });
+    aiPanel.replaceChildren(fragment);
   }
 
   const routinesData = routinesRes.status === "fulfilled" ? routinesRes.value : { routines: [] };
   const routinesList = document.getElementById("routines-list");
   if (routinesList) {
     if (routinesData.routines?.length > 0) {
-      routinesList.innerHTML = "";
+      routinesList.replaceChildren();
       routinesData.routines.forEach(r => {
         const card = document.createElement("div");
         card.className = "routine-card";
@@ -813,7 +860,7 @@ async function refreshMemoryView() {
         routinesList.appendChild(card);
       });
     } else {
-      routinesList.innerHTML = '<div class="empty-state">' + escapeHtml(t("memory.emptyRoutines")) + '</div>';
+      routinesList.replaceChildren(createMemoryEmptyState(t("memory.emptyRoutines")));
     }
   }
 
@@ -822,7 +869,7 @@ async function refreshMemoryView() {
   // Add cleanup info
   const cleanupEl = document.getElementById("memory-cleanup-info");
   if (cleanupEl) {
-    cleanupEl.innerHTML = "";
+    cleanupEl.replaceChildren();
     const cleanBtn = document.createElement("button");
     cleanBtn.type = "button";
     cleanBtn.className = "action-btn memory-cleanup-btn";
@@ -836,7 +883,7 @@ function renderClipboardEntries(entries = []) {
   const cbList = document.getElementById("clipboard-history-list");
   if (!cbList) return;
   if (entries.length > 0) {
-    cbList.innerHTML = "";
+    cbList.replaceChildren();
     entries.slice(0, 20).forEach(e => {
       const preview = String(e.text || "").substring(0, 80);
       const card = document.createElement("div");
@@ -857,14 +904,13 @@ function renderClipboardEntries(entries = []) {
       cbList.appendChild(card);
     });
   } else {
-    cbList.innerHTML = '<div class="empty-state">' + escapeHtml(t("memory.emptyClipboard")) + '</div>';
+    cbList.replaceChildren(createMemoryEmptyState(t("memory.emptyClipboard")));
   }
 }
 
 function renderClipboardPrivacyPrompt() {
   const cbList = document.getElementById("clipboard-history-list");
   if (!cbList) return;
-  cbList.innerHTML = "";
   const card = document.createElement("div");
   card.className = "empty-state";
   const hint = document.createElement("div");
@@ -876,7 +922,7 @@ function renderClipboardPrivacyPrompt() {
   button.addEventListener("click", revealClipboardHistory);
   card.appendChild(hint);
   card.appendChild(button);
-  cbList.appendChild(card);
+  cbList.replaceChildren(card);
 }
 
 async function revealClipboardHistory() {

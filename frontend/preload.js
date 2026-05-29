@@ -192,6 +192,8 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("visionOcr", "high", "secret", "/companion/execute:screen_read_text"),
   bridgePolicy("visionStatus", "low", "read", "/vision/status", { batch_allowed: true }),
   bridgePolicy("agentRun", "critical", "execute", "/agent/run"),
+  bridgePolicy("agentStreamRead", "low", "read", "agent-stream:read"),
+  bridgePolicy("agentStreamCancel", "low", "write", "agent-stream:cancel"),
   bridgePolicy("agentChat", "critical", "execute", "/agent/chat"),
   bridgePolicy("agentStatus", "low", "read", "/agent/status", { batch_allowed: true }),
   bridgePolicy("mcpServers", "low", "read", "/mcp/servers", { batch_allowed: true }),
@@ -212,6 +214,7 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("personalOsGraph", "low", "read", "/personal-os/graph", { batch_allowed: true }),
   bridgePolicy("personalOsContextPack", "low", "read", "/personal-os/context-pack", { batch_allowed: true }),
   bridgePolicy("personalOsObsidianContext", "low", "read", "/personal-os/obsidian-context", { batch_allowed: true }),
+  bridgePolicy("personalOsSharedContext", "low", "read", "/personal-os/shared-context", { batch_allowed: true }),
   bridgePolicy("personalOsCodeLoop", "medium", "read", "/personal-os/lexa-code-loop"),
   bridgePolicy("personalOsRawSubmit", "high", "write", "/personal-os/raw-inbox/submit"),
   bridgePolicy("personalOsRawStatus", "low", "read", "/personal-os/raw-inbox/status", { batch_allowed: true }),
@@ -283,12 +286,54 @@ function hasOnlyKeys(value, allowedKeys) {
   return keys.length > 0 && keys.every((key) => allowedKeys.includes(key));
 }
 
+function normalizeBridgePathSegments(value) {
+  const parts = String(value || "").replace(/\//g, "\\").split(/\\+/);
+  const normalized = [];
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (normalized.length > 0 && normalized[normalized.length - 1] !== "..") {
+        normalized.pop();
+      } else {
+        normalized.push(part);
+      }
+      continue;
+    }
+    normalized.push(part);
+  }
+  return normalized.join("\\");
+}
+
+function bridgePathInfo(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return { normalized: "", insideRoot: false, hasParentSegment: false, suspicious: false };
+  }
+  const slashNormalized = raw.replace(/\//g, "\\");
+  const rawSegments = slashNormalized.split(/\\+/).filter(Boolean);
+  const hasParentSegment = rawSegments.includes("..");
+  const dotOnlySegment = rawSegments.some((part) => /^\.\.+$/.test(part) && part !== "..");
+  const absoluteOrDevicePath = slashNormalized.startsWith("\\")
+    || /^[a-zA-Z]:/.test(slashNormalized)
+    || /^\\\\[.?]\\/.test(slashNormalized)
+    || /^\\\\/.test(slashNormalized);
+  const normalized = normalizeBridgePathSegments(slashNormalized);
+  return {
+    normalized: normalized.replace(/\\/g, "/"),
+    insideRoot: !absoluteOrDevicePath && !hasParentSegment,
+    hasParentSegment,
+    suspicious: dotOnlySegment || absoluteOrDevicePath,
+  };
+}
+
 function normalizedBridgePath(value) {
-  return String(value || "").replace(/\\/g, "/").replace(/^\/+/, "").trim();
+  return bridgePathInfo(value).normalized;
 }
 
 function isPathTraversal(value) {
-  return normalizedBridgePath(value).split("/").some((part) => part === "..");
+  const info = bridgePathInfo(value);
+  if (!info.normalized) return false;
+  return info.hasParentSegment || info.suspicious || !info.insideRoot;
 }
 
 function isSensitivePersonalOsPath(value) {
@@ -729,6 +774,58 @@ if (isLexaSmokeMockAllowed()) {
     battery_plugged: true,
   };
   const ok = (extra = {}) => ({ success: true, ok: true, ...extra });
+  const smokeMockBehaviors = Object.create(null);
+  const smokeMockCalls = [];
+  const cloneSmokePayload = (value) => {
+    if (value === undefined) return undefined;
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (_e) {
+      return value;
+    }
+  };
+  const normalizeSmokeBehavior = (behavior) => {
+    if (Array.isArray(behavior)) return behavior.map((item) => ({ ...(item || {}) }));
+    return { ...(behavior || {}) };
+  };
+  const runSmokeMock = async (method, args, fallback) => {
+    smokeMockCalls.push({ method, args: cloneSmokePayload(args || []) });
+    let behavior = smokeMockBehaviors[method];
+    if (Array.isArray(behavior)) {
+      behavior = behavior.shift();
+      if (!smokeMockBehaviors[method]?.length) delete smokeMockBehaviors[method];
+    }
+    if (behavior) {
+      const delayMs = Math.max(0, Number.parseInt(behavior.delay_ms || behavior.delayMs || 0, 10) || 0);
+      if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (behavior.throw || behavior.error) {
+        throw new Error(String(behavior.message || behavior.error || "smoke mock error"));
+      }
+      if (Object.prototype.hasOwnProperty.call(behavior, "response")) return cloneSmokePayload(behavior.response);
+      if (Object.prototype.hasOwnProperty.call(behavior, "value")) return cloneSmokePayload(behavior.value);
+    }
+    return fallback();
+  };
+  const smokeControlBridge = Object.freeze({
+    set(method, behavior) {
+      if (!method) return false;
+      smokeMockBehaviors[String(method)] = normalizeSmokeBehavior(behavior);
+      return true;
+    },
+    clear(method) {
+      if (method) delete smokeMockBehaviors[String(method)];
+      return true;
+    },
+    reset() {
+      Object.keys(smokeMockBehaviors).forEach((key) => delete smokeMockBehaviors[key]);
+      smokeMockCalls.length = 0;
+      return true;
+    },
+    calls(method = "") {
+      const key = String(method || "");
+      return cloneSmokePayload(key ? smokeMockCalls.filter((entry) => entry.method === key) : smokeMockCalls);
+    },
+  });
   const emptyPersonalOs = () => ({
     ok: true,
     status: "ready",
@@ -788,7 +885,7 @@ if (isLexaSmokeMockAllowed()) {
     pomodoroAcknowledge: async () => ok(),
     chat: async (message) => ({ response: `Mock: ${message || ""}`.trim() }),
     chatFile: async () => ({ response: "Mock file response" }),
-    generateTitle: async (message = "") => ({ title: String(message || "Smoke Test").slice(0, 40) }),
+    generateTitle: async (message = "") => runSmokeMock("generateTitle", [message], async () => ({ title: String(message || "Smoke Test").slice(0, 40) })),
     aiStatus: async () => ({
       active_provider: "groq",
       groq: { available: true },
@@ -850,20 +947,20 @@ if (isLexaSmokeMockAllowed()) {
     clipboardHistory: async () => ({ items: [] }),
     clipboardAdd: async () => ok(),
     clipboardClear: async () => ok(),
-    conversations: async () => ({ conversations: conversations.slice() }),
-    conversationCreate: async (title = "Neuer Chat") => {
+    conversations: async () => runSmokeMock("conversations", [], async () => ({ conversations: conversations.slice() })),
+    conversationCreate: async (title = "Neuer Chat") => runSmokeMock("conversationCreate", [title], async () => {
       const id = ++nextConversationId;
       const conversation = { id, title, message_count: 0, last_message: "" };
       conversations.unshift(conversation);
       conversationMessages.set(id, []);
       return { id, title, conversation };
-    },
-    conversationGet: async (id) => {
+    }),
+    conversationGet: async (id) => runSmokeMock("conversationGet", [id], async () => {
       const conversation = findConversation(id);
       if (!conversation) return { detail: "not found" };
       return { ...conversation, messages: conversationMessages.get(conversation.id) || [] };
-    },
-    conversationUpdate: async (id, data = {}) => {
+    }),
+    conversationUpdate: async (id, data = {}) => runSmokeMock("conversationUpdate", [id, data], async () => {
       let conversation = findConversation(id);
       if (!conversation) {
         conversation = { id, title: data.title || "Smoke Test Chat", message_count: 0, last_message: "" };
@@ -876,16 +973,16 @@ if (isLexaSmokeMockAllowed()) {
         conversation.last_message = data.messages.at(-1)?.content || "";
       }
       return ok({ conversation });
-    },
-    conversationDelete: async (id) => {
+    }),
+    conversationDelete: async (id) => runSmokeMock("conversationDelete", [id], async () => {
       const index = conversations.findIndex((c) => String(c.id) === String(id));
       if (index >= 0) conversations.splice(index, 1);
       conversationMessages.delete(Number(id));
       return ok();
-    },
-    conversationLoad: async () => ok(),
+    }),
+    conversationLoad: async (id) => runSmokeMock("conversationLoad", [id], async () => ok()),
     conversationExport: async (id) => ({ text: `# Conversation ${id}\n\nMock export.` }),
-    historyClear: async () => ok(),
+    historyClear: async () => runSmokeMock("historyClear", [], async () => ok()),
     search: async () => ({ conversations: [], notes: [], memories: [] }),
     ftsSearch: async () => ({ results: [] }),
     rebuildFts: async () => ok(),
@@ -986,6 +1083,7 @@ if (isLexaSmokeMockAllowed()) {
     personalOsQuery: async () => emptyPersonalOs(),
     personalOsContextPack: async () => emptyPersonalOs(),
     personalOsObsidianContext: async () => emptyPersonalOs(),
+    personalOsSharedContext: async () => ({ fresh: false, topic: "", recentIntents: [], entities: {} }),
     personalOsReadFile: async () => emptyPersonalOs(),
     personalOsRawStatus: async () => emptyPersonalOs(),
     personalOsRawSubmit: async () => emptyPersonalOs(),
@@ -998,6 +1096,7 @@ if (isLexaSmokeMockAllowed()) {
     }),
   };
   contextBridge.exposeInMainWorld("lexa", createGuardedBridge(smokeBridge, { disablePresenceChallenge: true }));
+  contextBridge.exposeInMainWorld("lexaSmoke", smokeControlBridge);
   return;
 }
 
@@ -1103,6 +1202,75 @@ function personalOsRetryDelayMs(res, fallbackMs = 1200) {
 
 function personalOsDelay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const agentStreamReaders = new Map();
+let agentStreamSeq = 0;
+
+function nextAgentStreamId() {
+  agentStreamSeq = (agentStreamSeq + 1) % Number.MAX_SAFE_INTEGER;
+  return `agent-${Date.now().toString(36)}-${agentStreamSeq.toString(36)}`;
+}
+
+function bridgeStreamChunk(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (value instanceof ArrayBuffer) return Array.from(new Uint8Array(value));
+  if (ArrayBuffer.isView(value)) {
+    return Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+  }
+  return [];
+}
+
+function registerAgentStreamResponse(res) {
+  const body = res && res.body;
+  const reader = body && typeof body.getReader === "function" ? body.getReader() : null;
+  if (!reader) {
+    return {
+      ok: Boolean(res?.ok),
+      status: Number(res?.status || 0),
+      statusText: String(res?.statusText || ""),
+      streamId: "",
+    };
+  }
+  const streamId = nextAgentStreamId();
+  agentStreamReaders.set(streamId, reader);
+  return {
+    ok: Boolean(res.ok),
+    status: Number(res.status || 0),
+    statusText: String(res.statusText || ""),
+    streamId,
+  };
+}
+
+async function readAgentStreamChunk(streamId) {
+  const id = String(streamId || "");
+  const reader = agentStreamReaders.get(id);
+  if (!reader) return { done: true, value: [] };
+  try {
+    const result = await reader.read();
+    if (result.done) agentStreamReaders.delete(id);
+    return {
+      done: Boolean(result.done),
+      value: bridgeStreamChunk(result.value),
+    };
+  } catch (error) {
+    agentStreamReaders.delete(id);
+    throw error;
+  }
+}
+
+async function cancelAgentStream(streamId) {
+  const id = String(streamId || "");
+  const reader = agentStreamReaders.get(id);
+  agentStreamReaders.delete(id);
+  if (!reader) return { ok: true, cancelled: false };
+  try {
+    await reader.cancel();
+    return { ok: true, cancelled: true };
+  } catch (error) {
+    return { ok: false, cancelled: false, error: String(error?.message || error || "cancel_failed") };
+  }
 }
 
 async function personalOsFetchJsonWithRetry(url, fallback, options, timeoutMs = 30000, retryOptions) {
@@ -2330,6 +2498,10 @@ const lexaBridge = {
     const r = await fetchWithTimeout(`${API}/personal-os/obsidian-context?${params.toString()}`);
     return personalOsJson(r, "Personal OS Obsidian context failed");
   },
+  personalOsSharedContext: async () => {
+    const r = await fetchWithTimeout(`${API}/personal-os/shared-context`);
+    return personalOsJson(r, "Personal OS shared context failed");
+  },
   personalOsCodeLoop: async ({ areaPath = "00_System", tag = "lexa", maxFiles = 5, bodyChars = 650, includeGraph = true, hideSmoke = true } = {}) => {
     const params = new URLSearchParams();
     params.set("areaPath", areaPath || "00_System");
@@ -2396,21 +2568,29 @@ const lexaBridge = {
   },
 
   // ── Agent (Phase 46) ────────────────────────
-  agentRun: async (message) => {
-    // Returns a ReadableStream of SSE events for the agent loop.
-    // The caller should use the EventSource-like pattern or fetch+reader.
+  agentRun: async (message, options = {}) => {
+    // Native Response/ReadableStream objects do not cross Electron's sandbox bridge
+    // reliably. Return a serializable stream id and read chunks via agentStreamRead().
+    const worker = typeof options?.worker === "string" ? options.worker : undefined;
     const res = await fetchWithTimeout(`${API}/agent/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(worker ? { message, worker } : { message }),
     }, 15000);
-    return res;
+    return registerAgentStreamResponse(res);
   },
-  agentChat: async (message) => {
+  agentStreamRead: async (streamId) => {
+    return readAgentStreamChunk(streamId);
+  },
+  agentStreamCancel: async (streamId) => {
+    return cancelAgentStream(streamId);
+  },
+  agentChat: async (message, options = {}) => {
+    const worker = typeof options?.worker === "string" ? options.worker : undefined;
     const res = await fetchWithTimeout(`${API}/agent/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(worker ? { message, worker } : { message }),
     }, 120000); // 2min timeout for agent tasks
     return res.json();
   },

@@ -5,6 +5,7 @@
  */
 
 const path = require("path");
+require("./electron_smoke_safe_io");
 
 if (!process.versions.electron) {
   const { spawnSync } = require("child_process");
@@ -108,13 +109,9 @@ async function main() {
         tick();
       });
 
-      await waitFor(() => window.lexa && typeof sendMessage === "function" && document.getElementById("chat-input") && document.getElementById("send-btn"));
+      await waitFor(() => window.lexa && typeof sendMessage === "function" && typeof clearChatVolatileState === "function" && document.getElementById("chat-input") && document.getElementById("send-btn"));
       if (typeof clearRenderedChatMessages === "function") clearRenderedChatMessages();
-      try {
-        localStorage.removeItem("lexa-chat-history");
-        localStorage.removeItem("lexa-chat-draft");
-        localStorage.removeItem("lexa-active-conversation");
-      } catch (_) {}
+      clearChatVolatileState();
       if (typeof LexaState !== "undefined") {
         LexaState.set("backendOnline", true);
         LexaState.set("isLoading", false);
@@ -161,7 +158,7 @@ async function main() {
       const userMessage = document.querySelector(".user-message .msg-text");
       const assistantMessage = Array.from(document.querySelectorAll(".system-message .msg-text")).at(-1);
       const assistantContainer = assistantMessage?.closest(".message") || null;
-      const history = JSON.parse(localStorage.getItem("lexa-chat-history") || "[]");
+      const history = typeof chatCachedHistorySnapshot === "function" ? chatCachedHistorySnapshot() : [];
       const streamCall = fetchCalls.find((call) => call.url.endsWith("/chat/stream"));
       const streamBody = streamCall ? JSON.parse(streamCall.body || "{}") : {};
       const actionButtons = assistantContainer ? {

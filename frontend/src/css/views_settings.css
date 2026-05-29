@@ -1,0 +1,402 @@
+/* Settings view styles. Loaded after views.css. */
+
+/* ── SETTINGS VIEW ───────────────────────────── */
+.settings-group {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  backdrop-filter: blur(10px);
+}
+
+.settings-group-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: 1.5px;
+  margin-bottom: 12px;
+}
+
+.settings-group-title .readiness-chip {
+  margin-left: 8px;
+  -webkit-text-fill-color: currentColor;
+  vertical-align: middle;
+}
+
+.setting-item > .readiness-chip {
+  margin: 0 8px;
+}
+
+.setting-name .readiness-chip,
+.view-title .readiness-chip {
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
+.view-title .readiness-chip {
+  transform: translateY(-0.2em);
+}
+
+.readiness-note {
+  border-color: rgba(139, 146, 255, 0.18);
+}
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.setting-item:last-child {
+  border-bottom: none;
+}
+
+.setting-info {
+  flex: 1;
+}
+
+.setting-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.setting-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.setting-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(52, 211, 153, 0.1);
+  color: var(--success);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+}
+
+.setting-status.offline {
+  background: rgba(248, 113, 113, 0.1);
+  color: var(--error);
+  border-color: rgba(248, 113, 113, 0.2);
+}
+
+.setting-status.warning {
+  background: rgba(251, 191, 36, 0.1);
+  color: var(--warning);
+  border-color: rgba(251, 191, 36, 0.24);
+}
+
+.setting-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.readiness-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.035), rgba(91, 124, 246, 0.08));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+
+.readiness-kicker,
+.readiness-card-label {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.readiness-score-row,
+.readiness-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.readiness-score {
+  color: var(--text);
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.readiness-summary,
+.readiness-card-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 6px;
+}
+
+.readiness-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.readiness-card {
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.readiness-card-value {
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+  margin-top: 8px;
+}
+
+.readiness-pill {
+  border-radius: 999px;
+  border: 1px solid rgba(52, 211, 153, 0.22);
+  background: rgba(52, 211, 153, 0.12);
+  color: var(--success);
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+}
+
+.readiness-pill.warn {
+  border-color: rgba(251, 191, 36, 0.28);
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--warning);
+}
+
+.readiness-pill.blocked {
+  border-color: rgba(248, 113, 113, 0.24);
+  background: rgba(248, 113, 113, 0.12);
+  color: var(--error);
+}
+
+.readiness-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+ }
+
+.voice-diagnostics-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin: 2px 0 10px;
+}
+
+.voice-diagnostics-panel:empty {
+  display: none;
+}
+
+.voice-diagnostic-check {
+  min-width: 0;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.voice-diagnostic-check-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--success);
+}
+
+.voice-diagnostic-check.warn .voice-diagnostic-check-title {
+  color: var(--warning);
+}
+
+.voice-diagnostic-check.blocked .voice-diagnostic-check-title {
+  color: var(--error);
+}
+
+.voice-diagnostic-check-detail {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 860px) {
+  .readiness-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .readiness-actions {
+    justify-content: flex-start;
+  }
+}
+
+/* Trial Status Bar */
+.trial-status-bar {
+  padding: 12px 16px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.trial-status-bar.trial-active {
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  color: var(--text);
+}
+.trial-status-bar.trial-grace {
+  background: rgba(232, 64, 160, 0.12);
+  border: 1px solid rgba(232, 64, 160, 0.3);
+  color: var(--warning);
+}
+.trial-status-bar.trial-expired {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: var(--error);
+}
+.trial-status-bar a {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.trial-progress {
+  height: 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.trial-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.trial-progress-days-0 { width: 0%; }
+.trial-progress-days-1 { width: 7%; }
+.trial-progress-days-2 { width: 14%; }
+.trial-progress-days-3 { width: 21%; }
+.trial-progress-days-4 { width: 29%; }
+.trial-progress-days-5 { width: 36%; }
+.trial-progress-days-6 { width: 43%; }
+.trial-progress-days-7 { width: 50%; }
+.trial-progress-days-8 { width: 57%; }
+.trial-progress-days-9 { width: 64%; }
+.trial-progress-days-10 { width: 71%; }
+.trial-progress-days-11 { width: 79%; }
+.trial-progress-days-12 { width: 86%; }
+.trial-progress-days-13 { width: 93%; }
+.trial-progress-days-14 { width: 100%; }
+
+/* Toggle Switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--bg-surface3);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  transition: 0.3s ease;
+}
+
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 2px;
+  bottom: 2px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: 0.3s ease;
+}
+
+.toggle-switch input:checked+.toggle-slider {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.toggle-switch input:checked+.toggle-slider::before {
+  transform: translateX(20px);
+  background: var(--accent);
+}
+
+.profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profile-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.settings-input {
+  background: var(--bg-surface3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 8px 12px;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.settings-input:focus {
+  border-color: var(--accent);
+}
+
+.settings-input::placeholder {
+  color: var(--text-muted);
+}

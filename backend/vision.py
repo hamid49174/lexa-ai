@@ -158,21 +158,6 @@ def _capture_active_window_sync(window_title: Optional[str] = None) -> bytes:
 
         hwnd = None
         if window_title:
-            # Suche Fenster nach Titel (Teiluebereinstimmung)
-            def _enum_callback(h, results):
-                if not user32.IsWindowVisible(h):
-                    return True
-                length = user32.GetWindowTextLengthW(h)
-                if length == 0:
-                    return True
-                buf = ctypes.create_unicode_buffer(length + 1)
-                user32.GetWindowTextW(h, buf, length + 1)
-                if window_title.lower() in buf.value.lower():
-                    results.append(h)
-                return True
-
-            _WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int))
-            results = []
             # Verwende einfachere Methode: FindWindowW
             # Alternativ: EnumWindows mit Callback
             # Einfacher Ansatz: FindWindow mit Teilstring

@@ -11,7 +11,6 @@ and gets a vector back. It doesn't need to know which provider is active.
 """
 
 import hashlib
-import json
 import logging
 import struct
 import threading
@@ -382,7 +381,6 @@ def embed_text(text: str) -> Optional[list[float]]:
     """
     result = embed_text_with_metadata(text)
     return result["vector"] if result else None
-
 
 
 def embed_batch_with_metadata(texts: list[str], batch_size: int = 100) -> list[Optional[dict]]:

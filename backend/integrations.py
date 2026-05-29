@@ -15,7 +15,7 @@ import subprocess
 import threading
 import time
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import urlparse

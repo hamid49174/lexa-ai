@@ -28,7 +28,7 @@ function settingsAiModelDescriptionText(data) {
 
 function settingsRenderAiModelSelection(data, select, desc) {
   if (!select || !settingsAiModelHasAvailableData(data)) return false;
-  select.innerHTML = "";
+  select.replaceChildren();
   if (data.grouped) {
     settingsAiModelGroupedOptions(data).forEach((group) => {
       const optgroup = document.createElement("optgroup");

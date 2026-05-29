@@ -190,6 +190,35 @@ def _summarize(checks: list[dict[str, Any]]) -> tuple[str, str, str]:
     return "ready", "Startup und Runtime-Basis sind bereit.", "Keep backend health visible in Lexa."
 
 
+def _system_health_index(checks: list[dict[str, Any]], tool_group: dict[str, Any]) -> int:
+    score = 100.0
+    for check in checks:
+        state = check.get("state")
+        required = bool(check.get("required"))
+        if state == "blocked":
+            score -= 35 if required else 18
+        elif state == "warn":
+            score -= 8 if required else 5
+
+    tool_health = tool_group.get("healthPct")
+    try:
+        tool_health_pct = max(0, min(100, int(tool_health)))
+    except (TypeError, ValueError):
+        tool_health_pct = 100
+    score -= max(0, 100 - tool_health_pct) * 0.10
+    return max(0, min(100, round(score)))
+
+
+def _health_band(score: int) -> str:
+    if score >= 97:
+        return "excellent"
+    if score >= 75:
+        return "good"
+    if score >= 50:
+        return "attention"
+    return "blocked"
+
+
 async def build_startup_diagnostics(*, probe_voice: bool = False) -> dict[str, Any]:
     """Build a compact startup reliability packet for backend and UI callers."""
     ai_task = _safe_to_thread(get_ai_status)
@@ -258,11 +287,15 @@ async def build_startup_diagnostics(*, probe_voice: bool = False) -> dict[str, A
         "warn": sum(1 for check in checks if check.get("state") == "warn"),
         "blocked": sum(1 for check in checks if check.get("state") == "blocked"),
     }
+    health_score = _system_health_index(checks, tool_group)
 
     return {
         "ok": state != "blocked",
         "status": "ok",
         "state": state,
+        "healthScore": health_score,
+        "systemHealthIndex": health_score,
+        "healthBand": _health_band(health_score),
         "summary": summary,
         "nextAction": next_action,
         "version": VERSION,

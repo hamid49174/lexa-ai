@@ -10,7 +10,6 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes
 import logging
-import os
 import subprocess
 import threading
 import time
@@ -390,8 +389,8 @@ class ContextMonitor:
             prev_window = self._last_active_window.copy()
             self._last_active_window = current_window.copy()
 
-        if (prev_window.get("title") and
-                current_window.get("title") != prev_window.get("title")):
+        if (prev_window.get("title")
+                and current_window.get("title") != prev_window.get("title")):
             self.emit("active_window_changed", {
                 "previous": prev_window,
                 "current": current_window,

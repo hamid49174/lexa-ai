@@ -9,7 +9,10 @@ const path = require("path");
 const root = path.join(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "frontend", "src", "index.html"), "utf8");
 const memorySrc = fs.readFileSync(path.join(root, "frontend", "src", "memory.js"), "utf8");
-const viewsCss = fs.readFileSync(path.join(root, "frontend", "src", "css", "views.css"), "utf8");
+const viewsCss = [
+  fs.readFileSync(path.join(root, "frontend", "src", "css", "views.css"), "utf8"),
+  fs.readFileSync(path.join(root, "frontend", "src", "css", "views_memory.css"), "utf8"),
+].join("\n");
 const preloadSrc = fs.readFileSync(path.join(root, "frontend", "preload.js"), "utf8");
 
 let passed = 0;

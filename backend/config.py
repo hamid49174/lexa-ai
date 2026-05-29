@@ -3,74 +3,124 @@ All magic numbers and configurable values in one place.
 """
 import os
 
+
+def _env_int(name: str, default: int, *, minimum: int | None = None, maximum: int | None = None) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def _env_float(name: str, default: float, *, minimum: float | None = None, maximum: float | None = None) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_str(name: str, default: str) -> str:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip() or default
+
+
 # ── Server ────────────────────────────────────────
 VERSION = "1.0.0"
-BACKEND_PORT = int(os.environ.get("LEXA_PORT", "8000"))
-BACKEND_HOST = "127.0.0.1"
+BACKEND_PORT = _env_int("LEXA_PORT", 8000, minimum=1, maximum=65535)
+BACKEND_HOST = _env_str("LEXA_HOST", "127.0.0.1")
 
 # ── Chat & History ────────────────────────────────
-MAX_HISTORY = 80
-MAX_CHAT_MESSAGE_LENGTH = 4000
-MAX_CONVERSATION_MESSAGES = 5000
+MAX_HISTORY = _env_int("LEXA_MAX_HISTORY", 80, minimum=1, maximum=1000)
+MAX_CHAT_MESSAGE_LENGTH = _env_int("LEXA_MAX_CHAT_MESSAGE_LENGTH", 4000, minimum=100, maximum=200000)
+MAX_CONVERSATION_MESSAGES = _env_int("LEXA_MAX_CONVERSATION_MESSAGES", 5000, minimum=1, maximum=100000)
 
 # ── File Upload ───────────────────────────────────
-MAX_FILE_SIZE = 2 * 1024 * 1024       # 2 MB
-MAX_FILE_SIZE_MB = 2
-MAX_TEXT_CHARS = 8000
-MAX_BODY_SIZE = 1 * 1024 * 1024       # 1 MB for non-file endpoints
+MAX_FILE_SIZE_MB = _env_int("LEXA_MAX_FILE_SIZE_MB", 2, minimum=1, maximum=100)
+MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024
+MAX_TEXT_CHARS = _env_int("LEXA_MAX_TEXT_CHARS", 8000, minimum=100, maximum=500000)
+MAX_BODY_SIZE = _env_int("LEXA_MAX_BODY_SIZE", 1 * 1024 * 1024, minimum=1024, maximum=50 * 1024 * 1024)
 
 # ── Cache ─────────────────────────────────────────
-CACHE_MAX_ENTRIES = 50
-CACHE_HEALTH_TTL = 5.0
-CACHE_MEMORY_STATS_TTL = 10.0
+CACHE_MAX_ENTRIES = _env_int("LEXA_CACHE_MAX_ENTRIES", 50, minimum=1, maximum=10000)
+CACHE_HEALTH_TTL = _env_float("LEXA_CACHE_HEALTH_TTL", 5.0, minimum=0.0, maximum=3600.0)
+CACHE_MEMORY_STATS_TTL = _env_float("LEXA_CACHE_MEMORY_STATS_TTL", 10.0, minimum=0.0, maximum=3600.0)
 
 # ── Rate Limits (per minute) ─────────────────────
-RATE_LIMIT_CHAT = 30
-RATE_LIMIT_EXECUTE = 20
-RATE_LIMIT_VOICE = 60
+RATE_LIMIT_CHAT = _env_int("LEXA_RATE_LIMIT_CHAT", 30, minimum=1, maximum=10000)
+RATE_LIMIT_EXECUTE = _env_int("LEXA_RATE_LIMIT_EXECUTE", 20, minimum=1, maximum=10000)
+RATE_LIMIT_VOICE = _env_int("LEXA_RATE_LIMIT_VOICE", 60, minimum=1, maximum=10000)
+RATE_LIMIT_VISION = _env_int("LEXA_RATE_LIMIT_VISION", 15, minimum=1, maximum=10000)
+RATE_LIMIT_WORKFLOWS = _env_int("LEXA_RATE_LIMIT_WORKFLOWS", 30, minimum=1, maximum=10000)
+RATE_LIMIT_STRIPE_READ = _env_int("LEXA_RATE_LIMIT_STRIPE_READ", 10, minimum=1, maximum=10000)
+RATE_LIMIT_AUDIT_READ = _env_int("LEXA_RATE_LIMIT_AUDIT_READ", 120, minimum=1, maximum=10000)
+RATE_LIMIT_DEFAULT = _env_int("LEXA_RATE_LIMIT_DEFAULT", 30, minimum=1, maximum=10000)
 
 # ── Input Limits ──────────────────────────────────
-MAX_NOTE_TITLE = 500
-MAX_NOTE_CONTENT = 50000
-MAX_NOTE_CATEGORY = 100
-MAX_MEMORY_CONTENT = 2000
-MAX_MEMORY_CATEGORY = 50
-MAX_CONVERSATION_TITLE = 200
-MAX_SNIPPET_NAME = 200
-MAX_SNIPPET_TEXT = 20000
-MAX_CLIPBOARD_TEXT = 50000
-MAX_SEARCH_QUERY = 200
-MAX_FTS_QUERY = 500
-MAX_PROFILE_KEY = 100
-MAX_PROFILE_VALUE = 1000
+MAX_NOTE_TITLE = _env_int("LEXA_MAX_NOTE_TITLE", 500, minimum=1, maximum=5000)
+MAX_NOTE_CONTENT = _env_int("LEXA_MAX_NOTE_CONTENT", 50000, minimum=100, maximum=1000000)
+MAX_NOTE_CATEGORY = _env_int("LEXA_MAX_NOTE_CATEGORY", 100, minimum=1, maximum=1000)
+MAX_MEMORY_CONTENT = _env_int("LEXA_MAX_MEMORY_CONTENT", 2000, minimum=100, maximum=200000)
+MAX_MEMORY_CATEGORY = _env_int("LEXA_MAX_MEMORY_CATEGORY", 50, minimum=1, maximum=500)
+MAX_CONVERSATION_TITLE = _env_int("LEXA_MAX_CONVERSATION_TITLE", 200, minimum=1, maximum=2000)
+MAX_SNIPPET_NAME = _env_int("LEXA_MAX_SNIPPET_NAME", 200, minimum=1, maximum=2000)
+MAX_SNIPPET_TEXT = _env_int("LEXA_MAX_SNIPPET_TEXT", 20000, minimum=100, maximum=1000000)
+MAX_CLIPBOARD_TEXT = _env_int("LEXA_MAX_CLIPBOARD_TEXT", 50000, minimum=100, maximum=1000000)
+MAX_SEARCH_QUERY = _env_int("LEXA_MAX_SEARCH_QUERY", 200, minimum=1, maximum=5000)
+MAX_FTS_QUERY = _env_int("LEXA_MAX_FTS_QUERY", 500, minimum=1, maximum=5000)
+MAX_PROFILE_KEY = _env_int("LEXA_MAX_PROFILE_KEY", 100, minimum=1, maximum=1000)
+MAX_PROFILE_VALUE = _env_int("LEXA_MAX_PROFILE_VALUE", 1000, minimum=1, maximum=100000)
 
 # ── Cleanup ───────────────────────────────────────
-DEFAULT_CLEANUP_DAYS = 90
-DEFAULT_CLEANUP_MAX_IMPORTANCE = 3
-MIN_CLEANUP_DAYS = 7
-MAX_CLEANUP_DAYS = 365
+DEFAULT_CLEANUP_DAYS = _env_int("LEXA_DEFAULT_CLEANUP_DAYS", 90, minimum=1, maximum=3650)
+DEFAULT_CLEANUP_MAX_IMPORTANCE = _env_int("LEXA_DEFAULT_CLEANUP_MAX_IMPORTANCE", 3, minimum=1, maximum=5)
+MIN_CLEANUP_DAYS = _env_int("LEXA_MIN_CLEANUP_DAYS", 7, minimum=1, maximum=3650)
+MAX_CLEANUP_DAYS = _env_int("LEXA_MAX_CLEANUP_DAYS", 365, minimum=1, maximum=3650)
 
 # ── Tool Use (Phase 40) ─────────────────────────
-TOOL_USE_ENABLED = True   # Native function calling for Groq/OpenAI/Gemini
-TOOL_USE_MAX_TOOLS = 40   # Max tools per API call (provider limits)
+TOOL_USE_ENABLED = _env_bool("LEXA_TOOL_USE_ENABLED", True)   # Native function calling for Groq/OpenAI/Gemini
+TOOL_USE_MAX_TOOLS = _env_int("LEXA_TOOL_USE_MAX_TOOLS", 40, minimum=1, maximum=128)   # Max tools per API call
 
 # ── Agent (Phase 46) ───────────────────────────
-AGENT_MAX_STEPS = 10      # Max tool calls per agent turn
-AGENT_STEP_TIMEOUT = 30   # Seconds per step execution
-AGENT_CONFIRM_TIMEOUT = 300  # Seconds to wait for user confirmation
+AGENT_MAX_STEPS = _env_int("LEXA_AGENT_MAX_STEPS", 10, minimum=1, maximum=50)      # Max tool calls per agent turn
+AGENT_STEP_TIMEOUT = _env_int("LEXA_AGENT_STEP_TIMEOUT", 30, minimum=1, maximum=600)   # Seconds per step execution
+AGENT_CONFIRM_TIMEOUT = _env_int("LEXA_AGENT_CONFIRM_TIMEOUT", 300, minimum=1, maximum=3600)
 
 # ── MCP — Model Context Protocol (Phase 47) ───
-MCP_ENABLED = True            # Enable MCP server integration
-MCP_CONNECT_TIMEOUT = 10      # Seconds to wait for server handshake
-MCP_CALL_TIMEOUT = 30         # Seconds to wait for tool call result
+MCP_ENABLED = _env_bool("LEXA_MCP_ENABLED", True)            # Enable MCP server integration
+MCP_CONNECT_TIMEOUT = _env_int("LEXA_MCP_CONNECT_TIMEOUT", 10, minimum=1, maximum=120)
+MCP_CALL_TIMEOUT = _env_int("LEXA_MCP_CALL_TIMEOUT", 30, minimum=1, maximum=600)
 
 # ── Embeddings (Phase 42) ────────────────────────
-EMBEDDING_ENABLED = True      # Enable semantic memory via embeddings
-EMBEDDING_PROVIDER = "auto"   # "auto" (OpenAI → local), "openai", "local"
-EMBEDDING_REINDEX_BATCH = 50  # Batch size for reindex operations
+EMBEDDING_ENABLED = _env_bool("LEXA_EMBEDDING_ENABLED", True)
+EMBEDDING_PROVIDER = _env_str("LEXA_EMBEDDING_PROVIDER", "auto")   # "auto", "openai", "local"
+EMBEDDING_REINDEX_BATCH = _env_int("LEXA_EMBEDDING_REINDEX_BATCH", 50, minimum=1, maximum=10000)
 
 # ── Slow Request Logging ─────────────────────────
-SLOW_REQUEST_THRESHOLD = 5.0  # seconds
+SLOW_REQUEST_THRESHOLD = _env_float("LEXA_SLOW_REQUEST_THRESHOLD", 5.0, minimum=0.1, maximum=3600.0)
 
 # ── Allowed File Extensions ──────────────────────
 TEXT_EXTENSIONS = {
@@ -85,14 +135,14 @@ BLOCKED_EXTENSIONS = {
 }
 
 # ── Weather (Upgrade 2) ───────────────────────
-WEATHER_CACHE_TTL = 600      # 10 minutes
+WEATHER_CACHE_TTL = _env_int("LEXA_WEATHER_CACHE_TTL", 600, minimum=0, maximum=86400)
 
 # ── Reminders (Upgrade 3) ─────────────────────
-REMINDER_CHECK_INTERVAL = 30  # seconds
+REMINDER_CHECK_INTERVAL = _env_int("LEXA_REMINDER_CHECK_INTERVAL", 30, minimum=1, maximum=3600)
 
 # ── Email (Upgrade 4) ─────────────────────────
-MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024  # 25 MB
+MAX_ATTACHMENT_SIZE = _env_int("LEXA_MAX_ATTACHMENT_SIZE_MB", 25, minimum=1, maximum=500) * 1024 * 1024
 
 # ── Vision/OCR (Upgrade 6) ────────────────────
-VISION_MAX_IMAGE_WIDTH = 1280  # Downscale before sending to API
-VISION_JPEG_QUALITY = 85       # JPEG quality for API uploads
+VISION_MAX_IMAGE_WIDTH = _env_int("LEXA_VISION_MAX_IMAGE_WIDTH", 1280, minimum=64, maximum=8192)
+VISION_JPEG_QUALITY = _env_int("LEXA_VISION_JPEG_QUALITY", 85, minimum=1, maximum=100)

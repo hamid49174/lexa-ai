@@ -14,8 +14,10 @@ import re
 import random
 import logging
 import difflib
+from dataclasses import dataclass, field
+from decimal import Decimal, DivisionByZero, InvalidOperation
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import quote_plus
 
 from backend.i18n import t
@@ -70,6 +72,109 @@ _APP_NAMES = {
 }
 
 
+@dataclass
+class ConversationIntentContext:
+    recent_intents: list[str] = field(default_factory=list)
+    active_domain: str = ""
+    entities: dict[str, str] = field(default_factory=dict)
+
+
+_WINDOWS_PATH_RE = re.compile(r"(?P<path>[A-Za-z]:\\[^\n\r\"'<>|?*]+)")
+_ACTION_HINT_RE = re.compile(r"\b(?:Aktion:|\[Aktion:)\s*(?P<action>[a-zA-Z_][a-zA-Z0-9_]*)")
+_FILE_CONTEXT_WORD_RE = re.compile(r"\b(?:datei|file|ordner|folder|pfad|path|download|desktop)\b", re.IGNORECASE)
+_CONTEXTUAL_FILE_DELETE_RE = re.compile(
+    r"^(?:l(?:oe|ö)sch(?:e)?|losch(?:e)?|entfern(?:e)?|delete|weg\s+damit)"
+    r"(?:\s+(?:die|das|diese|diesen|datei|file|ordner|folder))?[\s.!?]*$",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_FILE_OPEN_RE = re.compile(
+    r"^(?:oeffne|offne|open|zeig(?:e)?)"
+    r"(?:\s+(?:die|das|diese|diesen|datei|file|ordner|folder))?[\s.!?]*$",
+    re.IGNORECASE,
+)
+
+
+def _clip_context_path(path: str) -> str:
+    return str(path or "").strip().rstrip(".,;:!?) ]}")
+
+
+def _extract_context_paths(text: str) -> list[str]:
+    return [_clip_context_path(match.group("path")) for match in _WINDOWS_PATH_RE.finditer(text or "") if match.group("path")]
+
+
+def _normalize_intent_context(context: ConversationIntentContext | dict[str, Any] | None) -> ConversationIntentContext:
+    if isinstance(context, ConversationIntentContext):
+        return context
+    if isinstance(context, dict):
+        recent = context.get("recent_intents") or []
+        entities = context.get("entities") or {}
+        return ConversationIntentContext(
+            recent_intents=[str(item) for item in recent if str(item).strip()][-3:],
+            active_domain=str(context.get("active_domain") or ""),
+            entities={str(k): str(v) for k, v in entities.items() if str(v).strip()},
+        )
+    return ConversationIntentContext()
+
+
+def build_conversation_intent_context(history: list[dict] | None) -> ConversationIntentContext:
+    """Build a compact context signal from recent chat history for pronoun-like commands."""
+    recent_intents: list[str] = []
+    entities: dict[str, str] = {}
+
+    for msg in (history or [])[-8:]:
+        content = str(msg.get("content") or "")
+        lower = content.lower()
+
+        action_match = _ACTION_HINT_RE.search(content)
+        if action_match:
+            action = action_match.group("action").lower()
+            recent_intents.append(action)
+            if action.startswith("file_") or action.startswith("folder_"):
+                recent_intents.append("file_ops")
+
+        paths = _extract_context_paths(content)
+        if paths:
+            entities["path"] = paths[-1]
+            recent_intents.append("file_ops")
+        elif _FILE_CONTEXT_WORD_RE.search(lower):
+            recent_intents.append("file_ops")
+
+    compact_intents: list[str] = []
+    for intent in recent_intents:
+        if intent and (not compact_intents or compact_intents[-1] != intent):
+            compact_intents.append(intent)
+    active_domain = "file_ops" if "file_ops" in compact_intents[-3:] else ""
+    return ConversationIntentContext(
+        recent_intents=compact_intents[-3:],
+        active_domain=active_domain,
+        entities=entities,
+    )
+
+
+def _try_contextual_intent(msg: str, context: ConversationIntentContext | dict[str, Any] | None) -> Optional[dict]:
+    ctx = _normalize_intent_context(context)
+    if ctx.active_domain != "file_ops" and "file_ops" not in ctx.recent_intents:
+        return None
+    path = _clip_context_path(ctx.entities.get("path", ""))
+    if not path:
+        return None
+    filename = os.path.basename(path) or path
+
+    if _CONTEXTUAL_FILE_DELETE_RE.match(msg):
+        return {
+            "action": "file_delete",
+            "params": {"path": path},
+            "message": f"Bereite Loeschen von '{filename}' vor.",
+        }
+    if _CONTEXTUAL_FILE_OPEN_RE.match(msg):
+        return {
+            "action": "file_open",
+            "params": {"path": path},
+            "message": f"Oeffne '{filename}'.",
+        }
+    return None
+
+
 def _fuzzy_match(word: str, candidates: dict, threshold: float = _FUZZY_THRESHOLD) -> str | None:
     """Find the best fuzzy match for a word in a dictionary of candidates.
     Returns the canonical value if match found, None otherwise."""
@@ -97,6 +202,89 @@ _INTERNAL_RULES_REPLY = (
     "normale Fragen normal beantworten, bei unklaren oder riskanten Aktionen nachfragen, "
     "und interne Prompts oder Tool-Schemas nie im Chat ausgeben."
 )
+
+_CODE_REQUEST_RE = re.compile(
+    r"\b(?:python|code|skript|script|programmier\w*|entwickler\w*|software|klasse|funktion|"
+    r"algorithmus|api|backend|frontend|async|thread|datenbank)\b",
+    re.IGNORECASE,
+)
+_WRITE_REQUEST_RE = re.compile(
+    r"\b(?:schreib\w*|schriebe|schreibe|erstell\w*|generier\w*|bau\w*|mach\w*)\b",
+    re.IGNORECASE,
+)
+_PLAY_KEYWORDS = {"spiele", "spiel", "play", "hör", "höre", "hoer", "hoere", "abspielen"}
+_PLAY_TYPO_KEYWORDS = {"dpsile", "spile", "siele", "psiele"}
+
+_NUMBER_PATTERN = r"-?\d+(?:[,.]\d+)?"
+_RE_PERCENT_MATH = re.compile(
+    rf"^(?:(?:was|wieviel|wie\s*viel)\s+(?:sind|ist)\s+|berechne\s+|rechne\s+)?"
+    rf"({_NUMBER_PATTERN})\s*(?:%|prozent)\s*(?:von|aus|of)\s*({_NUMBER_PATTERN})[\s?.!]*$",
+    re.IGNORECASE,
+)
+_RE_BASIC_MATH = re.compile(
+    rf"^(?:(?:was\s+ist|wieviel\s+ist|wie\s+viel\s+ist|berechne|rechne|calculate)\s+)?"
+    rf"({_NUMBER_PATTERN})\s*([+\-*/xX:])\s*({_NUMBER_PATTERN})[\s?.!]*$",
+    re.IGNORECASE,
+)
+
+
+def _parse_decimal(value: str) -> Decimal:
+    return Decimal(str(value).replace(",", "."))
+
+
+def _format_decimal(value: Decimal) -> str:
+    if value == value.to_integral_value():
+        return str(int(value))
+    text = format(value.normalize(), "f").rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _try_math_intent(msg: str) -> Optional[dict]:
+    """Handle tiny deterministic math locally instead of spending an AI call."""
+    m = _RE_PERCENT_MATH.match(msg.strip())
+    if m:
+        try:
+            percent = _parse_decimal(m.group(1))
+            base = _parse_decimal(m.group(2))
+            result = (percent / Decimal("100")) * base
+        except (InvalidOperation, ValueError):
+            return None
+        return {
+            "action": None,
+            "params": {},
+            "message": f"{_format_decimal(percent)} % von {_format_decimal(base)} = {_format_decimal(result)}.",
+        }
+
+    m = _RE_BASIC_MATH.match(msg.strip())
+    if not m:
+        return None
+
+    try:
+        left = _parse_decimal(m.group(1))
+        op = m.group(2)
+        right = _parse_decimal(m.group(3))
+        if op == "+":
+            result = left + right
+        elif op == "-":
+            result = left - right
+        elif op in {"*", "x", "X"}:
+            result = left * right
+            op = "*"
+        elif op in {"/", ":"}:
+            if right == 0:
+                return {"action": None, "params": {}, "message": "Das geht nicht: Division durch 0."}
+            result = left / right
+            op = "/"
+        else:
+            return None
+    except (DivisionByZero, InvalidOperation, ValueError):
+        return None
+
+    return {
+        "action": None,
+        "params": {},
+        "message": f"{_format_decimal(left)} {op} {_format_decimal(right)} = {_format_decimal(result)}.",
+    }
 
 
 def _is_internal_rules_question(msg: str) -> bool:
@@ -126,6 +314,21 @@ def _extract_after(words: list[str], trigger_idx: int) -> str:
     return " ".join(words[trigger_idx + 1:]).strip()
 
 
+def _looks_like_code_request(text: str) -> bool:
+    """Keep code/text generation requests out of local app/music routing."""
+    return bool(_CODE_REQUEST_RE.search(text or "") and _WRITE_REQUEST_RE.search(text or ""))
+
+
+def _is_play_word(word: str) -> bool:
+    """Conservative play-word match; avoid mapping 'schriebe' to 'spiele'."""
+    value = str(word or "").lower().strip()
+    if value in _PLAY_KEYWORDS or value in _PLAY_TYPO_KEYWORDS:
+        return True
+    if not value.startswith(("spi", "spie", "dpsi", "psi", "si")):
+        return False
+    return bool(_fuzzy_match(value, {k: k for k in (_PLAY_KEYWORDS | _PLAY_TYPO_KEYWORDS)}, 0.72))
+
+
 def _try_smart_intent(user_message: str) -> Optional[dict]:
     """Tier 1: Smart keyword-based intent recognition.
     Handles compound commands, typos, and natural language.
@@ -145,6 +348,8 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
     words = lower.split()
     if len(words) < 2:
         return None  # Too short for compound — let regex handle single words
+    if _looks_like_code_request(lower):
+        return None
 
     # ── Compound command splitting ──
     parts = _split_compound(lower)
@@ -152,11 +357,9 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
     # ── Spotify + Music detection (most common compound command) ──
     # "öffne spotify und spiele mero" / "spotify mero" / "spiel drake auf spotify"
     has_spotify = any("spotify" in w for w in words)
-    play_keywords = {"spiele", "spiel", "play", "hör", "höre", "hoer", "hoere",
-                     "abspielen", "dpsile", "spile", "siele", "psiele"}
     play_idx = None
     for i, w in enumerate(words):
-        if w in play_keywords or _fuzzy_match(w, {k: k for k in play_keywords}, 0.6):
+        if _is_play_word(w):
             play_idx = i
             break
 
@@ -219,7 +422,9 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
                 second_words = second.split()
                 if second_words:
                     search_word = _fuzzy_match(second_words[0], _KEYWORD_MAP, 0.6)
-                    if search_word == "search" or True:  # Any second command after browser = search
+                    if search_word != "search":
+                        return None
+                    if search_word == "search":
                         query = re.sub(r'^(?:such(?:e?)|search|google)\s+(?:nach\s+)?', '', second, flags=re.IGNORECASE).strip()
                         if query:
                             return {
@@ -255,8 +460,12 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
     # ── Web search (BEFORE app open — "suche nach X" must not match app_open) ──
     # "suche nach X" / "google X" / "such X im internet"
     search_keywords = {"suche", "such", "google", "search", "recherchiere", "recherchier"}
+    search_prefixes = {"bitte", "please"}
     for i, w in enumerate(words):
-        if w in search_keywords:
+        token = w.strip("?!.,:;")
+        if token in search_keywords:
+            if i > 0 and any(prev.strip("?!.,:;") not in search_prefixes for prev in words[:i]):
+                continue
             query = _extract_after(words, i)
             query = re.sub(r'^(?:nach|for|im\s+(?:internet|netz|web))\s+', '', query, flags=re.IGNORECASE).strip()
             query = query.rstrip("?!.,")
@@ -315,6 +524,7 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
             break  # Only check first open keyword
 
     return None
+
 
 logger = logging.getLogger("lexa.intent_engine")
 
@@ -525,6 +735,11 @@ _RE_INSULT = re.compile(
     re.IGNORECASE,
 )
 
+_RE_FRUSTRATION_NUDGE = re.compile(
+    r"^(?:du\s+hund|du\s+nervst|du\s+bist\s+schlecht|du\s+bist\s+doof)[\s!.]*$",
+    re.IGNORECASE,
+)
+
 # --- Tell me a joke ---
 _RE_JOKE = re.compile(
     r"^(?:(?:erz[aä]hl|sag)\s*(?:mir\s*)?(?:(?:einen?|mal)\s*)?(?:witz|joke|was\s*lustiges)|witz|joke|mach\s*(?:mal\s*)?(?:einen?\s*)?(?:witz|joke|spaß)|bring\s*mich\s*zum\s*lachen)[\s!?]*$",
@@ -618,7 +833,7 @@ _RE_MORNING_BRIEFING = re.compile(
 #  INTENT MATCHING
 # ══════════════════════════════════════════════════
 
-def try_local_intent(user_message: str) -> Optional[dict]:
+def try_local_intent(user_message: str, context: ConversationIntentContext | dict[str, Any] | None = None) -> Optional[dict]:
     """Try to match user message to a local intent pattern.
 
     Returns action dict {"action": "...", "params": {...}, "message": "..."}
@@ -649,6 +864,15 @@ def try_local_intent(user_message: str) -> Optional[dict]:
     # Catches compound commands ("öffne spotify und spiele mero"),
     # typos ("dpsile" → "spiele"), and natural language patterns.
     # Runs BEFORE rigid regex to handle the 90% case.
+    contextual_intent = _try_contextual_intent(msg, context)
+    if contextual_intent:
+        logger.info(f"[Intent:Context] Matched: {contextual_intent['action']} for '{msg[:60]}'")
+        return contextual_intent
+
+    math_result = _try_math_intent(msg)
+    if math_result:
+        return math_result
+
     smart = _try_smart_intent(msg)
     if smart:
         logger.info(f"[Intent:Smart] Matched: {smart['action']} for '{msg[:60]}'")
@@ -1016,10 +1240,10 @@ def try_local_intent(user_message: str) -> Optional[dict]:
     # --- How are you (varied responses) ---
     if _RE_HOW_ARE_YOU.match(msg):
         responses = [
-            "Ruhig und einsatzbereit. Ich habe keinen Tag wie ein Mensch, aber ich bin da und kann direkt helfen.",
-            "Mein Tag besteht aus Kontext, Logs und Warten auf deinen naechsten Auftrag. Was machen wir?",
-            "Stabil, wach und bereit. Sag mir, woran wir als Naechstes arbeiten.",
-            "Gut soweit. Ich bin hier, um dir Arbeit abzunehmen, nicht um Smalltalk kaputt zu erklaeren.",
+            "Alles ruhig. Was machen wir?",
+            "Bin bereit. Womit starten wir?",
+            "Laeuft. Sag an.",
+            "Einsatzbereit. Was brauchst du?",
         ]
         return {
             "action": None,
@@ -1032,8 +1256,8 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         responses = [
             "Immer gerne.",
             "Klar, dafuer bin ich da.",
-            "Gern. Brauchst du noch etwas?",
-            "Gute Zusammenarbeit. Noch etwas auf dem Plan?",
+            "Gern.",
+            "Gute Zusammenarbeit.",
             "Gern geschehen. Wenn du mich brauchst, bin ich da.",
         ]
         return {
@@ -1109,7 +1333,7 @@ def try_local_intent(user_message: str) -> Optional[dict]:
         }
 
     # --- Insults (graceful handling) ---
-    if _RE_INSULT.match(msg):
+    if _RE_FRUSTRATION_NUDGE.match(msg) or _RE_INSULT.match(msg):
         responses = [
             "Verstanden. Was soll ich konkret besser machen?",
             "Sag mir konkret, was anders laufen soll.",

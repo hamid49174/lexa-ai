@@ -87,6 +87,8 @@ def test_startup_diagnostics_reports_ready_when_core_runtime_is_ready(monkeypatc
 
     assert payload["state"] == "ready"
     assert payload["ok"] is True
+    assert payload["systemHealthIndex"] == 100
+    assert payload["healthBand"] == "excellent"
     assert payload["groups"]["providers"]["fallbackAvailable"] == ["gemini:gemini-2.5-flash"]
     assert any(check["id"] == "provider-fallback" and check["state"] == "ok" for check in payload["checks"])
 
@@ -143,6 +145,8 @@ def test_startup_diagnostics_warns_when_selected_provider_falls_back(monkeypatch
 
     assert payload["state"] == "attention"
     assert payload["ok"] is True
+    assert 75 <= payload["systemHealthIndex"] < 100
+    assert payload["healthBand"] in {"good", "attention"}
     assert payload["groups"]["providers"]["available"] == ["openai"]
     assert any(check["id"] == "providers" and check["state"] == "warn" for check in payload["checks"])
     assert any(check["id"] == "provider-fallback" and check["state"] == "ok" for check in payload["checks"])

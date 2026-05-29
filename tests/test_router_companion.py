@@ -34,6 +34,7 @@ def client(mock_companion, disable_rate_limit):
     with patch("backend.router_companion.companion", mock_companion), \
          patch("backend.router_companion.is_command_allowed") as mock_allowed, \
          patch("backend.router_companion.check_rate_limit", lambda *a, **kw: True), \
+         patch("backend.router_companion.check_action_rate_limit", lambda *a, **kw: {"allowed": True}), \
          patch("backend.router_companion.audit_log"), \
          patch("backend.router_companion.validate_params", side_effect=lambda cmd, params: params):
 
@@ -58,6 +59,27 @@ class TestExecuteCommand:
         data = res.json()
         assert data["success"] is True
         mock_comp.execute.assert_called_once()
+
+    def test_execute_risk_budget_blocks_mutating_command(self, mock_companion, disable_rate_limit):
+        with patch("backend.router_companion.companion", mock_companion), \
+             patch("backend.router_companion.is_command_allowed", return_value="always_allowed"), \
+             patch("backend.router_companion.check_rate_limit", lambda *a, **kw: True), \
+             patch("backend.router_companion.check_action_rate_limit", return_value={"allowed": False, "used": 5, "limit": 5}), \
+             patch("backend.router_companion.reflect_action", return_value=None), \
+             patch("backend.router_companion.audit_log") as mock_audit, \
+             patch("backend.router_companion.validate_params", side_effect=lambda cmd, params: params):
+            from backend.router_companion import router
+            app = FastAPI()
+            app.include_router(router)
+            tc = TestClient(app)
+            res = tc.post("/companion/execute", json={"command": "process_kill", "params": {"pid": 123}})
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is False
+        assert "risky actions" in data["error"]
+        mock_companion.execute.assert_not_called()
+        mock_audit.assert_any_call("process_kill", "risk_rate_limited", "source=companion_execute used=5 limit=5")
 
     def test_execute_blocked_command(self, client):
         tc, mock_comp, mock_allowed = client

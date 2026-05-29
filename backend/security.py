@@ -16,6 +16,16 @@ from collections import deque
 from datetime import datetime
 from urllib.parse import urlparse
 
+from backend.config import (
+    RATE_LIMIT_AUDIT_READ,
+    RATE_LIMIT_CHAT,
+    RATE_LIMIT_DEFAULT,
+    RATE_LIMIT_EXECUTE,
+    RATE_LIMIT_STRIPE_READ,
+    RATE_LIMIT_VISION,
+    RATE_LIMIT_VOICE,
+    RATE_LIMIT_WORKFLOWS,
+)
 from backend.i18n import t
 
 logger = logging.getLogger("lexa.security")
@@ -29,18 +39,71 @@ AUDIT_LOG_PATH = Path(_DATA_DIR) / "audit.log"
 # Rate Limiting — per endpoint type, thread-safe with lock
 _rate_limit_lock = threading.Lock()
 _RATE_LIMITS: dict[str, dict] = {
-    "chat":         {"max": 30,  "timestamps": deque()},
-    "execute":      {"max": 20,  "timestamps": deque()},  # PC-Befehle strenger
-    "voice":        {"max": 60,  "timestamps": deque()},  # Voice großzügiger
-    "vision":       {"max": 15,  "timestamps": deque()},  # Vision-API (Screenshot + Analyse)
-    "workflows":    {"max": 30,  "timestamps": deque()},  # Workflow-Operationen
-    "stripe_read":  {"max": 10,  "timestamps": deque()},  # Stripe read endpoints (no auth)
-    "audit_read":   {"max": 120, "timestamps": deque()},  # Read-only UI trust/history surfaces
-    "default":      {"max": 30,  "timestamps": deque()},
+    "chat": {"max": RATE_LIMIT_CHAT, "timestamps": deque()},
+    "execute": {"max": RATE_LIMIT_EXECUTE, "timestamps": deque()},  # PC-Befehle strenger
+    "voice": {"max": RATE_LIMIT_VOICE, "timestamps": deque()},  # Voice großzügiger
+    "vision": {"max": RATE_LIMIT_VISION, "timestamps": deque()},  # Vision-API (Screenshot + Analyse)
+    "workflows": {"max": RATE_LIMIT_WORKFLOWS, "timestamps": deque()},  # Workflow-Operationen
+    "stripe_read": {"max": RATE_LIMIT_STRIPE_READ, "timestamps": deque()},  # Stripe read endpoints (no auth)
+    "audit_read": {"max": RATE_LIMIT_AUDIT_READ, "timestamps": deque()},  # Read-only UI trust/history surfaces
+    "default": {"max": RATE_LIMIT_DEFAULT, "timestamps": deque()},
 }
+_ACTION_RATE_LIMITS: dict[str, dict] = {
+    "execute": {"max": RATE_LIMIT_EXECUTE, "entries": deque()},
+}
+_ACTION_RATE_COSTS: dict[str, int] = {
+    "file_delete": 5,
+    "folder_delete": 5,
+    "file_write": 4,
+    "file_move": 4,
+    "file_rename": 4,
+    "process_kill": 4,
+    "shutdown": 5,
+    "restart": 5,
+    "shell_command": 5,
+    "run_command": 5,
+    "clipboard_write": 2,
+    "ui_click": 3,
+    "desktop_click": 3,
+    "desktop_click_text": 3,
+    "desktop_hotkey": 3,
+    "desktop_move": 2,
+    "desktop_scroll": 2,
+    "desktop_type": 4,
+    "hermes_desktop_commit": 4,
+    "volume_set": 2,
+    "app_open": 2,
+}
+_READ_ONLY_ACTIONS: frozenset[str] = frozenset({
+    "system_info",
+    "battery_status",
+    "screenshot",
+    "weather_check",
+    "time_now",
+    "date_today",
+    "file_read",
+    "folder_list",
+    "clipboard_read",
+    "ui_tree",
+    "ui_find",
+    "hermes_desktop_task",
+    "desktop_position",
+    "desktop_wait",
+    "window_list",
+    "process_list",
+    "memory_search",
+})
+_READ_ONLY_PREFIXES: tuple[str, ...] = (
+    "get_",
+    "list_",
+    "read_",
+    "search_",
+    "find_",
+    "status_",
+)
 # Legacy alias (backward-compat)
 _command_timestamps = _RATE_LIMITS["default"]["timestamps"]
-MAX_COMMANDS_PER_MINUTE = 30
+MAX_COMMANDS_PER_MINUTE = RATE_LIMIT_DEFAULT
 
 # Zero-width characters to strip from input
 _ZERO_WIDTH_CHARS = re.compile(
@@ -120,6 +183,56 @@ def check_rate_limit(endpoint_type: str = "default") -> bool:
             return False
         timestamps.append(now)
         return True
+
+
+def is_read_only_action(action_name: str) -> bool:
+    normalized = str(action_name or "").strip().lower()
+    return normalized in _READ_ONLY_ACTIONS or normalized.startswith(_READ_ONLY_PREFIXES)
+
+
+def action_rate_limit_cost(action_name: str) -> int:
+    normalized = str(action_name or "").strip().lower()
+    if is_read_only_action(normalized):
+        return 1
+    return max(1, _ACTION_RATE_COSTS.get(normalized, 2))
+
+
+def check_action_rate_limit(action_name: str, endpoint_type: str = "execute") -> dict:
+    """Risk-weighted action budget for actual command execution."""
+    bucket = _ACTION_RATE_LIMITS.get(endpoint_type, _ACTION_RATE_LIMITS["execute"])
+    now = time.time()
+    cutoff = now - 60
+    cost = action_rate_limit_cost(action_name)
+    read_only = is_read_only_action(action_name)
+
+    with _rate_limit_lock:
+        entries = bucket["entries"]
+        while entries and entries[0][0] < cutoff:
+            entries.popleft()
+        used = sum(entry_cost for _ts, entry_cost in entries)
+        remaining = max(0, bucket["max"] - used)
+        if used + cost > bucket["max"]:
+            return {
+                "allowed": read_only,
+                "read_only": read_only,
+                "read_only_only": True,
+                "cost": 0 if read_only else cost,
+                "limit": bucket["max"],
+                "used": used,
+                "remaining": remaining,
+                "reset_in_seconds": 60,
+            }
+        entries.append((now, cost))
+        return {
+            "allowed": True,
+            "read_only": read_only,
+            "read_only_only": False,
+            "cost": cost,
+            "limit": bucket["max"],
+            "used": used + cost,
+            "remaining": max(0, bucket["max"] - used - cost),
+            "reset_in_seconds": 60,
+        }
 
 
 # ══════════════════════════════════════════════════
@@ -234,21 +347,30 @@ BLOCKED_PATHS: list[str] = [
 ]
 
 
+def _is_same_or_child_path(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
 def validate_path(path_str: str) -> str:
     """Validate a file/directory path is safe to access."""
     if not path_str:
         return path_str
 
-    resolved = str(Path(path_str).resolve())
+    resolved_path = Path(path_str).resolve()
 
     for blocked in BLOCKED_PATHS:
-        if resolved.lower().startswith(blocked.lower()):
+        blocked_path = Path(blocked).resolve()
+        if _is_same_or_child_path(resolved_path, blocked_path):
             raise ValueError(t("security.blockedDir", dir=blocked))
 
     if ".." in path_str:
         raise ValueError("Pfad-Traversierung nicht erlaubt")
 
-    return resolved
+    return str(resolved_path)
 
 
 # ══════════════════════════════════════════════════
@@ -273,8 +395,12 @@ _BLOCKED_HOSTS: frozenset[str] = frozenset({
     # Generic link-local
     "169.254.0.1",
 })
+_LOCAL_HOSTNAMES: frozenset[str] = frozenset({
+    "localhost",
+})
 
-def _is_dangerous_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+
+def is_dangerous_network_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """Check if an IP address is private, loopback, link-local, or reserved.
 
     Also handles IPv6-mapped IPv4 addresses (e.g. ::ffff:127.0.0.1).
@@ -293,6 +419,9 @@ def _is_dangerous_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> boo
     )
 
 
+_is_dangerous_ip = is_dangerous_network_ip
+
+
 def validate_url(url: str) -> str:
     """Validate a URL is safe to access (SSRF protection).
 
@@ -300,31 +429,38 @@ def validate_url(url: str) -> str:
     IPs regardless of notation (decimal, hex, octal, IPv6-mapped IPv4, etc.).
     """
     parsed = urlparse(url)
+    if not parsed.scheme:
+        url = "https://" + url
+        parsed = urlparse(url)
 
     if parsed.scheme and parsed.scheme not in ("http", "https"):
         raise ValueError(f"Unsicheres URL-Schema: {parsed.scheme}")
 
     hostname = parsed.hostname
-    if hostname:
-        hostname_lower = hostname.lower().strip("[]")
+    if not hostname:
+        raise ValueError("Ungueltige URL: Host fehlt")
 
-        # Check exact blocked hosts (cloud metadata endpoints, etc.)
-        if hostname_lower in _BLOCKED_HOSTS:
-            raise ValueError(t("security.blockedInternal", host=hostname))
+    try:
+        parsed.port
+    except ValueError as exc:
+        raise ValueError("Ungueltige URL: Port ist ungueltig") from exc
 
-        # Try to parse as IP address (handles all notations: dotted, hex, decimal, IPv6)
-        try:
-            addr = ipaddress.ip_address(hostname_lower)
-            if _is_dangerous_ip(addr):
-                raise ValueError(t("security.blockedPrivate", host=hostname))
-        except ValueError as e:
-            # Not a valid IP literal — it's a hostname, which is fine
-            # (re-raise only our own SSRF errors, not ipaddress parse errors)
-            if "blockiert" in str(e):
-                raise
+    hostname_lower = hostname.lower().strip("[]").rstrip(".")
 
-    if not parsed.scheme:
-        url = "https://" + url
+    # Check exact blocked hosts (cloud metadata endpoints, etc.)
+    if hostname_lower in _BLOCKED_HOSTS:
+        raise ValueError(t("security.blockedInternal", host=hostname))
+    if hostname_lower in _LOCAL_HOSTNAMES or hostname_lower.endswith(".localhost"):
+        raise ValueError(t("security.blockedInternal", host=hostname))
+
+    # Try to parse as IP address (handles all notations: dotted, hex, decimal, IPv6)
+    try:
+        addr = ipaddress.ip_address(hostname_lower)
+    except ValueError:
+        addr = None
+
+    if addr is not None and is_dangerous_network_ip(addr):
+        raise ValueError(t("security.blockedPrivate", host=hostname))
 
     return url
 
@@ -335,8 +471,38 @@ def validate_url(url: str) -> str:
 
 PATH_PARAM_KEYS: frozenset[str] = frozenset({
     "path", "search_path", "folder", "input_path", "output_path",
-    "video_path", "pdf_path", "downloads_path", "save_path",
+    "video_path", "pdf_path", "pdf_paths", "downloads_path", "save_path",
+    "backup_path", "attachment_path", "repo_path", "file_path", "dir_path", "log_path",
 })
+
+COMMAND_PATH_PARAM_KEYS: dict[str, frozenset[str]] = {
+    "archive_extract": frozenset({"dest", "destination"}),
+    "backup_create": frozenset({"source", "dest", "destination"}),
+    "file_move": frozenset({"source", "destination"}),
+    "file_copy": frozenset({"source", "destination"}),
+}
+
+URL_PARAM_KEYS: frozenset[str] = frozenset({
+    "url", "urls",
+})
+
+
+def _is_path_param(command: str, key: str) -> bool:
+    return key in PATH_PARAM_KEYS or key in COMMAND_PATH_PARAM_KEYS.get(command, frozenset())
+
+
+def _max_string_param_length(command: str, key: str) -> int:
+    if command == "file_write" and key == "content":
+        return 200_000
+    if command == "desktop_type" and key == "text":
+        return 1000
+    if command == "hermes_desktop_task" and key == "message":
+        return 1600
+    if command == "hermes_desktop_commit" and key == "typing_text":
+        return 1000
+    if command in {"desktop_click_text", "ui_find", "ui_click", "hermes_desktop_commit"} and key == "text":
+        return 80
+    return 5000
 
 
 def validate_params(command: str, params: dict, _depth: int = 0) -> dict:
@@ -346,11 +512,12 @@ def validate_params(command: str, params: dict, _depth: int = 0) -> dict:
     clean = {}
     for key, value in params.items():
         if isinstance(value, str):
-            if len(value) > 5000:
-                value = value[:5000]
-            if key in PATH_PARAM_KEYS:
+            max_len = _max_string_param_length(command, key)
+            if len(value) > max_len:
+                value = value[:max_len]
+            if _is_path_param(command, key):
                 value = validate_path(value)
-            if key == "url":
+            if key in URL_PARAM_KEYS:
                 value = validate_url(value)
         elif isinstance(value, dict):
             value = validate_params(command, value, _depth + 1)
@@ -369,9 +536,9 @@ def _validate_param_list(command: str, key: str, items: list, depth: int) -> lis
         if isinstance(item, str):
             if len(item) > 5000:
                 item = item[:5000]
-            if key in PATH_PARAM_KEYS:
+            if _is_path_param(command, key):
                 item = validate_path(item)
-            if key == "url":
+            if key in URL_PARAM_KEYS:
                 item = validate_url(item)
         elif isinstance(item, dict):
             item = validate_params(command, item, depth)

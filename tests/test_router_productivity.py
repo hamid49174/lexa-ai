@@ -88,7 +88,6 @@ class TestTodoEndpoints:
         res = client.get("/productivity/todos", params={"status": "bogus"})
         assert res.status_code == 400
 
-    @pytest.mark.skip(reason="Route /todos/completed shadowed by /todos/{todo_id} — known router ordering issue")
     def test_delete_completed(self, client):
         client.post("/productivity/todos", json={"title": "Done1"})
         todos = client.get("/productivity/todos").json()["todos"]

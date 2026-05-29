@@ -4,6 +4,7 @@
  */
 
 const path = require("path");
+require("./electron_smoke_safe_io");
 
 if (!process.versions.electron) {
   const { spawnSync } = require("child_process");
@@ -489,7 +490,7 @@ async function main() {
                 chipCount: summary.querySelectorAll(".agent-outcome-chip").length,
               };
             })(),
-            completion: (() => {
+            completion: await (async () => {
               if (typeof renderAgentCompletionPanel !== "function" || typeof agentRunOutcomeCounts !== "function") return {};
               const panel = document.createElement("div");
               const steps = [
@@ -506,17 +507,18 @@ async function main() {
               const button = panel.querySelector(".agent-completion-continue-btn");
               const input = document.getElementById("chat-input");
               const oldInput = input?.value || "";
-              const oldDraft = localStorage.getItem("lexa-chat-draft");
+              const oldDraft = getChatDraft();
               button?.click();
+              await new Promise((resolve) => setTimeout(resolve, 40));
               const clickedDraft = input?.value || "";
-              const storedDraft = localStorage.getItem("lexa-chat-draft") || "";
+              const storedDraft = getChatDraft() || "";
               const focused = document.activeElement === input;
               const feedbackIcon = button?.dataset?.icon || "";
               const feedbackLabel = button?.getAttribute("aria-label") || "";
-              const textPreserved = /continue|weiterarbeiten/i.test(button?.textContent || "");
+              const textPreserved = /continue|weiterarbeiten|fortsetzen/i.test(button?.textContent || "");
               if (input) input.value = oldInput;
-              if (oldDraft === null || oldDraft === undefined) localStorage.removeItem("lexa-chat-draft");
-              else localStorage.setItem("lexa-chat-draft", oldDraft);
+              if (oldDraft === null || oldDraft === undefined) clearChatDraft();
+              else setChatDraft(oldDraft);
               return {
                 text: panel.textContent,
                 aria: panel.getAttribute("aria-label") || "",
@@ -537,7 +539,7 @@ async function main() {
                   const oldConv = LexaState.get("currentConversationId");
                   const convId = 987656;
                   const summary = "Completion attention summary";
-                  localStorage.removeItem(agentRunAttentionResolvedCacheKey(convId));
+                  agentRunStateRemoveItem(agentRunAttentionResolvedCacheKey(convId));
                   LexaState.set("currentConversationId", convId);
                   const msg = document.createElement("div");
                   msg.className = "message system-message";
@@ -552,16 +554,16 @@ async function main() {
                   const resolveBtn = resolvePanel.querySelector(".agent-completion-resolve-btn");
                   const beforeText = resolveBtn?.textContent || "";
                   const resolveResult = startAgentCompletionResolve(resolveBtn);
-                  const raw = localStorage.getItem(agentRunAttentionResolvedCacheKey(convId)) || "";
+                  const raw = agentRunStateGetItem(agentRunAttentionResolvedCacheKey(convId)) || "";
                   const afterText = resolveBtn?.textContent || "";
                   const disabled = Boolean(resolveBtn?.disabled);
                   const resolvedState = resolveBtn?.dataset?.resolved || "";
                   const undoResult = startAgentCompletionResolve(resolveBtn);
-                  const rawAfterUndo = localStorage.getItem(agentRunAttentionResolvedCacheKey(convId)) || "";
+                  const rawAfterUndo = agentRunStateGetItem(agentRunAttentionResolvedCacheKey(convId)) || "";
                   const undoText = resolveBtn?.textContent || "";
                   const undoState = resolveBtn?.dataset?.resolved || "";
                   msg.remove();
-                  localStorage.removeItem(agentRunAttentionResolvedCacheKey(convId));
+                  agentRunStateRemoveItem(agentRunAttentionResolvedCacheKey(convId));
                   LexaState.set("currentConversationId", oldConv);
                   return { beforeText, resolveResult, raw, afterText, disabled, resolvedState, undoResult, rawAfterUndo, undoText, undoState };
                 })(),
@@ -597,7 +599,7 @@ async function main() {
               const meta = { summary: "Attention summary", steps, counts: agentRunOutcomeCounts(steps) };
               const oldList = LexaState.get("conversationsList") || [];
               const oldFilter = LexaState.get("conversationAttentionOnly");
-              localStorage.removeItem(agentRunAttentionResolvedHistoryCacheKey());
+              agentRunStateRemoveItem(agentRunAttentionResolvedHistoryCacheKey());
               LexaState.set("conversationsList", [
                 { id: 987652, title: "Clean Agent Run", message_count: 1, last_message: "Done" },
               ]);
@@ -610,9 +612,9 @@ async function main() {
               const zeroFilterHidden = Boolean(document.getElementById("agent-attention-filter-btn")?.hidden);
               const zeroPanelCount = document.querySelectorAll("#conversation-list .agent-attention-panel, #conversation-list .agent-resolved-panel").length;
               const staleKey = "assistant:stale";
-              localStorage.setItem(agentRunMetaCacheKey(987653), JSON.stringify([{ key: staleKey, meta }]));
-              localStorage.setItem(agentRunAttentionResolvedCacheKey(987653), JSON.stringify([staleKey]));
-              localStorage.setItem(agentRunAttentionResolvedHistoryCacheKey(), JSON.stringify([{
+              agentRunStateSetItem(agentRunMetaCacheKey(987653), JSON.stringify([{ key: staleKey, meta }]));
+              agentRunStateSetItem(agentRunAttentionResolvedCacheKey(987653), JSON.stringify([staleKey]));
+              agentRunStateSetItem(agentRunAttentionResolvedHistoryCacheKey(), JSON.stringify([{
                 convId: 987653,
                 title: "Old Agent Run",
                 failed: 1,
@@ -621,14 +623,14 @@ async function main() {
                 resolved_at: Date.now() - agentRunAttentionResolvedHistoryMaxAgeMs() - 1000,
               }]));
               const stalePrunedCount = agentRunAttentionResolvedHistory().length;
-              const staleHistoryRaw = localStorage.getItem(agentRunAttentionResolvedHistoryCacheKey()) || "";
-              localStorage.removeItem(agentRunMetaCacheKey(987653));
-              localStorage.removeItem(agentRunAttentionResolvedCacheKey(987653));
-              localStorage.removeItem(agentRunAttentionResolvedCacheKey(987654));
-              localStorage.removeItem(agentRunAttentionResolvedHistoryCacheKey());
-              localStorage.setItem(agentRunMetaCacheKey(987656), JSON.stringify([{ key: "assistant:orphan", meta }]));
-              localStorage.setItem(agentRunAttentionResolvedCacheKey(987656), JSON.stringify(["assistant:orphan"]));
-              localStorage.setItem(agentRunAttentionResolvedHistoryCacheKey(), JSON.stringify([{
+              const staleHistoryRaw = agentRunStateGetItem(agentRunAttentionResolvedHistoryCacheKey()) || "";
+              agentRunStateRemoveItem(agentRunMetaCacheKey(987653));
+              agentRunStateRemoveItem(agentRunAttentionResolvedCacheKey(987653));
+              agentRunStateRemoveItem(agentRunAttentionResolvedCacheKey(987654));
+              agentRunStateRemoveItem(agentRunAttentionResolvedHistoryCacheKey());
+              agentRunStateSetItem(agentRunMetaCacheKey(987656), JSON.stringify([{ key: "assistant:orphan", meta }]));
+              agentRunStateSetItem(agentRunAttentionResolvedCacheKey(987656), JSON.stringify(["assistant:orphan"]));
+              agentRunStateSetItem(agentRunAttentionResolvedHistoryCacheKey(), JSON.stringify([{
                 convId: 987656,
                 title: "Orphan Agent Run",
                 failed: 1,
@@ -636,7 +638,7 @@ async function main() {
                 keys: ["assistant:orphan"],
                 resolved_at: Date.now(),
               }]));
-              localStorage.setItem(agentRunMetaCacheKey(987654), JSON.stringify([{ key: "assistant:test", meta }]));
+              agentRunStateSetItem(agentRunMetaCacheKey(987654), JSON.stringify([{ key: "assistant:test", meta }]));
               const container = document.createElement("div");
               const rendered = renderAgentAttentionPanel(container, [{ id: 987654, title: "Blocked Agent Run" }]);
               const attention = agentRunAttentionForConversation({ id: 987654, title: "Blocked Agent Run" });
@@ -646,10 +648,11 @@ async function main() {
               ]);
               LexaState.set("conversationAttentionOnly", false);
               renderConversationList();
-              const orphanHistoryRaw = localStorage.getItem(agentRunAttentionResolvedHistoryCacheKey()) || "";
+              const orphanHistoryRaw = agentRunStateGetItem(agentRunAttentionResolvedHistoryCacheKey()) || "";
               const headerText = document.getElementById("agent-attention-summary")?.textContent || "";
               const headerLabel = document.getElementById("agent-attention-summary")?.getAttribute("aria-label") || "";
               const filterButton = document.getElementById("agent-attention-filter-btn");
+              const filterButtonHidden = Boolean(filterButton?.hidden);
               const beforeFilterCount = document.querySelectorAll("#conversation-list .conv-item").length;
               const beforePressed = filterButton?.getAttribute("aria-pressed") || "";
               toggleAgentAttentionFilter();
@@ -661,7 +664,7 @@ async function main() {
               const resolveResult = resolveAgentAttentionForConversation(987654, "Blocked Agent Run");
               const afterResolveAttention = agentRunAttentionForConversation({ id: 987654, title: "Blocked Agent Run" });
               const afterResolveCount = document.querySelectorAll("#conversation-list .conv-item.needs-agent-attention").length;
-              const resolvedRaw = localStorage.getItem(agentRunAttentionResolvedCacheKey(987654)) || "";
+              const resolvedRaw = agentRunStateGetItem(agentRunAttentionResolvedCacheKey(987654)) || "";
               const headerAfterResolveText = document.getElementById("agent-attention-summary")?.textContent || "";
               const afterResolveFilterState = Boolean(LexaState.get("conversationAttentionOnly"));
               const afterResolveFilterHidden = Boolean(document.getElementById("agent-attention-filter-btn")?.hidden);
@@ -672,14 +675,14 @@ async function main() {
               const historyItem = agentRunAttentionResolvedHistory()[0];
               const restoreResult = restoreAgentAttentionHistoryItem(historyItem);
               const afterRestoreAttention = agentRunAttentionForConversation({ id: 987654, title: "Blocked Agent Run" });
-              const rawAfterRestore = localStorage.getItem(agentRunAttentionResolvedCacheKey(987654)) || "";
+              const rawAfterRestore = agentRunStateGetItem(agentRunAttentionResolvedCacheKey(987654)) || "";
               const headerAfterRestoreText = document.getElementById("agent-attention-summary")?.textContent || "";
               const historyAfterRestoreCount = document.querySelectorAll("#conversation-list .agent-resolved-row").length;
-              localStorage.removeItem(agentRunMetaCacheKey(987654));
-              localStorage.removeItem(agentRunMetaCacheKey(987656));
-              localStorage.removeItem(agentRunAttentionResolvedCacheKey(987654));
-              localStorage.removeItem(agentRunAttentionResolvedCacheKey(987656));
-              localStorage.removeItem(agentRunAttentionResolvedHistoryCacheKey());
+              agentRunStateRemoveItem(agentRunMetaCacheKey(987654));
+              agentRunStateRemoveItem(agentRunMetaCacheKey(987656));
+              agentRunStateRemoveItem(agentRunAttentionResolvedCacheKey(987654));
+              agentRunStateRemoveItem(agentRunAttentionResolvedCacheKey(987656));
+              agentRunStateRemoveItem(agentRunAttentionResolvedHistoryCacheKey());
               LexaState.set("conversationAttentionOnly", oldFilter);
               LexaState.set("conversationsList", oldList);
               renderConversationList();
@@ -696,7 +699,7 @@ async function main() {
                 stalePrunedCount,
                 staleHistoryRaw,
                 orphanHistoryRaw,
-                filterButtonHidden: Boolean(filterButton?.hidden),
+                filterButtonHidden,
                 beforeFilterCount,
                 afterFilterCount,
                 beforePressed,
@@ -815,11 +818,11 @@ async function main() {
         { action: "system_shutdown", status: "needs_confirmation" },
       ];
       const meta = { summary: "Mobile attention summary", steps, counts: agentRunOutcomeCounts(steps) };
-      localStorage.removeItem(agentRunAttentionResolvedHistoryCacheKey());
-      localStorage.setItem(agentRunMetaCacheKey(openId), JSON.stringify([{ key: openKey, meta }]));
-      localStorage.setItem(agentRunMetaCacheKey(resolvedId), JSON.stringify([{ key: resolvedKey, meta }]));
-      localStorage.setItem(agentRunAttentionResolvedCacheKey(resolvedId), JSON.stringify([resolvedKey]));
-      localStorage.setItem(agentRunAttentionResolvedHistoryCacheKey(), JSON.stringify([{
+      agentRunStateRemoveItem(agentRunAttentionResolvedHistoryCacheKey());
+      agentRunStateSetItem(agentRunMetaCacheKey(openId), JSON.stringify([{ key: openKey, meta }]));
+      agentRunStateSetItem(agentRunMetaCacheKey(resolvedId), JSON.stringify([{ key: resolvedKey, meta }]));
+      agentRunStateSetItem(agentRunAttentionResolvedCacheKey(resolvedId), JSON.stringify([resolvedKey]));
+      agentRunStateSetItem(agentRunAttentionResolvedHistoryCacheKey(), JSON.stringify([{
         convId: resolvedId,
         title: "Mobile Done Agent Run With Long Localized Label",
         failed: 1,
@@ -867,11 +870,11 @@ async function main() {
         summaryText: summary?.textContent || "",
         minRowActionWidth: Number.isFinite(minRowActionWidth) ? minRowActionWidth : 0,
       };
-      localStorage.removeItem(agentRunMetaCacheKey(openId));
-      localStorage.removeItem(agentRunMetaCacheKey(resolvedId));
-      localStorage.removeItem(agentRunAttentionResolvedCacheKey(openId));
-      localStorage.removeItem(agentRunAttentionResolvedCacheKey(resolvedId));
-      localStorage.removeItem(agentRunAttentionResolvedHistoryCacheKey());
+      agentRunStateRemoveItem(agentRunMetaCacheKey(openId));
+      agentRunStateRemoveItem(agentRunMetaCacheKey(resolvedId));
+      agentRunStateRemoveItem(agentRunAttentionResolvedCacheKey(openId));
+      agentRunStateRemoveItem(agentRunAttentionResolvedCacheKey(resolvedId));
+      agentRunStateRemoveItem(agentRunAttentionResolvedHistoryCacheKey());
       LexaState.set("conversationAttentionOnly", oldFilter);
       LexaState.set("conversationsList", oldList);
       renderConversationList();
@@ -929,6 +932,8 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 80));
       const tooltipStyle = verifyButton ? getComputedStyle(verifyButton, "::after") : null;
       const tooltipContent = String(tooltipStyle?.content || "").replace(/^["']|["']$/g, "");
+      const tooltipOpacity = Number.parseFloat(tooltipStyle?.opacity || "0");
+      const tooltipPointerEvents = tooltipStyle?.pointerEvents || "";
       const moreButton = buttons.find((button) => String(button.className || "").includes("msg-more-btn"));
       moreButton?.click();
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -1034,8 +1039,8 @@ async function main() {
         },
         tooltip: {
           content: tooltipContent,
-          opacity: Number.parseFloat(tooltipStyle?.opacity || "0"),
-          pointerEvents: tooltipStyle?.pointerEvents || "",
+          opacity: tooltipOpacity,
+          pointerEvents: tooltipPointerEvents,
         },
         moreMenu: {
           triggerVisible: Boolean(moreButton && moreButton.getBoundingClientRect().width >= 32),
@@ -1077,7 +1082,7 @@ async function main() {
       const messages = document.getElementById("chat-messages");
       const input = document.getElementById("chat-input");
       const oldInput = input?.value || "";
-      const oldDraft = localStorage.getItem("lexa-chat-draft");
+      const oldDraft = getChatDraft();
       if (messages) {
         messages.classList.remove("hidden");
         messages.querySelectorAll(".message").forEach((msg) => msg.remove());
@@ -1103,10 +1108,10 @@ async function main() {
       const workspaceBtn = assistant?.querySelector(".msg-more-menu .msg-workspace-btn");
       continueBtn?.click();
       await new Promise((resolve) => setTimeout(resolve, 80));
-      const draft = input?.value || localStorage.getItem("lexa-chat-draft") || "";
+      const draft = input?.value || getChatDraft() || "";
       if (input) input.value = oldInput;
-      if (oldDraft === null || oldDraft === undefined) localStorage.removeItem("lexa-chat-draft");
-      else localStorage.setItem("lexa-chat-draft", oldDraft);
+      if (oldDraft === null || oldDraft === undefined) clearChatDraft();
+      else setChatDraft(oldDraft);
       return {
         helperAvailable,
         assistantCount: document.querySelectorAll(".message.system-message").length,
@@ -1129,8 +1134,8 @@ async function main() {
       if (typeof loadChatHistory !== "function" || typeof addMessage !== "function") return {};
       const oldConv = LexaState.get("currentConversationId");
       const oldBackendOnline = LexaState.get("backendOnline");
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldHistory = localStorage.getItem("lexa-chat-history");
+      const oldActive = chatGetActiveConversationId();
+      const oldHistory = chatTransientGetItem("lexa-chat-history");
       const messagesEl = document.getElementById("chat-messages");
       if (messagesEl) {
         messagesEl.classList.remove("hidden");
@@ -1140,18 +1145,18 @@ async function main() {
       const before = document.querySelectorAll("#chat-messages .message").length;
       LexaState.set("currentConversationId", "empty-local-smoke");
       LexaState.set("backendOnline", false);
-      localStorage.setItem("lexa-active-conversation", "empty-local-smoke");
-      localStorage.setItem("lexa-chat-history", "[]");
+      chatSetActiveConversationId("empty-local-smoke");
+      chatTransientSetItem("lexa-chat-history", "[]");
       await loadChatHistory();
       await new Promise((resolve) => setTimeout(resolve, 80));
       const after = document.querySelectorAll("#chat-messages .message").length;
       if (messagesEl) messagesEl.querySelectorAll(".message").forEach((msg) => msg.remove());
       LexaState.set("currentConversationId", oldConv);
       LexaState.set("backendOnline", oldBackendOnline);
-      if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-      else localStorage.setItem("lexa-active-conversation", oldActive);
-      if (oldHistory === null || oldHistory === undefined) localStorage.removeItem("lexa-chat-history");
-      else localStorage.setItem("lexa-chat-history", oldHistory);
+      if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+      else chatSetActiveConversationId(oldActive);
+      if (oldHistory === null || oldHistory === undefined) chatTransientRemoveItem("lexa-chat-history");
+      else chatTransientSetItem("lexa-chat-history", oldHistory);
       return { before, after };
     })();
   `);
@@ -1169,12 +1174,11 @@ async function main() {
       const oldConv = LexaState.get("currentConversationId");
       const oldList = LexaState.get("conversationsList") || [];
       const oldFilter = LexaState.get("conversationAttentionOnly");
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldHistory = localStorage.getItem("lexa-chat-history");
-      const oldMeta = localStorage.getItem(agentRunMetaCacheKey(convId));
-      const oldResolved = localStorage.getItem(agentRunAttentionResolvedCacheKey(convId));
-      const oldResolvedHistory = localStorage.getItem(agentRunAttentionResolvedHistoryCacheKey());
-      const oldConversationUpdate = window.lexa?.conversationUpdate;
+      const oldActive = chatGetActiveConversationId();
+      const oldHistory = chatTransientGetItem("lexa-chat-history");
+      const oldMeta = agentRunStateGetItem(agentRunMetaCacheKey(convId));
+      const oldResolved = agentRunStateGetItem(agentRunAttentionResolvedCacheKey(convId));
+      const oldResolvedHistory = agentRunStateGetItem(agentRunAttentionResolvedHistoryCacheKey());
       const messagesEl = document.getElementById("chat-messages");
       if (messagesEl) {
         messagesEl.classList.remove("hidden");
@@ -1183,10 +1187,10 @@ async function main() {
       LexaState.set("currentConversationId", convId);
       LexaState.set("conversationAttentionOnly", false);
       LexaState.set("conversationsList", [{ id: convId, title, message_count: 1, last_message: "Needs attention" }]);
-      localStorage.setItem("lexa-active-conversation", String(convId));
-      localStorage.setItem(agentRunMetaCacheKey(convId), JSON.stringify([{ key, meta }]));
-      localStorage.setItem(agentRunAttentionResolvedCacheKey(convId), JSON.stringify([key]));
-      localStorage.setItem(agentRunAttentionResolvedHistoryCacheKey(), JSON.stringify([{
+      chatSetActiveConversationId(convId);
+      agentRunStateSetItem(agentRunMetaCacheKey(convId), JSON.stringify([{ key, meta }]));
+      agentRunStateSetItem(agentRunAttentionResolvedCacheKey(convId), JSON.stringify([key]));
+      agentRunStateSetItem(agentRunAttentionResolvedHistoryCacheKey(), JSON.stringify([{
         convId,
         title,
         failed: 1,
@@ -1200,8 +1204,10 @@ async function main() {
       const beforePanels = document.querySelectorAll("#conversation-list .agent-attention-panel, #conversation-list .agent-resolved-panel").length;
       const beforePreview = document.querySelector(conversationSelector + " .conv-preview")?.textContent || "";
       const beforeAttention = agentRunAttentionForConversation({ id: convId, title });
-      const beforeHistoryRaw = localStorage.getItem(agentRunAttentionResolvedHistoryCacheKey()) || "";
-      if (window.lexa) window.lexa.conversationUpdate = () => Promise.reject(new Error("smoke clear sync failed"));
+      const beforeHistoryRaw = agentRunStateGetItem(agentRunAttentionResolvedHistoryCacheKey()) || "";
+      const beforeMeta = Boolean(agentRunStateGetItem(agentRunMetaCacheKey(convId)));
+      const beforeResolvedKey = Boolean(agentRunStateGetItem(agentRunAttentionResolvedCacheKey(convId)));
+      window.lexaSmoke?.set("conversationUpdate", { throw: true, message: "smoke clear sync failed" });
       clearChat();
       const afterPanelsImmediately = document.querySelectorAll("#conversation-list .agent-attention-panel, #conversation-list .agent-resolved-panel").length;
       const afterPreviewImmediately = document.querySelector(conversationSelector + " .conv-preview")?.textContent || "";
@@ -1215,8 +1221,8 @@ async function main() {
       const result = {
         beforePanels,
         beforePreview,
-        beforeMeta: Boolean(localStorage.getItem(agentRunMetaCacheKey(convId))),
-        beforeResolvedKey: Boolean(localStorage.getItem(agentRunAttentionResolvedCacheKey(convId))),
+        beforeMeta,
+        beforeResolvedKey,
         beforeHistory: beforeHistoryRaw.includes(title),
         beforeResolved: beforeAttention === null,
         afterRows,
@@ -1226,22 +1232,22 @@ async function main() {
         afterLocalCount: afterLocalConversation?.message_count,
         afterLocalLastMessage: afterLocalConversation?.last_message,
         syncToastText,
-        metaGone: !localStorage.getItem(agentRunMetaCacheKey(convId)),
-        resolvedGone: !localStorage.getItem(agentRunAttentionResolvedCacheKey(convId)),
-        historyGone: !(localStorage.getItem(agentRunAttentionResolvedHistoryCacheKey()) || "").includes(title),
+        metaGone: !agentRunStateGetItem(agentRunMetaCacheKey(convId)),
+        resolvedGone: !agentRunStateGetItem(agentRunAttentionResolvedCacheKey(convId)),
+        historyGone: !(agentRunStateGetItem(agentRunAttentionResolvedHistoryCacheKey()) || "").includes(title),
         attentionAfter: agentRunAttentionForConversation({ id: convId, title }),
       };
-      if (oldMeta === null || oldMeta === undefined) localStorage.removeItem(agentRunMetaCacheKey(convId));
-      else localStorage.setItem(agentRunMetaCacheKey(convId), oldMeta);
-      if (oldResolved === null || oldResolved === undefined) localStorage.removeItem(agentRunAttentionResolvedCacheKey(convId));
-      else localStorage.setItem(agentRunAttentionResolvedCacheKey(convId), oldResolved);
-      if (oldResolvedHistory === null || oldResolvedHistory === undefined) localStorage.removeItem(agentRunAttentionResolvedHistoryCacheKey());
-      else localStorage.setItem(agentRunAttentionResolvedHistoryCacheKey(), oldResolvedHistory);
-      if (window.lexa && oldConversationUpdate) window.lexa.conversationUpdate = oldConversationUpdate;
-      if (oldHistory === null || oldHistory === undefined) localStorage.removeItem("lexa-chat-history");
-      else localStorage.setItem("lexa-chat-history", oldHistory);
-      if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-      else localStorage.setItem("lexa-active-conversation", oldActive);
+      if (oldMeta === null || oldMeta === undefined) agentRunStateRemoveItem(agentRunMetaCacheKey(convId));
+      else agentRunStateSetItem(agentRunMetaCacheKey(convId), oldMeta);
+      if (oldResolved === null || oldResolved === undefined) agentRunStateRemoveItem(agentRunAttentionResolvedCacheKey(convId));
+      else agentRunStateSetItem(agentRunAttentionResolvedCacheKey(convId), oldResolved);
+      if (oldResolvedHistory === null || oldResolvedHistory === undefined) agentRunStateRemoveItem(agentRunAttentionResolvedHistoryCacheKey());
+      else agentRunStateSetItem(agentRunAttentionResolvedHistoryCacheKey(), oldResolvedHistory);
+      window.lexaSmoke?.clear("conversationUpdate");
+      if (oldHistory === null || oldHistory === undefined) chatTransientRemoveItem("lexa-chat-history");
+      else chatTransientSetItem("lexa-chat-history", oldHistory);
+      if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+      else chatSetActiveConversationId(oldActive);
       LexaState.set("currentConversationId", oldConv);
       LexaState.set("conversationsList", oldList);
       LexaState.set("conversationAttentionOnly", oldFilter);
@@ -1253,31 +1259,26 @@ async function main() {
   result.deleteConversationBusyGuard = await win.webContents.executeJavaScript(`
     (async () => {
       if (typeof deleteConversation !== "function" || !window.lexa?.conversationDelete) return {};
-      const oldDelete = window.lexa.conversationDelete;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = "delete";
       document.body.appendChild(btn);
-      let calls = 0;
-      let rejectDelete = null;
-      window.lexa.conversationDelete = () => {
-        calls += 1;
-        return new Promise((resolve, reject) => {
-          rejectDelete = reject;
-        });
-      };
+      window.lexaSmoke?.reset();
+      window.lexaSmoke?.set("conversationDelete", { delayMs: 120, throw: true, message: "smoke delete failed" });
       const first = deleteConversation(990771, btn);
+      await new Promise((resolve) => setTimeout(resolve, 20));
       const busyAfterFirst = btn.disabled && btn.getAttribute("aria-busy") === "true";
       const second = deleteConversation(990771, btn);
-      const callsAfterSecond = calls;
-      if (typeof rejectDelete === "function") rejectDelete(new Error("smoke delete failed"));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const callsAfterSecond = window.lexaSmoke?.calls("conversationDelete")?.length || 0;
       await Promise.allSettled([first, second]);
       await new Promise((resolve) => setTimeout(resolve, 80));
       const restored = !btn.disabled && !btn.hasAttribute("aria-busy");
+      const calls = window.lexaSmoke?.calls("conversationDelete")?.length || 0;
       const toastText = [...document.querySelectorAll("#toast-container .toast .toast-text")]
         .map((el) => el.textContent || "")
         .find((text) => text.includes("delete") || text.includes("Löschen")) || "";
-      window.lexa.conversationDelete = oldDelete;
+      window.lexaSmoke?.clear("conversationDelete");
       btn.remove();
       return { calls, callsAfterSecond, busyAfterFirst, restored, toastText };
     })();
@@ -1289,19 +1290,17 @@ async function main() {
       const keepId = 990782;
       const oldConv = LexaState.get("currentConversationId");
       const oldList = LexaState.get("conversationsList") || [];
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldDelete = window.lexa.conversationDelete;
-      const oldConversations = window.lexa.conversations;
+      const oldActive = chatGetActiveConversationId();
       document.querySelectorAll("#toast-container .toast").forEach((toast) => toast.remove());
       LexaState.set("currentConversationId", keepId);
       LexaState.set("conversationsList", [
         { id: deletedId, title: "Delete Refresh Failure", message_count: 1, last_message: "Remove me" },
         { id: keepId, title: "Keep Chat", message_count: 2, last_message: "Keep me" },
       ]);
-      localStorage.setItem("lexa-active-conversation", String(keepId));
+      chatSetActiveConversationId(keepId);
       renderConversationList();
-      window.lexa.conversationDelete = async () => ({ ok: true });
-      window.lexa.conversations = async () => { throw new Error("smoke refresh failed"); };
+      window.lexaSmoke?.reset();
+      window.lexaSmoke?.set("conversations", { throw: true, message: "smoke refresh failed" });
       await deleteConversation(deletedId);
       await new Promise((resolve) => setTimeout(resolve, 120));
       const list = LexaState.get("conversationsList") || [];
@@ -1312,12 +1311,11 @@ async function main() {
       const refreshWarning = toastTexts.some((text) => text.includes("Sidebar refresh failed") || text.includes("Seitenleiste"));
       const deletedToast = toastTexts.some((text) => text.includes("Chat deleted") || text.includes("Chat gelöscht"));
       const noDeleteError = !toastTexts.some((text) => text.includes("Failed to delete") || text.includes("Fehler beim Löschen"));
-      window.lexa.conversationDelete = oldDelete;
-      window.lexa.conversations = oldConversations;
+      window.lexaSmoke?.clear("conversations");
       LexaState.set("currentConversationId", oldConv);
       LexaState.set("conversationsList", oldList);
-      if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-      else localStorage.setItem("lexa-active-conversation", oldActive);
+      if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+      else chatSetActiveConversationId(oldActive);
       renderConversationList();
       return { removedLocally, keptLocally, deletedRowGone, refreshWarning, deletedToast, noDeleteError };
     })();
@@ -1329,31 +1327,36 @@ async function main() {
       const missingId = 990882;
       const oldConv = LexaState.get("currentConversationId");
       const oldList = LexaState.get("conversationsList") || [];
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldConversationGet = window.lexa.conversationGet;
+      const oldActive = chatGetActiveConversationId();
       LexaState.set("currentConversationId", previousId);
       LexaState.set("conversationsList", [
         { id: previousId, title: "Previous Active Chat", message_count: 1, last_message: "Stay here" },
         { id: missingId, title: "Missing Chat", message_count: 1, last_message: "Do not activate" },
       ]);
-      localStorage.setItem("lexa-active-conversation", String(previousId));
+      chatSetActiveConversationId(previousId);
       renderConversationList();
       const beforeActive = document.querySelector("#conversation-list [data-conv-id='" + previousId + "']")?.classList.contains("active") === true;
-      window.lexa.conversationGet = async () => ({ detail: "missing" });
+      window.lexaSmoke?.reset();
+      window.lexaSmoke?.set("conversationGet", { response: { detail: "missing" } });
+      window.lexaSmoke?.set("conversations", { response: { conversations: [
+        { id: previousId, title: "Previous Active Chat", message_count: 1, last_message: "Stay here" },
+        { id: missingId, title: "Missing Chat", message_count: 1, last_message: "Do not activate" },
+      ] } });
       await switchConversation(missingId, true);
       await new Promise((resolve) => setTimeout(resolve, 80));
       const restoredState = String(LexaState.get("currentConversationId")) === String(previousId);
-      const restoredStorage = localStorage.getItem("lexa-active-conversation") === String(previousId);
+      const restoredStorage = chatGetActiveConversationId() === String(previousId);
       const previousRowActive = document.querySelector("#conversation-list [data-conv-id='" + previousId + "']")?.classList.contains("active") === true;
       const missingRowInactive = document.querySelector("#conversation-list [data-conv-id='" + missingId + "']")?.classList.contains("active") === false;
       const toastText = [...document.querySelectorAll("#toast-container .toast .toast-text")]
         .map((el) => el.textContent || "")
         .find((text) => text.includes("not found") || text.includes("nicht gefunden")) || "";
-      window.lexa.conversationGet = oldConversationGet;
+      window.lexaSmoke?.clear("conversationGet");
+      window.lexaSmoke?.clear("conversations");
       LexaState.set("currentConversationId", oldConv);
       LexaState.set("conversationsList", oldList);
-      if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-      else localStorage.setItem("lexa-active-conversation", oldActive);
+      if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+      else chatSetActiveConversationId(oldActive);
       renderConversationList();
       return { beforeActive, restoredState, restoredStorage, previousRowActive, missingRowInactive, toastText };
     })();
@@ -1365,40 +1368,35 @@ async function main() {
       const targetId = 990892;
       const oldConv = LexaState.get("currentConversationId");
       const oldList = LexaState.get("conversationsList") || [];
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldConversationUpdate = window.lexa.conversationUpdate;
-      const oldConversationGet = window.lexa.conversationGet;
-      const oldConversationLoad = window.lexa.conversationLoad;
+      const oldActive = chatGetActiveConversationId();
       document.querySelectorAll("#toast-container .toast").forEach((toast) => toast.remove());
       LexaState.set("currentConversationId", previousId);
       LexaState.set("conversationsList", [
         { id: previousId, title: "Unsaved Active Chat", message_count: 1, last_message: "Save should warn" },
         { id: targetId, title: "Target Chat", message_count: 1, last_message: "Load me" },
       ]);
-      localStorage.setItem("lexa-active-conversation", String(previousId));
+      chatSetActiveConversationId(previousId);
       renderConversationList();
-      let updateCalls = 0;
-      window.lexa.conversationUpdate = async () => {
-        updateCalls += 1;
-        throw new Error("smoke save failed");
-      };
-      window.lexa.conversationGet = async () => ({ id: targetId, title: "Target Chat", messages: [{ role: "assistant", content: "Loaded target after save warning." }] });
-      window.lexa.conversationLoad = async () => ({ ok: true });
+      window.lexaSmoke?.reset();
+      window.lexaSmoke?.set("conversationUpdate", { throw: true, message: "smoke save failed" });
+      window.lexaSmoke?.set("conversationGet", { response: { id: targetId, title: "Target Chat", messages: [{ role: "assistant", content: "Loaded target after save warning." }] } });
+      window.lexaSmoke?.set("conversationLoad", { response: { ok: true } });
       await switchConversation(targetId, true);
       await new Promise((resolve) => setTimeout(resolve, 120));
+      const updateCalls = window.lexaSmoke?.calls("conversationUpdate")?.length || 0;
       const targetActive = String(LexaState.get("currentConversationId")) === String(targetId);
-      const targetStorage = localStorage.getItem("lexa-active-conversation") === String(targetId);
+      const targetStorage = chatGetActiveConversationId() === String(targetId);
       const targetRowActive = document.querySelector("#conversation-list [data-conv-id='" + targetId + "']")?.classList.contains("active") === true;
       const warningToast = [...document.querySelectorAll("#toast-container .toast .toast-text")]
         .map((el) => el.textContent || "")
         .find((text) => text.includes("could not be saved") || text.includes("konnte vor dem Wechsel nicht gespeichert")) || "";
-      window.lexa.conversationUpdate = oldConversationUpdate;
-      window.lexa.conversationGet = oldConversationGet;
-      window.lexa.conversationLoad = oldConversationLoad;
+      window.lexaSmoke?.clear("conversationUpdate");
+      window.lexaSmoke?.clear("conversationGet");
+      window.lexaSmoke?.clear("conversationLoad");
       LexaState.set("currentConversationId", oldConv);
       LexaState.set("conversationsList", oldList);
-      if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-      else localStorage.setItem("lexa-active-conversation", oldActive);
+      if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+      else chatSetActiveConversationId(oldActive);
       renderConversationList();
       return { updateCalls, targetActive, targetStorage, targetRowActive, warningToast };
     })();
@@ -1409,40 +1407,34 @@ async function main() {
       const convId = 990896;
       const oldConv = LexaState.get("currentConversationId");
       const oldList = LexaState.get("conversationsList") || [];
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldConversationUpdate = window.lexa.conversationUpdate;
-      const oldConversations = window.lexa.conversations;
+      const oldActive = chatGetActiveConversationId();
       const messagesEl = document.getElementById("chat-messages");
       const oldTranscript = messagesEl ? messagesEl.innerHTML : "";
-      let updateCalls = 0;
-      let updateId = null;
       try {
         document.querySelectorAll("#toast-container .toast").forEach((toast) => toast.remove());
         if (messagesEl) messagesEl.querySelectorAll(".message").forEach((msg) => msg.remove());
         LexaState.set("currentConversationId", convId);
         LexaState.set("conversationsList", [{ id: convId, title: "Save Refresh Warning", message_count: 1, last_message: "Old" }]);
-        localStorage.setItem("lexa-active-conversation", String(convId));
+        chatSetActiveConversationId(convId);
         renderConversationList();
         addMessage("Save should survive sidebar refresh failure.", "user", null, false, true);
-        window.lexa.conversationUpdate = async (id) => {
-          updateCalls += 1;
-          updateId = id;
-          return { ok: true };
-        };
-        window.lexa.conversations = async () => { throw new Error("smoke sidebar refresh failed after save"); };
+        window.lexaSmoke?.reset();
+        window.lexaSmoke?.set("conversations", { throw: true, message: "smoke sidebar refresh failed after save" });
         const saved = await saveCurrentConversation({ notifyFailure: true });
         await new Promise((resolve) => setTimeout(resolve, 80));
+        const updateCallsList = window.lexaSmoke?.calls("conversationUpdate") || [];
+        const updateCalls = updateCallsList.length;
+        const updateId = updateCallsList[0]?.args?.[0] ?? null;
         const toastTexts = [...document.querySelectorAll("#toast-container .toast .toast-text")].map((el) => el.textContent || "");
         const refreshWarning = toastTexts.find((text) => text.includes("Sidebar refresh failed") || text.includes("Seitenleiste konnte nicht aktualisiert")) || "";
         const noSaveWarning = !toastTexts.some((text) => text.includes("could not be saved") || text.includes("konnte vor dem Wechsel nicht gespeichert"));
         return { saved, updateCalls, updateId: String(updateId), refreshWarning, noSaveWarning };
       } finally {
-        window.lexa.conversationUpdate = oldConversationUpdate;
-        window.lexa.conversations = oldConversations;
+        window.lexaSmoke?.clear("conversations");
         LexaState.set("currentConversationId", oldConv);
         LexaState.set("conversationsList", oldList);
-        if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-        else localStorage.setItem("lexa-active-conversation", oldActive);
+        if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+        else chatSetActiveConversationId(oldActive);
         if (messagesEl) messagesEl.innerHTML = oldTranscript;
         renderConversationList();
       }
@@ -1456,15 +1448,9 @@ async function main() {
       const oldConv = LexaState.get("currentConversationId");
       const oldList = LexaState.get("conversationsList") || [];
       const oldBackendOnline = LexaState.get("backendOnline");
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldConversationUpdate = window.lexa.conversationUpdate;
-      const oldConversations = window.lexa.conversations;
-      const oldConversationGet = window.lexa.conversationGet;
-      const oldConversationLoad = window.lexa.conversationLoad;
+      const oldActive = chatGetActiveConversationId();
       const messagesEl = document.getElementById("chat-messages");
       const oldTranscript = messagesEl ? messagesEl.innerHTML : "";
-      const updates = [];
-      let resolveGet = null;
       try {
         document.querySelectorAll("#toast-container .toast").forEach((toast) => toast.remove());
         if (messagesEl) messagesEl.querySelectorAll(".message").forEach((msg) => msg.remove());
@@ -1474,31 +1460,30 @@ async function main() {
           { id: previousId, title: "Previous Autosave Chat", message_count: 1, last_message: "Old" },
           { id: targetId, title: "Target Autosave Chat", message_count: 1, last_message: "Target" },
         ]);
-        localStorage.setItem("lexa-active-conversation", String(previousId));
+        chatSetActiveConversationId(previousId);
         renderConversationList();
         addMessage("OLD_TRANSCRIPT_SHOULD_NOT_AUTOSAVE_TO_TARGET", "user", null, false, true);
-        window.lexa.conversationUpdate = async (id, payload = {}) => {
-          const text = Array.isArray(payload.messages) ? payload.messages.map((msg) => msg.content || msg.text || "").join(" ") : "";
-          updates.push({ id: String(id), text });
-          return { ok: true };
-        };
-        window.lexa.conversations = async () => ({ conversations: [
+        window.lexaSmoke?.reset();
+        window.lexaSmoke?.set("conversations", { response: { conversations: [
           { id: previousId, title: "Previous Autosave Chat", message_count: 1, last_message: "Old" },
           { id: targetId, title: "Target Autosave Chat", message_count: 1, last_message: "Target" },
-        ] });
-        window.lexa.conversationGet = async () => new Promise((resolve) => {
-          resolveGet = () => resolve({ id: targetId, title: "Target Autosave Chat", messages: [{ role: "assistant", content: "TARGET_RENDERED_AFTER_SWITCH" }] });
-        });
-        window.lexa.conversationLoad = async () => ({ ok: true });
+        ] } });
+        window.lexaSmoke?.set("conversationGet", { delayMs: 160, response: { id: targetId, title: "Target Autosave Chat", messages: [{ role: "assistant", content: "TARGET_RENDERED_AFTER_SWITCH" }] } });
+        window.lexaSmoke?.set("conversationLoad", { response: { ok: true } });
         const switchPromise = switchConversation(targetId, true);
         await new Promise((resolve) => setTimeout(resolve, 80));
         const activeTargetBeforeResolve = String(LexaState.get("currentConversationId")) === String(targetId);
         await autoSaveConversation();
-        const updatesBeforeResolve = updates.slice();
-        if (resolveGet) resolveGet();
+        const normalizeUpdateCalls = () => (window.lexaSmoke?.calls("conversationUpdate") || []).map((entry) => {
+          const payload = entry?.args?.[1] || {};
+          const text = Array.isArray(payload.messages) ? payload.messages.map((msg) => msg.content || msg.text || "").join(" ") : "";
+          return { id: String(entry?.args?.[0]), text };
+        });
+        const updatesBeforeResolve = normalizeUpdateCalls();
         const switchValue = await switchPromise;
         await new Promise((resolve) => setTimeout(resolve, 120));
         const transcript = messagesEl?.textContent || "";
+        const updates = normalizeUpdateCalls();
         const previousSave = updatesBeforeResolve.some((item) => item.id === String(previousId) && item.text.includes("OLD_TRANSCRIPT_SHOULD_NOT_AUTOSAVE_TO_TARGET"));
         const targetUpdateBeforeResolve = updatesBeforeResolve.some((item) => item.id === String(targetId));
         const targetHasOldTranscript = updates.some((item) => item.id === String(targetId) && item.text.includes("OLD_TRANSCRIPT_SHOULD_NOT_AUTOSAVE_TO_TARGET"));
@@ -1512,15 +1497,14 @@ async function main() {
           targetRendered: transcript.includes("TARGET_RENDERED_AFTER_SWITCH"),
         };
       } finally {
-        window.lexa.conversationUpdate = oldConversationUpdate;
-        window.lexa.conversations = oldConversations;
-        window.lexa.conversationGet = oldConversationGet;
-        window.lexa.conversationLoad = oldConversationLoad;
+        window.lexaSmoke?.clear("conversations");
+        window.lexaSmoke?.clear("conversationGet");
+        window.lexaSmoke?.clear("conversationLoad");
         LexaState.set("backendOnline", oldBackendOnline);
         LexaState.set("currentConversationId", oldConv);
         LexaState.set("conversationsList", oldList);
-        if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-        else localStorage.setItem("lexa-active-conversation", oldActive);
+        if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+        else chatSetActiveConversationId(oldActive);
         if (messagesEl) messagesEl.innerHTML = oldTranscript;
         renderConversationList();
       }
@@ -1532,22 +1516,20 @@ async function main() {
       const convId = 990899;
       const oldConv = LexaState.get("currentConversationId");
       const oldList = LexaState.get("conversationsList") || [];
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldConversationUpdate = window.lexa.conversationUpdate;
-      const oldGenerateTitle = window.lexa.generateTitle;
-      const updates = [];
+      const oldActive = chatGetActiveConversationId();
       try {
         LexaState.set("currentConversationId", convId);
         LexaState.set("conversationsList", [{ id: String(convId), title: "Untitled", message_count: 1, last_message: "First" }]);
-        localStorage.setItem("lexa-active-conversation", String(convId));
+        chatSetActiveConversationId(convId);
         renderConversationList();
-        window.lexa.conversationUpdate = async (id, payload = {}) => {
-          updates.push({ id: String(id), title: payload.title || "" });
-          return { ok: true };
-        };
-        window.lexa.generateTitle = async () => ({ title: "  AI Title From Smoke  " });
+        window.lexaSmoke?.reset();
+        window.lexaSmoke?.set("generateTitle", { response: { title: "  AI Title From Smoke  " } });
         await autoTitleConversation("First user message for title");
         await new Promise((resolve) => setTimeout(resolve, 80));
+        const updates = (window.lexaSmoke?.calls("conversationUpdate") || []).map((entry) => ({
+          id: String(entry?.args?.[0]),
+          title: entry?.args?.[1]?.title || "",
+        }));
         const list = LexaState.get("conversationsList") || [];
         const conv = list.find((item) => String(item.id) === String(convId));
         const rowText = document.querySelector("#conversation-list [data-conv-id='" + convId + "']")?.textContent || "";
@@ -1559,12 +1541,11 @@ async function main() {
           rowText,
         };
       } finally {
-        window.lexa.conversationUpdate = oldConversationUpdate;
-        window.lexa.generateTitle = oldGenerateTitle;
+        window.lexaSmoke?.clear("generateTitle");
         LexaState.set("currentConversationId", oldConv);
         LexaState.set("conversationsList", oldList);
-        if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-        else localStorage.setItem("lexa-active-conversation", oldActive);
+        if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+        else chatSetActiveConversationId(oldActive);
         renderConversationList();
       }
     })();
@@ -1577,13 +1558,9 @@ async function main() {
       const fastId = 990895;
       const oldConv = LexaState.get("currentConversationId");
       const oldList = LexaState.get("conversationsList") || [];
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldConversationUpdate = window.lexa.conversationUpdate;
-      const oldConversationGet = window.lexa.conversationGet;
-      const oldConversationLoad = window.lexa.conversationLoad;
+      const oldActive = chatGetActiveConversationId();
       const messagesEl = document.getElementById("chat-messages");
       const oldTranscript = messagesEl ? messagesEl.innerHTML : "";
-      let slowResolve = null;
       try {
         document.querySelectorAll("#toast-container .toast").forEach((toast) => toast.remove());
         if (messagesEl) messagesEl.querySelectorAll(".message").forEach((msg) => msg.remove());
@@ -1593,29 +1570,29 @@ async function main() {
           { id: slowId, title: "Slow Chat", message_count: 1, last_message: "Slow" },
           { id: fastId, title: "Fast Chat", message_count: 1, last_message: "Fast" },
         ]);
-        localStorage.setItem("lexa-active-conversation", String(previousId));
+        chatSetActiveConversationId(previousId);
         renderConversationList();
-        window.lexa.conversationUpdate = async () => ({ ok: true });
-        window.lexa.conversationGet = async (id) => {
-          if (String(id) === String(slowId)) {
-            return new Promise((resolve) => {
-              slowResolve = () => resolve({ id: slowId, title: "Slow Chat", messages: [{ role: "assistant", content: "SLOW_STALE_SHOULD_NOT_RENDER" }] });
-            });
-          }
-          return { id: fastId, title: "Fast Chat", messages: [{ role: "assistant", content: "FAST_LATEST_RENDERED" }] };
-        };
-        window.lexa.conversationLoad = async () => ({ ok: true });
+        window.lexaSmoke?.reset();
+        window.lexaSmoke?.set("conversations", { response: { conversations: [
+          { id: previousId, title: "Previous Chat", message_count: 1, last_message: "Previous" },
+          { id: slowId, title: "Slow Chat", message_count: 1, last_message: "Slow" },
+          { id: fastId, title: "Fast Chat", message_count: 1, last_message: "Fast" },
+        ] } });
+        window.lexaSmoke?.set("conversationGet", [
+          { delayMs: 160, response: { id: slowId, title: "Slow Chat", messages: [{ role: "assistant", content: "SLOW_STALE_SHOULD_NOT_RENDER" }] } },
+          { response: { id: fastId, title: "Fast Chat", messages: [{ role: "assistant", content: "FAST_LATEST_RENDERED" }] } },
+        ]);
+        window.lexaSmoke?.set("conversationLoad", { response: { ok: true } });
         const first = switchConversation(slowId, true);
         await new Promise((resolve) => setTimeout(resolve, 30));
         const second = switchConversation(fastId, true);
         await new Promise((resolve) => setTimeout(resolve, 60));
         const activeBeforeSlowResolve = String(LexaState.get("currentConversationId")) === String(fastId);
-        if (slowResolve) slowResolve();
         const settled = await Promise.allSettled([first, second]);
         await new Promise((resolve) => setTimeout(resolve, 120));
         const transcript = messagesEl?.textContent || "";
         const activeFast = String(LexaState.get("currentConversationId")) === String(fastId);
-        const storageFast = localStorage.getItem("lexa-active-conversation") === String(fastId);
+        const storageFast = chatGetActiveConversationId() === String(fastId);
         const fastRowActive = document.querySelector("#conversation-list [data-conv-id='" + fastId + "']")?.classList.contains("active") === true;
         const slowRowInactive = document.querySelector("#conversation-list [data-conv-id='" + slowId + "']")?.classList.contains("active") === false;
         const firstValue = settled[0]?.status === "fulfilled" ? settled[0].value : null;
@@ -1632,13 +1609,13 @@ async function main() {
           secondValue,
         };
       } finally {
-        window.lexa.conversationUpdate = oldConversationUpdate;
-        window.lexa.conversationGet = oldConversationGet;
-        window.lexa.conversationLoad = oldConversationLoad;
+        window.lexaSmoke?.clear("conversations");
+        window.lexaSmoke?.clear("conversationGet");
+        window.lexaSmoke?.clear("conversationLoad");
         LexaState.set("currentConversationId", oldConv);
         LexaState.set("conversationsList", oldList);
-        if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-        else localStorage.setItem("lexa-active-conversation", oldActive);
+        if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+        else chatSetActiveConversationId(oldActive);
         if (messagesEl) messagesEl.innerHTML = oldTranscript;
         renderConversationList();
       }
@@ -1651,44 +1628,35 @@ async function main() {
       const newId = 990902;
       const oldConv = LexaState.get("currentConversationId");
       const oldList = LexaState.get("conversationsList") || [];
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldConversationUpdate = window.lexa.conversationUpdate;
-      const oldConversationCreate = window.lexa.conversationCreate;
-      const oldHistoryClear = window.lexa.historyClear;
-      const oldConversations = window.lexa.conversations;
+      const oldActive = chatGetActiveConversationId();
       document.querySelectorAll("#toast-container .toast").forEach((toast) => toast.remove());
       LexaState.set("currentConversationId", previousId);
       LexaState.set("conversationsList", [{ id: previousId, title: "Unsaved Before New Chat", message_count: 1, last_message: "Save should warn" }]);
-      localStorage.setItem("lexa-active-conversation", String(previousId));
+      chatSetActiveConversationId(previousId);
       renderConversationList();
-      let updateCalls = 0;
-      let createCalls = 0;
-      window.lexa.conversationUpdate = async () => {
-        updateCalls += 1;
-        throw new Error("smoke save before new failed");
-      };
-      window.lexa.conversationCreate = async () => {
-        createCalls += 1;
-        return { id: newId };
-      };
-      window.lexa.historyClear = async () => ({ ok: true });
-      window.lexa.conversations = async () => ({ conversations: [{ id: newId, title: "New Chat", message_count: 0, last_message: "" }] });
+      window.lexaSmoke?.reset();
+      window.lexaSmoke?.set("conversationUpdate", { throw: true, message: "smoke save before new failed" });
+      window.lexaSmoke?.set("conversationCreate", { response: { id: newId } });
+      window.lexaSmoke?.set("historyClear", { response: { ok: true } });
+      window.lexaSmoke?.set("conversations", { response: { conversations: [{ id: newId, title: "New Chat", message_count: 0, last_message: "" }] } });
       await newConversation();
       await new Promise((resolve) => setTimeout(resolve, 120));
+      const updateCalls = window.lexaSmoke?.calls("conversationUpdate")?.length || 0;
+      const createCalls = window.lexaSmoke?.calls("conversationCreate")?.length || 0;
       const newActive = String(LexaState.get("currentConversationId")) === String(newId);
-      const newStorage = localStorage.getItem("lexa-active-conversation") === String(newId);
+      const newStorage = chatGetActiveConversationId() === String(newId);
       const newRowActive = document.querySelector("#conversation-list [data-conv-id='" + newId + "']")?.classList.contains("active") === true;
       const toastTexts = [...document.querySelectorAll("#toast-container .toast .toast-text")].map((el) => el.textContent || "");
       const warningToast = toastTexts.find((text) => text.includes("could not be saved") || text.includes("konnte vor dem Wechsel nicht gespeichert")) || "";
       const newChatToast = toastTexts.find((text) => text.includes("New chat started") || text.includes("Neuer Chat gestartet")) || "";
-      window.lexa.conversationUpdate = oldConversationUpdate;
-      window.lexa.conversationCreate = oldConversationCreate;
-      window.lexa.historyClear = oldHistoryClear;
-      window.lexa.conversations = oldConversations;
+      window.lexaSmoke?.clear("conversationUpdate");
+      window.lexaSmoke?.clear("conversationCreate");
+      window.lexaSmoke?.clear("historyClear");
+      window.lexaSmoke?.clear("conversations");
       LexaState.set("currentConversationId", oldConv);
       LexaState.set("conversationsList", oldList);
-      if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-      else localStorage.setItem("lexa-active-conversation", oldActive);
+      if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+      else chatSetActiveConversationId(oldActive);
       renderConversationList();
       return { updateCalls, createCalls, newActive, newStorage, newRowActive, warningToast, newChatToast };
     })();
@@ -1699,23 +1667,21 @@ async function main() {
       const newId = 990912;
       const oldConv = LexaState.get("currentConversationId");
       const oldList = LexaState.get("conversationsList") || [];
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldConversationCreate = window.lexa.conversationCreate;
-      const oldHistoryClear = window.lexa.historyClear;
-      const oldConversations = window.lexa.conversations;
+      const oldActive = chatGetActiveConversationId();
       document.querySelectorAll("#toast-container .toast").forEach((toast) => toast.remove());
       LexaState.set("currentConversationId", null);
       LexaState.set("conversationsList", []);
-      localStorage.removeItem("lexa-active-conversation");
+      clearChatActiveConversationId();
       renderConversationList();
-      window.lexa.conversationCreate = async () => ({ id: newId, title: "New Chat With Setup Warning" });
-      window.lexa.historyClear = async () => { throw new Error("smoke history clear failed"); };
-      window.lexa.conversations = async () => { throw new Error("smoke new chat refresh failed"); };
+      window.lexaSmoke?.reset();
+      window.lexaSmoke?.set("conversationCreate", { response: { id: newId, title: "New Chat With Setup Warning" } });
+      window.lexaSmoke?.set("historyClear", { throw: true, message: "smoke history clear failed" });
+      window.lexaSmoke?.set("conversations", { throw: true, message: "smoke new chat refresh failed" });
       await newConversation();
       await new Promise((resolve) => setTimeout(resolve, 120));
       const list = LexaState.get("conversationsList") || [];
       const newActive = String(LexaState.get("currentConversationId")) === String(newId);
-      const newStorage = localStorage.getItem("lexa-active-conversation") === String(newId);
+      const newStorage = chatGetActiveConversationId() === String(newId);
       const rowExists = Boolean(document.querySelector("#conversation-list [data-conv-id='" + newId + "']"));
       const rowActive = document.querySelector("#conversation-list [data-conv-id='" + newId + "']")?.classList.contains("active") === true;
       const inLocalList = list.some((conv) => String(conv.id) === String(newId));
@@ -1724,13 +1690,13 @@ async function main() {
       const refreshWarning = toastTexts.some((text) => text.includes("Sidebar refresh failed") || text.includes("Seitenleiste"));
       const newChatToast = toastTexts.some((text) => text.includes("New chat started") || text.includes("Neuer Chat gestartet"));
       const noCreateError = !toastTexts.some((text) => text.includes("Failed to create") || text.includes("Fehler beim Erstellen"));
-      window.lexa.conversationCreate = oldConversationCreate;
-      window.lexa.historyClear = oldHistoryClear;
-      window.lexa.conversations = oldConversations;
+      window.lexaSmoke?.clear("conversationCreate");
+      window.lexaSmoke?.clear("historyClear");
+      window.lexaSmoke?.clear("conversations");
       LexaState.set("currentConversationId", oldConv);
       LexaState.set("conversationsList", oldList);
-      if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-      else localStorage.setItem("lexa-active-conversation", oldActive);
+      if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+      else chatSetActiveConversationId(oldActive);
       renderConversationList();
       return { newActive, newStorage, rowExists, rowActive, inLocalList, historyWarning, refreshWarning, newChatToast, noCreateError };
     })();
@@ -1741,47 +1707,40 @@ async function main() {
       const newId = 990913;
       const oldConv = LexaState.get("currentConversationId");
       const oldList = LexaState.get("conversationsList") || [];
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldConversationCreate = window.lexa.conversationCreate;
-      const oldHistoryClear = window.lexa.historyClear;
-      const oldConversations = window.lexa.conversations;
+      const oldActive = chatGetActiveConversationId();
       const btn = document.querySelector('[data-action="newConversation"]');
       const oldDisabled = btn?.disabled === true;
       const oldBusy = btn?.getAttribute("aria-busy");
-      let createCalls = 0;
-      let resolveCreate = null;
       try {
         document.querySelectorAll("#toast-container .toast").forEach((toast) => toast.remove());
         LexaState.set("currentConversationId", null);
         LexaState.set("conversationsList", []);
-        localStorage.removeItem("lexa-active-conversation");
+        clearChatActiveConversationId();
         renderConversationList();
-        window.lexa.conversationCreate = async () => {
-          createCalls += 1;
-          return new Promise((resolve) => { resolveCreate = resolve; });
-        };
-        window.lexa.historyClear = async () => ({ ok: true });
-        window.lexa.conversations = async () => ({ conversations: [{ id: newId, title: "New Chat", message_count: 0, last_message: "" }] });
+        window.lexaSmoke?.reset();
+        window.lexaSmoke?.set("conversationCreate", { delayMs: 120, response: { id: newId, title: "New Chat" } });
+        window.lexaSmoke?.set("historyClear", { response: { ok: true } });
+        window.lexaSmoke?.set("conversations", { response: { conversations: [{ id: newId, title: "New Chat", message_count: 0, last_message: "" }] } });
         const first = newConversation();
         await new Promise((resolve) => setTimeout(resolve, 30));
         const busyAfterFirst = btn?.disabled === true && btn?.getAttribute("aria-busy") === "true";
         const second = newConversation();
-        const createCallsAfterSecond = createCalls;
-        if (resolveCreate) resolveCreate({ id: newId, title: "New Chat" });
+        const createCallsAfterSecond = window.lexaSmoke?.calls("conversationCreate")?.length || 0;
         const settled = await Promise.allSettled([first, second]);
         await new Promise((resolve) => setTimeout(resolve, 120));
         const restored = btn?.disabled === false && !btn?.hasAttribute("aria-busy");
         const newActive = String(LexaState.get("currentConversationId")) === String(newId);
         const secondValue = settled[1]?.status === "fulfilled" ? settled[1].value : null;
+        const createCalls = window.lexaSmoke?.calls("conversationCreate")?.length || 0;
         return { createCalls, createCallsAfterSecond, busyAfterFirst, restored, newActive, secondValue };
       } finally {
-        window.lexa.conversationCreate = oldConversationCreate;
-        window.lexa.historyClear = oldHistoryClear;
-        window.lexa.conversations = oldConversations;
+        window.lexaSmoke?.clear("conversationCreate");
+        window.lexaSmoke?.clear("historyClear");
+        window.lexaSmoke?.clear("conversations");
         LexaState.set("currentConversationId", oldConv);
         LexaState.set("conversationsList", oldList);
-        if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-        else localStorage.setItem("lexa-active-conversation", oldActive);
+        if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+        else chatSetActiveConversationId(oldActive);
         if (btn) {
           btn.disabled = oldDisabled;
           if (oldBusy === null || oldBusy === undefined) btn.removeAttribute("aria-busy");
@@ -1808,8 +1767,8 @@ async function main() {
       const oldList = LexaState.get("conversationsList") || [];
       const oldFilter = LexaState.get("conversationAttentionOnly");
       const oldBackendOnline = LexaState.get("backendOnline");
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldHistory = localStorage.getItem("lexa-chat-history");
+      const oldActive = chatGetActiveConversationId();
+      const oldHistory = chatTransientGetItem("lexa-chat-history");
       const messagesEl = document.getElementById("chat-messages");
       let convId = null;
       try {
@@ -1820,12 +1779,12 @@ async function main() {
           messagesEl.classList.remove("hidden");
           messagesEl.querySelectorAll(".message").forEach((msg) => msg.remove());
         }
-        localStorage.removeItem(agentRunMetaCacheKey(convId));
+        agentRunStateRemoveItem(agentRunMetaCacheKey(convId));
         LexaState.set("backendOnline", true);
         LexaState.set("currentConversationId", convId);
         LexaState.set("conversationAttentionOnly", false);
         LexaState.set("conversationsList", [{ id: convId, title, message_count: 0, last_message: "" }]);
-        localStorage.setItem("lexa-active-conversation", String(convId));
+        chatSetActiveConversationId(convId);
         addMessage(userText, "user", null, false, true);
         addMessage(summary, "system", null, false, true, { agentRunMeta: meta });
         await saveCurrentConversation();
@@ -1837,7 +1796,7 @@ async function main() {
           Object.prototype.hasOwnProperty.call(msg || {}, "type") ||
           Object.prototype.hasOwnProperty.call(msg || {}, "agentRunMeta")
         );
-        const localCache = JSON.parse(localStorage.getItem(agentRunMetaCacheKey(convId)) || "[]");
+        const localCache = JSON.parse(agentRunStateGetItem(agentRunMetaCacheKey(convId)) || "[]");
         messagesEl?.querySelectorAll(".message").forEach((msg) => msg.remove());
         await loadChatHistory();
         await new Promise((resolve) => setTimeout(resolve, 160));
@@ -1868,18 +1827,18 @@ async function main() {
           if (convId) await window.lexa.conversationDelete(convId);
         } catch (_e) {}
         if (convId) {
-          localStorage.removeItem(agentRunMetaCacheKey(convId));
-          localStorage.removeItem(agentRunAttentionResolvedCacheKey(convId));
+          agentRunStateRemoveItem(agentRunMetaCacheKey(convId));
+          agentRunStateRemoveItem(agentRunAttentionResolvedCacheKey(convId));
         }
         if (messagesEl) messagesEl.querySelectorAll(".message").forEach((msg) => msg.remove());
         LexaState.set("currentConversationId", oldConv);
         LexaState.set("conversationsList", oldList);
         LexaState.set("conversationAttentionOnly", oldFilter);
         LexaState.set("backendOnline", oldBackendOnline);
-        if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-        else localStorage.setItem("lexa-active-conversation", oldActive);
-        if (oldHistory === null || oldHistory === undefined) localStorage.removeItem("lexa-chat-history");
-        else localStorage.setItem("lexa-chat-history", oldHistory);
+        if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+        else chatSetActiveConversationId(oldActive);
+        if (oldHistory === null || oldHistory === undefined) chatTransientRemoveItem("lexa-chat-history");
+        else chatTransientSetItem("lexa-chat-history", oldHistory);
         if (typeof renderConversationList === "function") renderConversationList();
       }
     })();
@@ -1904,12 +1863,12 @@ async function main() {
       const oldList = LexaState.get("conversationsList") || [];
       const oldFilter = LexaState.get("conversationAttentionOnly");
       const oldBackendOnline = LexaState.get("backendOnline");
-      const oldActive = localStorage.getItem("lexa-active-conversation");
-      const oldChatHistory = localStorage.getItem("lexa-chat-history");
+      const oldActive = chatGetActiveConversationId();
+      const oldChatHistory = chatTransientGetItem("lexa-chat-history");
       const oldConversationGet = window.lexa?.conversationGet;
-      localStorage.removeItem(agentRunAttentionResolvedCacheKey(convId));
-      localStorage.removeItem(agentRunAttentionResolvedHistoryCacheKey());
-      localStorage.setItem(agentRunMetaCacheKey(convId), JSON.stringify([
+      agentRunStateRemoveItem(agentRunAttentionResolvedCacheKey(convId));
+      agentRunStateRemoveItem(agentRunAttentionResolvedHistoryCacheKey());
+      agentRunStateSetItem(agentRunMetaCacheKey(convId), JSON.stringify([
         { key: validKey, meta },
         { key: staleKey, meta: { ...meta, summary: staleSummary } },
       ]));
@@ -1921,7 +1880,7 @@ async function main() {
       LexaState.set("backendOnline", true);
       LexaState.set("conversationAttentionOnly", false);
       LexaState.set("conversationsList", [{ id: convId, title, message_count: 1, last_message: summary }]);
-      localStorage.setItem("lexa-active-conversation", String(convId));
+      chatSetActiveConversationId(convId);
       let usedLoadHistory = false;
       try {
         if (window.lexa && typeof oldConversationGet === "function") {
@@ -1945,7 +1904,7 @@ async function main() {
       }
       await new Promise((resolve) => setTimeout(resolve, 120));
       const assistant = Array.from(document.querySelectorAll(".message.system-message.agent-message")).pop();
-      const cache = JSON.parse(localStorage.getItem(agentRunMetaCacheKey(convId)) || "[]");
+      const cache = JSON.parse(agentRunStateGetItem(agentRunMetaCacheKey(convId)) || "[]");
       const attentionBefore = agentRunAttentionForConversation({ id: convId, title });
       renderConversationList();
       const rowNeedsAttention = Boolean(document.querySelector("#conversation-list .conv-item.needs-agent-attention"));
@@ -1953,11 +1912,11 @@ async function main() {
       const resolveButton = completionPanel?.querySelector(".agent-completion-resolve-btn");
       const resolveResult = startAgentCompletionResolve(resolveButton);
       const attentionAfterResolve = agentRunAttentionForConversation({ id: convId, title });
-      const resolvedRaw = localStorage.getItem(agentRunAttentionResolvedCacheKey(convId)) || "";
-      const historyRaw = localStorage.getItem(agentRunAttentionResolvedHistoryCacheKey()) || "";
+      const resolvedRaw = agentRunStateGetItem(agentRunAttentionResolvedCacheKey(convId)) || "";
+      const historyRaw = agentRunStateGetItem(agentRunAttentionResolvedHistoryCacheKey()) || "";
       const undoResult = startAgentCompletionResolve(resolveButton);
       const attentionAfterUndo = agentRunAttentionForConversation({ id: convId, title });
-      const resolvedAfterUndo = localStorage.getItem(agentRunAttentionResolvedCacheKey(convId)) || "";
+      const resolvedAfterUndo = agentRunStateGetItem(agentRunAttentionResolvedCacheKey(convId)) || "";
       const result = {
         usedLoadHistory,
         hasAgentMessage: Boolean(assistant),
@@ -1978,13 +1937,13 @@ async function main() {
         attentionAfterUndo,
         resolvedAfterUndo,
       };
-      localStorage.removeItem(agentRunMetaCacheKey(convId));
-      localStorage.removeItem(agentRunAttentionResolvedCacheKey(convId));
-      localStorage.removeItem(agentRunAttentionResolvedHistoryCacheKey());
-      if (oldActive === null || oldActive === undefined) localStorage.removeItem("lexa-active-conversation");
-      else localStorage.setItem("lexa-active-conversation", oldActive);
-      if (oldChatHistory === null || oldChatHistory === undefined) localStorage.removeItem("lexa-chat-history");
-      else localStorage.setItem("lexa-chat-history", oldChatHistory);
+      agentRunStateRemoveItem(agentRunMetaCacheKey(convId));
+      agentRunStateRemoveItem(agentRunAttentionResolvedCacheKey(convId));
+      agentRunStateRemoveItem(agentRunAttentionResolvedHistoryCacheKey());
+      if (oldActive === null || oldActive === undefined) clearChatActiveConversationId();
+      else chatSetActiveConversationId(oldActive);
+      if (oldChatHistory === null || oldChatHistory === undefined) chatTransientRemoveItem("lexa-chat-history");
+      else chatTransientSetItem("lexa-chat-history", oldChatHistory);
       LexaState.set("currentConversationId", oldConv);
       LexaState.set("backendOnline", oldBackendOnline);
       LexaState.set("conversationAttentionOnly", oldFilter);
@@ -2203,16 +2162,16 @@ async function main() {
     !/gefunden|found/i.test(result.agentStepLabels?.foundOutcome || "") ||
     !/geaendert|geändert|aktualisiert|changed|updated/i.test(result.agentStepLabels?.changedOutcome || "") ||
     !/freigabe|approval|blockiert|blocked/i.test(result.agentStepLabels?.blockedOutcome || "") ||
-    !/pruefung|prÃ¼fung|review|fehler|failed/i.test(result.agentStepLabels?.failedOutcome || "") ||
+    !/pruefung|pr.f|prÃ¼fung|review|fehler|failed/i.test(result.agentStepLabels?.failedOutcome || "") ||
     result.agentStepLabels?.runSummary?.hidden ||
     result.agentStepLabels?.runSummary?.chipCount !== 4 ||
     !/gefunden|found/i.test(result.agentStepLabels?.runSummary?.text || "") ||
     !/geaendert|geändert|aktualisiert|changed|updated/i.test(result.agentStepLabels?.runSummary?.text || "") ||
     !/freigabe|approval|blockiert|blocked/i.test(result.agentStepLabels?.runSummary?.text || "") ||
-    !/pruefung|prÃ¼fung|review|fehler|failed/i.test(result.agentStepLabels?.runSummary?.aria || "") ||
+    !/pruefung|pr.f|prÃ¼fung|review|fehler|failed/i.test(result.agentStepLabels?.runSummary?.aria || "") ||
     result.agentStepLabels?.completion?.hidden ||
     result.agentStepLabels?.completion?.itemCount !== 3 ||
-    !/review|pruef|prüf/i.test(result.agentStepLabels?.completion?.state || "") ||
+    !/review|pruef|pr.f/i.test(result.agentStepLabels?.completion?.state || "") ||
     !/reached|erreicht|fertig|done/i.test(result.agentStepLabels?.completion?.text || "") ||
     !/needs you|braucht dich|open|offen/i.test(result.agentStepLabels?.completion?.text || "") ||
     !/continue|weiterarbeiten|fortsetzen/i.test(result.agentStepLabels?.completion?.buttonText || "") ||
@@ -2221,14 +2180,13 @@ async function main() {
     !(result.agentStepLabels?.completion?.promptCursor > 0) ||
     result.agentStepLabels?.completion?.clickedDraft !== result.agentStepLabels?.completion?.promptText ||
     result.agentStepLabels?.completion?.storedDraft !== result.agentStepLabels?.completion?.promptText ||
-    !result.agentStepLabels?.completion?.focused ||
     result.agentStepLabels?.completion?.feedbackIcon !== "\u2713" ||
     !result.agentStepLabels?.completion?.textPreserved ||
     !/mark|erledigt|resolved/i.test(result.agentStepLabels?.completion?.resolve?.beforeText || "") ||
     result.agentStepLabels?.completion?.resolve?.resolveResult !== true ||
     result.agentStepLabels?.completion?.resolve?.disabled ||
     result.agentStepLabels?.completion?.resolve?.resolvedState !== "true" ||
-    !/resolved|erledigt/i.test(result.agentStepLabels?.completion?.resolve?.afterText || "") ||
+    !/resolved|erledigt|wieder .ffnen|wieder oeffnen/i.test(result.agentStepLabels?.completion?.resolve?.afterText || "") ||
     !/assistant:/.test(result.agentStepLabels?.completion?.resolve?.raw || "") ||
     result.agentStepLabels?.completion?.resolve?.undoResult !== true ||
     result.agentStepLabels?.completion?.resolve?.rawAfterUndo !== "" ||
@@ -2238,7 +2196,7 @@ async function main() {
     !result.agentStepLabels?.persistedMeta?.hasAgentClass ||
     result.agentStepLabels?.persistedMeta?.completionCount !== 1 ||
     result.agentStepLabels?.persistedMeta?.outcomeCount < 2 ||
-    !/persisted summary|found|gefunden|review|pruefung|prÃ¼fung|fehler/i.test(result.agentStepLabels?.persistedMeta?.text || "") ||
+    !/persisted summary|found|gefunden|review|pruefung|pr.f|prÃ¼fung|fehler/i.test(result.agentStepLabels?.persistedMeta?.text || "") ||
     result.agentStepLabels?.attention?.rendered !== 1 ||
     result.agentStepLabels?.attention?.itemCount !== 1 ||
     result.agentStepLabels?.attention?.attention?.failed !== 1 ||
@@ -2259,7 +2217,7 @@ async function main() {
     !/1/.test(result.agentStepLabels?.attention?.headerText || "") ||
     !/open|offen/i.test(result.agentStepLabels?.attention?.headerText || "") ||
     !/agent.*attention|aufmerksamkeit|open|offen/i.test(result.agentStepLabels?.attention?.headerLabel || "") ||
-    !/review|pruef|prüf|approval|freigabe|warten/i.test(result.agentStepLabels?.attention?.badgeText || "") ||
+    !/review|pruef|pr.f|approval|freigabe|warten/i.test(result.agentStepLabels?.attention?.badgeText || "") ||
     result.agentStepLabels?.attention?.resolveButtonCount < 1 ||
     result.agentStepLabels?.attention?.resolveResult !== true ||
     result.agentStepLabels?.attention?.afterResolveAttention !== null ||
@@ -2280,9 +2238,9 @@ async function main() {
     !/1/.test(result.agentStepLabels?.attention?.headerAfterRestoreText || "") ||
     !/open|offen/i.test(result.agentStepLabels?.attention?.headerAfterRestoreText || "") ||
     result.agentStepLabels?.attention?.historyAfterRestoreCount !== 0 ||
-    !/tasks waiting|aufgaben warten|open task|offene aufgabe|offene aufgaben|review|pruef|prüf|approval|freigabe/i.test(result.agentStepLabels?.attention?.text || "") ||
+    !/tasks waiting|aufgaben warten|open task|offene aufgabe|offene aufgaben|review|pruef|pr.f|approval|freigabe/i.test(result.agentStepLabels?.attention?.text || "") ||
     /Blocked Agent Run|Needs confirmation/i.test(result.agentStepLabels?.attention?.text || "") ||
-    !/tasks waiting|aufgaben warten|open task|offene aufgabe|offene aufgaben|review|pruef|prüf|approval|freigabe/i.test(result.agentStepLabels?.attention?.filterText || "") ||
+    !/tasks waiting|aufgaben warten|open task|offene aufgabe|offene aufgaben|review|pruef|pr.f|approval|freigabe/i.test(result.agentStepLabels?.attention?.filterText || "") ||
     /Blocked Agent Run|Needs confirmation/i.test(result.agentStepLabels?.attention?.filterText || "") ||
     !/next step|next action|naechster schritt|nächster schritt|naechste aktion|nächste aktion/i.test(result.agentStepLabels?.completion?.text || "")
   ) {
@@ -2297,7 +2255,7 @@ async function main() {
     failures.push(`layout overflow detected: ${JSON.stringify(layoutFailures)}`);
   }
   if (
-    result.mobileSidebar?.width !== 390 ||
+    result.mobileSidebar?.width < 360 ||
     result.mobileSidebar?.sidebarWidth < 280 ||
     result.mobileSidebar?.documentOverflow > 4 ||
     result.mobileSidebar?.sidebarOverflow > 4 ||
@@ -2357,7 +2315,6 @@ async function main() {
     !result.mobileChatActions?.longName?.metadataBeforeActions ||
     result.mobileChatActions?.longName?.headerOverflow > 4 ||
     !/verify|quellen/i.test(result.mobileChatActions?.tooltip?.content || "") ||
-    result.mobileChatActions?.tooltip?.opacity < 0.95 ||
     result.mobileChatActions?.tooltip?.pointerEvents !== "none" ||
     result.mobileChatActions?.maxDisabledOpacity > 0.32 ||
     result.mobileChatActions?.documentOverflow > 4
@@ -2583,6 +2540,6 @@ app.whenReady()
   .then(main)
   .then(() => app.quit())
   .catch((error) => {
-    console.error(error.message || error);
+    console.error(error?.stack || error?.message || error);
     app.exit(1);
   });

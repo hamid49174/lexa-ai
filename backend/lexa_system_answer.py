@@ -21,6 +21,14 @@ def _normalize(text: str) -> str:
     value = str(text or "").lower()
     replacements = {
         "ä": "ae",
+        "Ä": "ae",
+        "ö": "oe",
+        "Ö": "oe",
+        "ü": "ue",
+        "Ü": "ue",
+        "ß": "ss",
+        "ẞ": "ss",
+        "ä": "ae",
         "ö": "oe",
         "ü": "ue",
         "ß": "ss",

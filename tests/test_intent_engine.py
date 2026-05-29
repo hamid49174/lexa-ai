@@ -1,7 +1,7 @@
 """Tests for backend/intent_engine.py — Local intent recognition edge cases."""
 
 import pytest
-from backend.intent_engine import try_local_intent
+from backend.intent_engine import build_conversation_intent_context, try_local_intent
 
 DEMO_TONE_MARKERS = (
     "Chef",
@@ -9,6 +9,8 @@ DEMO_TONE_MARKERS = (
     "Jarvis",
     "Challenge accepted",
     "Doktortitel",
+    "Brauchst du noch",
+    "beleidigt",
     "\U0001f3b5",
     "\U0001f4bb",
     "\U0001f4dd",
@@ -77,6 +79,45 @@ class TestIntentPriority:
         assert result["action"] == "browser_open"
         assert result["params"]["url"].startswith("https://www.google.com/search?q=")
 
+    def test_open_browser_and_non_search_followup_is_not_web_search(self):
+        """A browser compound command without a search verb should stay out of the local search shortcut."""
+        result = try_local_intent("oeffne chrome und spiele mero")
+        assert result is None
+
+    def test_contextual_file_delete_uses_recent_file_entity(self):
+        context = build_conversation_intent_context([
+            {"role": "user", "content": r"such die Datei C:\Users\admin\Desktop\plan.txt"},
+            {"role": "assistant", "content": r"Gefunden: C:\Users\admin\Desktop\plan.txt"},
+        ])
+
+        result = try_local_intent("lösch die", context=context)
+
+        assert result is not None
+        assert result["action"] == "file_delete"
+        assert result["params"]["path"] == r"C:\Users\admin\Desktop\plan.txt"
+
+    def test_contextual_pronoun_without_recent_file_stays_ambiguous(self):
+        result = try_local_intent("lösch die", context=build_conversation_intent_context([]))
+
+        assert result is None
+
+    def test_search_command_allows_polite_prefix(self):
+        result = try_local_intent("bitte suche nach Epstein Files")
+        assert result is not None
+        assert result["action"] == "browser_open"
+        assert result["params"]["url"].startswith("https://www.google.com/search?q=")
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "ich will google nicht benutzen",
+            "was bedeutet search engine optimization",
+        ],
+    )
+    def test_search_words_inside_sentence_do_not_open_browser(self, message):
+        result = try_local_intent(message)
+        assert result is None
+
     def test_internal_rules_question_is_not_app_open(self):
         """Meta questions about tool rules must not be routed to app_open."""
         result = try_local_intent(
@@ -92,11 +133,48 @@ class TestIntentPriority:
         result = try_local_intent("ich brauche chrome")
         assert result is None
 
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "schriebe mir ein sehr sher komplexses python code was nur programiere mit 10 jahre erfrahrung koennene",
+            "schreibe mir komplexen Python Code",
+            "generiere ein async backend script in python",
+        ],
+    )
+    def test_code_generation_requests_do_not_open_spotify(self, message):
+        result = try_local_intent(message)
+
+        assert result is None
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "spiel mir musik",
+            "spiele daft punk",
+            "dpsile daft punk",
+        ],
+    )
+    def test_music_commands_still_route_to_spotify(self, message):
+        result = try_local_intent(message)
+
+        assert result is not None
+        assert result["action"] == "spotify_open"
+
     def test_how_was_your_day_is_smalltalk(self):
         """Smalltalk should not fall through to the LLM/tool stack."""
         result = try_local_intent("Wie war dein Tag?")
         assert result is not None
         assert result["action"] is None
+
+    def test_was_geht_is_short_natural_smalltalk(self, monkeypatch):
+        monkeypatch.setattr("backend.intent_engine.random.choice", lambda seq: seq[0])
+
+        result = try_local_intent("WAS GEHT")
+
+        assert result is not None
+        assert result["action"] is None
+        assert result["message"] == "Alles ruhig. Was machen wir?"
+        assert "Ich habe keinen Tag" not in result["message"]
 
     @pytest.mark.parametrize(
         "message",
@@ -164,6 +242,43 @@ class TestVolumeIntents:
         result = try_local_intent("stumm")
         assert result is not None
         assert result["action"] == "volume_mute"
+
+
+class TestMathIntents:
+    @pytest.mark.parametrize(
+        ("message", "expected"),
+        [
+            ("was ist 1+1", "1 + 1 = 2."),
+            ("was sind 60% aus 5000", "60 % von 5000 = 3000."),
+            ("60 prozent von 5000", "60 % von 5000 = 3000."),
+        ],
+    )
+    def test_simple_math_is_answered_locally_without_neediness(self, message, expected):
+        result = try_local_intent(message)
+
+        assert result is not None
+        assert result["action"] is None
+        assert result["message"] == expected
+        assert "Brauchst du" not in result["message"]
+
+    def test_division_by_zero_is_clear(self):
+        result = try_local_intent("was ist 5/0")
+
+        assert result is not None
+        assert result["action"] is None
+        assert result["message"] == "Das geht nicht: Division durch 0."
+
+
+class TestToneRegression:
+    def test_short_frustration_is_handled_without_moralizing(self, monkeypatch):
+        monkeypatch.setattr("backend.intent_engine.random.choice", lambda seq: seq[0])
+
+        result = try_local_intent("du hund")
+
+        assert result is not None
+        assert result["action"] is None
+        assert_professional_reply(result["message"])
+        assert "beleidigt" not in result["message"].lower()
 
 
 # ---------------------------------------------------------------------------

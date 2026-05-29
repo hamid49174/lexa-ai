@@ -8,6 +8,7 @@ Circuit breaker with exponential backoff protects against API outages.
 """
 
 import io
+import importlib.util
 import logging
 import os
 import threading
@@ -471,7 +472,7 @@ def _cloud_transcribe(audio: np.ndarray, sample_rate: int = 16000,
     transcribers = {
         "openai": lambda: _transcribe_openai(audio, sample_rate),
         "deepgram": lambda: _transcribe_deepgram(audio, sample_rate,
-                                                  keywords="Lexa" if "Lexa" in prompt else ""),
+                                                 keywords="Lexa" if "Lexa" in prompt else ""),
         "groq": lambda: _transcribe_groq(audio, sample_rate, prompt=prompt),
     }
 
@@ -666,11 +667,7 @@ def get_stt_status() -> dict:
     groq_key = _get_key("groq")
     openai_key = _get_key("openai")
 
-    try:
-        import faster_whisper
-        local_available = True
-    except ImportError:
-        local_available = False
+    local_available = importlib.util.find_spec("faster_whisper") is not None
 
     return {
         "ready": bool(openai_key) or bool(dg_key) or bool(groq_key) or local_available,
@@ -707,11 +704,7 @@ def get_available_models() -> list[dict]:
         "available": bool(groq_key), **STT_MODELS["groq-whisper-large-v3-turbo"],
     })
     for size in ("tiny", "base", "small", "medium", "large-v3"):
-        try:
-            import faster_whisper
-            available = True
-        except ImportError:
-            available = False
+        available = importlib.util.find_spec("faster_whisper") is not None
         models.append({
             "name": size, "active": STT_ENGINE == "local" and _LOCAL_MODEL_SIZE == size,
             "available": available, **STT_MODELS[size],

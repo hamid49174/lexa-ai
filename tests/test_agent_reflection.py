@@ -1,5 +1,6 @@
 from backend.agent_reflection import (
     ReflectionDecision,
+    infer_reflection_risk,
     reflect_action,
     should_reflect_action,
 )
@@ -30,6 +31,13 @@ def test_high_risk_tool_triggers_reflection(monkeypatch):
     assert decision.risk_level == "critical"
     assert decision.requires_confirmation is True
     assert decision.verification_step
+
+
+def test_critical_tool_names_are_extendable_by_environment(monkeypatch):
+    monkeypatch.setenv("LEXA_AGENT_CRITICAL_TOOLS", "custom_destroy, Custom_Nuke ")
+
+    assert infer_reflection_risk("custom_destroy") == "critical"
+    assert infer_reflection_risk("custom_nuke") == "critical"
 
 
 def test_confirmation_required_tool_triggers_reflection(monkeypatch):

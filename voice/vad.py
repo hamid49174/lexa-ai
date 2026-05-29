@@ -8,7 +8,7 @@ import logging
 import numpy as np
 
 from voice.config import (
-    SAMPLE_RATE, VAD_CHUNK_SAMPLES, SILENCE_MS_BASE, RECORD_CHUNK_MS,
+    SAMPLE_RATE, VAD_CHUNK_SAMPLES,
 )
 
 logger = logging.getLogger("lexa.vad")

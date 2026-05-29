@@ -2,6 +2,7 @@
 
 const LEXA_COMPOSER_COMMANDS = [
   { id: "agent", icon: "command", hint: "/agent", aliases: ["a", "plan", "multi", "multi-step", "mehrschritt"], prefixKey: "composer.agent.prefix", labelKey: "composer.agent.label", descKey: "composer.agent.desc", fallbackPrefix: "/agent ", fallbackLabel: "Plan", fallbackDesc: "Handle a multi-step task clearly." },
+  { id: "hermes", icon: "monitor", hint: "/hermes", aliases: ["h", "pc", "hm", "hermespc", "computeragent", "pcagent", "systemagent", "steuerung"], prefixKey: "composer.hermes.prefix", labelKey: "composer.hermes.label", descKey: "composer.hermes.desc", fallbackPrefix: "/hermes ", fallbackLabel: "Hermes", fallbackDesc: "Control PC tasks through Lexa." },
   { id: "clone", icon: "image", hint: "/clone", aliases: ["cl", "cloneui", "screenshotui"], prefixKey: "composer.clone.prefix", labelKey: "composer.clone.label", descKey: "composer.clone.desc", fallbackPrefix: "/agent Clone or recreate this UI from the supplied screenshot. Preserve layout intent, accessibility, responsive behavior, and Lexa's product style: ", fallbackLabel: "Clone UI", fallbackDesc: "Generate UI from a screenshot." },
   { id: "figma", icon: "figma", hint: "/figma", aliases: ["fg", "design"], prefixKey: "composer.figma.prefix", labelKey: "composer.figma.label", descKey: "composer.figma.desc", fallbackPrefix: "/agent Import or translate this Figma design into Lexa-ready UI. Keep components accessible, responsive, and consistent with the existing codebase: ", fallbackLabel: "Import Figma", fallbackDesc: "Turn a design into UI." },
   { id: "page", icon: "monitor", hint: "/page", aliases: ["p", "seite", "webpage"], prefixKey: "composer.page.prefix", labelKey: "composer.page.label", descKey: "composer.page.desc", fallbackPrefix: "/agent Create a production-ready page or screen for Lexa. Include layout, states, accessibility, responsive behavior, and tests where useful: ", fallbackLabel: "Create Page", fallbackDesc: "Generate a new app page." },
@@ -99,6 +100,104 @@ function composerCommandIconSvg(icon) {
     wave: '<path d="M4 12h2l2-6 4 12 3-8 2 2h3"/>',
   };
   return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icons[icon] || icons.command}</svg>`;
+}
+
+function createComposerCommandIconElement(icon) {
+  const specs = {
+    command: [
+      { tag: "path", attrs: { d: "M18 6 6 18" } },
+      { tag: "path", attrs: { d: "m8 6 4 6-4 6" } },
+      { tag: "path", attrs: { d: "M14 18h4" } },
+    ],
+    figma: [
+      { tag: "path", attrs: { d: "M8 3h4v6H8a3 3 0 0 1 0-6Z" } },
+      { tag: "path", attrs: { d: "M12 3h4a3 3 0 0 1 0 6h-4V3Z" } },
+      { tag: "path", attrs: { d: "M12 9h4a3 3 0 0 1 0 6h-4V9Z" } },
+      { tag: "path", attrs: { d: "M8 9h4v6H8a3 3 0 0 1 0-6Z" } },
+      { tag: "path", attrs: { d: "M8 15h4v3a3 3 0 1 1-4-3Z" } },
+    ],
+    monitor: [
+      { tag: "rect", attrs: { x: "3", y: "5", width: "18", height: "12", rx: "2" } },
+      { tag: "path", attrs: { d: "M8 21h8" } },
+      { tag: "path", attrs: { d: "M12 17v4" } },
+    ],
+    search: [
+      { tag: "circle", attrs: { cx: "11", cy: "11", r: "7" } },
+      { tag: "path", attrs: { d: "M20 20l-4.5-4.5" } },
+      { tag: "path", attrs: { d: "M8 11h6" } },
+    ],
+    doc: [
+      { tag: "path", attrs: { d: "M6 3h8l4 4v14H6V3Z" } },
+      { tag: "path", attrs: { d: "M14 3v5h5" } },
+      { tag: "path", attrs: { d: "M9 13h6" } },
+      { tag: "path", attrs: { d: "M9 17h5" } },
+    ],
+    layers: [
+      { tag: "path", attrs: { d: "M12 3 3 8l9 5 9-5-9-5Z" } },
+      { tag: "path", attrs: { d: "m3 12 9 5 9-5" } },
+      { tag: "path", attrs: { d: "m3 16 9 5 9-5" } },
+    ],
+    check: [
+      { tag: "rect", attrs: { x: "4", y: "3", width: "16", height: "18", rx: "2" } },
+      { tag: "path", attrs: { d: "M9 12l2 2 4-5" } },
+      { tag: "path", attrs: { d: "M8 7h8" } },
+    ],
+    wand: [
+      { tag: "path", attrs: { d: "M15 4l5 5" } },
+      { tag: "path", attrs: { d: "M14 5l5 5-9 9-5-5 9-9Z" } },
+      { tag: "path", attrs: { d: "M5 4v3" } },
+      { tag: "path", attrs: { d: "M3.5 5.5h3" } },
+      { tag: "path", attrs: { d: "M20 17v3" } },
+      { tag: "path", attrs: { d: "M18.5 18.5h3" } },
+    ],
+    brain: [
+      { tag: "path", attrs: { d: "M9 5a3 3 0 0 0-3 3v1a3 3 0 0 0-1 5.2A3.5 3.5 0 0 0 8.5 19H10V5H9Z" } },
+      { tag: "path", attrs: { d: "M15 5a3 3 0 0 1 3 3v1a3 3 0 0 1 1 5.2A3.5 3.5 0 0 1 15.5 19H14V5h1Z" } },
+      { tag: "path", attrs: { d: "M10 9H7.5" } },
+      { tag: "path", attrs: { d: "M14 9h2.5" } },
+      { tag: "path", attrs: { d: "M10 14H7" } },
+      { tag: "path", attrs: { d: "M14 14h3" } },
+    ],
+    rocket: [
+      { tag: "path", attrs: { d: "M5 19c1.6-.3 3.2-.9 4.4-2.1" } },
+      { tag: "path", attrs: { d: "M4 14l6 6" } },
+      { tag: "path", attrs: { d: "M13 6c2.5-2.5 5.3-3 7-2-.2 2.1-1 4.5-3.1 6.6L10 17l-4-4 7-7Z" } },
+      { tag: "path", attrs: { d: "M15 8h.01" } },
+      { tag: "path", attrs: { d: "M6 13l-2 1 1-4 3-1" } },
+      { tag: "path", attrs: { d: "M11 18l-1 3 4-1 1-2" } },
+    ],
+    spark: [
+      { tag: "path", attrs: { d: "M12 2l1.8 6.1L20 10l-6.2 1.9L12 18l-1.8-6.1L4 10l6.2-1.9L12 2Z" } },
+      { tag: "path", attrs: { d: "M19 15l.9 3.1L23 19l-3.1.9L19 23l-.9-3.1L15 19l3.1-.9L19 15Z" } },
+    ],
+    map: [
+      { tag: "path", attrs: { d: "M4 6l5-2 6 2 5-2v14l-5 2-6-2-5 2V6Z" } },
+      { tag: "path", attrs: { d: "M9 4v14" } },
+      { tag: "path", attrs: { d: "M15 6v14" } },
+    ],
+    image: [
+      { tag: "rect", attrs: { x: "3", y: "5", width: "18", height: "14", rx: "2" } },
+      { tag: "circle", attrs: { cx: "8", cy: "10", r: "1.5" } },
+      { tag: "path", attrs: { d: "M21 15l-5-5L5 19" } },
+    ],
+    wave: [
+      { tag: "path", attrs: { d: "M4 12h2l2-6 4 12 3-8 2 2h3" } },
+    ],
+  };
+  const children = specs[icon] || specs.command;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", "16");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  children.forEach((child) => {
+    const el = document.createElementNS("http://www.w3.org/2000/svg", child.tag);
+    Object.entries(child.attrs || {}).forEach(([name, value]) => el.setAttribute(name, value));
+    svg.appendChild(el);
+  });
+  return svg;
 }
 
 function composerCommandMatches(command, query) {

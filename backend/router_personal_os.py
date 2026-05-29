@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from backend.config import MAX_TEXT_CHARS, MCP_CALL_TIMEOUT, MCP_ENABLED
+from backend.context_bus import get_shared_context_snapshot, suggest_personal_os_topic
 from backend.mcp_registry import MCPError, mcp_registry
 from backend.obsidian_context import build_obsidian_context_payload
 from backend.security import audit_log, check_rate_limit
@@ -1484,14 +1485,24 @@ async def obsidian_context_os(
     if not check_rate_limit("execute"):
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
 
-    audit_log("personal_os", "obsidian_context", f"topic={topic[:120]}")
+    resolved_topic = topic.strip() or suggest_personal_os_topic()
+    audit_log("personal_os", "obsidian_context", f"topic={resolved_topic[:120]}")
     return await asyncio.to_thread(
         build_obsidian_context_payload,
-        topic=topic,
+        topic=resolved_topic,
         max_files=maxFiles,
         body_chars=bodyChars,
         include_previews=includePreviews,
     )
+
+
+@router.get("/shared-context")
+async def personal_os_shared_context():
+    """Return the latest read-only chat context snapshot for OS surfaces."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
+    audit_log("personal_os", "shared_context", "read latest chat context")
+    return get_shared_context_snapshot()
 
 
 @router.get("/status")

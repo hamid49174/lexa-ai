@@ -1,13 +1,13 @@
 """
 Lexa AI -- Web Search Plugin
 Durchsucht das Web mit DuckDuckGo HTML Lite (kein API Key noetig).
-Nutzt nur urllib.request aus der Standardbibliothek.
+Nutzt den kontrollierten Plugin-HTTP-Helper des PluginManagers.
 """
 
 import html
 import re
-import urllib.parse
-import urllib.request
+
+LEXA_PLUGIN_HTTP_GET = None
 
 PLUGIN_META = {
     "name": "Web Search",
@@ -46,7 +46,7 @@ PLUGIN_META = {
         {
             "type": "function",
             "function": {
-                "name": "web_search_news"  ,
+                "name": "web_search_news",
                 "description": "Durchsucht DuckDuckGo nach aktuellen News zu einem Thema",
                 "parameters": {
                     "type": "object",
@@ -64,7 +64,7 @@ PLUGIN_META = {
 }
 
 
-def _ddg_search(query: str, max_results: int = 5) -> list[dict]:
+async def _ddg_search(query: str, max_results: int = 5) -> list[dict]:
     """Fuehrt eine DuckDuckGo HTML Lite Suche durch.
 
     Returns:
@@ -74,21 +74,28 @@ def _ddg_search(query: str, max_results: int = 5) -> list[dict]:
         return []
 
     max_results = max(1, min(max_results, 15))
-    encoded = urllib.parse.urlencode({"q": query})
-    url = f"https://html.duckduckgo.com/html/?{encoded}"
+    http_get = LEXA_PLUGIN_HTTP_GET
+    if http_get is None:
+        return [{"title": "Fehler", "url": "", "snippet": "Plugin-HTTP-Helper nicht verfuegbar."}]
+
+    url = "https://html.duckduckgo.com/html/"
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml",
         "Accept-Language": "de,en;q=0.9",
     }
 
-    req = urllib.request.Request(url, headers=headers)
-
     try:
-        with urllib.request.urlopen(req, timeout=15) as response:
-            raw_html = response.read().decode("utf-8", errors="replace")
+        response = await http_get(
+            url,
+            params={"q": query},
+            headers=headers,
+            timeout=8,
+            max_bytes=20000,
+        )
+        raw_html = response.get("body", "")
     except Exception as e:
         return [{"title": "Fehler", "url": "", "snippet": f"Suche fehlgeschlagen: {e}"}]
 
@@ -126,7 +133,7 @@ def _parse_ddg_html(raw_html: str, max_results: int) -> list[dict]:
         if "uddg=" in raw_url:
             match = re.search(r"uddg=([^&]+)", raw_url)
             if match:
-                actual_url = urllib.parse.unquote(match.group(1))
+                actual_url = _percent_decode(match.group(1))
         elif raw_url.startswith("//"):
             actual_url = "https:" + raw_url
 
@@ -142,8 +149,9 @@ def _parse_ddg_html(raw_html: str, max_results: int) -> list[dict]:
 
 def _clean_html(text: str) -> str:
     """Entfernt HTML-Tags und dekodiert HTML-Entities."""
+    clean = html.unescape(text)
     # Tags entfernen
-    clean = re.sub(r"<[^>]+>", "", text)
+    clean = re.sub(r"<[^>]+>", "", clean)
     # HTML-Entities dekodieren
     clean = html.unescape(clean)
     # Mehrfache Leerzeichen reduzieren
@@ -151,12 +159,22 @@ def _clean_html(text: str) -> str:
     return clean.strip()
 
 
+def _percent_decode(text: str) -> str:
+    def _replace(match):
+        try:
+            return bytes([int(match.group(1), 16)]).decode("utf-8", errors="replace")
+        except ValueError:
+            return match.group(0)
+
+    return re.sub(r"%([0-9a-fA-F]{2})", _replace, str(text or "").replace("+", " "))
+
+
 async def execute(tool_name: str, args: dict) -> dict:
     """Plugin-Eintrittspunkt -- wird vom PluginManager aufgerufen."""
     if tool_name == "web_search":
         query = args.get("query", "")
         max_results = int(args.get("max_results", 5))
-        results = _ddg_search(query, max_results)
+        results = await _ddg_search(query, max_results)
         if not results:
             return {"result": "Keine Ergebnisse gefunden.", "results": []}
         # Formatierte Ausgabe
@@ -172,7 +190,7 @@ async def execute(tool_name: str, args: dict) -> dict:
     elif tool_name == "web_search_news":
         query = args.get("query", "")
         # News-Suche = normaler Query + "news" Keyword
-        results = _ddg_search(f"{query} news aktuell", 5)
+        results = await _ddg_search(f"{query} news aktuell", 5)
         if not results:
             return {"result": "Keine News gefunden.", "results": []}
         formatted = []

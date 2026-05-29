@@ -16,6 +16,28 @@ from backend.i18n import t
 
 logger = logging.getLogger("lexa.files")
 
+_FILE_WRITE_MAX_CHARS = 200_000
+_FILE_WRITE_BLOCKED_EXTS = {
+    ".bat",
+    ".cmd",
+    ".com",
+    ".dll",
+    ".exe",
+    ".lnk",
+    ".msi",
+    ".ps1",
+    ".reg",
+    ".scr",
+    ".sys",
+    ".vbs",
+}
+_FILE_WRITE_BLOCKED_PATH_PARTS = (
+    "system32",
+    "syswow64",
+    "windows\\system",
+    "program files\\windows defender",
+)
+
 
 def _validate_scan_path(path: str) -> str | None:
     """Returns error string if path should not be scanned."""
@@ -796,7 +818,6 @@ def file_move(source: str = "", destination: str = "") -> dict:
         return {"error": "Ungültiger Quellpfad."}
 
     # Destination parent must exist
-    dst_parent = dst.parent if not dst.is_dir() else dst
     if not dst.is_dir() and not dst.parent.exists():
         return {"error": f"Zielverzeichnis existiert nicht: {dst.parent}"}
 
@@ -956,6 +977,48 @@ def folder_create(path: str = "") -> dict:
     except Exception as e:
         logger.error(f"folder_create failed: {e}", exc_info=True)
         return {"error": t("error.generic", error=str(e))}
+
+
+def file_write(path: str = "", content: str = "", create_dirs: bool = True) -> dict:
+    """Create a new UTF-8 text/code file. Existing files are never overwritten."""
+    if not path:
+        raise ValueError("Pfad fehlt.")
+    if not isinstance(content, str):
+        raise ValueError("Inhalt muss Text sein.")
+    if len(content) > _FILE_WRITE_MAX_CHARS:
+        raise ValueError(f"Inhalt ist zu lang (max {_FILE_WRITE_MAX_CHARS} Zeichen).")
+    if len(path) > 500:
+        raise ValueError("Pfad ist zu lang (max 500 Zeichen).")
+
+    p = Path(path).expanduser()
+    if p.suffix.lower() in _FILE_WRITE_BLOCKED_EXTS:
+        raise ValueError(t("file.blocked", extension=p.suffix))
+
+    resolved = p.resolve()
+    resolved_lower = str(resolved).lower()
+    if ".." in path or any(part in resolved_lower for part in _FILE_WRITE_BLOCKED_PATH_PARTS):
+        raise ValueError(t("file.systemPath"))
+    if resolved.exists():
+        if resolved.is_dir():
+            raise ValueError("Ziel ist ein Ordner, keine Datei.")
+        raise ValueError("Datei existiert bereits. Ich ueberschreibe sie nicht automatisch.")
+
+    parent = resolved.parent
+    if not parent.exists():
+        if not create_dirs:
+            raise ValueError("Zielordner existiert nicht.")
+        parent.mkdir(parents=True, exist_ok=True)
+    if not parent.is_dir():
+        raise ValueError("Zielordner ist kein Ordner.")
+
+    resolved.write_text(content, encoding="utf-8")
+    logger.info("file_write: Created %s", resolved)
+    return {
+        "path": str(resolved),
+        "chars": len(content),
+        "bytes": len(content.encode("utf-8")),
+        "created": True,
+    }
 
 
 def file_info(path: str = "") -> dict:

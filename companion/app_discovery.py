@@ -160,7 +160,7 @@ _CACHE_TTL = 300  # 5 minutes
 
 # Optional: persist cache to disk for faster cold starts
 _CACHE_FILE = Path(os.environ.get("LEXA_DATA_DIR",
-    str(Path(__file__).resolve().parent.parent))) / "app_cache.json"
+                                  str(Path(__file__).resolve().parent.parent))) / "app_cache.json"
 
 
 # ══════════════════════════════════════════════════

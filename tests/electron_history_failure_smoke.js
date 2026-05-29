@@ -5,6 +5,7 @@
  */
 
 const path = require("path");
+require("./electron_smoke_safe_io");
 
 if (!process.versions.electron) {
   const { spawnSync } = require("child_process");
@@ -114,14 +115,14 @@ async function main() {
         && typeof switchConversation === "function"
         && typeof loadChatHistory === "function"
         && typeof renderPersistedConversationMessages === "function"
+        && typeof clearChatVolatileState === "function"
+        && typeof chatSetActiveConversationId === "function"
+        && typeof chatGetActiveConversationId === "function"
+        && typeof chatTransientSetItem === "function"
       );
 
       clearRenderedChatMessages();
-      try {
-        localStorage.removeItem("lexa-chat-history");
-        localStorage.removeItem("lexa-chat-draft");
-        localStorage.removeItem("lexa-active-conversation");
-      } catch (_) {}
+      clearChatVolatileState();
       LexaState.set("backendOnline", true);
       LexaState.set("isLoading", false);
       LexaState.set("currentConversationId", null);
@@ -183,7 +184,7 @@ async function main() {
         ],
       });
       LexaState.set("currentConversationId", previous.id);
-      localStorage.setItem("lexa-active-conversation", previous.id);
+      chatSetActiveConversationId(previous.id);
       LexaState.set("conversationsList", (await window.lexa.conversations()).conversations || []);
       clearRenderedChatMessages();
       renderPersistedConversationMessages((await window.lexa.conversationGet(previous.id)).messages, previous.id);
@@ -194,7 +195,7 @@ async function main() {
       const failedLoad = {
         switchResult: missingSwitchResult === false,
         current: String(LexaState.get("currentConversationId") || ""),
-        stored: localStorage.getItem("lexa-active-conversation") || "",
+        stored: chatGetActiveConversationId() || "",
         transcriptPreserved: beforeMissingSwitchText === afterMissingSwitchText && /Previous assistant ok/.test(afterMissingSwitchText),
         activeRow: Boolean(document.querySelector('#conversation-list .conv-item[data-conv-id="' + previous.id + '"].active')),
       };
@@ -204,7 +205,7 @@ async function main() {
       clearRenderedChatMessages();
       LexaState.set("backendOnline", false);
       LexaState.set("currentConversationId", null);
-      localStorage.setItem("lexa-chat-history", "{not valid json");
+      chatTransientSetItem("lexa-chat-history", "{not valid json");
       let invalidLocalStorageError = "";
       try {
         await loadChatHistory();

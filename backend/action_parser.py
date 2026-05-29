@@ -30,8 +30,8 @@ _FUNCTION_TAG_PATTERN: re.Pattern = re.compile(
 # Per-field parameter size limits
 _PATH_PARAM_KEYS: frozenset[str] = frozenset({
     "path", "search_path", "folder", "input_path", "output_path",
-    "video_path", "pdf_path", "downloads_path", "save_path",
-    "repo_path", "file_path", "dir_path", "log_path",
+    "video_path", "pdf_path", "pdf_paths", "downloads_path", "save_path",
+    "backup_path", "attachment_path", "repo_path", "file_path", "dir_path", "log_path",
 })
 _PATH_PARAM_MAX_LEN: int = 500
 _TEXT_PARAM_MAX_LEN: int = 10000
@@ -204,6 +204,24 @@ def _extract_json_from_pos(text: str, start: int) -> Optional[str]:
 #  PARAM SANITIZATION
 # ══════════════════════════════════════════════════
 
+def _sanitize_param_string(key_str: str, value: str) -> str:
+    if key_str in _PATH_PARAM_KEYS:
+        return value[:_PATH_PARAM_MAX_LEN]
+    if key_str in ("text", "content", "body", "message", "description", "code"):
+        return value[:_TEXT_PARAM_MAX_LEN]
+    return value[:_DEFAULT_PARAM_MAX_LEN]
+
+
+def _sanitize_param_value(key_str: str, value):
+    if isinstance(value, str):
+        return _sanitize_param_string(key_str, value)
+    if isinstance(value, list):
+        return [_sanitize_param_value(key_str, item) for item in value]
+    if isinstance(value, dict):
+        return _sanitize_params(value)
+    return value
+
+
 def _sanitize_params(params: dict) -> dict:
     """Sanitize action parameters with per-field size limits.
 
@@ -219,18 +237,7 @@ def _sanitize_params(params: dict) -> dict:
         if len(key_str) > 100:
             continue
 
-        if isinstance(v, str):
-            # Apply per-field size limits
-            if key_str in _PATH_PARAM_KEYS:
-                if len(v) > _PATH_PARAM_MAX_LEN:
-                    v = v[:_PATH_PARAM_MAX_LEN]
-            elif key_str in ("text", "content", "body", "message", "description", "code"):
-                if len(v) > _TEXT_PARAM_MAX_LEN:
-                    v = v[:_TEXT_PARAM_MAX_LEN]
-            elif len(v) > _DEFAULT_PARAM_MAX_LEN:
-                v = v[:_DEFAULT_PARAM_MAX_LEN]
-
-        sanitized[key_str] = v
+        sanitized[key_str] = _sanitize_param_value(key_str, v)
     return sanitized
 
 

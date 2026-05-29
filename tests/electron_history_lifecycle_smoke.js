@@ -5,6 +5,7 @@
  */
 
 const path = require("path");
+require("./electron_smoke_safe_io");
 
 if (!process.versions.electron) {
   const { spawnSync } = require("child_process");
@@ -114,14 +115,12 @@ async function main() {
         && typeof switchConversation === "function"
         && typeof deleteConversation === "function"
         && typeof clearRenderedChatMessages === "function"
+        && typeof clearChatVolatileState === "function"
+        && typeof chatGetActiveConversationId === "function"
       );
 
       clearRenderedChatMessages();
-      try {
-        localStorage.removeItem("lexa-chat-history");
-        localStorage.removeItem("lexa-chat-draft");
-        localStorage.removeItem("lexa-active-conversation");
-      } catch (_) {}
+      clearChatVolatileState();
       LexaState.set("backendOnline", true);
       LexaState.set("isLoading", false);
       LexaState.set("currentConversationId", null);
@@ -190,7 +189,7 @@ async function main() {
       const firstSelected = {
         switchResult: firstSwitch === true,
         current: String(LexaState.get("currentConversationId") || ""),
-        stored: localStorage.getItem("lexa-active-conversation") || "",
+        stored: chatGetActiveConversationId() || "",
         activeClass: Boolean(firstActiveRow?.classList.contains("active")),
         ariaCurrent: firstActiveRow?.getAttribute("aria-current") || "",
       };
@@ -208,7 +207,7 @@ async function main() {
       const secondSelected = {
         switchResult: secondSwitch === true,
         current: String(LexaState.get("currentConversationId") || ""),
-        stored: localStorage.getItem("lexa-active-conversation") || "",
+        stored: chatGetActiveConversationId() || "",
         firstActiveClass: Boolean(firstRowAfterSecond?.classList.contains("active")),
         secondActiveClass: Boolean(secondActiveRow?.classList.contains("active")),
         secondAriaCurrent: secondActiveRow?.getAttribute("aria-current") || "",
@@ -221,7 +220,7 @@ async function main() {
         secondStillVisible: Boolean(document.querySelector('#conversation-list .conv-item[data-conv-id="' + second.id + '"]')),
         rowIds: Array.from(document.querySelectorAll("#conversation-list .conv-item")).map((row) => row.dataset?.convId || ""),
         current: String(LexaState.get("currentConversationId") || ""),
-        stored: localStorage.getItem("lexa-active-conversation") || "",
+        stored: chatGetActiveConversationId() || "",
         rowCount: document.querySelectorAll("#conversation-list .conv-item").length,
         emptyText: document.querySelector("#conversation-list .conv-empty")?.textContent || "",
       };

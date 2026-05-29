@@ -14,8 +14,6 @@ Plus execute_vision_tool() Dispatcher fuer die Tool-Ausfuehrung.
 
 from __future__ import annotations
 
-import asyncio
-import base64
 import logging
 from typing import Any
 

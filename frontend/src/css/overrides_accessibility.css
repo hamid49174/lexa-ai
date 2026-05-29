@@ -1,0 +1,204 @@
+/* Focus-visible and responsive accessibility overrides. Loaded before overrides.css. */
+
+/* ── FOCUS-VISIBLE STATES (Accessibility) ──────── */
+.action-btn:focus-visible,
+.send-btn:focus-visible,
+.new-chat-btn:focus-visible,
+.dash-quick-btn:focus-visible,
+.sidebar-btn:focus-visible,
+.tool-card:focus-visible,
+.icon-btn:focus-visible,
+.sleek-icon-btn:focus-visible,
+.talk-to-lexa-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.palette-input:focus,
+.search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.toggle-switch input:focus-visible + .slider {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.focus-mode-banner {
+  width: min(780px, 100%);
+  margin: 100px auto 0;
+  backdrop-filter: blur(14px);
+  background: rgba(10, 18, 27, 0.76);
+}
+
+
+
+
+@media (max-width: 1024px) {
+  .floating-cards-container {
+    padding: 0 20px;
+  }
+
+  .floating-card {
+    width: 180px;
+    min-width: 180px;
+  }
+}
+
+@media (max-width: 768px) {
+  .chat-container {
+    padding: 56px 16px 12px;
+  }
+
+  .top-nav-pill {
+    top: 12px;
+    min-width: 0;
+    width: calc(100vw - 32px);
+    max-width: calc(100vw - 32px);
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .voice-orb-container {
+    padding-top: 108px;
+  }
+
+  .voice-orb {
+    width: 280px;
+    height: 280px;
+  }
+
+  .greeting-title {
+    font-size: 38px;
+  }
+
+  .greeting-subtitle {
+    font-size: 14px;
+  }
+
+  .chat-messages {
+    padding-top: 120px;
+  }
+
+  .sidebar {
+    width: min(300px, calc(100vw - 24px));
+  }
+}
+
+@media (max-width: 560px) {
+  .top-nav-pill .nav-title {
+    display: none;
+  }
+
+  .top-nav-pill .nav-time {
+    display: none;
+  }
+
+  .top-nav-pill .nav-status {
+    padding: 4px 8px;
+    max-width: 86px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .top-nav-pill .icon-btn {
+    width: 32px;
+    min-width: 32px;
+  }
+
+  .greeting-stats {
+    justify-content: flex-start;
+  }
+
+  .stat-pill {
+    font-size: 10px;
+  }
+
+  .chat-input-area.sleek-input-area {
+    padding: 10px 10px 8px;
+  }
+
+  .sleek-pill {
+    padding: 8px 8px 8px 12px;
+    gap: 4px;
+  }
+
+  .sleek-actions-right {
+    gap: 0;
+  }
+
+  .sleek-icon-btn,
+  .send-btn.sleek-icon-btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  .char-counter {
+    max-width: 52px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .conversations-section .sidebar-label {
+    align-items: flex-start;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .conversations-section .sidebar-label > span {
+    flex: 1 1 auto;
+    min-width: 44px;
+  }
+
+  .conv-header-actions {
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+
+  .agent-attention-summary {
+    order: 2;
+    flex: 1 0 100%;
+    justify-content: flex-start;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+  }
+
+  .agent-attention-summary-chip {
+    max-width: calc(50% - 2px);
+    min-width: 0;
+  }
+
+  .agent-attention-panel,
+  .agent-resolved-panel {
+    padding: 8px;
+  }
+
+  .agent-attention-row,
+  .agent-resolved-row {
+    grid-template-columns: minmax(0, 1fr) 32px;
+  }
+
+  .agent-attention-item,
+  .agent-resolved-item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .agent-attention-count,
+  .agent-resolved-count {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.15;
+  }
+}
+
+@media (max-width: 560px) {
+  .agent-attention-count,
+  .agent-resolved-count {
+    overflow-wrap: anywhere;
+  }
+}

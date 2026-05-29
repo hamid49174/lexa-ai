@@ -63,6 +63,8 @@ _READ_ONLY_PREFIXES = (
     "calendar_week",
     "clipboard_read",
     "disk_analysis",
+    "desktop_position",
+    "desktop_wait",
     "docker_images",
     "docker_logs",
     "docker_ps",
@@ -115,6 +117,8 @@ _READ_ONLY_PREFIXES = (
     "system_uptime",
     "time_tracking_report",
     "todo_list",
+    "ui_find",
+    "ui_tree",
     "weather_",
     "wifi_status",
     "window_list",
@@ -130,6 +134,15 @@ _CRITICAL_NAMES = {
     "restart",
     "shutdown",
 }
+
+
+def _configured_critical_names() -> set[str]:
+    extra = {
+        item.strip().lower()
+        for item in os.getenv("LEXA_AGENT_CRITICAL_TOOLS", "").split(",")
+        if item.strip()
+    }
+    return _CRITICAL_NAMES | extra
 
 
 @dataclass
@@ -167,7 +180,7 @@ def infer_reflection_risk(action_name: str, permission: str = "", params: dict[s
     params = params or {}
     if not normalized:
         return "critical"
-    if normalized in _CRITICAL_NAMES:
+    if normalized in _configured_critical_names():
         return "critical"
     if permission in {"blocked", "unknown"}:
         return "critical"

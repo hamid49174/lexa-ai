@@ -7,7 +7,6 @@ import hashlib
 import logging
 import os
 import sqlite3
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -283,7 +282,6 @@ async def _handle_checkout_completed(session: dict):
 
 async def _handle_subscription_updated(subscription: dict):
     """Process subscription update (plan change, renewal, etc.)."""
-    customer_id = subscription.get("customer", "")
     subscription_id = subscription.get("id", "")
     status = subscription.get("status", "")
     plan = _extract_plan_name(subscription)

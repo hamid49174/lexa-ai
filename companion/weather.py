@@ -231,7 +231,7 @@ def weather_forecast(city: str = "", days: int = 3) -> dict:
             dt = datetime.strptime(dates[i], "%Y-%m-%d")
             label = dt.strftime("%A, %d.%m.")
         except (ValueError, IndexError):
-            label = dates[i] if i < len(dates) else f"Tag {i+1}"
+            label = dates[i] if i < len(dates) else f"Tag {i + 1}"
 
         wmo = codes[i] if i < len(codes) else 0
         forecast_days.append({

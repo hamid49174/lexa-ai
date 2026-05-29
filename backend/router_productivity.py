@@ -117,6 +117,24 @@ async def update_todo(todo_id: int, req: Request):
     return {"status": result}
 
 
+@router.delete("/todos/completed")
+async def delete_completed_todos():
+    """Delete all completed (done) todos. Returns count of deleted items."""
+    if not check_rate_limit("chat"):
+        return JSONResponse({"error": "Rate limit überschritten."}, status_code=429)
+
+    # Get all done todos, then delete each
+    todos = await asyncio.to_thread(prod.todo_list, status="done", category="", priority="")
+    deleted = 0
+    for todo in todos:
+        tid = todo.get("id")
+        if tid:
+            await asyncio.to_thread(prod.todo_delete, id=tid)
+            deleted += 1
+
+    return {"status": f"{deleted} erledigte Todos gelöscht.", "deleted": deleted}
+
+
 @router.delete("/todos/{todo_id}")
 async def delete_todo(todo_id: int):
     if not check_rate_limit("chat"):
@@ -146,24 +164,6 @@ async def complete_todo(todo_id: int):
         return JSONResponse({"status": result}, status_code=404)
 
     return {"status": result}
-
-
-@router.delete("/todos/completed")
-async def delete_completed_todos():
-    """Delete all completed (done) todos. Returns count of deleted items."""
-    if not check_rate_limit("chat"):
-        return JSONResponse({"error": "Rate limit überschritten."}, status_code=429)
-
-    # Get all done todos, then delete each
-    todos = await asyncio.to_thread(prod.todo_list, status="done", category="", priority="")
-    deleted = 0
-    for todo in todos:
-        tid = todo.get("id")
-        if tid:
-            await asyncio.to_thread(prod.todo_delete, id=tid)
-            deleted += 1
-
-    return {"status": f"{deleted} erledigte Todos gelöscht.", "deleted": deleted}
 
 
 # ── POMODORO ─────────────────────────────────────

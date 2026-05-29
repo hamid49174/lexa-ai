@@ -13,7 +13,7 @@ const LexaI18n = (() => {
   };
 
   // State
-  let _currentLang = localStorage.getItem("lexa-lang") || "de";
+  let _currentLang = lexaStorageGet("lexa-lang", "de");
   let _strings = {};       // Current language strings
   let _fallback = {};      // Fallback strings (German = default)
   let _loaded = false;
@@ -85,7 +85,7 @@ const LexaI18n = (() => {
     }
 
     _loaded = true;
-    localStorage.setItem("lexa-lang", _currentLang);
+    lexaStorageSet("lexa-lang", _currentLang);
     document.documentElement.lang = _currentLang;
 
     // Dispatch event for UI updates

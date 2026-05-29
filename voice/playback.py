@@ -5,7 +5,6 @@ Separated from conversation logic for clean architecture.
 
 import ctypes
 import logging
-import time
 import numpy as np
 from typing import Optional, Callable
 

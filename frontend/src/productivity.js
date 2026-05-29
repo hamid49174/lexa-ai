@@ -18,6 +18,140 @@ function productivityFormatDate(value = new Date()) {
   return new Date(value).toLocaleDateString(productivityLocale());
 }
 
+function productivityDisplayCount(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return "0";
+  return String(Math.floor(num));
+}
+
+function createProductivityStatCard(value, label, active = false) {
+  const card = document.createElement("div");
+  card.className = active ? "prod-stat-card prod-stat-active" : "prod-stat-card";
+  const valueEl = document.createElement("div");
+  valueEl.className = "prod-stat-value";
+  valueEl.textContent = String(value);
+  const labelEl = document.createElement("div");
+  labelEl.className = "prod-stat-label";
+  labelEl.textContent = String(label);
+  card.append(valueEl, labelEl);
+  return card;
+}
+
+function createProductivityEmptyState(message) {
+  const empty = document.createElement("div");
+  empty.className = "empty-state";
+  empty.textContent = String(message || "");
+  return empty;
+}
+
+function renderTimeTrackingLiveStatus(target, label, timeText, currentApp) {
+  const dot = document.createElement("span");
+  dot.className = "tt-live-dot";
+  const text = document.createTextNode(` ${label} \u2014 ${timeText}`);
+  target.replaceChildren(dot, text);
+  if (currentApp) {
+    target.appendChild(document.createTextNode(` | ${String(currentApp)}`));
+  }
+}
+
+function createTimeReportItem(entry) {
+  const item = document.createElement("div");
+  item.className = "time-report-item";
+  const appName = document.createElement("div");
+  appName.className = "time-app-name";
+  appName.textContent = String(entry?.app || "");
+  const duration = document.createElement("div");
+  duration.className = "time-duration";
+  duration.textContent = String(entry?.duration_display || "");
+  item.append(appName, duration);
+  return item;
+}
+
+function habitNumber(value, fallback = 0) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return fallback;
+  return Math.floor(num);
+}
+
+function createHabitWeekDots(week) {
+  const values = Array.isArray(week) ? week.slice(-7) : [];
+  while (values.length < 7) values.unshift(false);
+  const wrap = document.createElement("div");
+  wrap.className = "habit-week";
+  values.forEach((done, index) => {
+    const dot = document.createElement("span");
+    dot.className = `habit-dot${done ? " habit-dot-done" : ""}${index === 6 ? " habit-dot-today" : ""}`;
+    dot.title = done ? t("productivity.habitDone") : t("productivity.habitPending");
+    wrap.appendChild(dot);
+  });
+  return wrap;
+}
+
+function createHabitItem(habit) {
+  const name = String(habit?.name || "");
+  const description = habit?.description ? String(habit.description) : "";
+  const streak = habitNumber(habit?.streak);
+  const todayCount = habitNumber(habit?.today_count);
+  const target = Math.max(1, habitNumber(habit?.target, 1));
+  const progress = Math.min(100, Math.round((todayCount / target) * 100));
+
+  const item = document.createElement("div");
+  item.className = `habit-item${habit?.today_done ? " habit-done" : ""}`;
+
+  const info = document.createElement("div");
+  info.className = "habit-info";
+  const nameEl = document.createElement("div");
+  nameEl.className = "habit-name";
+  nameEl.textContent = name;
+  info.appendChild(nameEl);
+  if (description) {
+    const descEl = document.createElement("div");
+    descEl.className = "habit-desc";
+    descEl.textContent = description;
+    info.appendChild(descEl);
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "habit-meta";
+  const streakEl = document.createElement("span");
+  streakEl.className = "habit-streak";
+  streakEl.textContent = `\uD83D\uDD25 ${t("productivity.streakDays", {streak})}`;
+  const progressEl = document.createElement("span");
+  progressEl.className = "habit-progress";
+  progressEl.textContent = t("productivity.todayProgress", {count: todayCount, target});
+  meta.append(streakEl, progressEl);
+  info.append(meta, createHabitWeekDots(habit?.week));
+
+  const progressBar = document.createElement("div");
+  progressBar.className = "habit-progress-bar";
+  const progressFill = document.createElement("div");
+  progressFill.className = `habit-progress-fill habit-progress-${Math.max(0, Math.min(100, Math.round(progress / 5) * 5))}`;
+  progressBar.appendChild(progressFill);
+
+  const actions = document.createElement("div");
+  actions.className = "habit-actions";
+  const logBtn = document.createElement("button");
+  logBtn.type = "button";
+  logBtn.className = `action-btn habit-log-btn${habit?.today_done ? " disabled-half" : ""}`;
+  logBtn.textContent = habit?.today_done ? "\u2713" : "+1";
+  logBtn.disabled = Boolean(habit?.today_done);
+  logBtn.title = t("productivity.logHabitLabel", { name });
+  logBtn.setAttribute("aria-label", t("productivity.logHabitLabel", { name }));
+  logBtn.addEventListener("click", () => logHabit(name));
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "todo-action-btn todo-delete habit-del-btn";
+  deleteBtn.textContent = "\u2715";
+  deleteBtn.title = t("productivity.deleteHabitLabel", { name });
+  deleteBtn.setAttribute("aria-label", t("productivity.deleteHabitLabel", { name }));
+  deleteBtn.addEventListener("click", () => deleteHabit(name));
+
+  actions.append(logBtn, deleteBtn);
+  item.append(info, progressBar, actions);
+  return item;
+}
+
 async function refreshProductivityView() {
   if (!LexaState.get("backendOnline")) return;
   // All sub-refreshes run in parallel for faster view loading
@@ -35,28 +169,15 @@ async function refreshProdStats() {
     const stats = await window.lexa.productivityStats();
     const bar = document.getElementById("prod-stats-bar");
     if (!bar) return;
-    bar.innerHTML = `
-      <div class="prod-stat-card">
-        <div class="prod-stat-value">${stats.open_todos || 0}</div>
-        <div class="prod-stat-label">${t("productivity.statOpenTodos")}</div>
-      </div>
-      <div class="prod-stat-card">
-        <div class="prod-stat-value">${stats.done_today || 0}</div>
-        <div class="prod-stat-label">${t("productivity.statDoneToday")}</div>
-      </div>
-      <div class="prod-stat-card">
-        <div class="prod-stat-value">${stats.pomodoros_today || 0}</div>
-        <div class="prod-stat-label">${t("productivity.statPomodoros")}</div>
-      </div>
-      <div class="prod-stat-card">
-        <div class="prod-stat-value">${stats.habits_done_today || 0}/${stats.habits_total || 0}</div>
-        <div class="prod-stat-label">${t("productivity.statHabits")}</div>
-      </div>
-      <div class="prod-stat-card ${stats.focus_mode ? 'prod-stat-active' : ''}">
-        <div class="prod-stat-value">${stats.focus_mode ? t("productivity.focusOn") : t("productivity.focusOff")}</div>
-        <div class="prod-stat-label">${t("productivity.statFocusMode")}</div>
-      </div>
-    `;
+    const habitsDone = productivityDisplayCount(stats.habits_done_today);
+    const habitsTotal = productivityDisplayCount(stats.habits_total);
+    bar.replaceChildren(
+      createProductivityStatCard(productivityDisplayCount(stats.open_todos), t("productivity.statOpenTodos")),
+      createProductivityStatCard(productivityDisplayCount(stats.done_today), t("productivity.statDoneToday")),
+      createProductivityStatCard(productivityDisplayCount(stats.pomodoros_today), t("productivity.statPomodoros")),
+      createProductivityStatCard(`${habitsDone}/${habitsTotal}`, t("productivity.statHabits")),
+      createProductivityStatCard(stats.focus_mode ? t("productivity.focusOn") : t("productivity.focusOff"), t("productivity.statFocusMode"), Boolean(stats.focus_mode))
+    );
   } catch (e) { console.warn("[Productivity] Failed to refresh stats:", e.message || e); }
 }
 
@@ -68,7 +189,7 @@ async function refreshTodos() {
     const data = await window.lexa.todos(filter);
     const list = document.getElementById("todo-list");
     if (!list) return;
-    list.innerHTML = "";
+    list.replaceChildren();
     if (!data.todos || data.todos.length === 0) {
       const empty = document.createElement("div");
       empty.className = "empty-state";
@@ -393,34 +514,85 @@ async function exportTodos() {
 let _pomoLocal = { remaining: 0, total: 0, task: "", running: false, lastSync: 0 };
 const _POMO_SYNC_INTERVAL = 15000; // sync with backend every 15s
 
+function pomodoroSeconds(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return 0;
+  return Math.floor(num);
+}
+
+function createPomodoroCircle(className) {
+  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  circle.setAttribute("class", className);
+  circle.setAttribute("cx", "60");
+  circle.setAttribute("cy", "60");
+  circle.setAttribute("r", "52");
+  circle.setAttribute("fill", "none");
+  circle.setAttribute("stroke-width", "8");
+  return circle;
+}
+
+function createPomodoroTimerDisplay(remaining, total, task) {
+  const safeRemaining = pomodoroSeconds(remaining);
+  const safeTotal = pomodoroSeconds(total);
+  const mins = Math.floor(safeRemaining / 60);
+  const secs = safeRemaining % 60;
+  const elapsed = Math.max(0, safeTotal - safeRemaining);
+  const progress = Math.min(1, Math.max(0, safeTotal > 0 ? elapsed / safeTotal : 0));
+  const circumference = 2 * Math.PI * 52;
+  const dashoffset = circumference * (1 - progress);
+
+  const timer = document.createElement("div");
+  timer.className = "pomodoro-timer";
+  const wrap = document.createElement("div");
+  wrap.className = "pomodoro-ring-wrap";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "pomodoro-ring");
+  svg.setAttribute("width", "130");
+  svg.setAttribute("height", "130");
+  svg.setAttribute("viewBox", "0 0 120 120");
+  const bg = createPomodoroCircle("pomo-ring-bg");
+  const fill = createPomodoroCircle("pomo-ring-fill");
+  fill.setAttribute("stroke-dasharray", circumference.toFixed(1));
+  fill.setAttribute("stroke-dashoffset", dashoffset.toFixed(1));
+  fill.setAttribute("transform", "rotate(-90 60 60)");
+  svg.append(bg, fill);
+
+  const ringText = document.createElement("div");
+  ringText.className = "pomodoro-ring-text";
+  const timeEl = document.createElement("div");
+  timeEl.className = "pomodoro-time";
+  timeEl.textContent = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  const pctEl = document.createElement("div");
+  pctEl.className = "pomodoro-pct";
+  pctEl.textContent = `${Math.round(progress * 100)}%`;
+  ringText.append(timeEl, pctEl);
+
+  const taskEl = document.createElement("div");
+  taskEl.className = "pomodoro-task";
+  taskEl.textContent = String(task || t("productivity.noTask"));
+  wrap.append(svg, ringText);
+  timer.append(wrap, taskEl);
+  return timer;
+}
+
+function createPomodoroIdleDisplay(status) {
+  const idle = document.createElement("div");
+  idle.className = "pomodoro-idle";
+  const stats = document.createElement("div");
+  stats.className = "pomodoro-stats";
+  stats.textContent = t("productivity.pomodoroStats", {
+    today: productivityDisplayCount(status?.today_completed),
+    total: productivityDisplayCount(status?.total_completed),
+  });
+  idle.appendChild(stats);
+  return idle;
+}
+
 function _renderPomodoroDisplay(remaining, total, task) {
   const display = document.getElementById("pomodoro-display");
   const controls = document.getElementById("pomodoro-controls");
   if (!display || !controls) return;
-  const mins = Math.floor(remaining / 60);
-  const secs = remaining % 60;
-  const elapsed = total - remaining;
-  const progress = Math.min(1, Math.max(0, total > 0 ? elapsed / total : 0));
-  const circumference = 2 * Math.PI * 52;
-  const dashoffset = circumference * (1 - progress);
-  display.innerHTML = `
-    <div class="pomodoro-timer">
-      <div class="pomodoro-ring-wrap">
-        <svg class="pomodoro-ring" width="130" height="130" viewBox="0 0 120 120">
-          <circle class="pomo-ring-bg" cx="60" cy="60" r="52" fill="none" stroke-width="8"/>
-          <circle class="pomo-ring-fill" cx="60" cy="60" r="52" fill="none" stroke-width="8"
-            stroke-dasharray="${circumference.toFixed(1)}" stroke-dashoffset="${dashoffset.toFixed(1)}"
-            transform="rotate(-90 60 60)"/>
-        </svg>
-        <div class="pomodoro-ring-text">
-          <div class="pomodoro-time">${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}</div>
-          <div class="pomodoro-pct">${Math.round(progress * 100)}%</div>
-        </div>
-      </div>
-      <div class="pomodoro-task">${escapeHtml(String(task || t("productivity.noTask")))}</div>
-    </div>
-  `;
-  controls.innerHTML = "";
+  display.replaceChildren(createPomodoroTimerDisplay(remaining, total, task));
   const stopBtn = document.createElement("button");
   stopBtn.type = "button";
   stopBtn.className = "action-btn action-btn-danger";
@@ -428,7 +600,7 @@ function _renderPomodoroDisplay(remaining, total, task) {
   stopBtn.title = t("productivity.stopBtn");
   stopBtn.setAttribute("aria-label", t("productivity.stopBtn"));
   stopBtn.addEventListener("click", stopPomodoro);
-  controls.appendChild(stopBtn);
+  controls.replaceChildren(stopBtn);
 }
 
 function _pomoClientTick() {
@@ -468,12 +640,7 @@ async function refreshPomodoro() {
       LexaState.setInterval("pomodoro", _pomoClientTick, 1000);
     } else {
       LexaState.clearInterval("pomodoro");
-      display.innerHTML = `
-        <div class="pomodoro-idle">
-          <div class="pomodoro-stats">${t("productivity.pomodoroStats", {today: status.today_completed || 0, total: status.total_completed || 0})}</div>
-        </div>
-      `;
-      controls.innerHTML = "";
+      display.replaceChildren(createPomodoroIdleDisplay(status));
       const startBtn = document.createElement("button");
       startBtn.type = "button";
       startBtn.className = "action-btn";
@@ -481,7 +648,7 @@ async function refreshPomodoro() {
       startBtn.title = t("productivity.startBtn");
       startBtn.setAttribute("aria-label", t("productivity.startBtn"));
       startBtn.addEventListener("click", startPomodoro);
-      controls.appendChild(startBtn);
+      controls.replaceChildren(startBtn);
     }
   } catch (e) { console.warn("[Productivity] Failed to refresh pomodoro:", e.message || e); }
 }
@@ -597,65 +764,16 @@ async function refreshHabits() {
     const data = await window.lexa.habits();
     const list = document.getElementById("habits-list");
     if (!list) return;
-    if (!data.habits || data.habits.length === 0) {
-      list.innerHTML = '<div class="empty-state">' + escapeHtml(t("productivity.noHabits")) + '</div>';
+    const habits = Array.isArray(data.habits) ? data.habits : [];
+    if (habits.length === 0) {
+      list.replaceChildren(createProductivityEmptyState(t("productivity.noHabits")));
       return;
     }
-    // Build habit items using DOM (avoid inline-event + XSS issues with user-supplied names)
-    list.innerHTML = "";
-    data.habits.forEach(h => {
-      const progress = Math.min(100, Math.round((h.today_count / (h.target || 1)) * 100));
-      const safeName = escapeHtml(String(h.name || ""));
-      const safeDesc = h.description ? escapeHtml(String(h.description)) : "";
-      const streak = parseInt(h.streak) || 0;
-      const todayCount = parseInt(h.today_count) || 0;
-      const target = parseInt(h.target) || 1;
-
-      const item = document.createElement("div");
-      item.className = `habit-item${h.today_done ? " habit-done" : ""}`;
-      // Build week dots (last 7 days)
-      const weekDots = (h.week || [false,false,false,false,false,false,false]).map((done, i) => {
-        const isToday = i === 6;
-        return `<span class="habit-dot${done ? " habit-dot-done" : ""}${isToday ? " habit-dot-today" : ""}" title="${done ? t("productivity.habitDone") : t("productivity.habitPending")}"></span>`;
-      }).join("");
-
-      item.innerHTML = `
-        <div class="habit-info">
-          <div class="habit-name">${safeName}</div>
-          ${safeDesc ? `<div class="habit-desc">${safeDesc}</div>` : ""}
-          <div class="habit-meta">
-            <span class="habit-streak">\uD83D\uDD25 ${t("productivity.streakDays", {streak})}</span>
-            <span class="habit-progress">${t("productivity.todayProgress", {count: todayCount, target})}</span>
-          </div>
-          <div class="habit-week">${weekDots}</div>
-        </div>
-        <div class="habit-progress-bar">
-          <div class="habit-progress-fill habit-progress-${Math.max(0, Math.min(100, Math.round(progress / 5) * 5))}"></div>
-        </div>
-        <div class="habit-actions">
-          <button type="button" class="action-btn habit-log-btn ${h.today_done ? 'disabled-half' : ''}"${h.today_done ? ' disabled' : ""}>
-            ${h.today_done ? "&#10003;" : "+1"}
-          </button>
-          <button type="button" class="todo-action-btn todo-delete habit-del-btn" title="${t("productivity.deleteBtn")}" aria-label="${t("productivity.deleteBtn")}">&#10005;</button>
-        </div>
-      `;
-      // Attach events with real name (no inline injection risk)
-      const logBtn = item.querySelector(".habit-log-btn");
-      if (logBtn) {
-        logBtn.type = "button";
-        logBtn.title = t("productivity.logHabitLabel", { name: h.name || "" });
-        logBtn.setAttribute("aria-label", t("productivity.logHabitLabel", { name: h.name || "" }));
-        logBtn.addEventListener("click", () => logHabit(h.name));
-      }
-      const deleteBtn = item.querySelector(".habit-del-btn");
-      if (deleteBtn) {
-        deleteBtn.type = "button";
-        deleteBtn.title = t("productivity.deleteHabitLabel", { name: h.name || "" });
-        deleteBtn.setAttribute("aria-label", t("productivity.deleteHabitLabel", { name: h.name || "" }));
-        deleteBtn.addEventListener("click", () => deleteHabit(h.name));
-      }
-      list.appendChild(item);
+    const fragment = document.createDocumentFragment();
+    habits.forEach((habit) => {
+      fragment.appendChild(createHabitItem(habit));
     });
+    list.replaceChildren(fragment);
   } catch (e) { console.warn("[Productivity] Failed to refresh habits:", e.message || e); }
 }
 
@@ -817,7 +935,7 @@ async function refreshTimeTracking() {
         const m = Math.floor((elapsed % 3600) / 60);
         const s = elapsed % 60;
         const timeStr = (h > 0 ? h + "h " : "") + String(m).padStart(2, "0") + "m " + String(s).padStart(2, "0") + "s";
-        liveEl.innerHTML = `<span class="tt-live-dot"></span> ${t("productivity.trackingActive")} \u2014 ${timeStr}${ttStatus.current_app ? ` | ${escapeHtml(String(ttStatus.current_app))}` : ""}`;
+        renderTimeTrackingLiveStatus(liveEl, t("productivity.trackingActive"), timeStr, ttStatus.current_app);
       } else {
         liveEl.classList.add("hidden");
       }
@@ -828,19 +946,15 @@ async function refreshTimeTracking() {
     if (!reportDiv) return;
 
     if (!report.report || report.report.length === 0) {
-      reportDiv.innerHTML = '<div class="empty-state">' + escapeHtml(t("productivity.noTimeData")) + '</div>';
+      reportDiv.replaceChildren(createProductivityEmptyState(t("productivity.noTimeData")));
       return;
     }
-    reportDiv.innerHTML = `
-      <div class="time-report-grid">
-        ${report.report.slice(0, 10).map(r => `
-          <div class="time-report-item">
-            <div class="time-app-name">${escapeHtml(String(r.app || ""))}</div>
-            <div class="time-duration">${escapeHtml(String(r.duration_display || ""))}</div>
-          </div>
-        `).join("")}
-      </div>
-    `;
+    const grid = document.createElement("div");
+    grid.className = "time-report-grid";
+    report.report.slice(0, 10).forEach((entry) => {
+      grid.appendChild(createTimeReportItem(entry));
+    });
+    reportDiv.replaceChildren(grid);
   } catch (e) { console.warn("[Productivity] Failed to refresh time tracking:", e.message || e); }
 }
 

@@ -14,7 +14,7 @@ import asyncio
 import base64
 import logging
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, UploadFile, File
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -115,7 +115,7 @@ async def analyze_screenshot_endpoint(req: AnalyzeRequest):
     """
     check_rate_limit("vision")
     try:
-        from backend.vision import analyze_screenshot, analyze_image, capture_screenshot, capture_active_window
+        from backend.vision import analyze_screenshot
 
         if req.auto_capture:
             result = await analyze_screenshot(

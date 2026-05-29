@@ -204,8 +204,8 @@ class AgentPlan:
         self.max_runtime_seconds = _clean_optional_budget(self.max_runtime_seconds, "max_runtime_seconds", MAX_BUDGET_SECONDS)
         self.max_retry_count = _clean_optional_budget(self.max_retry_count, "max_retry_count", MAX_BUDGET_STEPS)
         self.checkpoints = _clean_string_list(self.checkpoints, "checkpoints", allow_empty=True)
-        if self.risk_level in {RiskLevel.HIGH, RiskLevel.CRITICAL} and not self.requires_user_review:
-            raise ValueError("high and critical plans require user review")
+        if self.risk_level in {RiskLevel.HIGH, RiskLevel.CRITICAL}:
+            self.requires_user_review = True
 
     def to_dict(self) -> dict[str, Any]:
         return redact_secrets(

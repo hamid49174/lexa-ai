@@ -78,7 +78,6 @@ from backend.shared import (
     _history_lock,
     cache_get,
     cache_set,
-    startup_time,
 )
 from backend.ai_engine import (
     get_ai_models,
@@ -88,11 +87,6 @@ from backend.ai_engine import (
 )
 from backend.hermes_adapter import get_hermes_status
 from backend import memory
-from backend.security import (
-    check_rate_limit,
-    get_rate_limit_info,
-    audit_log,
-)
 from backend.scheduler import start_scheduler, get_scheduler_status
 from backend.i18n import init as i18n_init, set_language as i18n_set_language, get_language as i18n_get_language
 

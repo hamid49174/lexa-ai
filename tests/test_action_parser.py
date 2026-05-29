@@ -250,6 +250,21 @@ class TestPermissionHandling(unittest.TestCase):
         self.assertFalse(requires_conf)
         self.assertTrue(any(call.args[1] == "tool_schema_invalid" for call in mock_audit.call_args_list))
 
+    def test_path_list_arguments_are_size_limited_before_confirmation(self):
+        long_path = "C:\\Users\\admin\\Documents\\" + ("a" * 1000) + ".pdf"
+        with patch.object(ap, "is_command_allowed", return_value="allowed"), \
+             patch.object(ap, "validate_command_output", return_value=None), \
+             patch.object(ap, "audit_log"):
+            _, action, requires_conf = ap.process_tool_call(
+                [{"id": "x", "name": "merge_pdfs", "arguments": {"pdf_paths": [long_path]}}],
+                ai_message="",
+                source="chat_stream",
+            )
+
+        self.assertIsNotNone(action)
+        self.assertFalse(requires_conf)
+        self.assertEqual(len(action["params"]["pdf_paths"][0]), ap._PATH_PARAM_MAX_LEN)
+
 
 class TestJsonExtraction(unittest.TestCase):
     """Verify robust JSON extraction from various AI response formats."""

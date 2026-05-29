@@ -35,6 +35,27 @@ from contextlib import contextmanager
 from typing import Any, Optional
 
 from backend.i18n import t
+from backend.memory_core.access import MemoryAccessTracker
+from backend.memory_core.connection import (
+    close_thread_memory_connection,
+    get_thread_memory_connection,
+)
+from backend.memory_core.nlp import score_memory_relevance as _score_memory_relevance  # noqa: F401
+from backend.memory_core.nlp import (
+    MEMORY_TYPES,
+    classify_memory_type,
+    escape_fts5_query as _escape_fts5_query,
+    extract_search_terms as _extract_search_terms,
+    normalize_for_dedup as _normalize_for_dedup,
+    normalize_memory_type,
+    similarity_ratio as _similarity_ratio,
+)
+from backend.memory_core.ranking import rank_memory_results as _rank_memory_results
+from backend.memory_core.schema import (
+    VALID_COLUMNS as _VALID_COLUMNS,
+    VALID_TABLES as _VALID_TABLES,
+    initialize_memory_schema,
+)
 
 logger = logging.getLogger("lexa.memory")
 
@@ -47,376 +68,27 @@ _tables_lock = _threading.Lock()
 _DATA_DIR = os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent))
 DB_PATH = Path(_DATA_DIR) / "lexa_memory.db"
 
-MEMORY_TYPES: tuple[str, ...] = (
-    "working",
-    "episodic",
-    "semantic",
-    "procedural",
-    "preference",
-    "system",
-)
 MEMORY_GRAPH_MAX_NODES = 220
 MEMORY_GRAPH_KEYWORD_NODES = 24
 MEMORY_GRAPH_MAX_LINKS = 420
-_VALID_MEMORY_TYPES: frozenset[str] = frozenset(MEMORY_TYPES)
-_MEMORY_TYPE_CATEGORY_MAP: dict[str, str] = {
-    "preference": "preference",
-    "preferences": "preference",
-    "explicit": "working",
-    "task": "working",
-    "todo": "working",
-    "reminder": "working",
-    "working": "working",
-    "scratch": "working",
-    "session": "working",
-    "event": "episodic",
-    "meeting": "episodic",
-    "appointment": "episodic",
-    "calendar": "episodic",
-    "routine": "procedural",
-    "procedure": "procedural",
-    "workflow": "procedural",
-    "howto": "procedural",
-    "command": "procedural",
-    "system": "system",
-    "config": "system",
-    "diagnostic": "system",
-    "fact": "semantic",
-    "identity": "semantic",
-    "person": "semantic",
-}
-_MEMORY_SYSTEM_PREFIXES: tuple[str, ...] = (
-    "system:",
-    "lexa:",
-    "config:",
-    "configuration:",
-    "diagnostic:",
+_memory_access_tracker = MemoryAccessTracker(
+    flush_seconds=int(os.environ.get("LEXA_MEMORY_ACCESS_FLUSH_SECONDS", "60")),
+    max_ids=int(os.environ.get("LEXA_MEMORY_ACCESS_FLUSH_MAX_IDS", "200")),
+    logger=logger,
 )
-_MEMORY_WORKING_PREFIXES: tuple[str, ...] = (
-    "merkzettel:",
-    "todo:",
-    "aufgabe:",
-    "notiz:",
-    "scratch:",
-)
-_MEMORY_EPISODIC_MARKERS: tuple[str, ...] = (
-    "termin:",
-    "meeting:",
-    "event:",
-    "gestern",
-    "heute",
-    "morgen",
-)
-_MEMORY_PROCEDURAL_MARKERS: tuple[str, ...] = (
-    "der befehl ",
-    "befehl ",
-    "command ",
-    "workflow:",
-    "routine:",
-    "how to ",
-    "wie man ",
-    "schritt ",
-)
-_MEMORY_PREFERENCE_MARKERS: tuple[str, ...] = (
-    "praeferenz:",
-    "präferenz:",
-    "lieblings",
-    "ich mag ",
-    "ich liebe ",
-    "interesse",
-    "hobby",
-)
-_MEMORY_RANKING_WEIGHTS: dict[str, float] = {
-    "lexical_score": 0.34,
-    "semantic_score": 0.24,
-    "recency_score": 0.10,
-    "importance_score": 0.14,
-    "access_score": 0.06,
-    "memory_type_weight": 0.12,
-}
-_MEMORY_ACCESS_THROTTLE_SECONDS = 30
+
+# Text processing, memory taxonomy, and ranking helpers live in backend.memory_core.
+# Private aliases are imported above to preserve backend.memory compatibility.
 
 
-# ══════════════════════════════════════════════════
-#  GERMAN STOP WORDS & INTELLIGENT TEXT PROCESSING
-# ══════════════════════════════════════════════════
-
-_GERMAN_STOP_WORDS: frozenset = frozenset({
-    # Articles & pronouns
-    "der", "die", "das", "ein", "eine", "den", "dem", "des",
-    "ich", "du", "er", "sie", "es", "wir", "ihr", "mir", "mich",
-    "dir", "dich", "sich", "mein", "dein", "sein", "unser", "euer",
-    # Verbs (common)
-    "ist", "sind", "war", "hat", "haben", "wird", "werden",
-    "kannst", "könntest", "würdest", "soll", "kann", "möchte",
-    "will", "lass", "mach",
-    # Conjunctions & particles
-    "und", "oder", "nicht", "kein", "keine", "bitte", "mal",
-    "auch", "noch", "ja", "nein", "doch", "nur", "schon", "sehr",
-    # Greetings & addressing
-    "hey", "lexa", "hallo", "guten", "morgen", "tag", "abend",
-    # Question words
-    "was", "wie", "wo", "wann", "warum", "wer", "welche", "welcher", "welches",
-    # Prepositions
-    "im", "am", "um", "zu", "von", "mit", "für", "auf", "in", "an",
-    "bei", "nach", "über", "unter", "vor", "hinter", "zwischen",
-    "durch", "gegen", "ohne", "bis", "seit", "während",
-})
-_ENGLISH_STOP_WORDS: frozenset = frozenset({
-    "the", "a", "an", "and", "or", "not", "no", "yes", "to", "of", "for",
-    "with", "without", "in", "on", "at", "by", "from", "about", "into",
-    "over", "under", "between", "through", "since", "during", "is", "are",
-    "was", "were", "be", "been", "being", "have", "has", "had", "do", "does",
-    "did", "can", "could", "should", "would", "will", "just", "please", "my",
-    "your", "his", "her", "their", "our", "me", "you", "we", "they", "it",
-    "this", "that", "these", "those", "what", "when", "where", "why", "how",
-})
-_MEMORY_STOP_WORDS: frozenset = _GERMAN_STOP_WORDS | _ENGLISH_STOP_WORDS
-_MEMORY_QUERY_TYPE_MARKERS: dict[str, tuple[str, ...]] = {
-    "preference": (
-        "preference", "preferences", "prefer", "favorite", "favourite",
-        "personality", "personalization", "like", "love", "mag", "liebe",
-        "lieblings", "praeferenz", "präferenz", "vorliebe", "geschmack",
-    ),
-    "procedural": (
-        "how", "workflow", "tool", "command", "steps", "process", "procedure",
-        "use", "wie", "befehl", "ablauf", "schritte", "anleitung", "nutze",
-    ),
-    "episodic": (
-        "meeting", "event", "history", "happened", "timeline", "appointment",
-        "termin", "ereignis", "verlauf", "wann", "gestern", "heute", "morgen",
-    ),
-    "semantic": (
-        "fact", "facts", "know", "knowledge", "explain", "what", "fakt",
-        "wissen", "erkläre", "erklaere",
-    ),
-    "system": (
-        "system", "config", "configuration", "diagnostic", "diagnostics",
-        "lexa", "provider", "konfiguration", "diagnose",
-    ),
-    "working": (
-        "todo", "task", "remember", "note", "scratch", "aufgabe", "merkzettel",
-        "notiz", "erinner",
-    ),
-}
-
-
-def _escape_fts5_query(terms: list[str]) -> str:
-    """Escape search terms for safe FTS5 MATCH usage.
-
-    Each term is wrapped in double quotes so FTS5 treats it as a literal phrase,
-    preventing operators like *, NEAR, NOT, OR, AND from being interpreted.
-    Internal double quotes are stripped to prevent query syntax injection.
-    Returns terms joined with OR.
-    """
-    escaped = []
-    for term in terms:
-        safe = term.replace('"', '')
-        if safe:
-            escaped.append(f'"{safe}"')
-    return " OR ".join(escaped) if escaped else ""
-
-
-def _extract_search_terms(query: str) -> list[str]:
-    """Extract meaningful search keywords from a German query.
-
-    - Removes German stop words
-    - Removes words shorter than 3 characters
-    - Returns max 5 most meaningful keywords (longest first, as longer words
-      tend to be more specific/meaningful)
-    """
-    words = query.lower().split()
-    keywords = []
-    for w in words:
-        # Strip punctuation from edges
-        w = w.strip(".,;:!?\"'()[]{}/-")
-        if len(w) < 3:
-            continue
-        if w in _MEMORY_STOP_WORDS:
-            continue
-        if w not in keywords:  # deduplicate
-            keywords.append(w)
-    # Sort by length descending (longer = more specific), take max 5
-    keywords.sort(key=len, reverse=True)
-    return keywords[:5]
-
-
-def _score_memory_relevance(memory_content: str, query_keywords: list[str],
-                            importance: int = 5) -> float:
-    """Score how relevant a memory is to the given search keywords.
-
-    Returns a float between 0.0 and 1.0.
-    - Counts how many keywords appear in the memory content
-    - Weights by the memory's importance field (1-10)
-    - Higher score = more relevant
-    """
-    if not query_keywords:
-        return 0.0
-    content_lower = memory_content.lower()
-    matches = sum(1 for kw in query_keywords if kw in content_lower)
-    if matches == 0:
-        return 0.0
-    # keyword_ratio: fraction of keywords that matched (0-1)
-    keyword_ratio = matches / len(query_keywords)
-    # importance_factor: normalized importance (0.1 - 1.0)
-    importance_factor = max(0.1, importance / 10.0)
-    # Combined score: 70% keyword match, 30% importance
-    score = 0.7 * keyword_ratio + 0.3 * importance_factor
-    return min(1.0, score)
-
-
-def _score_memory_lexical(memory_content: str, query_keywords: list[str], query: str = "") -> float:
-    """Score direct lexical overlap without importance or recency weighting."""
-    if not query_keywords:
-        return 0.0
-    content_lower = str(memory_content or "").lower()
-    matches = sum(1 for kw in query_keywords if kw in content_lower)
-    if matches == 0:
-        return 0.0
-    score = matches / len(query_keywords)
-    query_lower = str(query or "").strip().lower()
-    if query_lower and len(query_lower) >= 8 and query_lower in content_lower:
-        score = max(score, 1.0)
-    return min(1.0, score)
-
-
-def _parse_memory_timestamp(value: Any) -> Optional[datetime]:
-    """Parse SQLite localtime strings for deterministic ranking."""
-    if not value:
-        return None
-    text = str(value).strip()
-    for candidate in (text, text.replace(" ", "T", 1)):
-        try:
-            return datetime.fromisoformat(candidate)
-        except ValueError:
-            continue
-    return None
-
-
-def _score_memory_recency(created_at: Any) -> float:
-    """Score recent memories higher while keeping old memories discoverable."""
-    created = _parse_memory_timestamp(created_at)
-    if created is None:
-        return 0.0
-    age_days = max(0.0, (datetime.now() - created).total_seconds() / 86400.0)
-    if age_days <= 1:
-        return 1.0
-    if age_days <= 7:
-        return 0.85
-    if age_days <= 30:
-        return 0.60
-    if age_days <= 90:
-        return 0.35
-    if age_days <= 365:
-        return 0.15
-    return 0.05
-
-
-def _score_memory_importance(importance: Any) -> float:
-    try:
-        value = int(importance)
-    except (TypeError, ValueError):
-        value = 5
-    return max(0.1, min(1.0, value / 10.0))
-
-
-def _score_memory_access(access_count: Any) -> float:
-    try:
-        count = max(0, int(access_count or 0))
-    except (TypeError, ValueError):
-        count = 0
-    if count <= 0:
-        return 0.0
-    return min(1.0, math.log1p(count) / math.log1p(20))
-
-
-def _detect_memory_query_types(query: str, keywords: list[str]) -> set[str]:
-    query_lower = str(query or "").lower()
-    keyword_text = " ".join(keywords).lower()
-    detected: set[str] = set()
-    for memory_type, markers in _MEMORY_QUERY_TYPE_MARKERS.items():
-        if any(marker in query_lower or marker in keyword_text for marker in markers):
-            detected.add(memory_type)
-    return detected
-
-
-def _score_memory_type_weight(memory_type: str, query_types: set[str]) -> float:
-    normalized = normalize_memory_type(memory_type) or "semantic"
-    if normalized in query_types:
-        return 1.0
-    if normalized == "system":
-        return 0.20 if "system" in query_types else 0.05
-    if query_types:
-        return 0.35
-    return 0.50 if normalized != "system" else 0.10
-
-
-def _rank_memory_results(
-    memories: list[dict],
-    query: str,
-    keywords: list[str],
-    *,
-    include_ranking: bool = False,
-) -> list[dict]:
-    """Apply Memory Ranking v1 to memory result dictionaries."""
-    query_types = _detect_memory_query_types(query, keywords)
-    ranked: list[dict] = []
-    for mem in memories:
-        lexical_score = _score_memory_lexical(mem.get("content", ""), keywords, query)
-        semantic_score = max(0.0, min(1.0, float(mem.get("_semantic_score", 0.0) or 0.0)))
-        recency_score = _score_memory_recency(mem.get("created_at"))
-        importance_score = _score_memory_importance(mem.get("importance", 5))
-        access_score = _score_memory_access(mem.get("access_count", 0))
-        memory_type_weight = _score_memory_type_weight(mem.get("memory_type", "semantic"), query_types)
-        final_score = (
-            _MEMORY_RANKING_WEIGHTS["lexical_score"] * lexical_score
-            + _MEMORY_RANKING_WEIGHTS["semantic_score"] * semantic_score
-            + _MEMORY_RANKING_WEIGHTS["recency_score"] * recency_score
-            + _MEMORY_RANKING_WEIGHTS["importance_score"] * importance_score
-            + _MEMORY_RANKING_WEIGHTS["access_score"] * access_score
-            + _MEMORY_RANKING_WEIGHTS["memory_type_weight"] * memory_type_weight
-        )
-        mem["_final_score"] = round(final_score, 6)
-        if include_ranking:
-            mem["_ranking"] = {
-                "lexical_score": round(lexical_score, 6),
-                "semantic_score": round(semantic_score, 6),
-                "recency_score": round(recency_score, 6),
-                "importance_score": round(importance_score, 6),
-                "access_score": round(access_score, 6),
-                "memory_type_weight": round(memory_type_weight, 6),
-                "final_score": round(final_score, 6),
-            }
-        ranked.append(mem)
-    ranked.sort(
-        key=lambda m: (
-            m.get("_final_score", 0.0),
-            _score_memory_importance(m.get("importance", 5)),
-            str(m.get("created_at") or ""),
-        ),
-        reverse=True,
-    )
-    return ranked
+def flush_memory_access_tracking(db: sqlite3.Connection | None = None) -> int:
+    """Flush buffered memory access counters to SQLite in one small batch."""
+    return _memory_access_tracker.flush(db or _get_db())
 
 
 def _track_memory_access(db: sqlite3.Connection, memory_ids: list[int]) -> None:
-    """Track returned-memory access with a short write throttle."""
-    ids = sorted({int(memory_id) for memory_id in memory_ids if memory_id})
-    if not ids:
-        return
-    placeholders = ", ".join(["?"] * len(ids))
-    db.execute(
-        f"""UPDATE memories
-            SET access_count = COALESCE(access_count, 0) + 1,
-                last_accessed_at = datetime('now', 'localtime')
-            WHERE id IN ({placeholders})
-              AND (
-                last_accessed_at IS NULL
-                OR last_accessed_at < datetime('now', '-' || ? || ' seconds', 'localtime')
-              )""",
-        ids + [_MEMORY_ACCESS_THROTTLE_SECONDS],
-    )
-    db.commit()
+    """Track returned-memory access through a bounded write buffer."""
+    _memory_access_tracker.track(db, memory_ids)
 
 
 def _finalize_memory_results(
@@ -450,161 +122,22 @@ def _finalize_memory_results(
     return finalized
 
 
-def _normalize_for_dedup(content: str) -> str:
-    """Normalize content string for deduplication comparison.
-
-    Lowercase, strip, collapse whitespace, take first 120 chars.
-    """
-    normalized = content.strip().lower()
-    normalized = re.sub(r'\s+', ' ', normalized)
-    return normalized[:120]
-
-
-def _similarity_ratio(a: str, b: str) -> float:
-    """Compute a similarity ratio between two strings.
-
-    Returns 0.0 to 1.0.
-    Strategy:
-    1. Check if the shorter string is a substring/prefix of the longer one
-    2. Use word-level overlap (Dice coefficient) when there are multiple words
-    3. Fall back to character-level prefix overlap for single-word strings
-    """
-    if not a or not b:
-        return 0.0
-    if a == b:
-        return 1.0
-
-    shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
-
-    # If shorter string is fully contained in longer, high similarity
-    if shorter in longer:
-        # Scale by length ratio — if shorter is 80%+ of longer's length, very similar
-        return len(shorter) / len(longer)
-
-    words_a = set(a.split())
-    words_b = set(b.split())
-
-    # Word-level: use Dice coefficient (2*overlap / total) — more forgiving than Jaccard
-    if words_a and words_b:
-        overlap = len(words_a & words_b)
-        total = len(words_a) + len(words_b)
-        if total > 0:
-            return (2 * overlap) / total
-
-    # Single-word: character-level common prefix
-    common = 0
-    for ca, cb in zip(shorter, longer):
-        if ca == cb:
-            common += 1
-        else:
-            break
-    return common / len(longer) if len(longer) > 0 else 0.0
-
-
-def normalize_memory_type(memory_type: str | None) -> str | None:
-    """Return a valid canonical memory type, or None for unknown input."""
-    value = str(memory_type or "").strip().lower()
-    return value if value in _VALID_MEMORY_TYPES else None
-
-
-def classify_memory_type(content: str, category: str = "fact", source: str = "user") -> str:
-    """Classify a memory into Lexa's explicit memory type taxonomy.
-
-    The legacy category remains the user-facing/domain category. This helper adds
-    a deterministic type layer used for search, migration, and future UI filters.
-    """
-    source_key = str(source or "").strip().lower()
-    category_key = str(category or "").strip().lower()
-    category_type = _MEMORY_TYPE_CATEGORY_MAP.get(category_key)
-    text = str(content or "").strip().lower()
-
-    if source_key == "system":
-        return "system"
-    if category_type and category_type != "semantic":
-        return category_type
-    if any(text.startswith(prefix) for prefix in _MEMORY_SYSTEM_PREFIXES):
-        return "system"
-    if any(text.startswith(prefix) for prefix in _MEMORY_WORKING_PREFIXES):
-        return "working"
-    if any(marker in text for marker in _MEMORY_PREFERENCE_MARKERS):
-        return "preference"
-    if any(marker in text for marker in _MEMORY_PROCEDURAL_MARKERS):
-        return "procedural"
-    if (
-        any(marker in text for marker in _MEMORY_EPISODIC_MARKERS)
-        or re.search(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b", text)
-    ):
-        return "episodic"
-    if category_type:
-        return category_type
-    return "semantic"
-
+# Deduplication and memory-type helpers are imported from backend.memory_core.nlp.
 
 # ══════════════════════════════════════════════════
 #  CONNECTION MANAGEMENT
 # ══════════════════════════════════════════════════
-
 _thread_local = _threading.local()
-
-# Whitelist of valid table names for backup/restore operations
-_VALID_TABLES = frozenset({
-    "notes", "memories", "user_profile", "interactions", "routines",
-    "snippets", "conversations", "clipboard_entries", "session_state", "timers",
-    "conversation_summaries",
-})
-
-# Whitelist of valid column names per table (for restore validation)
-_VALID_COLUMNS = {
-    "notes": {"id", "title", "content", "category", "created_at", "updated_at", "embedding"},
-    "memories": {
-        "id", "content", "category", "memory_type", "importance", "source", "created_at",
-        "embedding", "embedding_provider", "embedding_model", "embedding_dimension",
-        "embedding_created_at", "access_count", "last_accessed_at",
-    },
-    "user_profile": {"key", "value", "updated_at"},
-    "interactions": {"id", "user_message", "ai_reply", "had_action", "created_at"},
-    "routines": {"id", "name", "description", "schedule", "actions", "enabled", "last_run", "created_at"},
-    "snippets": {"name", "text", "use_count", "created_at"},
-    "conversations": {"id", "title", "messages", "message_count", "created_at", "updated_at"},
-    "clipboard_entries": {"id", "text", "created_at"},
-    "session_state": {"key", "value", "updated_at"},
-    "timers": {"id", "message", "fire_at", "fired", "acknowledged", "created_at"},
-    "conversation_summaries": {"id", "conversation_id", "summary", "message_range", "created_at"},
-}
 
 
 def _get_db() -> sqlite3.Connection:
     """Get database connection with auto-init. Reuses connection per thread."""
-    db = getattr(_thread_local, "db", None)
-    if db is not None:
-        try:
-            db.execute("SELECT 1")
-            return db
-        except Exception:
-            # Connection broken, recreate
-            try:
-                db.close()
-            except Exception:
-                pass
-            _thread_local.db = None
-
-    db = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10)
-    db.row_factory = sqlite3.Row
-    # Performance PRAGMAs — WAL mode for concurrent reads, reduced sync for speed
-    wal_result = db.execute("PRAGMA journal_mode=WAL").fetchone()
-    if wal_result and wal_result[0].lower() != "wal":
-        logger.warning(
-            f"WAL mode not enabled — journal_mode is '{wal_result[0]}'. "
-            "Performance may be degraded. This can happen on network drives."
-        )
-    db.execute("PRAGMA synchronous=NORMAL")
-    db.execute("PRAGMA cache_size=-64000")  # 64MB cache
-    db.execute("PRAGMA temp_store=MEMORY")
-    db.execute("PRAGMA mmap_size=268435456")  # 256MB memory-mapped I/O
-    db.execute("PRAGMA foreign_keys=ON")
-    _init_tables(db)
-    _thread_local.db = db
-    return db
+    return get_thread_memory_connection(
+        _thread_local,
+        db_path=DB_PATH,
+        logger=logger,
+        initialize_schema=_init_tables,
+    )
 
 
 @contextmanager
@@ -632,383 +165,20 @@ def _db_session():
 
 def close_db() -> None:
     """Explicitly close the thread-local DB connection (call on shutdown only)."""
-    db = getattr(_thread_local, "db", None)
-    if db is not None:
-        try:
-            db.close()
-        except Exception:
-            pass
-        _thread_local.db = None
-
-
-def _backfill_memory_types(db: sqlite3.Connection, *, force: bool = False) -> int:
-    """Backfill missing/invalid memory_type values from existing row data."""
-    rows = db.execute(
-        "SELECT id, content, category, source, memory_type FROM memories"
-    ).fetchall()
-    updated = 0
-    for row in rows:
-        current = normalize_memory_type(row["memory_type"])
-        if current and not force:
-            continue
-        resolved = classify_memory_type(
-            row["content"],
-            row["category"],
-            row["source"],
-        )
-        if current != resolved:
-            db.execute(
-                "UPDATE memories SET memory_type = ? WHERE id = ?",
-                (resolved, row["id"]),
-            )
-            updated += 1
-    if updated:
-        db.commit()
-        logger.info("Memory type migration: backfilled %s memory rows", updated)
-    return updated
-
-
-def _ensure_memory_type_schema(db: sqlite3.Connection) -> None:
-    """Add memory_type to existing DBs and keep the new index migration-safe."""
-    added_column = False
-    try:
-        db.execute("SELECT memory_type FROM memories LIMIT 1")
-    except sqlite3.OperationalError:
-        try:
-            db.execute("ALTER TABLE memories ADD COLUMN memory_type TEXT DEFAULT 'semantic'")
-            db.commit()
-            added_column = True
-            logger.info("Memory migration: added 'memory_type' column to memories")
-        except Exception as e:
-            logger.warning(f"Memory type column migration skipped: {e}")
-            return
-
-    try:
-        db.execute("CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type)")
-        db.commit()
-    except Exception as e:
-        logger.warning(f"Memory type index migration skipped: {e}")
-
-    try:
-        _backfill_memory_types(db, force=added_column)
-    except Exception as e:
-        logger.warning(f"Memory type backfill skipped: {e}")
-
-
-def _ensure_embedding_metadata_schema(db: sqlite3.Connection) -> None:
-    """Add embedding metadata columns and backfill legacy vector rows safely."""
-    migrations = [
-        ("embedding_provider", "TEXT"),
-        ("embedding_model", "TEXT"),
-        ("embedding_dimension", "INTEGER"),
-        ("embedding_created_at", "TEXT"),
-    ]
-    for column, column_type in migrations:
-        try:
-            db.execute(f"SELECT {column} FROM memories LIMIT 1")
-        except sqlite3.OperationalError:
-            try:
-                db.execute(f"ALTER TABLE memories ADD COLUMN {column} {column_type}")
-                db.commit()
-                logger.info("Embedding metadata migration: added '%s' column", column)
-            except Exception as e:
-                logger.warning(f"Embedding metadata column migration skipped for {column}: {e}")
-
-    try:
-        db.execute("CREATE INDEX IF NOT EXISTS idx_memories_embedding_meta ON memories(embedding_provider, embedding_model, embedding_dimension)")
-        db.commit()
-    except Exception as e:
-        logger.warning(f"Embedding metadata index migration skipped: {e}")
-
-    try:
-        _backfill_embedding_metadata(db)
-    except Exception as e:
-        logger.warning(f"Embedding metadata backfill skipped: {e}")
-
-
-def _backfill_embedding_metadata(db: sqlite3.Connection) -> int:
-    """Backfill legacy embedding metadata from vector dimensions when possible."""
-    try:
-        from backend.embeddings import blob_to_vector, infer_embedding_metadata_from_dimension
-    except ImportError:
-        return 0
-
-    rows = db.execute(
-        """SELECT id, embedding, embedding_provider, embedding_model,
-                  embedding_dimension, embedding_created_at, created_at
-           FROM memories
-           WHERE embedding IS NOT NULL"""
-    ).fetchall()
-    updated = 0
-    for row in rows:
-        existing_dimension = row["embedding_dimension"]
-        existing_provider = row["embedding_provider"]
-        existing_model = row["embedding_model"]
-        if existing_provider and existing_model and existing_dimension:
-            continue
-
-        vector = blob_to_vector(row["embedding"])
-        if vector is None:
-            logger.warning("Skipping corrupt legacy memory embedding metadata backfill: id=%s", row["id"])
-            continue
-        inferred = infer_embedding_metadata_from_dimension(len(vector))
-        if not inferred:
-            logger.warning(
-                "Skipping unknown legacy memory embedding metadata backfill: id=%s dimension=%s",
-                row["id"],
-                len(vector),
-            )
-            continue
-
-        db.execute(
-            """UPDATE memories
-               SET embedding_provider = ?,
-                   embedding_model = ?,
-                   embedding_dimension = ?,
-                   embedding_created_at = COALESCE(embedding_created_at, created_at, datetime('now', 'localtime'))
-               WHERE id = ?""",
-            (
-                inferred["provider"],
-                inferred["model"],
-                inferred["dimension"],
-                row["id"],
-            ),
-        )
-        updated += 1
-
-    if updated:
-        db.commit()
-        logger.info("Embedding metadata migration: backfilled %s memory rows", updated)
-    return updated
-
-
-def _ensure_memory_ranking_schema(db: sqlite3.Connection) -> None:
-    """Add lightweight ranking/access tracking columns to existing DBs."""
-    migrations = [
-        ("access_count", "INTEGER DEFAULT 0"),
-        ("last_accessed_at", "TEXT"),
-    ]
-    for column, column_type in migrations:
-        try:
-            db.execute(f"SELECT {column} FROM memories LIMIT 1")
-        except sqlite3.OperationalError:
-            try:
-                db.execute(f"ALTER TABLE memories ADD COLUMN {column} {column_type}")
-                db.commit()
-                logger.info("Memory ranking migration: added '%s' column", column)
-            except Exception as e:
-                logger.warning(f"Memory ranking column migration skipped for {column}: {e}")
-
-    try:
-        db.execute("CREATE INDEX IF NOT EXISTS idx_memories_access ON memories(access_count DESC, last_accessed_at DESC)")
-        db.commit()
-    except Exception as e:
-        logger.warning(f"Memory ranking index migration skipped: {e}")
+    close_thread_memory_connection(_thread_local, before_close=flush_memory_access_tracking)
+    _memory_access_tracker.reset()
 
 
 def _init_tables(db: sqlite3.Connection) -> None:
-    """Initialize all memory tables."""
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT UNIQUE NOT NULL,
-            content TEXT NOT NULL,
-            category TEXT DEFAULT 'general',
-            created_at TEXT DEFAULT (datetime('now', 'localtime')),
-            updated_at TEXT DEFAULT (datetime('now', 'localtime'))
-        );
+    """Initialize memory schema through the extracted schema module."""
+    def _rebuild_once() -> None:
+        global _tables_ready
+        with _tables_lock:
+            if not _tables_ready:
+                _tables_ready = True
+                _rebuild_fts(db)
 
-        CREATE TABLE IF NOT EXISTS memories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            content TEXT NOT NULL,
-            category TEXT DEFAULT 'fact',
-            memory_type TEXT DEFAULT 'semantic'
-                CHECK(memory_type IN ('working', 'episodic', 'semantic', 'procedural', 'preference', 'system')),
-            importance INTEGER DEFAULT 5 CHECK(importance BETWEEN 1 AND 10),
-            source TEXT DEFAULT 'auto',
-            created_at TEXT DEFAULT (datetime('now', 'localtime')),
-            embedding BLOB,
-            embedding_provider TEXT,
-            embedding_model TEXT,
-            embedding_dimension INTEGER,
-            embedding_created_at TEXT,
-            access_count INTEGER DEFAULT 0,
-            last_accessed_at TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS user_profile (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            updated_at TEXT DEFAULT (datetime('now', 'localtime'))
-        );
-
-        CREATE TABLE IF NOT EXISTS interactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_message TEXT NOT NULL,
-            ai_reply TEXT NOT NULL,
-            had_action INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now', 'localtime'))
-        );
-
-        CREATE TABLE IF NOT EXISTS routines (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            description TEXT,
-            schedule TEXT NOT NULL,
-            actions TEXT NOT NULL,
-            enabled INTEGER DEFAULT 1,
-            last_run TEXT,
-            created_at TEXT DEFAULT (datetime('now', 'localtime'))
-        );
-
-        CREATE TABLE IF NOT EXISTS snippets (
-            name TEXT PRIMARY KEY,
-            text TEXT NOT NULL,
-            use_count INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now', 'localtime'))
-        );
-
-        CREATE TABLE IF NOT EXISTS conversations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL DEFAULT 'Neuer Chat',
-            messages TEXT NOT NULL DEFAULT '[]',
-            message_count INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now', 'localtime')),
-            updated_at TEXT DEFAULT (datetime('now', 'localtime'))
-        );
-
-        CREATE TABLE IF NOT EXISTS clipboard_entries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            text TEXT NOT NULL,
-            created_at TEXT DEFAULT (datetime('now', 'localtime'))
-        );
-
-        CREATE TABLE IF NOT EXISTS session_state (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            updated_at TEXT DEFAULT (datetime('now', 'localtime'))
-        );
-
-        -- Original indexes
-        CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
-        CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance DESC);
-        CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_interactions_created ON interactions(created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_clipboard_id ON clipboard_entries(id DESC);
-
-        -- Additional performance indexes
-        CREATE INDEX IF NOT EXISTS idx_notes_category ON notes(category);
-        CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source);
-
-        CREATE TABLE IF NOT EXISTS timers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            message TEXT NOT NULL DEFAULT 'Timer abgelaufen!',
-            fire_at REAL NOT NULL,
-            fired INTEGER DEFAULT 0,
-            acknowledged INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now', 'localtime'))
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_timers_fire_at ON timers(fire_at);
-
-        CREATE TABLE IF NOT EXISTS conversation_summaries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            conversation_id INTEGER,
-            summary TEXT NOT NULL,
-            message_range TEXT NOT NULL,
-            created_at TEXT DEFAULT (datetime('now','localtime'))
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_conv_summary_conv ON conversation_summaries(conversation_id);
-    """)
-
-    db.commit()
-    _ensure_memory_type_schema(db)
-    _ensure_memory_ranking_schema(db)
-
-    # Phase 42: Add embedding BLOB column to memories before FTS triggers
-    # exist, so legacy metadata backfill cannot trip stale FTS state.
-    try:
-        db.execute("SELECT embedding FROM memories LIMIT 1")
-    except sqlite3.OperationalError:
-        try:
-            db.execute("ALTER TABLE memories ADD COLUMN embedding BLOB")
-            db.commit()
-            logger.info("Phase 42 migration: Added 'embedding' column to memories")
-        except Exception as e:
-            logger.warning(f"Embedding column migration skipped: {e}")
-
-    _ensure_embedding_metadata_schema(db)
-
-    # FTS5 full-text search indexes
-    try:
-        db.executescript("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-                title, content, category,
-                content='notes', content_rowid='id'
-            );
-            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-                content, category,
-                content='memories', content_rowid='id'
-            );
-        """)
-
-        # Triggers to keep FTS in sync
-        db.executescript("""
-            CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
-                INSERT INTO notes_fts(rowid, title, content, category)
-                VALUES (new.id, new.title, new.content, new.category);
-            END;
-            CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
-                INSERT INTO notes_fts(notes_fts, rowid, title, content, category)
-                VALUES ('delete', old.id, old.title, old.content, old.category);
-            END;
-            CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE ON notes BEGIN
-                INSERT INTO notes_fts(notes_fts, rowid, title, content, category)
-                VALUES ('delete', old.id, old.title, old.content, old.category);
-                INSERT INTO notes_fts(rowid, title, content, category)
-                VALUES (new.id, new.title, new.content, new.category);
-            END;
-
-            CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-                INSERT INTO memories_fts(rowid, content, category)
-                VALUES (new.id, new.content, new.category);
-            END;
-            CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-                INSERT INTO memories_fts(memories_fts, rowid, content, category)
-                VALUES ('delete', old.id, old.content, old.category);
-            END;
-            CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-                INSERT INTO memories_fts(memories_fts, rowid, content, category)
-                VALUES ('delete', old.id, old.content, old.category);
-                INSERT INTO memories_fts(rowid, content, category)
-                VALUES (new.id, new.content, new.category);
-            END;
-        """)
-    except Exception as e:
-        logger.warning(f"FTS5 setup skipped (not supported?): {e}")
-
-    db.commit()
-
-    # Phase 42: Add embedding BLOB column to notes (migration-safe)
-    try:
-        db.execute("SELECT embedding FROM notes LIMIT 1")
-    except sqlite3.OperationalError:
-        try:
-            db.execute("ALTER TABLE notes ADD COLUMN embedding BLOB")
-            db.commit()
-            logger.info("Phase 42 migration: Added 'embedding' column to notes")
-        except Exception as e:
-            logger.warning(f"Notes embedding column migration skipped: {e}")
-
-    # Rebuild FTS index once on first init (thread-safe)
-    global _tables_ready
-    with _tables_lock:
-        if not _tables_ready:
-            _tables_ready = True
-            _rebuild_fts(db)
+    initialize_memory_schema(db, rebuild_fts_once=_rebuild_once)
 
 
 def _rebuild_fts(db: Optional[sqlite3.Connection] = None) -> None:

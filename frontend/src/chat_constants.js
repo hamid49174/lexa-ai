@@ -3,7 +3,7 @@
 // Multi-step signal words/patterns (German + English)
 const _AGENT_PATTERNS = [
   // Sequential actions
-  /\bund\s+(dann|danach|anschlie[sÃŸ]end)\b/i,
+  /\bund\s+(dann|danach|anschliessend)\b/i,
   /\bdanach\b/i,
   /\berstens\b.*\bzweitens\b/i,
   /\bschritt\s*\d/i,

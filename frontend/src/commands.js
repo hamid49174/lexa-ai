@@ -177,18 +177,52 @@ function getAllCommands() {
 // Keep backward-compatible reference for .length checks
 const ALL_COMMANDS = ALL_COMMANDS_DATA;
 
+function createCommandSearchIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", "16");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("aria-hidden", "true");
+  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  circle.setAttribute("cx", "11");
+  circle.setAttribute("cy", "11");
+  circle.setAttribute("r", "8");
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  line.setAttribute("x1", "21");
+  line.setAttribute("y1", "21");
+  line.setAttribute("x2", "16.65");
+  line.setAttribute("y2", "16.65");
+  svg.append(circle, line);
+  return svg;
+}
+
 function createCommandsView() {
   const div = document.createElement("div");
-  div.className = "commands-view active";
-  div.innerHTML = `
-    <div class="view-title">${t("commands.allCommands")}</div>
-    <div class="cmd-search-bar">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" id="cmd-search" class="cmd-search-input" placeholder="${escapeHtml(t("commands.search"))}" aria-label="${escapeHtml(t("commands.search"))}" data-action="filterCommands">
-      <span class="cmd-count" id="cmd-count-badge">${ALL_COMMANDS_DATA.length} ${t("nav.commands")}</span>
-    </div>
-    <div id="cmd-results"></div>
-  `;
+  div.className = "tool-view commands-view active";
+  const title = document.createElement("div");
+  title.className = "view-title";
+  title.textContent = t("commands.allCommands");
+  const searchBar = document.createElement("div");
+  searchBar.className = "cmd-search-bar";
+  const input = document.createElement("input");
+  const searchLabel = t("commands.search");
+  input.type = "text";
+  input.id = "cmd-search";
+  input.className = "cmd-search-input";
+  input.placeholder = searchLabel;
+  input.setAttribute("aria-label", searchLabel);
+  input.dataset.action = "filterCommands";
+  const count = document.createElement("span");
+  count.className = "cmd-count";
+  count.id = "cmd-count-badge";
+  count.textContent = `${ALL_COMMANDS_DATA.length} ${t("nav.commands")}`;
+  searchBar.append(createCommandSearchIcon(), input, count);
+  const results = document.createElement("div");
+  results.id = "cmd-results";
+  div.append(title, searchBar, results);
   setTimeout(() => renderCommands(""), 0);
   return div;
 }
@@ -200,13 +234,14 @@ function filterCommands(query) {
 // ── RECENTLY USED COMMANDS ───────────────────────
 const MAX_RECENT_CMDS = 6;
 function getRecentCommands() {
-  try { return JSON.parse(localStorage.getItem("lexa-recent-cmds") || "[]"); } catch (e) { console.warn("[Commands] Failed to parse recent commands:", e.message || e); return []; }
+  const parsed = lexaStorageJson("lexa-recent-cmds", []);
+  return Array.isArray(parsed) ? parsed : [];
 }
 function trackRecentCommand(name) {
   let recent = getRecentCommands().filter(n => n !== name);
   recent.unshift(name);
   recent = recent.slice(0, MAX_RECENT_CMDS);
-  localStorage.setItem("lexa-recent-cmds", JSON.stringify(recent));
+  lexaStorageSet("lexa-recent-cmds", JSON.stringify(recent));
 }
 
 function bindCommandItemAction(el, handler, label) {
@@ -224,6 +259,13 @@ function bindCommandItemAction(el, handler, label) {
   el.addEventListener("click", handler);
 }
 
+function createCommandEmptyState(message) {
+  const emptyDiv = document.createElement("div");
+  emptyDiv.className = "empty-state";
+  emptyDiv.textContent = message || "";
+  return emptyDiv;
+}
+
 function renderCommands(query) {
   const container = document.getElementById("cmd-results");
   if (!container) return;
@@ -237,10 +279,10 @@ function renderCommands(query) {
   const badge = document.getElementById("cmd-count-badge");
   if (badge) badge.textContent = filtered.length + " " + t("nav.commands");
 
-  container.innerHTML = "";
+  container.replaceChildren();
 
   if (filtered.length === 0) {
-    container.innerHTML = ""; const emptyDiv = document.createElement("div"); emptyDiv.className = "empty-state"; emptyDiv.textContent = t("common.noResults"); container.appendChild(emptyDiv);
+    container.replaceChildren(createCommandEmptyState(t("common.noResults")));
     return;
   }
 

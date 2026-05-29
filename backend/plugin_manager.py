@@ -29,6 +29,7 @@ YAML Plugin Format:
           ...
 """
 
+import ast
 import asyncio
 import importlib.util
 import ipaddress
@@ -37,18 +38,19 @@ import logging
 import os
 import re
 import shlex
+import socket
 import subprocess
 import threading
-import traceback
+import urllib.request
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
-from backend.security import audit_log
+from backend.security import audit_log, is_dangerous_network_ip
 
 logger = logging.getLogger("lexa.plugin_manager")
 
-# ── Konstanten ──
+# â”€â”€ Konstanten â”€â”€
 MAX_PLUGIN_SIZE_BYTES = 200 * 1024  # 200 KB
 MAX_TOOLS_PER_PLUGIN = 30
 PLUGIN_LOAD_TIMEOUT_SEC = 10
@@ -69,6 +71,15 @@ _FORBIDDEN_PATTERNS = [
     "eval(",
     "exec(",
     "__import__(",
+    "getattr(",
+    "globals(",
+    "locals(",
+    "builtins",
+    "importlib",
+    "open(",
+    "socket.",
+    "urllib.",
+    "requests.",
     "shutil.rmtree",
     "subprocess.Popen",
     "subprocess.run",
@@ -78,6 +89,39 @@ _FORBIDDEN_PATTERNS = [
 _FORBIDDEN_REGEX_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("compile(", re.compile(r"(?<![\w.])compile\s*\(")),
 ]
+_ALLOWED_PYTHON_PLUGIN_IMPORTS: frozenset[str] = frozenset({
+    "asyncio",
+    "base64",
+    "collections",
+    "datetime",
+    "decimal",
+    "fractions",
+    "functools",
+    "hashlib",
+    "html",
+    "itertools",
+    "json",
+    "math",
+    "random",
+    "re",
+    "statistics",
+    "string",
+    "time",
+    "typing",
+})
+_FORBIDDEN_PYTHON_PLUGIN_CALLS: frozenset[str] = frozenset({
+    "__import__",
+    "compile",
+    "delattr",
+    "eval",
+    "exec",
+    "getattr",
+    "globals",
+    "locals",
+    "open",
+    "setattr",
+    "vars",
+})
 
 # Erlaubte YAML Action-Typen
 _ALLOWED_YAML_ACTIONS = {"http", "shell", "file_append", "file_write", "file_read"}
@@ -101,6 +145,48 @@ def _as_list(value: Any) -> list[Any]:
     if isinstance(value, list):
         return value
     return [value]
+
+
+class _PluginSandboxValidator(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.error: str | None = None
+
+    def _fail(self, message: str) -> None:
+        if self.error is None:
+            self.error = message
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            root = alias.name.split(".", 1)[0]
+            if root not in _ALLOWED_PYTHON_PLUGIN_IMPORTS:
+                self._fail(f"import '{root}' is not allowed")
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        root = (node.module or "").split(".", 1)[0]
+        if node.level or root not in _ALLOWED_PYTHON_PLUGIN_IMPORTS:
+            self._fail(f"import '{node.module or ''}' is not allowed")
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Name) and node.func.id in _FORBIDDEN_PYTHON_PLUGIN_CALLS:
+            self._fail(f"call '{node.func.id}' is not allowed")
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr.startswith("__"):
+            self._fail("dunder attribute access is not allowed")
+        self.generic_visit(node)
+
+
+def _validate_python_plugin_ast(code: str) -> str | None:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        return f"syntax error: {exc.msg}"
+    validator = _PluginSandboxValidator()
+    validator.visit(tree)
+    return validator.error
 
 
 def _is_enabled_permission(value: Any) -> bool:
@@ -153,6 +239,37 @@ def _is_local_or_private_host(host: str) -> bool:
     except ValueError:
         return False
     return bool(ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast)
+
+
+def _resolved_network_target_error(host: str, *, allow_private_hosts: bool) -> str | None:
+    if allow_private_hosts:
+        return None
+    try:
+        resolved = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror:
+        return None
+
+    for _, _, _, _, sockaddr in resolved:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if is_dangerous_network_ip(ip):
+            return "Local/private network targets are denied"
+    return None
+
+
+class _PluginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self, policy: "PluginPermissionPolicy"):
+        super().__init__()
+        self.policy = policy
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        normalized_url, target_host = self.policy.validate_url(newurl)
+        resolved_error = _resolved_network_target_error(
+            target_host,
+            allow_private_hosts=self.policy.allow_private_hosts(),
+        )
+        if resolved_error:
+            raise PluginPermissionError(resolved_error)
+        return super().redirect_request(req, fp, code, msg, headers, normalized_url)
 
 
 def _resolve_config_path(value: str) -> Path:
@@ -422,9 +539,9 @@ class PluginManager:
         self._data_lock = threading.Lock()
         logger.info("PluginManager initialisiert")
 
-    # ══════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  DISCOVERY
-    # ══════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     def discover_plugins(self) -> list[str]:
         """Scannt alle Plugin-Verzeichnisse und laedt gefundene Plugins.
@@ -463,9 +580,9 @@ class PluginManager:
         logger.info(f"Plugin-Discovery abgeschlossen: {len(loaded)} Plugins geladen")
         return loaded
 
-    # ══════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  LOAD / UNLOAD / RELOAD
-    # ══════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     def load_plugin(self, path: str | Path) -> str | None:
         """Laedt ein einzelnes Plugin (oeffentliche API).
@@ -509,6 +626,11 @@ class PluginManager:
             code = path.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
             logger.error(f"Plugin-Code nicht lesbar: {path.name} -- {e}")
+            return None
+
+        ast_error = _validate_python_plugin_ast(code)
+        if ast_error:
+            logger.warning(f"Plugin '{path.name}' verletzt Python-Sandbox: {ast_error} -- nicht geladen")
             return None
 
         for pattern in _FORBIDDEN_PATTERNS:
@@ -745,9 +867,9 @@ class PluginManager:
             logger.error(f"Plugin-Neuladen fehlgeschlagen: {name}")
             return False
 
-    # ══════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  TOOL MANAGEMENT
-    # ══════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     def _register_tools(self, plugin_name: str) -> None:
         """Registriert alle Tools eines Plugins im Index (muss unter Lock aufgerufen werden)."""
@@ -827,9 +949,9 @@ class PluginManager:
 
         return validated
 
-    # ══════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  QUERY
-    # ══════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     def list_plugins(self) -> list[dict]:
         """Gibt alle geladenen Plugins mit Status zurueck."""
@@ -879,9 +1001,9 @@ class PluginManager:
         logger.info(f"Plugin deaktiviert: {name}")
         return True
 
-    # ══════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     #  EXECUTION
-    # ══════════════════════════════════════════════════
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     async def execute_plugin_tool(
         self, plugin_name: str, tool_name: str, args: dict
@@ -955,6 +1077,8 @@ class PluginManager:
         if not callable(execute_fn):
             return {"success": False, "result": None, "error": "Plugin hat keine execute()-Funktion"}
 
+        setattr(module, "LEXA_PLUGIN_HTTP_GET", lambda *call_args, **call_kwargs: self._python_plugin_http_get(info, *call_args, **call_kwargs))
+
         # In separatem Thread ausfuehren (Sandbox)
         try:
             _audit_plugin_action(
@@ -985,6 +1109,62 @@ class PluginManager:
             return {"success": False, "result": None, "error": f"Plugin-Timeout nach {PLUGIN_LOAD_TIMEOUT_SEC}s"}
         except Exception as e:
             return {"success": False, "result": None, "error": str(e)}
+
+    async def _python_plugin_http_get(
+        self,
+        info: PluginInfo,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, Any] | None = None,
+        timeout: int | float = 8,
+        max_bytes: int = 10000,
+    ) -> dict[str, Any]:
+        """Controlled network helper exposed to trusted Python plugins."""
+        try:
+            permission = info.policy.require_permission("network")
+            if params:
+                query = urlencode({str(k): str(v) for k, v in params.items()})
+                separator = "&" if "?" in str(url) else "?"
+                url = f"{url}{separator}{query}"
+            url, target_host = info.policy.validate_url(url)
+            resolved_error = _resolved_network_target_error(
+                target_host,
+                allow_private_hosts=info.policy.allow_private_hosts(),
+            )
+            if resolved_error:
+                raise PluginPermissionError(resolved_error)
+        except PluginPermissionError as exc:
+            _audit_plugin_action(info.name, "python_http", "denied", str(exc), target_kind="network")
+            raise
+
+        request_headers = {str(k): str(v) for k, v in (headers or {}).items()}
+        timeout_seconds = min(max(float(timeout or 8), 1.0), max(1, PLUGIN_LOAD_TIMEOUT_SEC - 1))
+        byte_limit = min(max(int(max_bytes or 10000), 1), 50000)
+
+        def do_request() -> dict[str, Any]:
+            req = urllib.request.Request(url)
+            for key, value in request_headers.items():
+                req.add_header(key, value)
+            opener = urllib.request.build_opener(_PluginRedirectHandler(info.policy))
+            with opener.open(req, timeout=timeout_seconds) as resp:
+                return {
+                    "status": resp.status,
+                    "body": resp.read(byte_limit).decode("utf-8", errors="replace"),
+                    "headers": dict(resp.headers),
+                    "url": url,
+                }
+
+        _audit_plugin_action(
+            info.name,
+            "python_http",
+            "allowed",
+            "network request allowed by plugin policy",
+            permission_used=permission,
+            target_kind="network",
+            target_host=target_host,
+        )
+        return await asyncio.to_thread(do_request)
 
     async def _execute_yaml_tool(
         self, info: PluginInfo, tool_name: str, args: dict
@@ -1022,7 +1202,7 @@ class PluginManager:
         else:
             return {"success": False, "result": None, "error": f"Unbekannter Action-Typ: {action_type}"}
 
-    # ── YAML Action Handlers ──
+    # â”€â”€ YAML Action Handlers â”€â”€
 
     def _resolve_template(self, template: Any, args: dict, policy: PluginPermissionPolicy | None = None) -> Any:
         """Ersetzt {{params.x}} und {{env.X}} Template-Variablen.
@@ -1051,6 +1231,12 @@ class PluginManager:
             headers_raw = self._resolve_template(action.get("headers", {}), args, policy)
             body_raw = self._resolve_template(action.get("body"), args, policy)
             url, target_host = policy.validate_url(url)
+            resolved_error = _resolved_network_target_error(
+                target_host,
+                allow_private_hosts=policy.allow_private_hosts(),
+            )
+            if resolved_error:
+                raise PluginPermissionError(resolved_error)
         except PluginPermissionError as e:
             _audit_plugin_action(plugin_name, "http", "denied", str(e), target_kind="network")
             return {"success": False, "result": None, "error": str(e)}
@@ -1072,7 +1258,8 @@ class PluginManager:
                 req.add_header(str(k), str(v))
 
             def do_request():
-                with urllib.request.urlopen(req, timeout=30) as resp:
+                opener = urllib.request.build_opener(_PluginRedirectHandler(policy))
+                with opener.open(req, timeout=30) as resp:
                     return {
                         "status": resp.status,
                         "body": resp.read().decode("utf-8", errors="replace")[:10000],
@@ -1148,6 +1335,7 @@ class PluginManager:
                 target_kind="process",
                 command_name=(argv or [""])[0],
             )
+
             def do_process():
                 proc = subprocess.run(
                     argv,
@@ -1345,6 +1533,7 @@ class PluginManager:
                 target_kind="file",
                 target_path=str(path),
             )
+
             def do_read():
                 content = path.read_text(encoding="utf-8", errors="replace")
                 return {"path": str(path), "content": content[:50000], "size": len(content)}
@@ -1356,5 +1545,5 @@ class PluginManager:
             return {"success": False, "result": None, "error": str(e)}
 
 
-# ── Singleton-Instanz ──
+# â”€â”€ Singleton-Instanz â”€â”€
 plugin_manager = PluginManager()

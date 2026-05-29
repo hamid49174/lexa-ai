@@ -1,0 +1,159 @@
+/* Commands view styles. Loaded after views.css. */
+
+/* ── COMMANDS VIEW ───────────────────────────── */
+.cmd-category {
+  margin-bottom: 20px;
+}
+
+.cmd-category-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: 1.5px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cmd-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.cmd-item {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  backdrop-filter: blur(10px);
+  position: relative;
+}
+
+.cmd-item:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(168, 85, 247, 0.15);
+}
+
+.cmd-copy-btn {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  background: var(--accent-soft);
+  border: 1px solid var(--glass-border);
+  border-radius: 4px;
+  color: var(--accent2);
+  font-size: 13px;
+  padding: 2px 8px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+.cmd-item:hover .cmd-copy-btn { opacity: 1; }
+.cmd-copy-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.cmd-recent-title {
+  color: var(--accent2) !important;
+  opacity: 0.85;
+}
+
+.cmd-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent2);
+  margin-bottom: 2px;
+}
+
+.cmd-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.cmd-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-top: 4px;
+}
+
+.cmd-badge.allowed {
+  background: rgba(52, 211, 153, 0.1);
+  color: var(--success);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+}
+
+.cmd-badge.confirm {
+  background: rgba(232, 64, 160, 0.1);
+  color: var(--warning);
+  border: 1px solid rgba(232, 64, 160, 0.2);
+}
+
+.cmd-badge.blocked {
+  background: rgba(248, 113, 113, 0.1);
+  color: var(--error);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+}
+
+.cmd-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  margin-bottom: 20px;
+  transition: all 0.3s;
+  backdrop-filter: blur(10px);
+}
+
+.cmd-search-bar:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.cmd-search-bar svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.cmd-search-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+}
+
+.cmd-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.cmd-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  background: var(--bg-surface3);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.cmd-name mark {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 2px;
+  padding: 0 2px;
+}

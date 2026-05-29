@@ -11,11 +11,10 @@ Handles permission checks, param validation, audit logging, and execution.
 """
 
 import logging
-from typing import Optional
 
 from companion.engine import companion
 from backend.agent_reflection import reflect_action
-from backend.security import is_command_allowed, validate_params, audit_log
+from backend.security import check_action_rate_limit, is_command_allowed, validate_params, audit_log
 from backend.tool_registry import ToolSchemaValidationError, validate_tool_arguments
 
 logger = logging.getLogger("lexa.executor")
@@ -98,6 +97,21 @@ def execute_action(
     except ValueError as e:
         audit_log(action_name, "param_blocked", str(e))
         return {"success": False, "error": str(e), "executed": False, "requires_confirmation": False}
+
+    rate_limit = check_action_rate_limit(action_name)
+    if not rate_limit.get("allowed", False):
+        audit_log(
+            action_name,
+            "risk_rate_limited",
+            f"source={source} used={rate_limit.get('used')} limit={rate_limit.get('limit')}",
+        )
+        return {
+            "success": False,
+            "error": "Zu viele riskante Aktionen in kurzer Zeit. Read-only Aktionen bleiben erlaubt.",
+            "executed": False,
+            "requires_confirmation": False,
+            "rate_limited": True,
+        }
 
     # Execute using global singleton
     try:

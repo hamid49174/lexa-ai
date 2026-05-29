@@ -1,0 +1,162 @@
+/* Shortcut, chart, and input modal component styles. */
+
+/* ── Keyboard Shortcuts Overlay ───────────────── */
+.shortcuts-overlay {
+  position: fixed; inset: 0; z-index: 2100;
+  background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+  display: flex; align-items: center; justify-content: center;
+  animation: fadeIn 0.2s ease-out;
+}
+.shortcuts-panel {
+  width: 480px; max-width: 94vw; max-height: 80vh;
+  background: var(--bg-surface); border: 1px solid var(--glass-border-hover);
+  border-radius: var(--radius); box-shadow: var(--shadow), var(--shadow-glow);
+  display: flex; flex-direction: column; overflow: hidden;
+  animation: paletteIn 0.25s ease-out;
+}
+.shortcuts-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  font-size: 15px; font-weight: 600; color: var(--text);
+}
+.shortcuts-close {
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  font-size: 20px; line-height: 1; padding: 2px 6px; border-radius: 4px;
+  transition: color 0.2s, background 0.2s;
+}
+.shortcuts-close:hover { color: var(--text); background: var(--bg-hover); }
+.shortcuts-body { padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; }
+.sc-group { display: flex; flex-direction: column; gap: 8px; }
+.sc-group-title { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--accent); text-transform: uppercase; margin-bottom: 4px; }
+.sc-row { display: flex; align-items: center; gap: 14px; }
+.sc-key {
+  flex-shrink: 0; min-width: 140px; padding: 4px 10px;
+  background: var(--bg-hover); border: 1px solid var(--border); border-radius: 6px;
+  font-family: var(--font-mono); font-size: 12px; color: var(--accent2);
+  text-align: center;
+}
+.sc-desc { font-size: 13px; color: var(--text-secondary); }
+
+/* ── WEEKLY CHART WIDGET (Phase 36) ── */
+.dash-widget-weekly { grid-column: span 2; }
+.dash-weekly-chart { display: flex; flex-direction: column; gap: 8px; }
+.weekly-legend {
+  display: flex; gap: 14px; flex-wrap: wrap;
+  font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;
+}
+.weekly-legend-item { display: flex; align-items: center; gap: 5px; }
+.weekly-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.weekly-bar-todos { background: var(--accent); }
+.weekly-bar-pomo { background: var(--warning); }
+.weekly-bar-habits { background: var(--success); }
+.weekly-chart-bars {
+  display: flex; align-items: flex-end; gap: 6px; height: 80px;
+}
+.weekly-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.weekly-bars-group {
+  flex: 1; width: 100%; display: flex; align-items: flex-end; gap: 2px; height: 64px;
+}
+.weekly-bar-wrap { flex: 1; display: flex; align-items: flex-end; height: 100%; }
+.weekly-bar {
+  width: 100%; min-height: 0; border-radius: 3px 3px 0 0;
+  transition: height 0.4s ease; position: relative;
+  display: flex; align-items: flex-start; justify-content: center;
+}
+.chart-height-0 { height: 0%; }
+.chart-height-5 { height: 5%; }
+.chart-height-10 { height: 10%; }
+.chart-height-15 { height: 15%; }
+.chart-height-20 { height: 20%; }
+.chart-height-25 { height: 25%; }
+.chart-height-30 { height: 30%; }
+.chart-height-35 { height: 35%; }
+.chart-height-40 { height: 40%; }
+.chart-height-45 { height: 45%; }
+.chart-height-50 { height: 50%; }
+.chart-height-55 { height: 55%; }
+.chart-height-60 { height: 60%; }
+.chart-height-65 { height: 65%; }
+.chart-height-70 { height: 70%; }
+.chart-height-75 { height: 75%; }
+.chart-height-80 { height: 80%; }
+.chart-height-85 { height: 85%; }
+.chart-height-90 { height: 90%; }
+.chart-height-95 { height: 95%; }
+.chart-height-100 { height: 100%; }
+.weekly-bar-num {
+  font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.9);
+  line-height: 1; padding-top: 2px; pointer-events: none;
+}
+.weekly-label {
+  font-size: 10px; color: var(--text-muted); text-align: center;
+  font-family: var(--font-mono); white-space: nowrap;
+}
+
+/* ── INPUT MODAL (Phase 35 — generic showInputModal) ── */
+.input-modal-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 0;
+  width: 480px;
+  max-width: 94vw;
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow), 0 0 60px rgba(168, 85, 247, 0.08);
+  animation: modalSlideIn 0.18s ease;
+}
+.input-modal-body {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+.input-modal-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.input-modal-row label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+.input-modal-input,
+.input-modal-select {
+  width: 100%;
+  background: var(--bg-surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--font);
+  padding: 9px 12px;
+  outline: none;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+.input-modal-input:focus,
+.input-modal-select:focus {
+  border-color: var(--accent);
+}
+.input-modal-input.input-invalid,
+.input-modal-select.input-invalid {
+  border-color: var(--error);
+}
+.input-modal-select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23a0a0c0' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+}
+.input-modal-select option {
+  background: var(--bg-surface2);
+  color: var(--text);
+}
+.input-hint { display: none !important; }

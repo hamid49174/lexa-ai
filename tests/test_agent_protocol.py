@@ -30,6 +30,18 @@ def test_valid_plan_is_accepted():
     assert plan.to_dict()["requires_user_review"] is True
 
 
+def test_high_risk_plan_auto_requires_user_review():
+    plan = AgentPlan(
+        goal="Restore backup carefully",
+        risk_level="critical",
+        requires_user_review=False,
+    )
+
+    assert plan.risk_level is RiskLevel.CRITICAL
+    assert plan.requires_user_review is True
+    assert plan.to_dict()["requires_user_review"] is True
+
+
 def test_invalid_risk_level_is_rejected():
     with pytest.raises(ValueError, match="invalid risk_level"):
         AgentPlan(goal="Bad risk", risk_level="urgent", requires_user_review=True)

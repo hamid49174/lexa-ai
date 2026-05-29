@@ -56,7 +56,46 @@ function conversationListPreviewText(conversation) {
 
 function renderConversationEmptyState(container, message) {
   if (!container) return;
-  container.innerHTML = '<div class="conv-empty">' + escapeHtml(message) + '</div>';
+  const empty = document.createElement("div");
+  empty.className = "conv-empty";
+  empty.textContent = message || "";
+  container.replaceChildren(empty);
+}
+
+const CONVERSATION_ICON_NS = "http://www.w3.org/2000/svg";
+
+function createConversationSvgIcon(children, options = {}) {
+  const svg = document.createElementNS(CONVERSATION_ICON_NS, "svg");
+  const attrs = {
+    width: options.size || "11",
+    height: options.size || "11",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": options.strokeWidth || "2",
+    "aria-hidden": "true",
+  };
+  Object.entries(attrs).forEach(([name, value]) => svg.setAttribute(name, value));
+  children.forEach((child) => {
+    const el = document.createElementNS(CONVERSATION_ICON_NS, child.tag);
+    Object.entries(child.attrs || {}).forEach(([name, value]) => el.setAttribute(name, value));
+    svg.appendChild(el);
+  });
+  return svg;
+}
+
+function createConversationExportIcon() {
+  return createConversationSvgIcon([
+    { tag: "path", attrs: { d: "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" } },
+    { tag: "polyline", attrs: { points: "7 10 12 15 17 10" } },
+    { tag: "line", attrs: { x1: "12", y1: "15", x2: "12", y2: "3" } },
+  ]);
+}
+
+function createConversationResolveIcon() {
+  return createConversationSvgIcon([
+    { tag: "path", attrs: { d: "M20 6L9 17l-5-5" } },
+  ], { strokeWidth: "2.4" });
 }
 
 function createConversationListItem(conversation, options = {}) {
@@ -108,7 +147,7 @@ function createConversationListItem(conversation, options = {}) {
   exportBtn.className = "conv-action-btn";
   exportBtn.title = t("chat.export");
   exportBtn.setAttribute("aria-label", t("chat.exportConversationLabel", { title: accessibleTitle }));
-  exportBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+  exportBtn.appendChild(createConversationExportIcon());
   exportBtn.addEventListener("click", (e) => { e.stopPropagation(); exportConversation(conversation.id); });
 
   const delBtn = document.createElement("button");
@@ -125,7 +164,7 @@ function createConversationListItem(conversation, options = {}) {
     resolveBtn.className = "conv-action-btn conv-agent-resolve-btn";
     resolveBtn.title = t("chat.agentAttentionResolveLabel", { title: accessibleTitle });
     resolveBtn.setAttribute("aria-label", t("chat.agentAttentionResolveLabel", { title: accessibleTitle }));
-    resolveBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>';
+    resolveBtn.appendChild(createConversationResolveIcon());
     resolveBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       resolveAgentAttentionForConversation(conversation.id, conversation.title);

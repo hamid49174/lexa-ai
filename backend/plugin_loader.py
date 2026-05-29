@@ -38,8 +38,15 @@ _FORBIDDEN_PATTERNS = [
     "eval(",
     "exec(",
     "__import__(",
+    "getattr(",
+    "globals(",
+    "locals(",
+    "builtins",
+    "importlib",
     "open(",          # Datei-IO direkt
     "socket.",        # Netzwerk direkt
+    "urllib.",        # Netzwerk direkt
+    "requests.",      # Netzwerk direkt
     "shutil.rmtree",  # Destructive ops
     "subprocess.Popen",
     "subprocess.run",

@@ -10,6 +10,8 @@ provider validates parameters automatically — no more JSON-parsing hacks.
 import logging
 from typing import Any
 
+from backend.tool_schema import build_parameter_descriptor, build_tool_definition
+
 logger = logging.getLogger("lexa.tool_registry")
 
 # ── Storage ──
@@ -40,14 +42,15 @@ def _param(
     items_type: str | None = None,
 ) -> dict:
     """Build a JSON-Schema parameter descriptor."""
-    schema: dict[str, Any] = {"type": type_, "description": description}
-    if enum:
-        schema["enum"] = enum
-    if default is not None:
-        schema["default"] = default
-    if type_ == "array" and items_type:
-        schema["items"] = {"type": items_type}
-    return {"name": name, "schema": schema, "required": required}
+    return build_parameter_descriptor(
+        name,
+        type_,
+        description,
+        required=required,
+        enum=enum,
+        default=default,
+        items_type=items_type,
+    )
 
 
 def _tool(
@@ -57,32 +60,12 @@ def _tool(
     confirmation_required: bool = False,
 ) -> dict:
     """Build a complete tool definition in OpenAI function-calling format."""
-    properties: dict[str, Any] = {}
-    required: list[str] = []
-    for p in (params or []):
-        properties[p["name"]] = p["schema"]
-        if p.get("required"):
-            required.append(p["name"])
-
-    desc = description
-    if confirmation_required:
-        desc += " ⚠️ Braucht User-Bestätigung."
-
-    tool_def = {
-        "type": "function",
-        "confirmation_required": bool(confirmation_required),
-        "function": {
-            "name": name,
-            "description": desc,
-            "parameters": {
-                "type": "object",
-                "properties": properties,
-            },
-        },
-    }
-    if required:
-        tool_def["function"]["parameters"]["required"] = required
-    return tool_def
+    return build_tool_definition(
+        name,
+        description,
+        params,
+        confirmation_required=confirmation_required,
+    )
 
 
 # ══════════════════════════════════════════════════
@@ -252,6 +235,11 @@ def _register_file_tools() -> list[dict]:
         ]),
         _tool("folder_size", "Berechnet die Gesamtgröße eines Ordners", [
             _param("path", "string", "Ordner-Pfad", required=True),
+        ]),
+        _tool("file_write", "Erstellt eine neue UTF-8 Text- oder Code-Datei. Ueberschreibt keine vorhandenen Dateien und blockiert gefaehrliche Executable-/Script-Endungen. Nutze dieses Tool, wenn Hermes/Lexa Dateien mit Inhalt anlegen soll.", [
+            _param("path", "string", "Zielpfad der neuen Datei", required=True),
+            _param("content", "string", "Text- oder Code-Inhalt der Datei", required=True),
+            _param("create_dirs", "boolean", "Fehlende Zielordner automatisch erstellen (Standard: true)"),
         ]),
         _tool("file_move", "Verschiebt eine Datei oder einen Ordner von Quelle nach Ziel", [
             _param("source", "string", "Quellpfad (Datei oder Ordner)", required=True),
@@ -444,6 +432,7 @@ def _register_personal_os_tools() -> list[dict]:
         ]),
     ]
 
+
 def _register_hermes_tools() -> list[dict]:
     """Hermes Agent bridge tools."""
     return [
@@ -556,8 +545,71 @@ def _register_productivity_tools() -> list[dict]:
 
 
 def _register_pc_control_tools() -> list[dict]:
-    """PC-Kontrolle erweitert (24): Fenster, Autostart, Dienste, Netzwerk."""
+    """PC-Kontrolle erweitert: Fenster, Desktop-Input, Autostart, Dienste, Netzwerk."""
     return [
+        _tool("ui_tree", "Liest echte Windows-UI-Controls im aktiven oder benannten Fenster via UI Automation: Buttons, Textfelder, Listen, Tabs und ihre Rechtecke. Nutze dies vor visueller PC-Steuerung, wenn Hermes wissen muss, was wirklich klickbar ist.", [
+            _param("window", "string", "Optionaler Fenstertitel oder Teil davon"),
+            _param("max_depth", "integer", "UIA-Tiefe 1-5, Standard 3"),
+            _param("max_controls", "integer", "Max. Controls im Ergebnis, Standard 80"),
+        ]),
+        _tool("ui_find", "Findet echte Windows-UI-Controls nach sichtbarem Namen oder Automation-ID. Besser als OCR fuer Buttons und Eingabefelder.", [
+            _param("text", "string", "Text/Name des gesuchten Controls", required=True),
+            _param("control_type", "string", "Optionaler UIA-Typ z.B. Button, Edit, MenuItem"),
+            _param("window", "string", "Optionaler Fenstertitel oder Teil davon"),
+            _param("max_results", "integer", "Max. Treffer, Standard 10"),
+        ]),
+        _tool("ui_click", "Klickt ein echtes Windows-UI-Control anhand seines Namens/Automation-ID via UI Automation. Nutze dies bevorzugt fuer Befehle wie 'klicke auf Speichern'; OCR ist nur Fallback. Braucht Freigabe.", [
+            _param("text", "string", "Name/Text des Controls, das geklickt werden soll", required=True),
+            _param("control_type", "string", "Optionaler UIA-Typ z.B. Button, Edit, MenuItem"),
+            _param("window", "string", "Optionaler Fenstertitel oder Teil davon"),
+            _param("occurrence", "integer", "Welcher Treffer geklickt wird, Standard 1"),
+            _param("button", "string", "Maustaste", enum=["left", "right", "middle"]),
+            _param("fallback_ocr", "boolean", "Wenn UIA keinen Treffer findet, OCR-Fallback versuchen (Standard true)"),
+        ], confirmation_required=True),
+        _tool("hermes_desktop_task", "Hermes-Pro Desktop-Controller: verarbeitet mehrere Hermes-Desktop-Schritte in einem Prompt. Fuehrt nur read-only Beobachtung/Suche aus und bereitet Klicks, Tippen oder Hotkeys als Lexa-Freigabe vor.", [
+            _param("message", "string", "Originaler Hermes-Desktop-Auftrag, auch mit mehreren Zeilen oder /hermes-Prefixen", required=True),
+            _param("max_steps", "integer", "Maximale Desktop-Teilschritte, Standard 8"),
+        ]),
+        _tool("hermes_desktop_commit", "Fuehrt genau eine vorbereitete Hermes-Desktop-Aktion nach Lexa-Freigabe aus und beobachtet danach den Desktop erneut. Nur fuer Pending-Confirmations nutzen.", [
+            _param("kind", "string", "Aktionstyp", enum=["click", "type", "hotkey"], required=True),
+            _param("text", "string", "UI-Control-Name fuer click, z.B. Pause oder darauf"),
+            _param("control_type", "string", "Optionaler UIA-Typ z.B. Button"),
+            _param("window", "string", "Optionaler Fenstertitel oder Teil davon"),
+            _param("button", "string", "Maustaste", enum=["left", "right", "middle"]),
+            _param("typing_text", "string", "Text fuer kind=type"),
+            _param("keys", "string", "Tastenkombination fuer kind=hotkey, z.B. ctrl+l"),
+            _param("verify", "boolean", "Nach der Aktion erneut beobachten, Standard true"),
+        ], confirmation_required=True),
+        _tool("desktop_position", "Liest die aktuelle Mausposition und Bildschirmgroesse. Nutze dies vor Desktop-Automation, um Koordinaten sicher einzuordnen."),
+        _tool("desktop_move", "Bewegt den Mauszeiger zu absoluten Bildschirmkoordinaten. Nur nutzen, wenn der User eine sichtbare Desktop-Steuerung durch Hermes erwartet.", [
+            _param("x", "integer", "X-Koordinate in Pixeln", required=True),
+            _param("y", "integer", "Y-Koordinate in Pixeln", required=True),
+        ], confirmation_required=True),
+        _tool("desktop_click", "Fuehrt einen Mausklick an der aktuellen oder angegebenen Position aus. Vorher per screen_read_text/screenshot/window_focus orientieren. Veraendert den PC-Zustand und braucht Freigabe.", [
+            _param("x", "integer", "Optionale X-Koordinate in Pixeln"),
+            _param("y", "integer", "Optionale Y-Koordinate in Pixeln"),
+            _param("button", "string", "Maustaste", enum=["left", "right", "middle"]),
+            _param("clicks", "integer", "Anzahl Klicks, 1-3"),
+        ], confirmation_required=True),
+        _tool("desktop_click_text", "Findet sichtbaren Bildschirmtext per OCR und klickt die Mitte dieses Textblocks. Nutze dies fuer Befehle wie 'klicke auf Speichern'. Braucht Freigabe.", [
+            _param("text", "string", "Sichtbarer Text, der geklickt werden soll", required=True),
+            _param("button", "string", "Maustaste", enum=["left", "right", "middle"]),
+            _param("occurrence", "integer", "Welcher Treffer geklickt wird, Standard 1"),
+            _param("window", "string", "Optionaler Fenstertitel-Fokus fuer OCR"),
+        ], confirmation_required=True),
+        _tool("desktop_scroll", "Scrollt im aktiven Fenster. Negative Werte scrollen nach unten, positive nach oben. Veraendert die Desktop-Ansicht und braucht Freigabe.", [
+            _param("clicks", "integer", "Scroll-Schritte von -20 bis 20", required=True),
+        ], confirmation_required=True),
+        _tool("desktop_type", "Tippt Text in das aktive Feld. Nutze nur nach window_focus/screen_read_text und wenn klar ist, wohin getippt wird. Gibt den Text nicht im Ergebnis zurueck.", [
+            _param("text", "string", "Text, der getippt werden soll (max. 1000 Zeichen)", required=True),
+            _param("interval_ms", "integer", "Optionale Pause pro Zeichen in Millisekunden"),
+        ], confirmation_required=True),
+        _tool("desktop_hotkey", "Drueckt eine begrenzte Tastenkombination wie ctrl+l, ctrl+c, alt+tab, enter oder tab. Braucht Freigabe, weil es aktive Apps steuert.", [
+            _param("keys", "string", "Tastenkombination mit +, z.B. ctrl+l oder alt+tab", required=True),
+        ], confirmation_required=True),
+        _tool("desktop_wait", "Wartet kurz in einer Desktop-Automation, damit UI-Aenderungen laden koennen.", [
+            _param("seconds", "number", "Sekunden, maximal 10"),
+        ]),
         _tool("window_move", "Verschiebt ein Fenster an eine bestimmte Position", [
             _param("title", "string", "Fenstertitel", required=True),
             _param("x", "integer", "X-Position in Pixeln", required=True),
@@ -788,13 +840,13 @@ def register_all_tools() -> None:
     tools.extend(_register_browser_tools())       # 8
     tools.extend(_register_file_tools())          # 19
     tools.extend(_register_media_tools())         # 8
-    tools.extend(_register_communication_tools()) # 5
+    tools.extend(_register_communication_tools())  # 5
     tools.extend(_register_memory_tools())        # 11
     tools.extend(_register_personal_os_tools())   # 11
     tools.extend(_register_hermes_tools())        # 5
     tools.extend(_register_os_agent_tools())      # 5
     tools.extend(_register_productivity_tools())  # 17
-    tools.extend(_register_pc_control_tools())    # 24
+    tools.extend(_register_pc_control_tools())    # 27
     tools.extend(_register_dev_tools())           # 25
     tools.extend(_register_reminder_tools())       # 3
     tools.extend(_register_calendar_tools())      # 6
@@ -953,9 +1005,10 @@ _CATEGORY_KEYWORDS: dict[str, list[str]] = {
                 "quellenrecherche", "source", "sources", "citation",
                 "citations", "zitat", "zitate", "fundstelle",
                 "fundstellen", "belege", "evidence", "report"],
-    "dateien": ["datei", "file", "zip", "archiv", "backup", "ordner", "pdf",
+    "dateien": ["datei", "file", "files", "zip", "archiv", "backup", "ordner", "pdf",
                 "bild", "image", "duplikat", "umbenennen", "rename", "download",
-                "temp", "entpack", "konvertier", "resize", "skalier", "disk"],
+                "temp", "entpack", "konvertier", "resize", "skalier", "disk",
+                "erstelle", "erstellen", "anlegen", "schreibe", "write", "create"],
     "media": ["musik", "music", "spotify", "media", "abspielen", "play",
               "pause", "stop", "song", "track", "video", "aufnahme",
               "record", "screen", "audio", "konvertier",
@@ -997,7 +1050,10 @@ _CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "pc_kontrolle": ["fenster", "window", "layout", "split", "autostart",
                      "dienst", "service", "umgebungsvariable", "env",
                      "uptime", "installiert", "netzwerk", "ping", "dns",
-                     "port", "ip", "traceroute", "flush"],
+                     "port", "ip", "traceroute", "flush", "maus", "mouse",
+                     "klick", "click", "tippe", "tippen", "type", "tastatur",
+                     "keyboard", "hotkey", "taste", "scroll", "desktop",
+                     "pc", "kontrolliere", "steuere"],
     "entwickler": ["git", "commit", "push", "pull", "branch", "diff",
                    "docker", "container", "image", "api", "http", "request",
                    "server", "log", "json", "regex", "base64", "hash",
@@ -1027,7 +1083,7 @@ _CATEGORY_TOOL_PREFIXES: dict[str, list[str]] = {
     "browser": ["youtube_", "web_", "price_", "browser_close"],
     "dateien": ["find_duplicates", "batch_rename", "organize_", "merge_",
                 "split_", "disk_", "clean_", "archive_", "backup_",
-                "image_", "file_info", "folder_size"],
+                "image_", "file_", "folder_size", "folder_create"],
     "media": ["media_", "spotify_", "convert_media", "extract_audio", "screen_record"],
     "kommunikation": ["email_", "telegram_", "discord_"],
     "gedaechtnis": ["note_", "memory_", "summarize", "routine_", "reminder_"],
@@ -1036,7 +1092,7 @@ _CATEGORY_TOOL_PREFIXES: dict[str, list[str]] = {
     "os_agent": ["os_agent_"],
     "produktivitaet": ["todo_", "pomodoro_", "habit_", "time_tracking_", "focus_mode_"],
     "pc_kontrolle": ["window_move", "window_resize", "window_min", "window_max",
-                     "window_layout", "autostart_", "service_", "env_",
+                     "window_layout", "ui_", "desktop_", "autostart_", "service_", "env_",
                      "system_uptime", "installed_apps", "ping", "dns_",
                      "port_", "network_", "public_ip", "traceroute", "flush_dns"],
     "entwickler": ["git_", "docker_", "http_request", "log_analyze",
@@ -1130,6 +1186,29 @@ def get_tools_for_context(user_message: str, max_tools: int = 45) -> list[dict]:
     # Build prioritized list: matched category tools FIRST, then basis
     seen: set[str] = set()
     filtered: list[dict] = []
+    hermes_pc_worker_request = (
+        "hermes" in msg_words
+        and any(
+            word in msg_words
+            for word in (
+                "oeffne", "öffne", "open", "starte", "erstelle", "erstellen",
+                "anlegen", "schreibe", "write", "create", "datei", "dateien",
+                "file", "files", "code", "vscode", "visual", "maus", "mouse",
+                "klick", "click", "tippe", "tippen", "type", "tastatur",
+                "keyboard", "hotkey", "taste", "scroll", "desktop", "pc",
+                "kontrolliere", "steuere", "bildschirm", "screen", "ocr",
+            )
+        )
+    )
+
+    def append_exact_tool_names(names: tuple[str, ...]) -> None:
+        for exact_name in names:
+            for t in all_tools:
+                fname = t["function"]["name"]
+                if fname == exact_name and fname not in seen:
+                    seen.add(fname)
+                    filtered.append(t)
+                    break
 
     # 1. Specific matched categories first (what the user actually asked about).
     for cat in selected_categories:
@@ -1141,6 +1220,27 @@ def get_tools_for_context(user_message: str, max_tools: int = 45) -> list[dict]:
                     seen.add(fname)
                     filtered.append(t)
                     break
+        if cat == "hermes" and hermes_pc_worker_request:
+            append_exact_tool_names((
+                "app_open",
+                "folder_create",
+                "file_write",
+                "window_list",
+                "window_focus",
+                "hermes_desktop_task",
+                "ui_tree",
+                "ui_find",
+                "ui_click",
+                "screen_read_text",
+                "desktop_position",
+                "desktop_move",
+                "desktop_click",
+                "desktop_click_text",
+                "desktop_type",
+                "desktop_hotkey",
+                "desktop_scroll",
+                "desktop_wait",
+            ))
 
     # 2. Basis tools (core functionality)
     for t in all_tools:

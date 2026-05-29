@@ -56,9 +56,9 @@ class Suggestion:
     """Ein proaktiver Vorschlag fuer den User."""
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     type: str = ""          # "reminder", "shortcut", "health", "productivity", "context",
-                            # "briefing", "calendar_reminder", "weather_warning",
-                            # "email_notification", "battery_warning", "disk_warning",
-                            # "evening_summary"
+    # "briefing", "calendar_reminder", "weather_warning",
+    # "email_notification", "battery_warning", "disk_warning",
+    # "evening_summary"
     title: str = ""
     message: str = ""
     action: Optional[dict] = None  # {"type": "tool", "tool": "start_pomodoro"} oder None
@@ -368,7 +368,7 @@ class ProactiveEngine:
         # 2. Habit-Erinnerung (abends, 18-22 Uhr)
         if 18 <= hour <= 22:
             try:
-                from backend.productivity import habit_list, habit_stats
+                from backend.productivity import habit_stats
                 stats = habit_stats()
                 total = stats.get("total_habits", 0)
                 done = stats.get("completed_today", 0)
@@ -415,7 +415,7 @@ class ProactiveEngine:
         hour = now.hour
 
         try:
-            from backend.smart_memory import get_common_commands, profile_get
+            from backend.smart_memory import get_common_commands
 
             # Haeufige Commands zur typischen Uhrzeit vorschlagen
             commands = get_common_commands(5)
@@ -846,7 +846,6 @@ class ProactiveEngine:
 
         # 2. Tomorrow's calendar
         try:
-            from companion.calendar_integration import calendar_today
             # We need tomorrow's events — calendar_today() only does today.
             # Use calendar_week() and filter for tomorrow instead.
             from companion.calendar_integration import calendar_week

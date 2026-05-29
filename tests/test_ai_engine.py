@@ -187,6 +187,30 @@ class TestToolContextSelection:
         assert "hermes_improve_lexa" in names
         assert "hermes_telegram_status" in names
 
+    def test_hermes_pc_worker_file_request_selects_file_tools(self):
+        """Hermes PC-worker requests should include file creation tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("Hermes oeffne VS Code und erstelle drei Dateien mit Code")
+        names = [t["function"]["name"] for t in tools]
+        assert "app_open" in names
+        assert "folder_create" in names
+        assert "file_write" in names
+
+    def test_hermes_pc_worker_desktop_request_selects_desktop_tools(self):
+        """Hermes PC-worker requests should include controlled desktop tools."""
+        from backend.tool_registry import get_tools_for_context
+        tools = get_tools_for_context("Hermes klick auf den Button und tippe Hallo, aber aendere sonst nichts")
+        names = [t["function"]["name"] for t in tools]
+        assert "window_focus" in names
+        assert "ui_tree" in names
+        assert "ui_find" in names
+        assert "ui_click" in names
+        assert "screen_read_text" in names
+        assert "desktop_position" in names
+        assert "desktop_click" in names
+        assert "desktop_click_text" in names
+        assert "desktop_type" in names
+
     def test_os_agent_runtime_selects_os_agent_tools(self):
         """OS agent-runtime requests should include Lexa OS worker tools."""
         from backend.tool_registry import get_tools_for_context
@@ -253,6 +277,281 @@ class TestConversationSummarization:
         result = _summarize_messages_local(messages)
         # Should mention the actions
         assert "volume_set" in result or "app_open" in result or "Aktionen" in result
+
+
+class TestQualityMode:
+    def test_detect_quality_mode_for_top_tier_lexa_goal(self):
+        from backend.ai_engine import _detect_quality_mode
+
+        hint = _detect_quality_mode("mach bitte ziel ist lexa auf chagbt claude niviu+")
+
+        assert "Top-tier Assistant Quality" in hint
+        assert "kleinsten sinnvollen naechsten Schritt" in hint
+
+    def test_build_messages_injects_quality_mode_for_complex_product_work(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Ziel ist Lexa auf ChatGPT Claude Niveau+ verbessern.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Fakten/Annahmen/Entscheidungen" in system
+
+    def test_detect_quality_mode_normalizes_real_umlauts(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Ziel ist Lexa Qualit\u00e4t und Architektur professionell verbessern.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+
+    def test_build_messages_skips_quality_mode_for_simple_greeting(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("hi")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_injects_senior_code_quality_for_python_generation(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages(
+            "schreibe mir sehr komplexen Python Code wie von einem Senior mit 10 Jahren Erfahrung"
+        )
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Senior-Code-Antwort" in system
+        assert "keine unbenutzten Imports/Parameter" in system
+        assert "deprecated APIs" in system
+
+    def test_build_messages_injects_ml_timeseries_guardrails(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages(
+            "verbessere diesen Python Code fuer ein LSTM Zeitreihenmodell"
+        )
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "zeitliche Splits" in system
+        assert "Scaler-Fit" in system
+        assert "Tensor-Shapes" in system
+
+
+class TestToolGatingForGeneration:
+    @pytest.mark.parametrize("message", [
+        "schriebe mir ein sehr sher komplexses python code was nur programiere mit 10 jahre erfrahrung koennene",
+        "schreibe mir komplexen Python Code",
+        "generiere ein async backend script in python",
+        "implementiere eine REST API klasse",
+    ])
+    def test_disables_tools_for_direct_code_generation(self, message):
+        from backend.ai_engine import _should_disable_tools_for_text_generation
+
+        assert _should_disable_tools_for_text_generation(message) is True
+
+    @pytest.mark.parametrize("message", [
+        "spiel mir musik",
+        "oeffne spotify",
+        "wie ist wetter in hamburg",
+        "git status",
+        "suche python tutorial auf youtube",
+        "erstelle einen quellenbasierten research brief",
+    ])
+    def test_keeps_tools_for_tool_backed_requests(self, message):
+        from backend.ai_engine import _should_disable_tools_for_text_generation
+
+        assert _should_disable_tools_for_text_generation(message) is False
+
+    def test_chat_skips_tool_registry_for_code_generation(self, monkeypatch):
+        from backend import ai_engine
+        import backend.config as config
+        import backend.tool_registry as tool_registry
+
+        tool_registry_calls = []
+        received_tools = []
+
+        monkeypatch.setattr(config, "TOOL_USE_ENABLED", True)
+        monkeypatch.setattr(
+            ai_engine,
+            "_get_selected_model_meta",
+            lambda: {"id": "groq:test", "provider": "groq", "model": "test"},
+        )
+        monkeypatch.setattr(
+            ai_engine,
+            "_build_messages",
+            lambda user_message, conversation_history=None, system_extra=None: [
+                {"role": "user", "content": user_message or ""}
+            ],
+        )
+        monkeypatch.setattr(ai_engine, "_save_chat_result", lambda *args, **kwargs: None)
+
+        def fake_get_tools(context, max_tools=45):
+            tool_registry_calls.append((context, max_tools))
+            raise AssertionError("tool registry should be skipped for code generation")
+
+        def fake_chat(messages, selected_model, tools=None):
+            received_tools.append(tools)
+            return {"type": "text", "content": "ok"}
+
+        monkeypatch.setattr(tool_registry, "get_tools_for_context", fake_get_tools)
+        monkeypatch.setattr(ai_engine, "_chat_with_selected_provider", fake_chat)
+
+        result = ai_engine.chat("schreibe mir komplexen Python Code")
+
+        assert result == {"type": "text", "content": "ok"}
+        assert tool_registry_calls == []
+        assert received_tools == [None]
+
+    def test_chat_keeps_tool_registry_for_local_actions(self, monkeypatch):
+        from backend import ai_engine
+        import backend.config as config
+        import backend.tool_registry as tool_registry
+
+        fake_tools = [{
+            "type": "function",
+            "function": {
+                "name": "spotify_open",
+                "description": "Open Spotify",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }]
+        tool_registry_calls = []
+        received_tools = []
+
+        monkeypatch.setattr(config, "TOOL_USE_ENABLED", True)
+        monkeypatch.setattr(
+            ai_engine,
+            "_get_selected_model_meta",
+            lambda: {"id": "groq:test", "provider": "groq", "model": "test"},
+        )
+        monkeypatch.setattr(
+            ai_engine,
+            "_build_messages",
+            lambda user_message, conversation_history=None, system_extra=None: [
+                {"role": "user", "content": user_message or ""}
+            ],
+        )
+        monkeypatch.setattr(ai_engine, "_save_chat_result", lambda *args, **kwargs: None)
+
+        def fake_get_tools(context, max_tools=45):
+            tool_registry_calls.append((context, max_tools))
+            return fake_tools
+
+        def fake_chat(messages, selected_model, tools=None):
+            received_tools.append(tools)
+            return {"type": "text", "content": "ok"}
+
+        monkeypatch.setattr(tool_registry, "get_tools_for_context", fake_get_tools)
+        monkeypatch.setattr(ai_engine, "_chat_with_selected_provider", fake_chat)
+
+        result = ai_engine.chat("spiel mir musik")
+
+        assert result == {"type": "text", "content": "ok"}
+        assert tool_registry_calls == [("spiel mir musik", 45)]
+        assert received_tools == [fake_tools]
+
+    def test_agent_system_extra_keeps_tools_for_code_file_work(self, monkeypatch):
+        from backend import ai_engine
+        import backend.config as config
+        import backend.tool_registry as tool_registry
+
+        fake_tools = [{
+            "type": "function",
+            "function": {
+                "name": "file_write",
+                "description": "Write file",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }]
+        tool_registry_calls = []
+        received_tools = []
+
+        monkeypatch.setattr(config, "TOOL_USE_ENABLED", True)
+        monkeypatch.setattr(
+            ai_engine,
+            "_get_selected_model_meta",
+            lambda: {"id": "groq:test", "provider": "groq", "model": "test"},
+        )
+        monkeypatch.setattr(
+            ai_engine,
+            "_build_messages",
+            lambda user_message, conversation_history=None, system_extra=None: [
+                {"role": "user", "content": user_message or ""}
+            ],
+        )
+        monkeypatch.setattr(ai_engine, "_save_chat_result", lambda *args, **kwargs: None)
+
+        def fake_get_tools(context, max_tools=45):
+            tool_registry_calls.append((context, max_tools))
+            return fake_tools
+
+        def fake_chat(messages, selected_model, tools=None):
+            received_tools.append(tools)
+            return {"type": "text", "content": "ok"}
+
+        monkeypatch.setattr(tool_registry, "get_tools_for_context", fake_get_tools)
+        monkeypatch.setattr(ai_engine, "_chat_with_selected_provider", fake_chat)
+
+        result = ai_engine.chat(
+            "schreibe drei Python Dateien in meinem Projekt",
+            system_extra="Du bist im AGENT-MODUS. HERMES-WORKER-MODUS. Nutze Lexa-Tools.",
+        )
+
+        assert result == {"type": "text", "content": "ok"}
+        assert tool_registry_calls == [("schreibe drei Python Dateien in meinem Projekt", 45)]
+        assert received_tools == [fake_tools]
+
+    def test_chat_stream_skips_tool_registry_for_code_generation(self, monkeypatch):
+        from backend import ai_engine
+        import backend.config as config
+        import backend.tool_registry as tool_registry
+
+        class Delta:
+            content = "ok"
+            tool_calls = None
+
+        class Choice:
+            delta = Delta()
+
+        class Chunk:
+            choices = [Choice()]
+
+        tool_registry_calls = []
+        received_tools = []
+
+        monkeypatch.setattr(config, "TOOL_USE_ENABLED", True)
+        monkeypatch.setattr(
+            ai_engine,
+            "_get_selected_model_meta",
+            lambda: {"id": "groq:test", "provider": "groq", "model": "test"},
+        )
+        monkeypatch.setattr(
+            ai_engine,
+            "_build_messages",
+            lambda user_message, conversation_history=None, system_extra=None: [
+                {"role": "user", "content": user_message or ""}
+            ],
+        )
+        monkeypatch.setattr(ai_engine, "_save_interaction", lambda *args, **kwargs: None)
+
+        def fake_get_tools(context, max_tools=45):
+            tool_registry_calls.append((context, max_tools))
+            raise AssertionError("tool registry should be skipped for code generation")
+
+        def fake_stream(messages, selected_model, tools=None):
+            received_tools.append(tools)
+            return iter([Chunk()])
+
+        monkeypatch.setattr(tool_registry, "get_tools_for_context", fake_get_tools)
+        monkeypatch.setattr(ai_engine, "_stream_with_selected_provider", fake_stream)
+
+        result = list(ai_engine.chat_stream("schreibe mir komplexen Python Code"))
+
+        assert result == ["ok"]
+        assert tool_registry_calls == []
+        assert received_tools == [None]
 
 
 # ---------------------------------------------------------------------------

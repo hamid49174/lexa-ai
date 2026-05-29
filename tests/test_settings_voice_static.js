@@ -14,10 +14,10 @@ const html = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "index.html"),
   "utf8"
 );
-const viewsCss = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "css", "views.css"),
-  "utf8"
-);
+const viewsCss = [
+  fs.readFileSync(path.join(__dirname, "..", "frontend", "src", "css", "views.css"), "utf8"),
+  fs.readFileSync(path.join(__dirname, "..", "frontend", "src", "css", "views_settings.css"), "utf8"),
+].join("\n");
 
 function extractFn(source, name) {
   const needles = [`async function ${name}(`, `function ${name}(`];

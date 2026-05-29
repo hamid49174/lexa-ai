@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <!-- CSP: Allow pinned CDN dependencies for Three.js and SimplexNoise. -->
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; connect-src 'self' http://127.0.0.1:8000 ws://127.0.0.1:8000; style-src 'self' https://fonts.googleapis.com; img-src 'self' data: blob: http: https:; font-src https://fonts.gstatic.com; media-src blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none';">
+    content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; connect-src 'self' http://127.0.0.1:8000 ws://127.0.0.1:8000; style-src 'self' https://fonts.googleapis.com; img-src 'self' data: blob: http: https:; font-src https://fonts.gstatic.com; media-src blob:; object-src 'none'; base-uri 'self';">
   <title>Lexa AI</title>
   <link
     href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
@@ -17,8 +17,25 @@
   <link rel="stylesheet" href="./css/chat.css">
   <link rel="stylesheet" href="./css/voice.css">
   <link rel="stylesheet" href="./css/views.css">
+  <link rel="stylesheet" href="./css/views_commands.css">
+  <link rel="stylesheet" href="./css/views_tools.css">
+  <link rel="stylesheet" href="./css/views_memory.css">
+  <link rel="stylesheet" href="./css/views_settings.css">
+  <link rel="stylesheet" href="./css/views_dashboard.css">
+  <link rel="stylesheet" href="./css/views_personal_os.css">
   <link rel="stylesheet" href="./css/components.css">
+  <link rel="stylesheet" href="./css/components_core.css">
+  <link rel="stylesheet" href="./css/components_search_memory.css">
+  <link rel="stylesheet" href="./css/components_productivity.css">
+  <link rel="stylesheet" href="./css/components_overlays.css">
+  <link rel="stylesheet" href="./css/components_shell_widgets.css">
+  <link rel="stylesheet" href="./css/overrides_responsive_utilities.css">
+  <link rel="stylesheet" href="./css/overrides_shell.css">
+  <link rel="stylesheet" href="./css/overrides_chat_voice.css">
+  <link rel="stylesheet" href="./css/overrides_accessibility.css">
+  <link rel="stylesheet" href="./css/overrides_ai_surface.css">
   <link rel="stylesheet" href="./css/overrides.css">
+  <link rel="stylesheet" href="./css/overrides_personal_os.css">
   <link rel="stylesheet" href="./css/premium_animations.css">
 
   <!-- 3D Visualization Dependencies -->
@@ -28,7 +45,12 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"
     integrity="sha384-jjHgEv1aKR4CNMJrTCxr7j6K3HOexCFlAqN92iFyiRIoR/GsQUs2rjFGIVpswZAL"
     crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="./storage.js"></script>
   <script src="./i18n/i18n.js"></script>
+  <script src="./app_ambient.js" defer></script>
+  <script src="./app_actions.js" defer></script>
+  <script src="./app_desktop_shortcuts.js" defer></script>
+  <script src="./app_health.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
 
@@ -1293,6 +1315,7 @@
   <script src="./chat_message_formatting.js"></script>
   <script src="./chat_export.js"></script>
   <script src="./chat_composer_helpers.js"></script>
+  <script src="./chat_composer_palette.js"></script>
   <script src="./chat_message_actions.js"></script>
   <script src="./chat_message_actions_controller.js"></script>
   <script src="./chat_input_helpers.js"></script>
@@ -1302,6 +1325,12 @@
   <script src="./chat_history_ui.js"></script>
   <script src="./chat_streaming_helpers.js"></script>
   <script src="./chat_file_display_ui.js"></script>
+  <script src="./chat_state.js"></script>
+  <script src="./chat_agent_runs.js"></script>
+  <script src="./chat_conversations.js"></script>
+  <script src="./chat_file_upload.js"></script>
+  <script src="./chat_search.js"></script>
+  <script src="./chat_voice.js"></script>
   <script src="./chat.js"></script>
   <script src="./productivity.js"></script>
   <script src="./dashboard.js"></script>
@@ -1309,7 +1338,12 @@
   <script src="./commands.js"></script>
   <script src="./memory.js"></script>
   <script src="./personal_os_display_helpers.js"></script>
+  <script src="./personal_os_prompt_helpers.js"></script>
+  <script src="./personal_os_dom_helpers.js"></script>
+  <script src="./personal_os_state_helpers.js"></script>
+  <script src="./personal_os_graph_helpers.js"></script>
   <script src="./personal_os_review_helpers.js"></script>
+  <script src="./personal_os_renderers.js"></script>
   <script src="./personal_os.js"></script>
   <script src="./settings_helpers.js"></script>
   <script src="./settings_provider_helpers.js"></script>

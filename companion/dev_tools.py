@@ -7,13 +7,84 @@ import json
 import logging
 import subprocess
 import socket
-import os
 import re
+import ipaddress
+import urllib.request
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import urlparse
 from backend.i18n import t
 
 logger = logging.getLogger("lexa.dev_tools")
+
+_BLOCKED_HTTP_HOSTS: frozenset[str] = frozenset({
+    "169.254.169.254",
+    "169.254.169.253",
+    "metadata.google.internal",
+    "metadata.google",
+    "100.100.100.200",
+    "169.254.0.1",
+})
+_LOCAL_HTTP_HOSTNAMES: frozenset[str] = frozenset({
+    "localhost",
+})
+
+
+def _is_dangerous_ip_address(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+        addr = addr.ipv4_mapped
+    return (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_reserved
+        or addr.is_multicast
+        or addr.is_unspecified
+    )
+
+
+def _normalize_public_http_url(url: str) -> tuple[str, str | None]:
+    url = (url or "").strip()
+    if not url:
+        return "", "URL erforderlich."
+    if not url.startswith(("http://", "https://")):
+        if "://" in url:
+            return "", "Nur http:// und https:// URLs erlaubt."
+        url = "https://" + url
+
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme not in ("http", "https") or not hostname:
+        return "", "Nur http:// und https:// URLs erlaubt."
+
+    if hostname in _BLOCKED_HTTP_HOSTS:
+        return "", t("security.blockedInternal", host=hostname)
+    if hostname in _LOCAL_HTTP_HOSTNAMES or hostname.endswith(".localhost"):
+        return "", t("security.blockedInternal", host=hostname)
+
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        return url, None
+
+    if _is_dangerous_ip_address(addr):
+        return "", t("security.blockedSsrf", ip=addr)
+    return url, None
+
+
+class _SafePublicRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        normalized_url, url_error = _normalize_public_http_url(newurl)
+        if url_error:
+            raise ValueError(url_error)
+
+        parsed = urlparse(normalized_url)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        resolved_error = _resolved_public_host_error(parsed.hostname or "", port)
+        if resolved_error:
+            raise ValueError(resolved_error)
+
+        return super().redirect_request(req, fp, code, msg, headers, normalized_url)
 
 
 def _validate_repo_path(path: str) -> str | None:
@@ -502,12 +573,9 @@ def docker_stats() -> list[dict]:
 
 def http_request(url: str = "", method: str = "GET", headers: str = "", body: str = "", timeout: int = 10) -> dict:
     """HTTP-Request senden (API-Tester)."""
-    if not url:
-        return {"error": "URL erforderlich."}
-
-    # Validate URL
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
+    url, url_error = _normalize_public_http_url(url)
+    if url_error:
+        return {"error": url_error}
 
     timeout = max(3, min(30, timeout))
 
@@ -538,9 +606,7 @@ def http_request(url: str = "", method: str = "GET", headers: str = "", body: st
             if "Content-Type" not in (headers or ""):
                 req.add_header("Content-Type", "application/json")
 
-        import ipaddress
         try:
-            from urllib.parse import urlparse
             parsed_url = urlparse(url)
             hostname = parsed_url.hostname or ""
             # Resolve and block private/loopback/link-local IPs
@@ -548,7 +614,7 @@ def http_request(url: str = "", method: str = "GET", headers: str = "", body: st
                 resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
                 for _, _, _, _, addr in resolved:
                     ip = ipaddress.ip_address(addr[0])
-                    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                    if _is_dangerous_ip_address(ip):
                         return {"error": t("security.blockedSsrf", ip=ip)}
             except socket.gaierror:
                 pass  # Let the actual request fail naturally
@@ -556,7 +622,8 @@ def http_request(url: str = "", method: str = "GET", headers: str = "", body: st
             pass
 
         start = datetime.now()
-        response = urllib.request.urlopen(req, timeout=timeout)
+        opener = urllib.request.build_opener(_SafePublicRedirectHandler)
+        response = opener.open(req, timeout=timeout)
         elapsed = (datetime.now() - start).total_seconds()
 
         resp_body = response.read(500_000).decode("utf-8", errors="replace")
@@ -626,15 +693,15 @@ def log_analyze(path: str = "", lines: int = 100, pattern: str = "", level: str 
         # Filter by level
         if level:
             level_upper = level.upper()
-            tail = [l for l in tail if level_upper in l.upper()]
+            tail = [line for line in tail if level_upper in line.upper()]
 
         # Filter by pattern
         if pattern:
             try:
                 regex = re.compile(pattern, re.IGNORECASE)
-                tail = [l for l in tail if regex.search(l)]
+                tail = [line for line in tail if regex.search(line)]
             except re.error:
-                tail = [l for l in tail if pattern.lower() in l.lower()]
+                tail = [line for line in tail if pattern.lower() in line.lower()]
 
         # Count log levels
         level_counts = {"ERROR": 0, "WARN": 0, "INFO": 0, "DEBUG": 0}
@@ -659,8 +726,43 @@ def log_analyze(path: str = "", lines: int = 100, pattern: str = "", level: str 
 #  SERVER-MONITOR
 # ══════════════════════════════════════════════════════
 
-def server_check(host: str = "", port: int = 80, name: str = "") -> dict:
+def _server_target_from_url(url: str) -> tuple[str, int, str, str | None]:
+    normalized_url, url_error = _normalize_public_http_url(url)
+    if url_error:
+        return "", 0, "", url_error
+
+    parsed = urlparse(normalized_url)
+    host = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return host, port, normalized_url, None
+
+
+def _resolved_public_host_error(host: str, port: int) -> str | None:
+    try:
+        resolved = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror:
+        return None
+
+    for _, _, _, _, addr in resolved:
+        ip = ipaddress.ip_address(addr[0])
+        if _is_dangerous_ip_address(ip):
+            return t("security.blockedSsrf", ip=ip)
+    return None
+
+
+def server_check(host: str = "", port: int = 80, name: str = "", url: str = "") -> dict:
     """Server/Port Erreichbarkeit prüfen mit Response-Time."""
+    if url or host.startswith(("http://", "https://")):
+        parsed_host, parsed_port, normalized_url, url_error = _server_target_from_url(url or host)
+        if url_error:
+            return {"error": url_error}
+        resolved_error = _resolved_public_host_error(parsed_host, parsed_port)
+        if resolved_error:
+            return {"error": resolved_error}
+        host = parsed_host
+        port = parsed_port
+        name = name or normalized_url
+
     if not host:
         return {"error": "Host erforderlich."}
     try:
@@ -691,8 +793,11 @@ def server_check(host: str = "", port: int = 80, name: str = "") -> dict:
         }
 
 
-def multi_server_check(servers: str = "") -> list[dict]:
+def multi_server_check(servers: str = "", urls: list[str] | None = None) -> list[dict]:
     """Mehrere Server/Ports gleichzeitig prüfen. Format: host:port,host:port"""
+    if urls:
+        return [server_check(url=url) for url in urls[:20]]
+
     if not servers:
         # Default common servers
         servers = "127.0.0.1:8000,127.0.0.1:3000,127.0.0.1:5432,127.0.0.1:6379"
@@ -700,7 +805,9 @@ def multi_server_check(servers: str = "") -> list[dict]:
     results = []
     for entry in servers.split(","):
         entry = entry.strip()
-        if ":" in entry:
+        if entry.startswith(("http://", "https://")):
+            results.append(server_check(url=entry))
+        elif ":" in entry:
             host, port_str = entry.rsplit(":", 1)
             try:
                 port = int(port_str)

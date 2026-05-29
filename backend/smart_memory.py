@@ -11,11 +11,10 @@ Features:
 import json
 import logging
 import os
-import re
 import sqlite3
 import threading
 from collections import Counter
-from datetime import datetime, date, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 

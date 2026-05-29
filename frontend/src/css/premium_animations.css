@@ -1038,10 +1038,23 @@ body {
 
 .message .msg-more-menu .msg-thumbs-btn,
 .message .msg-more-menu .msg-action-btn {
+  width: 100%;
+  min-width: 160px;
   height: 38px;
-  flex-basis: 38px;
+  flex: 0 0 38px;
+  justify-content: flex-start;
   border-radius: 9px;
   color: rgba(245, 245, 252, 0.9);
+}
+
+.message .msg-copy-btn:focus::after,
+.message .msg-thumbs-btn:focus::after,
+.message .msg-action-btn:focus::after,
+.message .msg-copy-btn:focus-visible::after,
+.message .msg-thumbs-btn:focus-visible::after,
+.message .msg-action-btn:focus-visible::after {
+  opacity: 1 !important;
+  transform: translate(-50%, 0) !important;
 }
 
 .message .msg-more-menu .msg-thumbs-btn:hover,

@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -23,6 +22,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DATA_DIR = Path(os.environ.get("LEXA_DATA_DIR", str(_PROJECT_ROOT)))
 MCP_CONFIG_PATH = _DATA_DIR / "mcp_servers.json"
 PROJECT_MCP_CONFIG_PATH = _PROJECT_ROOT / "mcp_servers.json"
+_PERSONAL_OS_MCP_INDEX = Path("11_Integrations") / "MCP" / "os-mcp-server" / "dist" / "index.js"
 
 
 def _mcp_config_candidates() -> list[Path]:
@@ -30,6 +30,76 @@ def _mcp_config_candidates() -> list[Path]:
     if PROJECT_MCP_CONFIG_PATH != MCP_CONFIG_PATH:
         paths.append(PROJECT_MCP_CONFIG_PATH)
     return paths
+
+
+def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    result: list[Path] = []
+    for path in paths:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
+
+
+def _personal_os_root_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    for env_name in ("PERSONAL_OS_ROOT", "PERSONAL_OS_SDK_ROOT"):
+        configured = os.environ.get(env_name)
+        if configured:
+            candidates.append(Path(configured))
+
+    repo_parent = _PROJECT_ROOT.parent
+    storage_parent = repo_parent.parent
+    candidates.extend([
+        _PROJECT_ROOT / "personal_os",
+        repo_parent / "OS",
+        storage_parent / "OS",
+        storage_parent / "Desktop" / "OS",
+        Path.home() / "OneDrive - Office" / "Desktop" / "OS",
+        Path.home() / "OneDrive" / "Desktop" / "OS",
+        Path.home() / "Desktop" / "OS",
+    ])
+    return _dedupe_paths(candidates)
+
+
+def _find_personal_os_mcp_index() -> tuple[Path, Path] | None:
+    for root in _personal_os_root_candidates():
+        index = root / _PERSONAL_OS_MCP_INDEX
+        if index.exists():
+            return root.resolve(), index.resolve()
+    return None
+
+
+def _looks_like_personal_os_mcp_index(value: object) -> bool:
+    normalized = str(value or "").replace("\\", "/").lower()
+    return normalized.endswith("11_integrations/mcp/os-mcp-server/dist/index.js")
+
+
+def _normalize_personal_os_config(cfg: dict) -> dict:
+    normalized = dict(cfg)
+    args = list(normalized.get("args") or [])
+    current_index = Path(args[0]) if args and _looks_like_personal_os_mcp_index(args[0]) else None
+    current_exists = bool(current_index and current_index.exists())
+    found = _find_personal_os_mcp_index()
+
+    if found:
+        os_root, mcp_index = found
+        if not current_exists:
+            if args:
+                args[0] = str(mcp_index)
+            else:
+                args = [str(mcp_index)]
+            normalized["args"] = args
+
+        env = dict(normalized.get("env") or {})
+        env.setdefault("PERSONAL_OS_ROOT", str(os_root))
+        env.setdefault("PERSONAL_OS_SDK_ROOT", str(os_root))
+        normalized["env"] = env
+
+    return normalized
 
 
 class MCPRegistry:
@@ -79,6 +149,8 @@ class MCPRegistry:
                 if not all(c.isalnum() or c in "-_" for c in name):
                     logger.warning(f"MCP config: invalid server name '{name}' — skipping")
                     continue
+                if name == "personal_os":
+                    cfg = _normalize_personal_os_config(cfg)
                 valid[name] = cfg
 
             self._configs = valid
@@ -188,8 +260,8 @@ class MCPRegistry:
                 f"MCP [{name}] Ready — {len(client.tools)} tools available"
             )
             return server_info
-        except MCPError:
-            self._errors[name] = str(MCPError)
+        except MCPError as exc:
+            self._errors[name] = str(exc)
             raise
         except Exception as e:
             self._errors[name] = str(e)

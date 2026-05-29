@@ -33,7 +33,7 @@ console.log("\nHermes frontend:");
 assert("dashboard fetches backend health for Hermes state", dashboard.includes("window.lexa.health()") && dashboard.includes("healthRes"));
 assert("dashboard renders Anthropic provider status", dashboard.includes('["anthropic", "Claude"]'));
 assert("dashboard renders provider fallback status", dashboard.includes("fallback_available") && dashboard.includes('t("dashboard.aiFallback")'));
-assert("dashboard renders Hermes health row", dashboard.includes("const hermes = healthRes.status") && dashboard.includes("Hermes <span"));
+assert("dashboard renders Hermes health row", dashboard.includes("const hermes = healthRes.status") && dashboard.includes('createDashboardAiRow("Hermes", hermesLabel, hermesReady)'));
 
 assert("settings tracks Anthropic provider status", settings.includes("anthropic-status") && settings.includes("ai.anthropic?.available"));
 assert("settings builds Hermes readiness signal", settings.includes("function hermesReadinessSignal") && settings.includes("diagnostics?.hermes") && settings.includes("health?.hermes"));

@@ -5,6 +5,7 @@
  */
 
 const path = require("path");
+require("./electron_smoke_safe_io");
 
 if (!process.versions.electron) {
   const { spawnSync } = require("child_process");
@@ -113,13 +114,13 @@ async function main() {
         && typeof addMessage === "function"
         && typeof createMessageActionOverflowMenu === "function"
         && typeof clearRenderedChatMessages === "function"
+        && typeof clearChatVolatileState === "function"
+        && typeof getChatDraft === "function"
         && document.getElementById("chat-input")
       );
 
       clearRenderedChatMessages();
-      localStorage.removeItem("lexa-chat-history");
-      localStorage.removeItem("lexa-chat-draft");
-      localStorage.removeItem("lexa-active-conversation");
+      clearChatVolatileState();
       if (typeof LexaState !== "undefined") {
         LexaState.set("backendOnline", true);
         LexaState.set("isLoading", false);
@@ -204,7 +205,7 @@ async function main() {
       await waitFor(() => document.getElementById("chat-input").value.includes("Assistant **answer**"));
       const continueDraft = {
         input: document.getElementById("chat-input").value,
-        stored: localStorage.getItem("lexa-chat-draft") || "",
+        stored: getChatDraft() || "",
         sendCalls: sendCalls.length,
         fetchCalls: fetchCalls.length,
       };

@@ -1,4 +1,5 @@
 import asyncio
+import socket
 import types
 import urllib.request
 
@@ -141,7 +142,11 @@ def test_sensitive_files_are_blocked_even_inside_allowed_root(tmp_path):
 
 def test_network_denied_by_default(monkeypatch):
     manager = pm.PluginManager()
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not request")))
+    monkeypatch.setattr(
+        urllib.request,
+        "build_opener",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not request")),
+    )
 
     result = _run(manager._yaml_action_http({"url": "https://example.com"}, {}))
 
@@ -165,7 +170,13 @@ def test_network_allowed_host_works(monkeypatch):
         def read(self):
             return b"ok"
 
-    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: FakeResponse())
+    fake_opener = types.SimpleNamespace(open=lambda req, timeout: FakeResponse())
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *args, **kwargs: fake_opener)
+    monkeypatch.setattr(
+        pm.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 443))],
+    )
     policy = _policy("Network", {"network": {"allowed_hosts": ["example.com"]}})
 
     result = _run(manager._yaml_action_http({"url": "https://example.com/path"}, {}, policy, "Network"))
@@ -176,7 +187,11 @@ def test_network_allowed_host_works(monkeypatch):
 
 def test_network_blocks_disallowed_host_and_localhost(monkeypatch):
     manager = pm.PluginManager()
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not request")))
+    monkeypatch.setattr(
+        urllib.request,
+        "build_opener",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not request")),
+    )
     policy = _policy("Network", {"network": {"allowed_hosts": ["example.com"]}})
 
     disallowed = _run(manager._yaml_action_http({"url": "https://not-example.com"}, {}, policy, "Network"))
@@ -186,6 +201,101 @@ def test_network_blocks_disallowed_host_and_localhost(monkeypatch):
     assert "Host is not allowed" in disallowed["error"]
     assert localhost["success"] is False
     assert "Local/private" in localhost["error"]
+
+
+def test_network_blocks_private_dns_answer_before_request(monkeypatch):
+    manager = pm.PluginManager()
+    monkeypatch.setattr(
+        pm.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 443))],
+    )
+    monkeypatch.setattr(
+        urllib.request,
+        "build_opener",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not request")),
+    )
+    policy = _policy("Network", {"network": {"allowed_hosts": ["example.com"]}})
+
+    result = _run(manager._yaml_action_http({"url": "https://example.com/path"}, {}, policy, "Network"))
+
+    assert result["success"] is False
+    assert "Local/private" in result["error"]
+
+
+def test_network_redirect_handler_revalidates_redirect_target(monkeypatch):
+    policy = _policy("Network", {"network": {"allowed_hosts": ["example.com"]}})
+    handler = pm._PluginRedirectHandler(policy)
+    monkeypatch.setattr(
+        pm.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("DNS should not run")),
+    )
+
+    try:
+        handler.redirect_request(None, None, 302, "Found", {}, "http://localhost:8000/private")
+    except pm.PluginPermissionError as exc:
+        assert "Local/private" in str(exc)
+    else:
+        raise AssertionError("redirect should be denied")
+
+
+def test_python_plugin_sandbox_allows_html_but_blocks_raw_network_imports():
+    assert pm._validate_python_plugin_ast("import html\nvalue = html.unescape('&amp;')\n") is None
+
+    error = pm._validate_python_plugin_ast("import urllib.request\n")
+    assert error == "import 'urllib' is not allowed"
+
+
+def test_builtin_web_search_uses_managed_http_helper(monkeypatch):
+    manager = pm.PluginManager()
+    with manager._data_lock:
+        manager._plugins.clear()
+        manager._tool_index.clear()
+
+    monkeypatch.setattr(
+        pm.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 443))],
+    )
+
+    class FakeResponse:
+        status = 200
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self, _limit=-1):
+            return (
+                '<a rel="nofollow" class="result__a" href="https://example.com">'
+                "Lexa &amp; AI</a>"
+                '<a class="result__snippet">Smart &lt;b&gt;assistant&lt;/b&gt;</a>'
+            ).encode("utf-8")
+
+    def fake_build_opener(*handlers):
+        assert any(isinstance(handler, pm._PluginRedirectHandler) for handler in handlers)
+
+        def open_request(req, timeout):
+            assert req.full_url == "https://html.duckduckgo.com/html/?q=lexa"
+            assert timeout <= pm.PLUGIN_LOAD_TIMEOUT_SEC - 1
+            return FakeResponse()
+
+        return types.SimpleNamespace(open=open_request)
+
+    monkeypatch.setattr(urllib.request, "build_opener", fake_build_opener)
+
+    loaded = manager.load_plugin(pm._get_builtin_plugin_dir() / "web_search.py")
+    result = _run(manager.execute_tool_by_name("web_search", {"query": "lexa", "max_results": 1}))
+
+    assert loaded == "Web Search"
+    assert result["success"] is True
+    assert result["result"]["count"] == 1
+    assert result["result"]["results"][0]["title"] == "Lexa & AI"
+    assert result["result"]["results"][0]["snippet"] == "Smart assistant"
 
 
 def test_env_expansion_denied_by_default_and_allowed_key_works(monkeypatch):

@@ -5,6 +5,7 @@
  */
 
 const path = require("path");
+require("./electron_smoke_safe_io");
 
 if (!process.versions.electron) {
   const { spawnSync } = require("child_process");
@@ -108,13 +109,9 @@ async function main() {
         tick();
       });
 
-      await waitFor(() => window.lexa && typeof sendMessage === "function" && typeof addMessage === "function" && typeof renderPersistedConversationMessages === "function");
+      await waitFor(() => window.lexa && typeof sendMessage === "function" && typeof addMessage === "function" && typeof renderPersistedConversationMessages === "function" && typeof clearChatVolatileState === "function");
       if (typeof clearRenderedChatMessages === "function") clearRenderedChatMessages();
-      try {
-        localStorage.removeItem("lexa-chat-history");
-        localStorage.removeItem("lexa-chat-draft");
-        localStorage.removeItem("lexa-active-conversation");
-      } catch (_) {}
+      clearChatVolatileState();
       if (typeof LexaState !== "undefined") {
         LexaState.set("backendOnline", true);
         LexaState.set("isLoading", false);

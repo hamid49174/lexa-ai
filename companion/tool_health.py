@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger("lexa.tool_health")

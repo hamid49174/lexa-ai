@@ -13,12 +13,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.config import MCP_ENABLED, MCP_CALL_TIMEOUT
 from backend.security import check_rate_limit, audit_log
-from backend.shared import parse_json_body
 from backend.mcp_registry import mcp_registry, MCPError
 
 logger = logging.getLogger("lexa.router_mcp")

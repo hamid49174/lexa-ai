@@ -6,26 +6,67 @@ Thread-safe, async-kompatibel, integriert mit bestehender CompanionEngine.
 
 import asyncio
 import base64
+import ipaddress
 import json
 import logging
 import os
 import re
 import sqlite3
+import socket
 import subprocess
 import threading
-import time
+import urllib.request
 import uuid
-from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urljoin, urlparse
+
+from backend.security import is_dangerous_network_ip
 
 logger = logging.getLogger("lexa.workflows")
 
 _DATA_DIR = os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent))
 DB_PATH = Path(_DATA_DIR) / "lexa_memory.db"
+MAX_TEMPLATE_DEPTH = 5
+WORKFLOW_BACKOFF_AFTER_FAILURES = 3
+WORKFLOW_BACKOFF_AFTER_MORE_FAILURES = 5
+WORKFLOW_AUTO_DISABLE_AFTER_FAILURES = 10
+_thread_local = threading.local()
 
 # ══════════════════════════════════════════════════
+
+
+def _validate_workflow_http_url(url: str) -> str:
+    from backend.security import validate_url
+
+    normalized_url = validate_url(url)
+    parsed = urlparse(normalized_url)
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("HTTP-URL ohne Host nicht erlaubt.")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+    try:
+        resolved = socket.getaddrinfo(hostname, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except (socket.gaierror, OSError):
+        return normalized_url
+
+    for _, _, _, _, sockaddr in resolved:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if is_dangerous_network_ip(ip):
+            raise ValueError(f"Zugriff auf private IP-Adressen nicht erlaubt: {hostname}")
+    return normalized_url
+
+
+class _SafeWorkflowRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urljoin(req.full_url, newurl)
+        safe_target = _validate_workflow_http_url(target)
+        return super().redirect_request(req, fp, code, msg, headers, safe_target)
+
+
 #  DATA MODEL
 # ══════════════════════════════════════════════════
 
@@ -43,6 +84,9 @@ class Workflow:
     last_run: Optional[str] = None
     run_count: int = 0
     last_result: Optional[str] = None  # "success" | "error" | None
+    failure_count: int = 0
+    next_retry_at: Optional[str] = None
+    disabled_reason: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -57,6 +101,9 @@ class Workflow:
             "last_run": self.last_run,
             "run_count": self.run_count,
             "last_result": self.last_result,
+            "failure_count": self.failure_count,
+            "next_retry_at": self.next_retry_at,
+            "disabled_reason": self.disabled_reason,
         }
 
 
@@ -194,6 +241,7 @@ class WorkflowEngine:
         self._scheduler_task: Optional[asyncio.Task] = None
         self._companion_execute = None
         self._tables_ready = False
+        self._db_path: str | None = None
         self._initialized = True
         logger.info("WorkflowEngine initialisiert")
 
@@ -201,12 +249,40 @@ class WorkflowEngine:
 
     def _get_db(self) -> sqlite3.Connection:
         """Thread-lokale DB-Verbindung mit WAL-Modus."""
-        db = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("PRAGMA synchronous=NORMAL")
+        db_path = str(DB_PATH)
+        db = getattr(_thread_local, "workflow_db", None)
+        cached_path = getattr(_thread_local, "workflow_db_path", None)
+        if db is None or cached_path != db_path:
+            self._close_thread_db()
+            db = sqlite3.connect(db_path, check_same_thread=False, timeout=10)
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA synchronous=NORMAL")
+            _thread_local.workflow_db = db
+            _thread_local.workflow_db_path = db_path
+
+        if self._db_path != db_path:
+            with self._db_lock:
+                if self._db_path != db_path:
+                    self._tables_ready = False
+                    self._db_path = db_path
         self._ensure_tables(db)
         return db
+
+    def _release_db(self, db: sqlite3.Connection) -> None:
+        """No-op fuer call sites, die frueher pro Zugriff geschlossen haben."""
+        return None
+
+    def _close_thread_db(self) -> None:
+        """Schliesst die thread-lokale Workflow-DB-Verbindung."""
+        db = getattr(_thread_local, "workflow_db", None)
+        if db is not None:
+            try:
+                db.close()
+            except sqlite3.Error:
+                pass
+        _thread_local.workflow_db = None
+        _thread_local.workflow_db_path = None
 
     def _ensure_tables(self, db: sqlite3.Connection) -> None:
         """Erstellt die Workflow-Tabellen falls nicht vorhanden."""
@@ -227,7 +303,10 @@ class WorkflowEngine:
                     updated_at TEXT DEFAULT (datetime('now', 'localtime')),
                     last_run TEXT,
                     run_count INTEGER DEFAULT 0,
-                    last_result TEXT
+                    last_result TEXT,
+                    failure_count INTEGER DEFAULT 0,
+                    next_retry_at TEXT,
+                    disabled_reason TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS workflow_logs (
@@ -244,9 +323,71 @@ class WorkflowEngine:
                 CREATE INDEX IF NOT EXISTS idx_workflow_logs_wf_id ON workflow_logs(workflow_id);
                 CREATE INDEX IF NOT EXISTS idx_workflow_logs_started ON workflow_logs(started_at);
             """)
+            for column, definition in (
+                ("failure_count", "INTEGER DEFAULT 0"),
+                ("next_retry_at", "TEXT"),
+                ("disabled_reason", "TEXT"),
+            ):
+                try:
+                    db.execute(f"SELECT {column} FROM workflows LIMIT 1")
+                except sqlite3.OperationalError:
+                    db.execute(f"ALTER TABLE workflows ADD COLUMN {column} {definition}")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_workflows_retry ON workflows(enabled, next_retry_at)")
             db.commit()
             self._tables_ready = True
             logger.info("Workflow-Tabellen erstellt/verifiziert")
+
+    def _workflow_backoff_minutes(self, failure_count: int) -> Optional[int]:
+        if failure_count >= WORKFLOW_AUTO_DISABLE_AFTER_FAILURES:
+            return None
+        if failure_count >= WORKFLOW_BACKOFF_AFTER_MORE_FAILURES:
+            return 30
+        if failure_count >= WORKFLOW_BACKOFF_AFTER_FAILURES:
+            return 5
+        return 0
+
+    def _parse_workflow_time(self, value: Any) -> Optional[datetime]:
+        if not value:
+            return None
+        text = str(value).strip()
+        for candidate in (text, text.replace(" ", "T", 1)):
+            try:
+                return datetime.fromisoformat(candidate)
+            except ValueError:
+                continue
+        return None
+
+    def _workflow_in_backoff(self, wf: dict, now: Optional[datetime] = None) -> bool:
+        next_retry = self._parse_workflow_time(wf.get("next_retry_at"))
+        return bool(next_retry and next_retry > (now or datetime.now()))
+
+    def _workflow_backoff_state(self, current_failures: Any, finished_at: datetime) -> dict:
+        try:
+            failure_count = max(0, int(current_failures or 0)) + 1
+        except (TypeError, ValueError):
+            failure_count = 1
+
+        minutes = self._workflow_backoff_minutes(failure_count)
+        if minutes is None:
+            return {
+                "failure_count": failure_count,
+                "next_retry_at": None,
+                "enabled": 0,
+                "disabled_reason": f"Automatisch deaktiviert nach {failure_count} Fehlern in Folge.",
+            }
+        if minutes > 0:
+            return {
+                "failure_count": failure_count,
+                "next_retry_at": (finished_at + timedelta(minutes=minutes)).strftime("%Y-%m-%d %H:%M:%S"),
+                "enabled": 1,
+                "disabled_reason": None,
+            }
+        return {
+            "failure_count": failure_count,
+            "next_retry_at": None,
+            "enabled": 1,
+            "disabled_reason": None,
+        }
 
     # ── CRUD ──────────────────────────────────────
 
@@ -303,7 +444,7 @@ class WorkflowEngine:
         except sqlite3.IntegrityError as e:
             return {"error": f"Workflow konnte nicht erstellt werden: {e}"}
         finally:
-            db.close()
+            self._release_db(db)
 
     def get_workflow(self, workflow_id: str) -> Optional[dict]:
         """Laedt einen einzelnen Workflow."""
@@ -314,7 +455,7 @@ class WorkflowEngine:
                 return None
             return self._row_to_dict(row)
         finally:
-            db.close()
+            self._release_db(db)
 
     def list_workflows(self) -> list[dict]:
         """Listet alle Workflows auf."""
@@ -323,7 +464,7 @@ class WorkflowEngine:
             rows = db.execute("SELECT * FROM workflows ORDER BY created_at DESC").fetchall()
             return [self._row_to_dict(r) for r in rows]
         finally:
-            db.close()
+            self._release_db(db)
 
     def update_workflow(self, workflow_id: str, data: dict) -> dict:
         """Aktualisiert einen bestehenden Workflow."""
@@ -345,6 +486,9 @@ class WorkflowEngine:
             if "enabled" in data:
                 updates.append("enabled = ?")
                 params.append(1 if data["enabled"] else 0)
+                if data["enabled"]:
+                    updates.extend(["failure_count = ?", "next_retry_at = ?", "disabled_reason = ?"])
+                    params.extend([0, None, None])
             if "trigger" in data:
                 trigger_type = data["trigger"].get("type")
                 if trigger_type not in ("schedule", "event", "manual"):
@@ -372,7 +516,7 @@ class WorkflowEngine:
             logger.info(f"Workflow aktualisiert: {workflow_id}")
             return self.get_workflow(workflow_id) or {"error": "Workflow nicht gefunden nach Update."}
         finally:
-            db.close()
+            self._release_db(db)
 
     def delete_workflow(self, workflow_id: str) -> dict:
         """Loescht einen Workflow und seine Logs."""
@@ -392,7 +536,7 @@ class WorkflowEngine:
             logger.info(f"Workflow geloescht: {workflow_id}")
             return {"success": True, "deleted_id": workflow_id}
         finally:
-            db.close()
+            self._release_db(db)
 
     def enable_workflow(self, workflow_id: str) -> dict:
         """Aktiviert einen Workflow."""
@@ -423,7 +567,7 @@ class WorkflowEngine:
                 result.append(d)
             return result
         finally:
-            db.close()
+            self._release_db(db)
 
     # ── Execution ─────────────────────────────────
 
@@ -477,7 +621,20 @@ class WorkflowEngine:
             error_msg = str(e)
             logger.error(f"Workflow-Ausfuehrung fehlgeschlagen: {e}", exc_info=True)
 
-        finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        finished_dt = datetime.now()
+        finished_at = finished_dt.strftime("%Y-%m-%d %H:%M:%S")
+        current_enabled = 1 if wf_data.get("enabled", True) else 0
+        if overall_status == "success":
+            backoff_state = {
+                "failure_count": 0,
+                "next_retry_at": None,
+                "enabled": current_enabled,
+                "disabled_reason": None,
+            }
+        else:
+            backoff_state = self._workflow_backoff_state(wf_data.get("failure_count"), finished_dt)
+            if not current_enabled:
+                backoff_state["enabled"] = 0
 
         # Log speichern und Workflow aktualisieren
         db = self._get_db()
@@ -495,13 +652,28 @@ class WorkflowEngine:
                 ),
             )
             db.execute(
-                """UPDATE workflows SET last_run = ?, run_count = run_count + 1, last_result = ?
+                """UPDATE workflows
+                      SET last_run = ?,
+                          run_count = run_count + 1,
+                          last_result = ?,
+                          failure_count = ?,
+                          next_retry_at = ?,
+                          enabled = ?,
+                          disabled_reason = ?
                    WHERE id = ?""",
-                (finished_at, overall_status, workflow_id),
+                (
+                    finished_at,
+                    overall_status,
+                    backoff_state["failure_count"],
+                    backoff_state["next_retry_at"],
+                    backoff_state["enabled"],
+                    backoff_state["disabled_reason"],
+                    workflow_id,
+                ),
             )
             db.commit()
         finally:
-            db.close()
+            self._release_db(db)
 
         logger.info(f"Workflow beendet: '{wf_data['name']}' — Status: {overall_status}")
         return {
@@ -693,19 +865,17 @@ class WorkflowEngine:
         if not url.startswith(("http://", "https://")):
             raise ValueError(f"Nur HTTP/HTTPS URLs erlaubt, nicht: {url[:50]}")
 
+        url = _validate_workflow_http_url(url)
+
         # SSRF Protection: Block private IPs
         try:
-            import urllib.parse
-            import ipaddress
-            import socket
-            hostname = urllib.parse.urlparse(url).hostname
+            hostname = urlparse(url).hostname
             if hostname:
-                resolved = socket.getaddrinfo(hostname, None)
-                for family, stype, proto, canonname, sockaddr in resolved:
+                resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                for _, _, _, _, sockaddr in resolved:
                     ip = ipaddress.ip_address(sockaddr[0])
-                    if ip.is_private or ip.is_loopback or ip.is_link_local:
+                    if is_dangerous_network_ip(ip):
                         raise ValueError(f"Zugriff auf private IP-Adressen nicht erlaubt: {hostname}")
-                    break  # Only check first result
         except (socket.gaierror, OSError):
             pass  # DNS resolution failed — let the request fail naturally
 
@@ -725,7 +895,8 @@ class WorkflowEngine:
 
         try:
             def _do_request():
-                with urllib.request.urlopen(req, timeout=30) as resp:
+                opener = urllib.request.build_opener(_SafeWorkflowRedirectHandler)
+                with opener.open(req, timeout=30) as resp:
                     return {
                         "status_code": resp.status,
                         "headers": dict(resp.headers),
@@ -762,6 +933,8 @@ class WorkflowEngine:
         def _replacer(match):
             expr = match.group(1).strip()
             parts = expr.split(".")
+            if len(parts) > MAX_TEMPLATE_DEPTH:
+                return match.group(0)
 
             # Navigate context
             value = context
@@ -788,20 +961,34 @@ class WorkflowEngine:
         Unterstuetzt: ==, !=, >, <, >=, <=, 'contains', 'is_empty', 'not_empty'
         """
         expr = expr.strip()
+        lower_expr = expr.lower()
 
         # Boolean keywords
-        if expr.lower() in ("true", "1", "yes", "ja"):
+        if lower_expr in ("true", "1", "yes", "ja"):
             return True
-        if expr.lower() in ("false", "0", "no", "nein", ""):
+        if lower_expr in ("false", "0", "no", "nein", ""):
             return False
 
         # "is_empty" / "not_empty" check
-        if "is_empty" in expr:
-            val = expr.replace("is_empty", "").strip()
-            return not val or val in ("None", "null", "")
-        if "not_empty" in expr:
-            val = expr.replace("not_empty", "").strip()
-            return bool(val) and val not in ("None", "null", "")
+        def _is_empty_value(value: str) -> bool:
+            normalized = value.strip()
+            return not normalized or normalized.lower() in ("none", "null")
+
+        tokens = expr.split()
+        lower_tokens = [token.lower() for token in tokens]
+        if lower_tokens == ["is_empty"]:
+            return True
+        if lower_tokens == ["not_empty"]:
+            return False
+        if len(tokens) == 2:
+            if lower_tokens[0] == "is_empty":
+                return _is_empty_value(tokens[1])
+            if lower_tokens[1] == "is_empty":
+                return _is_empty_value(tokens[0])
+            if lower_tokens[0] == "not_empty":
+                return not _is_empty_value(tokens[1])
+            if lower_tokens[1] == "not_empty":
+                return not _is_empty_value(tokens[0])
 
         # Comparison operators
         for op in (">=", "<=", "!=", "==", ">", "<"):
@@ -812,16 +999,24 @@ class WorkflowEngine:
                     try:
                         left_num = float(left)
                         right_num = float(right)
-                        if op == ">=": return left_num >= right_num
-                        if op == "<=": return left_num <= right_num
-                        if op == "!=": return left_num != right_num
-                        if op == "==": return left_num == right_num
-                        if op == ">": return left_num > right_num
-                        if op == "<": return left_num < right_num
+                        if op == ">=":
+                            return left_num >= right_num
+                        if op == "<=":
+                            return left_num <= right_num
+                        if op == "!=":
+                            return left_num != right_num
+                        if op == "==":
+                            return left_num == right_num
+                        if op == ">":
+                            return left_num > right_num
+                        if op == "<":
+                            return left_num < right_num
                     except ValueError:
                         # String comparison
-                        if op == "==": return left == right
-                        if op == "!=": return left != right
+                        if op == "==":
+                            return left == right
+                        if op == "!=":
+                            return left != right
                         return False
                 break
 
@@ -870,7 +1065,7 @@ class WorkflowEngine:
             if self._event_handlers:
                 logger.info(f"Event-Handler geladen: {dict((k, len(v)) for k, v in self._event_handlers.items())}")
         finally:
-            db.close()
+            self._release_db(db)
 
     async def _scheduler_loop(self) -> None:
         """Hintergrund-Loop: Prueft alle 30s ob Schedule-Workflows faellig sind."""
@@ -886,7 +1081,7 @@ class WorkflowEngine:
                     ).fetchall()
                     workflows = [self._row_to_dict(r) for r in rows]
                 finally:
-                    db.close()
+                    self._release_db(db)
 
                 now = datetime.now()
                 now_str = now.strftime("%Y-%m-%d %H:%M")
@@ -894,6 +1089,8 @@ class WorkflowEngine:
                 for wf in workflows:
                     trigger = wf.get("trigger", {})
                     if trigger.get("type") != "schedule":
+                        continue
+                    if self._workflow_in_backoff(wf, now):
                         continue
 
                     should_run = False
@@ -942,6 +1139,7 @@ class WorkflowEngine:
         if self._scheduler_task and not self._scheduler_task.done():
             self._scheduler_task.cancel()
             self._scheduler_task = None
+            self._close_thread_db()
             logger.info("Workflow-Scheduler gestoppt")
 
     # ── Events ────────────────────────────────────
@@ -961,6 +1159,8 @@ class WorkflowEngine:
         for wf_id in handler_ids:
             wf = self.get_workflow(wf_id)
             if not wf or not wf.get("enabled"):
+                continue
+            if self._workflow_in_backoff(wf):
                 continue
 
             # Threshold-Check (z.B. CPU > 90%)
@@ -1022,6 +1222,10 @@ class WorkflowEngine:
             except (json.JSONDecodeError, TypeError):
                 d["steps"] = []
         d["enabled"] = bool(d.get("enabled", 0))
+        try:
+            d["failure_count"] = max(0, int(d.get("failure_count") or 0))
+        except (TypeError, ValueError):
+            d["failure_count"] = 0
         return d
 
     def get_status(self) -> dict:
@@ -1035,7 +1239,7 @@ class WorkflowEngine:
                 "SELECT finished_at, status FROM workflow_logs ORDER BY finished_at DESC LIMIT 1"
             ).fetchone()
         finally:
-            db.close()
+            self._release_db(db)
 
         return {
             "scheduler_running": self._scheduler_task is not None and not self._scheduler_task.done(),

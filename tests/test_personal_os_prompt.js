@@ -6,7 +6,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const src = fs.readFileSync(
+const personalOsSrc = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "personal_os.js"),
   "utf8"
 );
@@ -14,23 +14,63 @@ const displayHelpersSrc = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "personal_os_display_helpers.js"),
   "utf8"
 );
+const promptHelpersSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "personal_os_prompt_helpers.js"),
+  "utf8"
+);
+const domHelpersSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "personal_os_dom_helpers.js"),
+  "utf8"
+);
+const stateHelpersSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "personal_os_state_helpers.js"),
+  "utf8"
+);
+const graphHelpersSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "personal_os_graph_helpers.js"),
+  "utf8"
+);
 const reviewHelpersSrc = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "personal_os_review_helpers.js"),
   "utf8"
 );
-const combinedPersonalOsSrc = `${displayHelpersSrc}\n${reviewHelpersSrc}\n${src}`;
+const renderersSrc = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "personal_os_renderers.js"),
+  "utf8"
+);
+const src = [
+  displayHelpersSrc,
+  promptHelpersSrc,
+  domHelpersSrc,
+  stateHelpersSrc,
+  graphHelpersSrc,
+  reviewHelpersSrc,
+  renderersSrc,
+  personalOsSrc,
+].join("\n");
+const combinedPersonalOsSrc = src;
 const html = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "index.html"),
   "utf8"
 );
-const css = fs.readFileSync(
+const viewsCss = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "css", "views.css"),
   "utf8"
 );
-const overridesCss = fs.readFileSync(
+const viewsPersonalOsCss = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "css", "views_personal_os.css"),
+  "utf8"
+);
+const css = `${viewsCss}\n${viewsPersonalOsCss}`;
+const overridesBaseCss = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "src", "css", "overrides.css"),
   "utf8"
 );
+const overridesPersonalOsCss = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "src", "css", "overrides_personal_os.css"),
+  "utf8"
+);
+const overridesCss = `${overridesBaseCss}\n${overridesPersonalOsCss}`;
 const preload = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "preload.js"),
   "utf8"
@@ -414,15 +454,24 @@ assert("next card loads pending filter when pending draft is not visible", posNe
   counts: { pending: 1 },
   drafts: [{ title: "Approved", path: "06_Inbox/Drafts/approved.md", approval: "approved" }],
 }) === "load-pending");
-assert("next card is rendered as actionable button", src.includes("data-next-draft-path") && src.includes('data-next-action="${escapeHtml(nextCardAction)}"') && src.includes("pos-next-card"));
+assert("next card is rendered as actionable button", src.includes("{ nextDraftPath, nextAction: nextCardAction }") && src.includes("pos-next-card"));
 assert("actionable Personal OS cards reset native button chrome", css.includes(".pos-next-card,\n.pos-action-card") && css.includes("appearance: none") && css.includes("-webkit-appearance: none"));
-assert("status metric cards can switch draft filters", src.includes('data-queue-filter="pending"') && src.includes('data-queue-filter="approved"') && src.includes('data-queue-filter="rejected"') && src.includes('data-queue-filter="all"') && src.includes("loadPersonalOsQueueFilter"));
+assert("status metric cards can switch draft filters", src.includes('createPersonalOsInfoCard(posUiText("pos.cardPending", "PENDING"), String(pending), draftSub, pending ? "pos-warn" : "pos-good", "pending")') && src.includes('createPersonalOsInfoCard(posUiText("pos.cardApproved", "APPROVED"), String(approved), approvedSub, approved ? "pos-good" : "", "approved")') && src.includes('createPersonalOsInfoCard(posUiText("pos.cardRejected", "REJECTED"), String(rejected), rejectedSub, rejected ? "pos-bad" : "", "rejected")') && src.includes('createPersonalOsInfoCard(posUiText("pos.cardInvalid", "INVALID"), String(invalid), invalidSub, invalid ? "pos-bad" : "pos-good", "all")') && src.includes("loadPersonalOsQueueFilter"));
 assert("active draft rows expose current selection", src.includes('row.setAttribute("aria-current"') && css.includes(".pos-draft-row.active") && css.includes("inset 3px 0 0 rgba(165, 154, 255, 0.9)"));
 assert("Personal OS cockpit uses calmer product surfaces", css.includes("#personal-os-view .info-card") && css.includes("box-shadow: none") && css.includes(".pos-panel") && css.includes("background: rgba(12, 12, 20, 0.7)") && css.includes("border-radius: 8px"));
 assert("Personal OS context search stays out of the default path", html.includes('class="pos-panel pos-query-panel pos-collapsible-panel"') && html.includes('class="pos-panel-summary"') && html.includes("Nur öffnen, wenn du Wissen aus dem OS brauchst.") && src.includes('panel.tagName === "DETAILS") panel.open = true') && overridesCss.includes(".pos-collapsible-panel") && overridesCss.includes(".pos-panel-summary::after"));
 assert("empty draft states clear stale detail controls", src.includes("function clearPersonalOsDraftDetail") && src.includes('posUiText("pos.draftTitle"') && src.includes("button.disabled = true"));
 assert("Personal OS draft detail fallbacks are localized", combinedPersonalOsSrc.includes("function posUiText") && src.includes('posUiText("pos.noDraftSelected"') && src.includes('posUiText("pos.draftLoadFailed"') && src.includes('posUiText("pos.applyApprovedOnly"') && src.includes('posUiText("pos.applyApprovedTitle"') && i18nDe.includes('"pos.noDraftSelected"') && i18nEn.includes('"pos.noDraftSelected"') && i18nDe.includes('"pos.applyApprovedTitle"') && i18nEn.includes('"pos.applyApprovedTitle"'));
-assert("empty draft detail messages are escaped", src.includes("escapeHtml(emptyMessage)") && !src.includes("${message}</div>") && !src.includes("${emptyMessage}</div>"));
+assert("empty draft detail messages use safe text nodes", src.includes("function createPersonalOsEmptyState") && src.includes("empty.textContent = message || \"\"") && src.includes("setPersonalOsEmptyState(detail, emptyMessage)") && !src.includes("${message}</div>") && !src.includes("${emptyMessage}</div>"));
+assert("Personal OS empty and loading states use safe DOM helpers", src.includes("setPersonalOsEmptyState(list, posDraftEmptyMessage(filterValue))") && src.includes("setPersonalOsEmptyState(target, posUiText(\"pos.noQueryMatches\"") && src.includes("summary.replaceChildren();") && src.includes("setPersonalOsEmptyState(stage, posUiText(\"pos.loadingContextMap\"") && src.includes("setPersonalOsEmptyState(list, posUiText(\"pos.loadingDraftQueue\"") && src.includes("setPersonalOsEmptyState(detail, posUiText(\"pos.noDraftSelected\"") && !src.includes("list.innerHTML = `<div class=\"empty-state\"") && !src.includes("detail.innerHTML = `<div class=\"empty-state\"") && !src.includes("stage.innerHTML = `<div class=\"empty-state\""));
+assert("Personal OS home grid uses safe DOM helpers", src.includes("function createPersonalOsHomeAction") && src.includes("button.dataset.posHomeAction = action") && src.includes("function createPersonalOsInfoCard") && src.includes("card.dataset.queueFilter = queueFilter") && src.includes("function createPersonalOsCapabilityItem") && src.includes("grid.replaceChildren(homeCard)") && !src.includes("grid.innerHTML = `"));
+assert("Personal OS draft and query rows use safe DOM helpers", src.includes("function createPersonalOsDraftRow") && src.includes("title.textContent = posText(draft.title") && src.includes("subtitle.textContent = posDraftStatusText(draft.approval)") && src.includes("pill.textContent = posText(draft.approval") && src.includes("const row = createPersonalOsDraftRow(draft, PersonalOSState.selectedPath)") && src.includes("function createPersonalOsQueryMatchRow") && src.includes("path.textContent = posText(match.path)") && src.includes("pill.textContent = posText(match.memory_level || match.type") && src.includes("const row = createPersonalOsQueryMatchRow(match)") && !src.includes('row.className = "pos-query-row";\n      row.innerHTML = `'));
+assert("Personal OS read payloads use safe DOM helpers", src.includes("function createPersonalOsQueryDocumentView") && src.includes("const fragment = document.createDocumentFragment()") && src.includes("titleEl.textContent = title") && src.includes("pathEl.textContent = posText(payload.path)") && src.includes("tagEl.textContent = tags") && src.includes("body.textContent = posText(payload.body)") && src.includes("target.replaceChildren(createPersonalOsQueryDocumentView(payload, title, tags))") && src.includes("setPersonalOsEmptyState(target, posErrorMessage(payload, posUiText(\"pos.contextPackFailed\"") && src.includes("setPersonalOsEmptyState(target, posErrorMessage(payload, posUiText(\"pos.obsidianContextFailed\"") && src.includes("setPersonalOsEmptyState(target, posErrorMessage(payload, posUiText(\"pos.codeLoopFailed\"") && !src.includes("target.innerHTML = `<div class=\"empty-state\">${escapeHtml(posErrorMessage(payload, posUiText(\"pos.contextPackFailed\"") && !src.includes("target.innerHTML = `<div class=\"empty-state\">${escapeHtml(posErrorMessage(payload, posUiText(\"pos.obsidianContextFailed\"") && !src.includes("target.innerHTML = `<div class=\"empty-state\">${escapeHtml(posErrorMessage(payload, posUiText(\"pos.codeLoopFailed\""));
+assert("Personal OS context pack render uses safe DOM helpers", src.includes("function createPersonalOsContextPackView") && src.includes("function createPersonalOsRelatedFileRow") && src.includes("row.dataset.relatedPath = posText(file.path)") && src.includes("preview.textContent = posContextFilesPreview(files)") && src.includes("target.replaceChildren(createPersonalOsContextPackView(query, files, errors, graphLabel, graphClass))") && !src.includes('data-action="personalOsSendContextPackToChat">${escapeHtml') && !src.includes('data-related-path="${escapeHtml(posText(file.path))}"'));
+assert("Personal OS Obsidian context render uses safe DOM helpers", src.includes("function createPersonalOsObsidianContextView") && src.includes("function createPersonalOsRelatedInfoRow") && src.includes("chatButton.dataset.action = \"personalOsSendObsidianContextToChat\"") && src.includes("quickFindList.appendChild(createPersonalOsRelatedInfoRow(posText(item.need, \"Context\"), posText(item.goTo, \"-\")))") && src.includes("preview.textContent = posContextFilesPreview(files)") && src.includes("target.replaceChildren(createPersonalOsObsidianContextView(vault, counts, product, quickFind, surfaces, files))") && !src.includes('data-action="personalOsSendObsidianContextToChat">${escapeHtml') && !src.includes('${quickFind.slice(0, 10).map((item) => `'));
+assert("Personal OS Code Loop render uses safe DOM helpers", src.includes("function createPersonalOsCodeLoopView") && src.includes("button.dataset.action = action") && src.includes("card.dataset.codeLoopAction = \"load-pending\"") && src.includes("row.dataset.codeLoopDraft = posText(draft.path)") && src.includes("row.dataset.codeLoopFile = posText(file.path)") && src.includes("preview.textContent = personalOsCodeLoopPrompt(payload)") && src.includes("target.replaceChildren(createPersonalOsCodeLoopView(payload, diagnostics, draftRows, contextFiles, raw, evidence, meta))") && !src.includes('data-action="personalOsSendCodeLoopToAgent">${escapeHtml') && !src.includes('data-code-loop-draft="${escapeHtml(posText(draft.path))}"') && !src.includes('data-code-loop-file="${escapeHtml(posText(file.path))}"'));
+assert("Personal OS draft detail render uses safe DOM helpers", src.includes("function createPersonalOsDraftDetailView") && src.includes("bodyEl.textContent = body") && src.includes("createPosPromptHint(payload, review)") && src.includes("createPosApplyHint(review)") && src.includes("detail.replaceChildren(createPersonalOsDraftDetailView(payload, review, body, approval, tags, related))") && !src.includes("detail.innerHTML = `"));
+assert("Personal OS review hint helpers build DOM nodes", reviewHelpersSrc.includes("function createPosApplyHint") && reviewHelpersSrc.includes("function createPosPromptHint") && reviewHelpersSrc.includes('wrapper.className = "pos-prompt-hint"') && reviewHelpersSrc.includes('createPersonalOsTextElement("div", "pos-label", posUiText("pos.labelChatReviewPrompt"'));
 assert("Personal OS apply-draft modal copy is localized", src.includes('posUiText("pos.applyDraftTitle"') && src.includes('posUiText("pos.applyReasonLabel"') && src.includes('posUiText("pos.applyDefaultTarget"') && src.includes('posUiText("pos.applyReasonDefault"') && src.includes('posUiText("pos.applyDraftAction"') && src.includes('posUiText("pos.applyFailed"') && src.includes('posUiText("pos.applySuccess"') && i18nDe.includes('"pos.applyDraftTitle"') && i18nEn.includes('"pos.applyDraftTitle"') && i18nDe.includes('"pos.applySuccess"') && i18nEn.includes('"pos.applySuccess"'));
 assert("Personal OS draft loading and search states are localized", src.includes('posUiText("pos.loadingDraftQueue"') && src.includes('posUiText("pos.searchingDrafts"') && src.includes('posUiText("pos.noDraftSearchResult"') && src.includes('posUiText("pos.draftFoundLoaded"') && src.includes('posUiText("pos.draftsFoundSelect"') && i18nDe.includes('"pos.loadingDraftQueue"') && i18nEn.includes('"pos.loadingDraftQueue"') && i18nDe.includes('"pos.draftsFoundSelect"') && i18nEn.includes('"pos.draftsFoundSelect"'));
 assert("Personal OS find-draft modal copy is localized", src.includes('posUiText("pos.findDraftTitle"') && src.includes('posUiText("pos.findDraftSearchLabel"') && src.includes('posUiText("pos.findDraftSearchPlaceholder"') && src.includes('posUiText("pos.findDraftAction"') && i18nDe.includes('"pos.findDraftTitle"') && i18nEn.includes('"pos.findDraftTitle"') && i18nDe.includes('"pos.findDraftAction"') && i18nEn.includes('"pos.findDraftAction"'));
@@ -518,6 +567,7 @@ assert("builds Obsidian prompt with quick-find routes", obsidianPrompt.includes(
 assert("keeps Obsidian prompt under chat limit", obsidianPrompt.length <= posChatPromptLimit(), `len=${obsidianPrompt.length}`);
 assert("personal OS view exposes Obsidian context action", html.includes('data-action="personalOsLoadObsidianContext"') && src.includes("function personalOsLoadObsidianContext") && src.includes("personalOsObsidianContext"));
 assert("preload exposes Obsidian context endpoint", preload.includes("personalOsObsidianContext") && preload.includes("/personal-os/obsidian-context"));
+assert("Obsidian context uses shared chat context when available", src.includes("personalOsSharedContext") && src.includes("shared?.fresh") && src.includes('sharedTopic || "lexa hermes obsidian"'));
 assert("renders Obsidian context card and chat handoff", src.includes("function renderPersonalOsObsidianContext") && src.includes("personalOsSendObsidianContextToChat") && src.includes("selectedObsidianContext"));
 assert("i18n includes Obsidian context labels", i18nDe.includes('"pos.titleObsidianContext"') && i18nEn.includes('"pos.obsidianContextPromptReady"'));
 
@@ -536,7 +586,7 @@ assert("normalizes code loop approval counts", codeLoopCounts.approved === 2 && 
 assert("normalizes code loop worker failures", codeLoopCounts.workerFailures === 1);
 assert("normalizes code loop graph counts", codeLoopCounts.graphFiles === 3 && codeLoopCounts.graphEdges === 4);
 assert("marks partial code loop graph", codeLoopCounts.graphOk === false && codeLoopCounts.graphErrors === 2);
-assert("code loop pending card can load review queue", src.includes('data-code-loop-action="load-pending"') && src.includes("loadPersonalOsPendingQueue"));
+assert("code loop pending card can load review queue", src.includes('card.dataset.codeLoopAction = "load-pending"') && src.includes("loadPersonalOsPendingQueue"));
 const codeLoopDraftRows = posCodeLoopDraftRows([
   { title: "Approved", approval: "approved", path: "approved.md" },
   { title: "Rejected", approval: "rejected", path: "rejected.md" },
@@ -565,12 +615,15 @@ assert("labels graph view as context map", html.includes(">Context Map<"));
 assert("uses context map accessibility label", src.includes('posUiText("pos.graphAriaLabel"') && i18nDe.includes('"pos.graphAriaLabel"') && i18nEn.includes('"pos.graphAriaLabel"'));
 assert("uses context map label in status and detail UI", src.includes("Context Map Errors") && src.includes("Context Map failed"));
 assert("does not leave standalone graph label in visible cards", !src.includes('<div class="pos-label">Graph</div>'));
-assert("context map prioritizes navigable rows before mini network", src.indexOf('<div class="pos-graph-explorer">') > -1 && src.indexOf('<div class="pos-graph-explorer">') < src.indexOf('<svg class="pos-graph-svg"'));
+assert("context map prioritizes navigable rows before mini network", src.indexOf('explorer.className = "pos-graph-explorer"') > -1 && src.indexOf('explorer.className = "pos-graph-explorer"') < src.indexOf('class: "pos-graph-svg"'));
 assert("context map network is labeled as a full relationship map", src.includes('posUiText("pos.labelRelationshipMap"') && src.includes('posUiText("pos.graphShown"'));
-assert("context map renders a visible legend", src.includes('class="pos-graph-legend"') && src.includes("pos-graph-legend-file") && css.includes(".pos-graph-legend"));
+assert("context map renders a visible legend", src.includes('legend.className = "pos-graph-legend"') && src.includes("pos-graph-legend-file") && css.includes(".pos-graph-legend"));
 assert("context map uses a larger readable stage", src.includes("const width = 1160") && src.includes("const height = 430") && css.includes("height: 430px"));
 assert("context map tag hubs are actionable searches", src.includes("dataset.graphTag") && src.includes("personalOsSearchTag()") && css.includes(".pos-graph-hub-action"));
-assert("context map supports focus highlights for related nodes", src.includes("function setupPersonalOsGraphFocus") && src.includes('data-node-id="${escapeHtml(node.id)}"') && src.includes('data-source="${escapeHtml(edge.source)}"') && overridesCss.includes(".pos-graph-node.is-active") && overridesCss.includes(".pos-graph-edge.is-active"));
+assert("context map explorer rows use safe DOM helpers", src.includes("function createPersonalOsGraphFileRow") && src.includes("function createPersonalOsGraphHubRow") && src.includes("title.textContent = posGraphLabel(node)") && src.includes("path.textContent = posText(node.path || node.id)") && src.includes("title.textContent = posGraphDisplayName(node, 34)") && src.includes("pill.textContent = String(Number(node.degree || 0))") && src.includes("rows.replaceChildren();") && src.includes("hubs.replaceChildren();") && src.includes("const row = createPersonalOsGraphFileRow(node)") && src.includes("const row = createPersonalOsGraphHubRow(node, tagQuery)") && !src.includes("rows.innerHTML = \"\"") && !src.includes("hubs.innerHTML = \"\"") && !src.includes("row.innerHTML = `"));
+assert("context map summary uses safe DOM helpers", src.includes("function createPersonalOsPill") && src.includes("pill.textContent = text") && src.includes("function renderPersonalOsGraphSummary") && src.includes("summary.replaceChildren(...pills)") && src.includes("renderPersonalOsGraphSummary(summary, payload, counts, nodes, edges, visibleNodes, visibleEdges, health)") && !src.includes("summary.innerHTML = `"));
+assert("context map network uses safe SVG helpers", src.includes("function createPersonalOsSvgElement") && src.includes("function createPersonalOsGraphStageView") && src.includes("stage.replaceChildren(createPersonalOsGraphStageView(health, width, height, visibleNodes, visibleEdges, positions))") && !src.includes("stage.innerHTML = `"));
+assert("context map supports focus highlights for related nodes", src.includes("function setupPersonalOsGraphFocus") && src.includes('"data-node-id": node.id') && src.includes('"data-source": edge.source') && overridesCss.includes(".pos-graph-node.is-active") && overridesCss.includes(".pos-graph-edge.is-active"));
 
 console.log("\nposGraphRankedNodes():");
 const graphNodes = [

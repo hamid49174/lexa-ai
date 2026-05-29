@@ -61,24 +61,53 @@ def _get_rapid_ocr():
 #  OCR ENGINES
 # ══════════════════════════════════════════════════
 
-def _ocr_rapidocr(image_bytes: bytes, lang: str = "en") -> Optional[str]:
-    """Run OCR via rapidocr-onnxruntime. Returns extracted text or None."""
+def _ocr_rapidocr_details(image_bytes: bytes, lang: str = "en") -> tuple[Optional[str], list[dict]]:
+    """Run OCR via rapidocr-onnxruntime. Returns extracted text and boxes."""
     ocr = _get_rapid_ocr()
     if ocr is None:
-        return None
+        return None, []
     try:
         img = Image.open(io.BytesIO(image_bytes))
         import numpy as np
         img_array = np.array(img)
         result, _ = ocr(img_array)
         if result is None:
-            return ""
+            return "", []
         # result is list of [box, text, confidence]
-        lines = [item[1] for item in result if item and len(item) >= 2]
-        return "\n".join(lines)
+        lines = []
+        blocks = []
+        for item in result:
+            if not item or len(item) < 2:
+                continue
+            box = item[0]
+            text = str(item[1] or "")
+            confidence = float(item[2]) if len(item) >= 3 else None
+            lines.append(text)
+            try:
+                xs = [float(point[0]) for point in box]
+                ys = [float(point[1]) for point in box]
+                blocks.append({
+                    "text": text,
+                    "confidence": confidence,
+                    "bbox": {
+                        "left": min(xs),
+                        "top": min(ys),
+                        "right": max(xs),
+                        "bottom": max(ys),
+                    },
+                })
+            except Exception:
+                continue
+        return "\n".join(lines), blocks
     except Exception as e:
         logger.warning(f"RapidOCR Fehler: {e}")
-        return None
+        return None, []
+
+
+def _ocr_rapidocr(image_bytes: bytes, lang: str = "en") -> Optional[str]:
+    """Run OCR via rapidocr-onnxruntime. Returns extracted text or None."""
+    text, _blocks = _ocr_rapidocr_details(image_bytes, lang)
+    return text
 
 
 def _ocr_tesseract(image_bytes: bytes, lang: str = "eng") -> Optional[str]:
@@ -167,7 +196,7 @@ def ocr_screenshot(image_bytes: bytes = None, window_title: str = None) -> dict:
         if image_bytes is None:
             image_bytes = _capture_for_ocr(window_title)
 
-        text, engine = _run_ocr(image_bytes)
+        text, engine, blocks = _run_ocr_with_blocks(image_bytes)
         duration_ms = round((time.monotonic() - start) * 1000)
 
         if text is None:
@@ -184,6 +213,7 @@ def ocr_screenshot(image_bytes: bytes = None, window_title: str = None) -> dict:
                 "word_count": word_count,
                 "engine": engine,
                 "duration_ms": duration_ms,
+                "blocks": blocks,
             },
         }
     except Exception as e:
@@ -201,7 +231,7 @@ def ocr_from_bytes(image_bytes: bytes, lang: str = "en") -> dict:
         {"success": True, "data": {"text": "...", "word_count": N, "engine": "...", "duration_ms": X}}
     """
     start = time.monotonic()
-    text, engine = _run_ocr(image_bytes, lang)
+    text, engine, blocks = _run_ocr_with_blocks(image_bytes, lang)
     duration_ms = round((time.monotonic() - start) * 1000)
 
     if text is None:
@@ -218,26 +248,33 @@ def ocr_from_bytes(image_bytes: bytes, lang: str = "en") -> dict:
             "word_count": word_count,
             "engine": engine,
             "duration_ms": duration_ms,
+            "blocks": blocks,
         },
     }
 
 
 def _run_ocr(image_bytes: bytes, lang: str = "en") -> tuple:
     """Try OCR engines in order. Returns (text, engine_name) or (None, None)."""
+    text, engine, _blocks = _run_ocr_with_blocks(image_bytes, lang)
+    return text, engine
+
+
+def _run_ocr_with_blocks(image_bytes: bytes, lang: str = "en") -> tuple:
+    """Try OCR engines in order. Returns (text, engine_name, blocks)."""
     # 1. Try RapidOCR (fastest, most accurate)
     if _RAPIDOCR_AVAILABLE:
-        text = _ocr_rapidocr(image_bytes, lang)
+        text, blocks = _ocr_rapidocr_details(image_bytes, lang)
         if text is not None:
-            return text, "rapidocr"
+            return text, "rapidocr", blocks
 
     # 2. Fallback: pytesseract
     if _TESSERACT_AVAILABLE:
         tess_lang = "deu+eng" if lang == "de" else "eng"
         text = _ocr_tesseract(image_bytes, tess_lang)
         if text is not None:
-            return text, "pytesseract"
+            return text, "pytesseract", []
 
-    return None, None
+    return None, None, []
 
 
 def get_ocr_status() -> dict:

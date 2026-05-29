@@ -15,7 +15,7 @@ _translations: dict[str, dict[str, str]] = {}
 
 def init(lang: str = "de") -> None:
     """Load translation files from backend/i18n/ directory."""
-    global _lang, _translations
+    global _lang
     _lang = lang
     i18n_dir = Path(__file__).parent
     for locale in ["de", "en"]:

@@ -197,6 +197,7 @@ function responseWithHeaders({ ok, status, payload, headers = {} }) {
   assert("status offline fallback is marked ok false", personalOsSection.includes('return { ok: false, status: "offline"'));
   assert("draft queue offline fallback includes direct error", personalOsSection.includes('error: "Personal OS nicht erreichbar", errors:'));
   assert("read-only cockpit endpoints retry transient rate limits", retryHelperCount >= 3 && personalOsSection.includes("personalOsStatus: async") && personalOsSection.includes("personalOsDiagnostics: async") && personalOsSection.includes("personalOsDrafts: async") && personalOsSection.includes("statuses: [429]") && personalOsSection.includes("attempts: 2"));
+  assert("shared chat context is exposed as read-only Personal OS bridge", personalOsSection.includes("personalOsSharedContext: async") && personalOsSection.includes("/personal-os/shared-context") && src.includes('bridgePolicy("personalOsSharedContext", "low", "read"'));
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
   if (failed > 0) process.exit(1);

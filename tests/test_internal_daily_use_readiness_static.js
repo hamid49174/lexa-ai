@@ -9,7 +9,10 @@ const path = require("path");
 const root = path.join(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "frontend", "src", "index.html"), "utf8");
 const layoutCss = fs.readFileSync(path.join(root, "frontend", "src", "css", "layout.css"), "utf8");
-const viewsCss = fs.readFileSync(path.join(root, "frontend", "src", "css", "views.css"), "utf8");
+const viewsCss = [
+  fs.readFileSync(path.join(root, "frontend", "src", "css", "views.css"), "utf8"),
+  fs.readFileSync(path.join(root, "frontend", "src", "css", "views_settings.css"), "utf8"),
+].join("\n");
 const matrix = fs.readFileSync(path.join(root, "docs", "product", "feature_readiness_matrix.md"), "utf8");
 const websiteSnapshot = fs.readFileSync(path.join(root, "docs", "product", "website_external_hardening_snapshot.md"), "utf8");
 

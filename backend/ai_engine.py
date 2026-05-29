@@ -21,6 +21,8 @@ from collections import OrderedDict
 from datetime import datetime
 from typing import Generator, Optional
 
+from backend.conversation_summary import extract_keywords as _extract_keywords  # noqa: F401
+from backend.conversation_summary import summarize_messages_local as _summarize_messages_local
 from backend.i18n import t
 from backend.lexa_voice import LEXA_SYSTEM_PROMPT_CORE, lexa_user_error
 
@@ -227,24 +229,25 @@ def _estimate_tokens(char_count: int) -> int:
 
 def _check_token_budget(system_content: str, messages: list[dict]) -> list[dict]:
     """Check token budget and trim history if needed. Returns (possibly trimmed) messages."""
+    message_snapshot = list(messages or [])
     system_tokens = _estimate_tokens(len(system_content))
     total_tokens = system_tokens
 
-    for msg in messages:
+    for msg in message_snapshot:
         total_tokens += _estimate_tokens(len(msg.get("content", "")))
 
     if total_tokens <= _TOKEN_WARN_THRESHOLD:
-        return messages
+        return message_snapshot
 
     # Actively trim history from the front until under budget
-    trimmed = list(messages)
+    trimmed = list(message_snapshot)
     while len(trimmed) > 2 and total_tokens > _TOKEN_WARN_THRESHOLD:
         removed = trimmed.pop(0)
         total_tokens -= _estimate_tokens(len(removed.get("content", "")))
 
     logger.warning(
         f"Token budget trimmed: ~{total_tokens} tokens "
-        f"(removed {len(messages) - len(trimmed)} older messages, "
+        f"(removed {len(message_snapshot) - len(trimmed)} older messages, "
         f"threshold: {_TOKEN_WARN_THRESHOLD})"
     )
     return trimmed
@@ -263,197 +266,15 @@ SYSTEM_PROMPT = SYSTEM_PROMPT_CORE
 
 
 # ══════════════════════════════════════════════════
-#  KEYWORD EXTRACTION (used by memory search + tool context)
+# ══════════════════════════════════════════════════
+#  CONVERSATION CONTEXT HELPERS
 # ══════════════════════════════════════════════════
 
-# German stop words for keyword extraction
-_STOP_WORDS = frozenset({
-    "der", "die", "das", "den", "dem", "des",
-    "ein", "eine", "einer", "einem", "einen", "eines",
-    "und", "oder", "aber", "doch", "wenn", "weil", "dass", "als", "wie",
-    "nicht", "kein", "keine", "keinen", "keinem", "keiner",
-    "ich", "du", "er", "sie", "es", "wir", "ihr", "mir", "mich", "dir", "dich",
-    "sich", "uns", "euch", "ihm", "ihn", "ihnen", "mein", "dein", "sein",
-    "bitte", "danke", "kannst", "könntest", "würdest", "sollst", "möchtest",
-    "mal", "auch", "noch", "schon", "jetzt", "dann", "hier", "dort",
-    "ja", "nein", "hey", "lexa", "hallo", "guten", "morgen", "abend",
-    "tag", "nacht", "was", "wer", "wo", "wann", "warum", "welche", "welcher",
-    "hab", "habe", "hat", "hast", "bin", "bist", "ist", "sind", "war", "waren",
-    "kann", "will", "soll", "muss", "darf", "mag", "werde", "wird", "werden",
-    "für", "mit", "von", "auf", "aus", "bei", "nach", "vor", "über", "unter",
-    "zum", "zur", "vom", "ins", "ans", "ums",
-    "mach", "sag", "zeig", "gib", "lass",
-    "sehr", "ganz", "etwas", "nur", "denn", "wohl",
-    "unser", "euer", "möchte",
-    "im", "am", "um", "zu", "in", "an",
-    "hinter", "zwischen", "durch", "gegen", "ohne", "bis", "seit",
-    "okay", "alles", "chef",
-    "the", "is", "are", "was", "has", "have", "and", "or", "not",
-    "this", "that", "for", "with", "from", "you", "your",
-})
+# Keyword extraction and old-history summarization live in
+# backend.conversation_summary. The underscored imports above preserve
+# compatibility for tests and older modules that import from ai_engine.
 
 
-def _extract_keywords(user_message: str, max_keywords: int = 5) -> list[str]:
-    """Extract meaningful keywords from user message.
-
-    1. Lowercases and splits on non-alphanumeric (keeping umlauts/ß)
-    2. Removes German stop words
-    3. Removes words shorter than 3 chars
-    4. Returns max `max_keywords` keywords (default 5)
-
-    Used by memory search and tool context selection.
-    """
-    text = user_message.lower()
-    words = re.findall(r'[a-zäöüß]+', text)
-    keywords = []
-    seen = set()
-    for w in words:
-        if len(w) < 3:
-            continue
-        if w in _STOP_WORDS:
-            continue
-        if w in seen:
-            continue
-        seen.add(w)
-        keywords.append(w)
-        if len(keywords) >= max_keywords:
-            break
-    return keywords
-
-
-# ══════════════════════════════════════════════════
-#  CONVERSATION SUMMARIZATION (local, no API call)
-# ══════════════════════════════════════════════════
-
-# Action pattern to detect executed commands in AI responses
-_ACTION_PATTERN = re.compile(r'"action"\s*:\s*"([a-z_]+)"', re.IGNORECASE)
-# Fact patterns: dates, names, numbers with context
-_FACT_PATTERNS = [
-    re.compile(r'\b(\d{1,2}\.\d{1,2}\.\d{2,4})\b'),                     # dates DD.MM.YYYY
-    re.compile(r'\b(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)\b', re.I),
-    re.compile(r'\b(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\b', re.I),
-    re.compile(r'\b(deadline|termin|meeting|projekt|aufgabe)\s+["\']?(\w[\w\s]{2,30})["\']?\b', re.I),
-]
-
-
-def _summarize_messages_local(messages: list[dict]) -> str:
-    """Summarize older conversation messages using local text processing (no API call).
-
-    Extracts:
-    - Topics the user asked about (keywords from user messages)
-    - Actions Lexa executed (parsed from assistant JSON responses)
-    - Facts the user mentioned (dates, names, deadlines, preferences)
-    - Items Lexa created (notes, todos, memories)
-
-    For large histories (>20 messages), uses a fast path: just collects
-    the last user message from each user/assistant pair instead of full extraction.
-
-    Returns a compact German bullet-point summary under 200 words.
-    """
-    # Fast path for large histories: skip complex extraction
-    if len(messages) > 20:
-        user_msgs = []
-        for msg in messages:
-            if msg.get("role") == "user" and msg.get("content"):
-                content = msg["content"].strip()
-                if len(content) > 60:
-                    content = content[:60] + "..."
-                user_msgs.append(content)
-        # Take every other message to keep it compact
-        sampled = user_msgs[::2] if len(user_msgs) > 10 else user_msgs
-        lines = ["[Bisheriger Gesprächsverlauf]"]
-        if sampled:
-            topics_str = " | ".join(sampled[:12])
-            lines.append(f"- User besprach: {topics_str}")
-        else:
-            lines.append(f"- {len(messages)} ältere Nachrichten (keine User-Nachrichten extrahiert)")
-        return "\n".join(lines)
-
-    user_topics: list[str] = []
-    executed_actions: list[str] = []
-    user_facts: list[str] = []
-    lexa_created: list[str] = []
-
-    for msg in messages:
-        role = msg.get("role", "")
-        content = msg.get("content", "")
-        if not content:
-            continue
-
-        if role == "user":
-            # Extract topic keywords from user messages
-            kws = _extract_keywords(content, max_keywords=5)
-            for kw in kws:
-                if kw not in user_topics:
-                    user_topics.append(kw)
-
-            # Extract facts (dates, deadlines, named entities)
-            for pattern in _FACT_PATTERNS:
-                for match in pattern.finditer(content):
-                    fact = match.group(0).strip()
-                    if fact and fact not in user_facts and len(fact) > 2:
-                        user_facts.append(fact)
-
-        elif role == "assistant":
-            # Extract executed actions from JSON responses
-            action_matches = _ACTION_PATTERN.findall(content)
-            for action in action_matches:
-                if action not in executed_actions:
-                    executed_actions.append(action)
-
-            # Extract "message" field from action JSON for context
-            try:
-                parsed = json.loads(content)
-                if isinstance(parsed, dict):
-                    action_name = parsed.get("action", "")
-                    params = parsed.get("params", {})
-
-                    # Track created items
-                    if action_name in ("note_create", "todo_create", "memory_add"):
-                        item_name = params.get("title") or params.get("content", "")
-                        if item_name:
-                            label = {"note_create": "Notiz", "todo_create": "Todo", "memory_add": "Erinnerung"}.get(action_name, "Item")
-                            entry = f'{label}: "{item_name[:40]}"'
-                            if entry not in lexa_created:
-                                lexa_created.append(entry)
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
-
-    # Build compact summary
-    lines = ["[Bisheriger Gesprächsverlauf]"]
-
-    if user_topics:
-        # Cap at 12 most relevant topics
-        topics_str = ", ".join(user_topics[:12])
-        lines.append(f"- User fragte nach: {topics_str}")
-
-    if executed_actions:
-        actions_str = ", ".join(executed_actions[:10])
-        lines.append(f"- Lexa führte aus: {actions_str}")
-
-    if lexa_created:
-        created_str = "; ".join(lexa_created[:6])
-        lines.append(f"- Lexa erstellte: {created_str}")
-
-    if user_facts:
-        facts_str = ", ".join(user_facts[:8])
-        lines.append(f"- User erwähnte: {facts_str}")
-
-    # If nothing was extracted, provide a minimal summary
-    if len(lines) == 1:
-        lines.append(t("ai.noHistory", count=len(messages)))
-
-    summary = "\n".join(lines)
-
-    # Hard cap at ~200 words
-    words = summary.split()
-    if len(words) > 200:
-        summary = " ".join(words[:200]) + "..."
-
-    return summary
-
-
-# ══════════════════════════════════════════════════
 #  SHARED RESPONSE PROCESSING (DRY — used by all providers)
 # ══════════════════════════════════════════════════
 
@@ -1098,6 +919,218 @@ def _detect_conversation_topic(conversation_history: Optional[list]) -> str:
     return ""
 
 
+_QUALITY_MODE_TOP_TIER_MARKERS = (
+    "chatgpt",
+    "chagbt",
+    "gpt",
+    "claude",
+    "niveau",
+    "niviu",
+    "level",
+    "top",
+    "premium",
+)
+
+_QUALITY_MODE_COMPLEX_MARKERS = (
+    "verbesser",
+    "upgrade",
+    "professionell",
+    "produkt",
+    "release",
+    "internalrc",
+    "publicrc",
+    "strategie",
+    "roadmap",
+    "entscheidung",
+    "architektur",
+    "security",
+    "sicherheit",
+    "audit",
+    "review",
+    "debug",
+    "fehler",
+    "implement",
+    "code",
+    "komplex",
+    "senior",
+    "erfahrung",
+    "profi",
+    "advanced",
+    "production",
+    "best practice",
+    "test",
+    "refactor",
+    "qualitaet",
+    "quality",
+)
+
+_SENIOR_CODE_MARKERS = (
+    "komplex",
+    "senior",
+    "10 jahre",
+    "erfahrung",
+    "profi",
+    "advanced",
+    "production",
+    "best practice",
+    "professionell",
+    "architektur",
+)
+
+
+def _quality_text_normalized(text: str) -> str:
+    value = str(text or "").lower()
+    replacements = {
+        "ä": "ae",
+        "ö": "oe",
+        "ü": "ue",
+        "ß": "ss",
+        "Ã¤": "ae",
+        "Ã¶": "oe",
+        "Ã¼": "ue",
+        "ÃŸ": "ss",
+    }
+    for source, target in replacements.items():
+        value = value.replace(source, target)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+_CODE_GENERATION_VERB_RE = re.compile(
+    r"\b(?:schreib\w*|schreibe\w*|schriebe\w*|generier\w*|erstell\w*|"
+    r"entwickel\w*|implementier\w*|programmier\w*|codiere\w*|verbesser\w*|bau\w*|"
+    r"mach(?:e|st)?\s+mir|write|generate|create|build|implement|code)\b"
+)
+
+_CODE_TARGET_RE = re.compile(
+    r"\b(?:python|javascript|typescript|java|rust|golang|php|ruby|swift|kotlin|"
+    r"c\+\+|c#|html|css|sql|code|kode|skript|script|programm|program|"
+    r"funktion|function|klasse|class|algorithmus|algorithm|api|backend|frontend|"
+    r"async|server|cli|regex|library|bibliothek|framework)\b"
+)
+
+_TEXT_GENERATION_RE = re.compile(
+    r"\b(?:schreib\w*|schreibe\w*|schriebe\w*|formulier\w*|generier\w*|"
+    r"erstell\w*|entwirf\w*|erklaer\w*|erklar\w*|zusammenfass\w*|"
+    r"mach(?:e|st)?\s+mir|write|draft|generate|create|explain|summarize)\b"
+)
+
+_SOURCE_OR_TOOL_BACKED_RE = re.compile(
+    r"\b(?:oeffne|open|starte|start|spiel\w*|play|pausier\w*|stoppe|suche|such|"
+    r"google|browse|browser|youtube|spotify|wetter|weather|timer|wecker|reminder|"
+    r"erinner\w*|todo|todos|notiz|note|kalender|calendar|lautstaerke|volume|"
+    r"screenshot|prozess|process|disk|system|datei|file|ordner|folder|git|docker|"
+    r"terminal|powershell|cmd|repo|repository|workspace|personal os|quelle|quellen|"
+    r"citation|citations|beleg|belege|evidence|research|recherche|web|online|"
+    r"internet|aktuell|latest|heute|news|hermes|agent)\b"
+)
+
+_LOCAL_CODE_WORK_RE = re.compile(
+    r"\b(?:aendere|bearbeite|editiere|fixe|repariere|patch|commit|pull request|"
+    r"installiere|fuehre|run|execute|terminal|powershell|cmd|git|docker)\b|"
+    r"\bin\s+(?:meinem|diesem|dem)?\s*(?:projekt|repo|repository|datei|ordner|workspace)\b"
+)
+
+
+def _latest_user_context(user_message: Optional[str], conversation_history: Optional[list]) -> str:
+    """Return the best user-facing text for tool gating and tool selection."""
+    if user_message:
+        return user_message
+    if conversation_history:
+        for msg in reversed(conversation_history):
+            if msg.get("role") == "user" and msg.get("content"):
+                return msg.get("content", "")
+    return ""
+
+
+def _should_disable_tools_for_text_generation(user_message: Optional[str]) -> bool:
+    """Detect requests that should be answered by the model, not local tools."""
+    text = _quality_text_normalized(user_message or "")
+    if not text:
+        return False
+
+    has_code_target = bool(_CODE_TARGET_RE.search(text))
+    has_generation_verb = bool(_CODE_GENERATION_VERB_RE.search(text))
+    if has_code_target and has_generation_verb:
+        return not bool(_LOCAL_CODE_WORK_RE.search(text))
+
+    if _SOURCE_OR_TOOL_BACKED_RE.search(text):
+        return False
+
+    return bool(_TEXT_GENERATION_RE.search(text))
+
+
+def _system_extra_requests_tool_mode(system_extra: Optional[str]) -> bool:
+    """Agent/Hermes system contexts must keep tools even for code-heavy tasks."""
+    text = _quality_text_normalized(system_extra or "")
+    if not text:
+        return False
+    return any(marker in text for marker in (
+        "agent modus",
+        "agent-modus",
+        "hermes worker",
+        "pc worker",
+        "lexa tool",
+        "tool gateway",
+    ))
+
+
+def _detect_code_quality_mode(text: str) -> str:
+    """Return stricter instructions for code-generation answers."""
+    if not _CODE_TARGET_RE.search(text):
+        return ""
+
+    is_code_generation = bool(_CODE_GENERATION_VERB_RE.search(text))
+    wants_senior_level = any(marker in text for marker in _SENIOR_CODE_MARKERS)
+    if not (is_code_generation or wants_senior_level):
+        return ""
+
+    return (
+        "Anspruch: Senior-Code-Antwort. Liefere keinen aufgeblasenen Spielzeugcode, "
+        "sondern aktuellen, plausibel lauffaehigen Code mit passender Struktur. "
+        "Nutze keine unbenutzten Imports/Parameter und keine deprecated APIs. "
+        "Wenn der User komplex/Senior/10 Jahre verlangt: kurz Architektur-Idee nennen, "
+        "dann ein robustes Beispiel mit klaren Grenzen, Typing/Config/Logging/Tests "
+        "oder Fehlerbehandlung wo sinnvoll. Bei ML, Daten und Zeitreihen besonders "
+        "auf Leakage, zeitliche Splits, Scaler-Fit, Tensor-Shapes, Ausrichtung von "
+        "Targets/Predictions und sinnvolle Evaluation achten. Wenn du Code verbesserst, "
+        "pruefe explizit, ob die neue Version noch logisch und technisch laeuft."
+    )
+
+
+def _detect_quality_mode(user_message: Optional[str], conversation_history: Optional[list] = None) -> str:
+    """Return a compact instruction when the task needs top-tier answer discipline."""
+    text = _quality_text_normalized(user_message or "")
+    if not text:
+        return ""
+
+    code_quality_mode = _detect_code_quality_mode(text)
+    if code_quality_mode:
+        return code_quality_mode
+
+    score = 0
+    if any(marker in text for marker in _QUALITY_MODE_TOP_TIER_MARKERS):
+        score += 2
+    if any(marker in text for marker in _QUALITY_MODE_COMPLEX_MARKERS):
+        score += 1
+    if "ziel" in text and ("lexa" in text or "app" in text or "assistant" in text):
+        score += 1
+    if len(text) > 160 or text.count("?") >= 2:
+        score += 1
+    if conversation_history and len(conversation_history) >= 8:
+        score += 1
+
+    if score < 2:
+        return ""
+
+    return (
+        "Anspruch: Top-tier Assistant Quality. Handle proaktiv, waehle den "
+        "kleinsten sinnvollen naechsten Schritt, nutze vorhandenen Kontext und "
+        "Evidenz, trenne bei Bedarf Fakten/Annahmen/Entscheidungen/Risiken/"
+        "naechste Schritte, und belege am Ende kurz was getan oder geprueft wurde. "
+        "Frage nur, wenn eine Entscheidung riskant oder blockierend ist."
+    )
+
+
 def _build_messages(
     user_message: Optional[str],
     conversation_history: Optional[list] = None,
@@ -1143,6 +1176,10 @@ def _build_messages(
         dynamic_parts.append(f"\n\n[KONVERSATIONS-KONTEXT] {mood}")
 
     # Topic continuity — helps AI stay on topic
+    quality_mode = _detect_quality_mode(user_message, conversation_history)
+    if quality_mode:
+        dynamic_parts.append(f"\n\n[QUALITAETSMODUS]\n{quality_mode}")
+
     topic = _detect_conversation_topic(conversation_history)
     if topic:
         dynamic_parts.append(f"\n\n[{topic.upper()}]")
@@ -1283,15 +1320,13 @@ def chat(
         from backend.config import TOOL_USE_ENABLED
         if TOOL_USE_ENABLED:
             from backend.tool_registry import get_tools_for_context
-            # Phase 46: when user_message is None (agent mode), derive context from history
-            tool_context = user_message or ""
-            if not tool_context and conversation_history:
-                for msg in reversed(conversation_history):
-                    if msg.get("role") == "user":
-                        tool_context = msg.get("content", "")
-                        break
-            tools = get_tools_for_context(tool_context)
-            logger.debug(f"Sending {len(tools)} tools to {selected_model['provider']}")
+            # Phase 46: when user_message is None (agent mode), derive context from history.
+            tool_context = _latest_user_context(user_message, conversation_history)
+            if not _system_extra_requests_tool_mode(system_extra) and _should_disable_tools_for_text_generation(tool_context):
+                logger.debug("Skipping tools for direct text/code generation request")
+            else:
+                tools = get_tools_for_context(tool_context)
+                logger.debug(f"Sending {len(tools)} tools to {selected_model['provider']}")
     except Exception as e:
         logger.warning(f"Tool registry unavailable: {e}")
 
@@ -1326,7 +1361,6 @@ def chat(
     }
 
 
-
 # ══════════════════════════════════════════════════
 #  STREAMING CHAT (SSE)
 # ══════════════════════════════════════════════════
@@ -1353,7 +1387,11 @@ def chat_stream(
         from backend.config import TOOL_USE_ENABLED
         if TOOL_USE_ENABLED:
             from backend.tool_registry import get_tools_for_context
-            tools = get_tools_for_context(user_message, max_tools=20)
+            tool_context = _latest_user_context(user_message, conversation_history)
+            if _should_disable_tools_for_text_generation(tool_context):
+                logger.debug("Skipping stream tools for direct text/code generation request")
+            else:
+                tools = get_tools_for_context(tool_context, max_tools=20)
     except Exception as e:
         logger.warning(f"Tool registry unavailable for stream: {e}")
 
@@ -1489,9 +1527,7 @@ def chat_stream(
     yield lexa_user_error("ai_unavailable")
 
 
-
 # ── Interaction Logging ──
-
 _last_saved_hash: Optional[str] = None
 _save_interaction_lock = threading.Lock()
 

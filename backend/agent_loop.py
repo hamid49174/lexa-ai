@@ -16,10 +16,13 @@ Sicherheit:
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import os
+import re
 import time
+import unicodedata
 import uuid
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -29,14 +32,10 @@ from typing import AsyncGenerator, Optional
 from backend.config import (
     AGENT_MAX_STEPS,
     AGENT_STEP_TIMEOUT,
-    MAX_HISTORY,
-    TOOL_USE_MAX_TOOLS,
 )
 from backend.agent_reflection import reflect_action
 from backend.security import is_command_allowed, audit_log, validate_params
 from backend.action_parser import _ACTION_NAME_PATTERN, _sanitize_params
-from backend.i18n import t
-
 logger = logging.getLogger("lexa.agent")
 _AGENT_ARGS_MISSING = object()
 _TOOL_ARGUMENT_ERROR_REPLY = "Tool-Argumente ungueltig. Aktion wurde nicht ausgefuehrt."
@@ -79,6 +78,7 @@ class AgentRun:
     """Eine komplette Agent-Ausfuehrung."""
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     user_message: str = ""
+    worker: str = "lexa"
     steps: list[AgentStep] = field(default_factory=list)
     status: str = "running"      # running, completed, failed, paused
     summary: str = ""
@@ -90,6 +90,7 @@ class AgentRun:
         payload = {
             "id": self.id,
             "user_message": self.user_message,
+            "worker": self.worker,
             "steps": [s.to_dict() for s in self.steps],
             "status": self.status,
             "summary": self.summary,
@@ -381,6 +382,12 @@ async def _execute_tool(action_name: str, params: dict, *, plan_length: int = 1,
 
     if permission == "confirmation_required":
         audit_log(action_name, "agent_needs_confirmation")
+        try:
+            from backend.shared import set_pending_confirmation
+
+            set_pending_confirmation({"action": action_name, "params": schema_params})
+        except Exception as exc:
+            logger.debug("Could not store pending agent confirmation for %s: %s", action_name, exc)
         return {
             "success": False,
             "error": f"Befehl '{action_name}' braucht User-Bestaetigung.",
@@ -421,10 +428,226 @@ async def _execute_tool(action_name: str, params: dict, *, plan_length: int = 1,
         return {"success": False, "error": str(e)}
 
 
+_ORIGINAL_EXECUTE_TOOL = _execute_tool
+_EXECUTE_TOOL_ACCEPTS_PLAN_LENGTH = "plan_length" in inspect.signature(_execute_tool).parameters
+
+
+def _execute_tool_supports_plan_length(execute_tool) -> bool:
+    if execute_tool is _ORIGINAL_EXECUTE_TOOL:
+        return _EXECUTE_TOOL_ACCEPTS_PLAN_LENGTH
+    try:
+        return "plan_length" in inspect.signature(execute_tool).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _format_metric(value, suffix: str = "") -> str:
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return "unbekannt"
+    text = f"{num:.1f}".rstrip("0").rstrip(".")
+    return f"{text}{suffix}"
+
+
+def _format_system_info_result(data: dict) -> str:
+    useful_keys = {
+        "cpu_percent", "cpu_cores", "cpu_freq_mhz",
+        "ram_total_gb", "ram_used_gb", "ram_percent",
+        "disk_total_gb", "disk_used_gb", "disk_percent",
+        "battery_percent", "battery_plugged",
+    }
+    if not isinstance(data, dict) or not useful_keys.intersection(data):
+        return ""
+
+    lines = ["[system_info] Erfolgreich: gueltige Systemdaten."]
+    lines.append(
+        "CPU: "
+        f"{_format_metric(data.get('cpu_percent'), '%')}"
+        f" Auslastung, {data.get('cpu_cores') or 'unbekannt'} Kerne"
+        f", {_format_metric(data.get('cpu_freq_mhz'), ' MHz')} Takt."
+    )
+    lines.append(
+        "RAM: "
+        f"{_format_metric(data.get('ram_used_gb'), ' GB')} von "
+        f"{_format_metric(data.get('ram_total_gb'), ' GB')} genutzt "
+        f"({_format_metric(data.get('ram_percent'), '%')})."
+    )
+    lines.append(
+        "Speicherplatz: "
+        f"{_format_metric(data.get('disk_used_gb'), ' GB')} von "
+        f"{_format_metric(data.get('disk_total_gb'), ' GB')} genutzt "
+        f"({_format_metric(data.get('disk_percent'), '%')})."
+    )
+    battery_percent = data.get("battery_percent")
+    if battery_percent is not None:
+        plugged = data.get("battery_plugged")
+        plugged_text = "am Strom" if plugged else "im Akkubetrieb"
+        lines.append(f"Batterie: {_format_metric(battery_percent, '%')}, {plugged_text}.")
+    else:
+        lines.append("Batterie: kein Akku gemeldet oder Desktop-PC.")
+
+    try:
+        disk_percent = float(data.get("disk_percent"))
+    except (TypeError, ValueError):
+        disk_percent = 0
+    if disk_percent >= 90:
+        lines.append("Hinweis: Speicherplatz ist knapp; vor grossen Downloads/Builds aufraeumen.")
+
+    lines.append("Antworte dem User direkt mit dieser Zusammenfassung, frage nicht nach alternativen Systemabfragen.")
+    return " ".join(lines)
+
+
+def _format_system_info_user_summary(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+    summary = (
+        "Ich habe den Systemstatus ueber das echte PC-Tool geprueft. "
+        "CPU: "
+        f"{_format_metric(data.get('cpu_percent'), '%')} Auslastung"
+        f", {data.get('cpu_cores') or 'unbekannt'} Kerne. "
+        "RAM: "
+        f"{_format_metric(data.get('ram_used_gb'), ' GB')} von "
+        f"{_format_metric(data.get('ram_total_gb'), ' GB')} genutzt "
+        f"({_format_metric(data.get('ram_percent'), '%')}). "
+        "Speicherplatz: "
+        f"{_format_metric(data.get('disk_used_gb'), ' GB')} von "
+        f"{_format_metric(data.get('disk_total_gb'), ' GB')} genutzt "
+        f"({_format_metric(data.get('disk_percent'), '%')})."
+    )
+    battery_percent = data.get("battery_percent")
+    if battery_percent is not None:
+        plugged = data.get("battery_plugged")
+        plugged_text = "am Strom" if plugged else "im Akkubetrieb"
+        summary += f" Batterie: {_format_metric(battery_percent, '%')}, {plugged_text}."
+
+    try:
+        disk_percent = float(data.get("disk_percent"))
+    except (TypeError, ValueError):
+        disk_percent = 0
+    if disk_percent >= 90:
+        summary += " Hinweis: Der Speicherplatz ist knapp; vor grossen Downloads oder Builds solltest du aufraeumen."
+    return summary
+
+
+def _format_desktop_position_user_summary(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+    try:
+        x = int(data.get("x"))
+        y = int(data.get("y"))
+        width = int(data.get("screen_width"))
+        height = int(data.get("screen_height"))
+    except (TypeError, ValueError):
+        return ""
+    return (
+        f"Aktuelle Mausposition: X={x}, Y={y}. "
+        f"Bildschirmgroesse: {width}x{height}. "
+        "Ich habe nichts veraendert."
+    )
+
+
+_UI_ACTIONABLE_TYPES = {
+    "Button",
+    "CheckBox",
+    "ComboBox",
+    "DataItem",
+    "Edit",
+    "Hyperlink",
+    "ListItem",
+    "MenuItem",
+    "RadioButton",
+    "SplitButton",
+    "TabItem",
+    "TreeItem",
+}
+
+
+def _short_visible_label(value: object, fallback: str = "Position", limit: int = 80) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text:
+        return fallback
+    if len(text) > limit:
+        return text[: limit - 3].rstrip() + "..."
+    return text
+
+
+def _control_center(control: dict) -> tuple[int | None, int | None]:
+    rect = control.get("rect") if isinstance(control, dict) else None
+    if not isinstance(rect, dict):
+        return None, None
+    try:
+        x = int(round((float(rect.get("left")) + float(rect.get("right"))) / 2))
+        y = int(round((float(rect.get("top")) + float(rect.get("bottom"))) / 2))
+    except (TypeError, ValueError):
+        return None, None
+    return x, y
+
+
+def _format_ui_tree_user_summary(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+    windows = data.get("windows") if isinstance(data.get("windows"), list) else []
+    if not windows:
+        return "Ich konnte kein UIA-Fenster lesen. Ich habe nichts veraendert."
+    first_window = windows[0] if isinstance(windows[0], dict) else {}
+    title = _short_visible_label(first_window.get("title"), fallback="aktuelles Fenster", limit=100)
+    controls: list[dict] = []
+    for window in windows:
+        if not isinstance(window, dict):
+            continue
+        for control in window.get("controls") or []:
+            if isinstance(control, dict) and control.get("control_type") in _UI_ACTIONABLE_TYPES:
+                controls.append(control)
+    named = []
+    for control in controls:
+        label = _short_visible_label(control.get("name") or control.get("automation_id"), fallback="")
+        if label and label not in named:
+            named.append(label)
+        if len(named) >= 12:
+            break
+    if not named:
+        return f'Aktuelles Fenster analysiert: "{title}". Keine klar klickbaren Controls gefunden. Ich habe nichts veraendert.'
+    listed = ", ".join(f'"{item}"' for item in named)
+    suffix = f" (+{len(controls) - len(named)} weitere)" if len(controls) > len(named) else ""
+    return f'Aktuelles Fenster analysiert: "{title}". Klickbare Controls: {listed}{suffix}. Ich habe nichts veraendert.'
+
+
+def _format_ui_find_user_summary(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+    matches = data.get("matches") if isinstance(data.get("matches"), list) else []
+    if not matches:
+        return "Ich habe kein passendes Windows-Control gefunden. Ich habe nichts veraendert."
+    first = matches[0] if isinstance(matches[0], dict) else {}
+    label = _short_visible_label(first.get("name") or first.get("automation_id"), fallback="Control")
+    control_type = _short_visible_label(first.get("control_type"), fallback="Control", limit=40)
+    window = _short_visible_label(first.get("window_title"), fallback="aktuelles Fenster", limit=100)
+    x, y = _control_center(first)
+    position = f" bei X={x}, Y={y}" if x is not None and y is not None else ""
+    extra = f" Es gibt {len(matches)} Treffer." if len(matches) > 1 else ""
+    return f'Gefunden: "{label}" ({control_type}) im Fenster "{window}"{position}.{extra} Ich habe nichts veraendert.'
+
+
+def _format_hermes_desktop_task_user_summary(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+    summary = str(data.get("summary") or "").strip()
+    if summary:
+        return summary
+    steps = data.get("steps") if isinstance(data.get("steps"), list) else []
+    lines = [str(step.get("summary") or "").strip() for step in steps if isinstance(step, dict) and step.get("summary")]
+    return " ".join(line for line in lines if line)
+
+
 def _format_tool_result(action_name: str, result: dict) -> str:
     """Format tool result as concise string for LLM context."""
     if result.get("success"):
         data = result.get("data", "OK")
+        if action_name == "system_info":
+            formatted_system = _format_system_info_result(data)
+            if formatted_system:
+                return formatted_system
         if isinstance(data, dict):
             # Truncate large dicts
             text = json.dumps(data, ensure_ascii=False, default=str)
@@ -433,7 +656,7 @@ def _format_tool_result(action_name: str, result: dict) -> str:
             return f"[{action_name}] Erfolgreich: {text}"
         elif isinstance(data, list):
             text = json.dumps(data[:20], ensure_ascii=False, default=str)
-            suffix = f" (+{len(data)-20} weitere)" if len(data) > 20 else ""
+            suffix = f" (+{len(data) - 20} weitere)" if len(data) > 20 else ""
             return f"[{action_name}] Erfolgreich: {text}{suffix}"
         else:
             text = str(data)
@@ -445,6 +668,204 @@ def _format_tool_result(action_name: str, result: dict) -> str:
         return f"[{action_name}] Fehlgeschlagen: {error}"
 
 
+def _build_step_reflection_message(action_name: str, exec_result: dict, remaining_steps: int) -> str:
+    status = "erfolgreich" if exec_result.get("success") else "fehlgeschlagen"
+    formatted = _format_tool_result(action_name, exec_result)
+    return (
+        "[AGENT MINI-REFLEXION]\n"
+        f"Der gerade ausgefuehrte Schritt '{action_name}' war {status}.\n"
+        f"Ergebnis: {formatted}\n"
+        f"Im urspruenglichen Tool-Batch warten noch {remaining_steps} Schritt(e).\n"
+        "Pruefe vor dem naechsten Tool-Call kurz: Liefert dieses Ergebnis genug Information "
+        "fuer den naechsten Schritt? Wenn nein, passe den Plan an, hole fehlende Information "
+        "oder frage den User. Fuehre den naechsten Tool-Call nur aus, wenn er nach diesem "
+        "Zwischenergebnis weiterhin sinnvoll und sicher ist."
+    )
+
+
+def _agent_tool_call_signature(action_name: str, params: dict | None) -> str:
+    try:
+        payload = json.dumps(params or {}, sort_keys=True, ensure_ascii=False, default=str)
+    except TypeError:
+        payload = str(params or {})
+    return f"{action_name}:{payload}"
+
+
+def _build_tool_self_correction_message(action_name: str, params: dict | None, exec_result: dict) -> str:
+    formatted = _format_tool_result(action_name, exec_result)
+    try:
+        args_text = json.dumps(params or {}, sort_keys=True, ensure_ascii=False, default=str)
+    except TypeError:
+        args_text = str(params or {})
+    return (
+        f"[TOOL ERGEBNIS] {formatted}\n"
+        "[AGENT SELF-CORRECTION]\n"
+        f"Der letzte Tool-Call '{action_name}' mit Argumenten {args_text} ist fehlgeschlagen. "
+        "Du darfst denselben Tool-Call mit denselben Argumenten nicht direkt wiederholen. "
+        "Analysiere den Fehler, korrigiere die Argumente, nutze ein anderes Tool oder erklaere "
+        "dem User klar, warum der Schritt nicht moeglich ist."
+    )
+
+
+def _normalize_agent_worker(worker: str | None) -> str:
+    return "hermes" if str(worker or "").strip().lower() == "hermes" else "lexa"
+
+
+def _normalize_agent_text(value: str) -> str:
+    text = str(value or "")
+    for source, target in {
+        "ä": "ae",
+        "Ä": "ae",
+        "ö": "oe",
+        "Ö": "oe",
+        "ü": "ue",
+        "Ü": "ue",
+        "ß": "ss",
+        "ẞ": "ss",
+    }.items():
+        text = text.replace(source, target)
+    text = unicodedata.normalize("NFKD", text.casefold())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return (
+        text
+        .replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
+        .replace("Ã¤", "ae").replace("Ã¶", "oe").replace("Ã¼", "ue").replace("ÃŸ", "ss")
+        .replace("Ã„", "ae").replace("Ã–", "oe").replace("Ãœ", "ue")
+    )
+
+
+def _clean_hermes_ui_target(value: str) -> str:
+    target = str(value or "").strip(" ._-")
+    target = re.split(
+        r"\b(?:ich\s+)?(?:bestaetige|bestatige|bestaetigen|bestatigen|confirm|confirmed|freigabe)\b(?:\s+es|\s+das)?",
+        target,
+        maxsplit=1,
+    )[0]
+    target = re.split(
+        r"\b(?:im|in|am|auf)\s+(?:aktuellen|aktiven|sichtbaren)?\s*(?:fenster|bildschirm|screen)\b",
+        target,
+        maxsplit=1,
+    )[0]
+    target = re.split(r"\b(?:aendere|andere|veraendere|verandere)\s+nichts\b", target, maxsplit=1)[0]
+    target = re.split(r"\b(?:und|aber)\b", target, maxsplit=1)[0]
+    target = re.split(r"[,.;:!?]", target, maxsplit=1)[0]
+    target = re.sub(r"\b(?:button|btn|knopf|taste)\b", "", target)
+    return target.strip(" ._-")
+
+
+def _hermes_forced_first_tool(worker: str, user_message: str) -> tuple[str, dict] | None:
+    if worker != "hermes":
+        return None
+    text = _normalize_agent_text(user_message)
+    system_terms = (
+        "systemstatus", "system status", "system-info", "system info",
+        "pc status", "pc-status", "status vom system",
+    )
+    metric_terms = (
+        "cpu", "ram", "arbeitsspeicher", "speicherplatz", "speicher", "disk",
+        "platte", "festplatte", "auslastung",
+    )
+    asks_status = any(term in text for term in system_terms)
+    asks_metrics = sum(1 for term in metric_terms if term in text) >= 2
+    if asks_status or asks_metrics:
+        return ("system_info", {})
+
+    position_terms = (
+        "mausposition", "maus position", "cursor", "zeiger",
+        "bildschirmgro", "bildschirm gro", "screen size", "screen resolution",
+        "aufloesung", "auflosung",
+    )
+    if any(term in text for term in position_terms):
+        return ("desktop_position", {})
+
+    screen_text_terms = (
+        "bildschirmtext", "bildschirm text", "text auf dem bildschirm",
+        "lies den bildschirm", "lese den bildschirm", "ocr", "screen text",
+        "read screen", "read the screen",
+    )
+    if any(term in text for term in screen_text_terms):
+        return ("screen_read_text", {})
+
+    ui_tree_terms = (
+        "echte windows controls", "windows controls", "ui controls", "echte controls",
+        "klickbare buttons", "klickbare controls", "buttons im aktuellen fenster",
+        "controls im aktuellen fenster", "was siehst du", "was sieht", "was erkennst",
+        "was ist auf dem bildschirm", "was ist offen",
+    )
+    if any(term in text for term in ui_tree_terms):
+        return ("ui_tree", {"max_depth": 3, "max_controls": 80})
+
+    ui_find_match = re.search(
+        r"\b(?:finde|such(?:e)?|suche|zeige|pruefe|prufe)\b"
+        r".{0,40}?\b(?:button|btn|knopf|taste|control|element)\b"
+        r"\s+(?P<target>[a-z0-9][a-z0-9 ._-]{1,80})",
+        text,
+    )
+    if ui_find_match:
+        target = _clean_hermes_ui_target(ui_find_match.group("target"))
+        if target:
+            params = {"text": target}
+            if any(word in text for word in ("button", "btn", "knopf", "taste")):
+                params["control_type"] = "Button"
+            return ("ui_find", params)
+
+    click_match = re.search(
+        r"\b(?:klick(?:e|en)?|kilck(?:e|en)?|klcik(?:e|en)?|klcick(?:e|en)?|click|drueck(?:e|en)?|druck(?:e|en)?)\b"
+        r"(?:\s+(?:bitte|mal|kurz))?"
+        r"(?:\s+(?:auf|den|die|das|einen|eine|einem|einer|irgend\s+einen|irgendeinen|anderen|andere))*"
+        r"\s+(?P<target>[a-z0-9][a-z0-9 ._-]{1,80})",
+        text,
+    )
+    if click_match:
+        target = _clean_hermes_ui_target(click_match.group("target"))
+        if target:
+            return ("ui_click", {"text": target})
+
+    return None
+
+
+def _hermes_desktop_controller_required(worker: str, user_message: str) -> bool:
+    if worker != "hermes":
+        return False
+    try:
+        from companion.hermes_desktop import is_multi_step_desktop_prompt
+
+        return is_multi_step_desktop_prompt(user_message)
+    except Exception as exc:
+        logger.debug("Hermes desktop controller precheck failed: %s", exc)
+        return False
+
+
+def _build_agent_context(worker: str) -> str:
+    base = (
+        "Du bist im AGENT-MODUS. Du fuehrst mehrstufige Aufgaben aus.\n"
+        "REGELN:\n"
+        "- Plane ZUERST welche Schritte noetig sind, dann fuehre sie einzeln aus.\n"
+        "- Nach jedem Schritt bekommst du das Ergebnis und entscheidest den naechsten.\n"
+        "- Wenn du FERTIG bist, antworte mit normalem Text (KEIN Tool Call).\n"
+        "- Maximal {max_steps} Schritte pro Aufgabe.\n"
+        "- Bei Fehlern: versuche eine Alternative oder erklaere das Problem.\n"
+        "- Fasse am Ende zusammen was du getan hast.\n"
+    ).format(max_steps=AGENT_MAX_STEPS)
+    if worker != "hermes":
+        return base
+    return (
+        base
+        + "\nHERMES-WORKER-MODUS:\n"
+        "- Du bist Hermes, der PC-Worker hinter Lexa. Lexa ist Chat-, Kontroll- und Sicherheits-Schicht.\n"
+        "- Der User schreibt Befehle in Lexa; Lexa delegiert sie an dich. Entferne gedanklich Prefixe wie 'Hermes' oder 'Lexa sag Hermes'.\n"
+        "- Nutze ausschliesslich die bereitgestellten Lexa-Tools fuer PC-Aktionen. Keine rohen Shell-/PowerShell-Befehle erfinden.\n"
+        "- Apps oeffnest du mit app_open, Ordner legst du mit folder_create an, neue Text-/Code-Dateien schreibst du mit file_write.\n"
+        "- file_write erstellt nur neue Dateien; wenn eine Datei existiert, melde das statt zu ueberschreiben.\n"
+        "- Fuer echte Desktop-Steuerung: orientiere dich zuerst mit ui_tree/ui_find fuer echte Windows-Controls; nutze screen_read_text/OCR nur als Fallback.\n"
+        "- Wenn der User mehrere Desktop-Schritte in einem Auftrag nennt, nutze hermes_desktop_task: es beobachtet/sucht read-only und bereitet riskante Aktionen fuer Lexa-Freigabe vor.\n"
+        "- Fuer Klicks auf sichtbare Buttons nutze bevorzugt ui_click statt desktop_click_text. Danach darfst du kontrolliert desktop_move, desktop_click, desktop_type, desktop_hotkey, desktop_scroll und desktop_wait nutzen.\n"
+        "- Vor Klicks, Tippen und Hotkeys muss klar sein, welches Fenster/Feld aktiv ist. Wenn nicht klar: erst schauen oder nachfragen.\n"
+        "- Erfinde keine Systemwerte und keine UI-Zustaende. Wenn ein Sicht-/PC-Tool fehlschlaegt, melde das statt zu raten.\n"
+        "- Riskante oder bestaetigungspflichtige Aktionen werden angehalten; sage dann klar, welche Bestaetigung fehlt.\n"
+    )
+
+
 # ══════════════════════════════════════════════════
 #  AGENT LOOP (async generator — yields SSE events)
 # ══════════════════════════════════════════════════
@@ -453,6 +874,7 @@ async def run_agent(
     user_message: str,
     conversation_history: list[dict],
     *,
+    worker: str = "lexa",
     trace_source: str = "runtime",
     synthetic_context: bool = False,
 ) -> AsyncGenerator[dict, None]:
@@ -469,7 +891,8 @@ async def run_agent(
     """
     from backend.ai_engine import chat
 
-    run = AgentRun(user_message=user_message)
+    worker_name = _normalize_agent_worker(worker)
+    run = AgentRun(user_message=user_message, worker=worker_name)
     if _agent_ledger_enabled():
         run.ledger = _build_agent_run_ledger(run)
     trace_recorder = None
@@ -511,19 +934,10 @@ async def run_agent(
                     "forbidden_tools": run.ledger.plan.forbidden_tools,
                 },
             )
-    audit_log("agent", "start", f"RUN={run.id} MSG={user_message[:100]}")
+    audit_log("agent", "start", f"RUN={run.id} WORKER={worker_name} MSG={user_message[:100]}")
 
     # Build agent-specific system context
-    agent_context = (
-        "Du bist im AGENT-MODUS. Du fuehrst mehrstufige Aufgaben aus.\n"
-        "REGELN:\n"
-        "- Plane ZUERST welche Schritte noetig sind, dann fuehre sie einzeln aus.\n"
-        "- Nach jedem Schritt bekommst du das Ergebnis und entscheidest den naechsten.\n"
-        "- Wenn du FERTIG bist, antworte mit normalem Text (KEIN Tool Call).\n"
-        "- Maximal {max_steps} Schritte pro Aufgabe.\n"
-        "- Bei Fehlern: versuche eine Alternative oder erklaere das Problem.\n"
-        "- Fasse am Ende zusammen was du getan hast.\n"
-    ).format(max_steps=AGENT_MAX_STEPS)
+    agent_context = _build_agent_context(worker_name)
 
     # Working conversation for the agent (separate from global history)
     agent_messages: list[dict] = []
@@ -536,8 +950,77 @@ async def run_agent(
     agent_messages.append({"role": "user", "content": user_message})
 
     step_count = 0
+    failed_tool_attempts: dict[str, int] = {}
+    forced_first_tool = (
+        ("hermes_desktop_task", {"message": user_message})
+        if _hermes_desktop_controller_required(worker_name, user_message)
+        else _hermes_forced_first_tool(worker_name, user_message)
+    )
+    forced_direct_summary = ""
+    if forced_first_tool is not None:
+        action_name, params = forced_first_tool
+        step = AgentStep(
+            index=step_count,
+            action=action_name,
+            params=params,
+            status=StepStatus.RUNNING,
+            started_at=time.time(),
+        )
+        run.steps.append(step)
+        yield {"type": "step_start", "step": step.to_dict()}
+        try:
+            exec_result = await asyncio.wait_for(
+                _execute_tool(action_name, params, plan_length=1),
+                timeout=AGENT_STEP_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            exec_result = {"success": False, "error": f"Timeout nach {AGENT_STEP_TIMEOUT}s"}
+            step.duration_ms = AGENT_STEP_TIMEOUT * 1000
+        else:
+            step.duration_ms = (time.time() - step.started_at) * 1000
 
-    while step_count < AGENT_MAX_STEPS:
+        if exec_result.get("needs_confirmation"):
+            step.status = StepStatus.NEEDS_CONFIRMATION
+            step.error = exec_result.get("error", "Bestaetigung noetig")
+            step.result = _format_tool_result(action_name, exec_result)
+            yield {"type": "step_blocked", "step": step.to_dict()}
+            run.status = "completed"
+            run.summary = (
+                f"Bestaetigung noetig fuer {action_name}. "
+                "Antworte kurz mit 'ja', wenn Lexa diese vorbereitete Aktion wirklich ausfuehren soll."
+            )
+            agent_messages.append({
+                "role": "user",
+                "content": f"[TOOL ERGEBNIS] {step.result}",
+            })
+        else:
+            if exec_result.get("success"):
+                step.status = StepStatus.SUCCESS
+            else:
+                step.status = StepStatus.FAILED
+                step.error = exec_result.get("error", "Unbekannter Fehler")
+            step.result = _format_tool_result(action_name, exec_result)
+            yield {"type": "step_done", "step": step.to_dict()}
+            agent_messages.append({
+                "role": "user",
+                "content": f"[TOOL ERGEBNIS] {step.result}",
+            })
+            if action_name == "desktop_position" and exec_result.get("success"):
+                forced_direct_summary = _format_desktop_position_user_summary(exec_result.get("data", {}))
+            elif action_name == "ui_tree" and exec_result.get("success"):
+                forced_direct_summary = _format_ui_tree_user_summary(exec_result.get("data", {}))
+            elif action_name == "ui_find" and exec_result.get("success"):
+                forced_direct_summary = _format_ui_find_user_summary(exec_result.get("data", {}))
+            elif action_name == "hermes_desktop_task" and exec_result.get("success"):
+                forced_direct_summary = _format_hermes_desktop_task_user_summary(exec_result.get("data", {}))
+        step_count += 1
+
+    if forced_direct_summary:
+        run.status = "completed"
+        run.summary = forced_direct_summary
+        yield {"type": "thinking", "message": forced_direct_summary}
+
+    while run.status == "running" and step_count < AGENT_MAX_STEPS:
         # Call LLM with tools
         # First call: user_message goes through normal _build_messages path
         # Subsequent calls: user_message=None, last msg is already in agent_messages
@@ -598,7 +1081,7 @@ async def run_agent(
                 break
 
             # Process each tool call in this turn
-            for tc in tool_calls:
+            for call_index, tc in enumerate(tool_calls):
                 if step_count >= AGENT_MAX_STEPS:
                     yield {
                         "type": "error",
@@ -725,15 +1208,11 @@ async def run_agent(
                 # Execute the tool
                 try:
                     execute_kwargs = {}
-                    try:
-                        import inspect
-
-                        if "plan_length" in inspect.signature(_execute_tool).parameters:
-                            execute_kwargs["plan_length"] = len(tool_calls)
-                    except (TypeError, ValueError):
-                        execute_kwargs = {}
+                    execute_tool = _execute_tool
+                    if _execute_tool_supports_plan_length(execute_tool):
+                        execute_kwargs["plan_length"] = len(tool_calls)
                     exec_result = await asyncio.wait_for(
-                        _execute_tool(action_name, params, **execute_kwargs),
+                        execute_tool(action_name, params, **execute_kwargs),
                         timeout=AGENT_STEP_TIMEOUT,
                     )
                 except asyncio.TimeoutError:
@@ -832,17 +1311,23 @@ async def run_agent(
                             related_tool=action_name,
                         )
                     yield {"type": "step_blocked", "step": step.to_dict()}
+                    run.status = "completed"
+                    run.summary = (
+                        f"Bestaetigung noetig fuer {action_name}. "
+                        "Antworte kurz mit 'ja', wenn Lexa diese vorbereitete Aktion wirklich ausfuehren soll."
+                    )
                     # Tell LLM this step needs confirmation — skip it
                     agent_messages.append({
                         "role": "user",
                         "content": (
                             f"[TOOL ERGEBNIS] {action_name}: Befehl braucht User-Bestaetigung. "
-                            f"Ueberspringe diesen Schritt und mache weiter mit dem naechsten."
+                            f"Der Schritt wurde nicht ausgefuehrt."
                         ),
                     })
                     step_count += 1
-                    continue
+                    break
 
+                repeat_failure_count = 0
                 if exec_result.get("success"):
                     step.status = StepStatus.SUCCESS
                     step.result = _format_tool_result(action_name, exec_result)
@@ -850,6 +1335,15 @@ async def run_agent(
                     step.status = StepStatus.FAILED
                     step.error = exec_result.get("error", "Unbekannter Fehler")
                     step.result = _format_tool_result(action_name, exec_result)
+                    failure_signature = _agent_tool_call_signature(action_name, params)
+                    repeat_failure_count = failed_tool_attempts.get(failure_signature, 0) + 1
+                    failed_tool_attempts[failure_signature] = repeat_failure_count
+                    if repeat_failure_count >= 2:
+                        step.error = (
+                            f"{step.error} "
+                            "(identischer Tool-Call ist zweimal fehlgeschlagen; Agent-Loop abgebrochen)"
+                        )
+                        step.result = _format_tool_result(action_name, {**exec_result, "error": step.error})
 
                 yield {"type": "step_done", "step": step.to_dict()}
                 if run.ledger is not None:
@@ -892,11 +1386,22 @@ async def run_agent(
                     )
 
                 # Feed result back to LLM for the next iteration
-                formatted = _format_tool_result(action_name, exec_result)
-                agent_messages.append({
-                    "role": "user",
-                    "content": f"[TOOL ERGEBNIS] {formatted}",
-                })
+                if step.status == StepStatus.FAILED:
+                    agent_messages.append({
+                        "role": "user",
+                        "content": _build_tool_self_correction_message(action_name, params, exec_result),
+                    })
+                    if repeat_failure_count >= 2:
+                        run.status = "failed"
+                        run.summary = (
+                            f"Abgebrochen: '{action_name}' ist zweimal mit denselben Argumenten fehlgeschlagen."
+                        )
+                else:
+                    formatted = _format_tool_result(action_name, exec_result)
+                    agent_messages.append({
+                        "role": "user",
+                        "content": f"[TOOL ERGEBNIS] {formatted}",
+                    })
 
                 audit_log(
                     "agent",
@@ -905,6 +1410,18 @@ async def run_agent(
                     f"OK={exec_result.get('success')} DUR={step.duration_ms:.0f}ms",
                 )
                 step_count += 1
+                if run.status == "failed":
+                    break
+                remaining_in_batch = len(tool_calls) - call_index - 1
+                if remaining_in_batch > 0 and step_count < AGENT_MAX_STEPS:
+                    agent_messages.append({
+                        "role": "user",
+                        "content": _build_step_reflection_message(action_name, exec_result, remaining_in_batch),
+                    })
+                    break
+
+            if run.status == "failed":
+                break
 
             # If we hit max steps inside the for loop, break outer while
             if step_count >= AGENT_MAX_STEPS:

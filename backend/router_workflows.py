@@ -10,7 +10,6 @@ sie korrekt matcht und nicht als workflow_id interpretiert.
 import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
 
 from backend.security import check_rate_limit, audit_log
 from backend.shared import parse_json_body

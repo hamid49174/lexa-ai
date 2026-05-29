@@ -6,6 +6,7 @@ is never touched.
 
 import pytest
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -25,6 +26,22 @@ def _isolate_db(tmp_path, monkeypatch):
     mem._tables_ready = False
     yield
     mem.close_db()
+
+
+def test_memory_facade_uses_extracted_core_helpers():
+    import backend.memory as mem
+    import backend.memory_core.connection as connection
+    import backend.memory_core.nlp as nlp
+    import backend.memory_core.ranking as ranking
+    import backend.memory_core.schema as schema
+
+    assert mem.MEMORY_TYPES is nlp.MEMORY_TYPES
+    assert mem._extract_search_terms is nlp.extract_search_terms
+    assert mem._normalize_for_dedup is nlp.normalize_for_dedup
+    assert mem._rank_memory_results is ranking.rank_memory_results
+    assert mem.initialize_memory_schema is schema.initialize_memory_schema
+    assert mem.get_thread_memory_connection is connection.get_thread_memory_connection
+    assert mem._VALID_TABLES is schema.VALID_TABLES
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +341,70 @@ class TestMemoryRanking:
             "memory_type_weight",
             "final_score",
         }
+
+    def test_specific_semantic_query_outranks_recent_keyword_noise(self):
+        from backend.memory import _rank_memory_results
+
+        old = (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d %H:%M:%S")
+        recent = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ranked = _rank_memory_results(
+            [
+                {
+                    "id": 1,
+                    "content": "Detailed migration architecture from the Q4 project plan",
+                    "importance": 5,
+                    "memory_type": "semantic",
+                    "created_at": old,
+                    "access_count": 0,
+                    "_semantic_score": 0.95,
+                },
+                {
+                    "id": 2,
+                    "content": "Q4 project plan migration status noise",
+                    "importance": 5,
+                    "memory_type": "semantic",
+                    "created_at": recent,
+                    "access_count": 0,
+                    "_semantic_score": 0.0,
+                },
+            ],
+            "Was war der detaillierte Q4 project plan fuer migration architecture?",
+            ["detaillierte", "project", "migration", "architecture", "plan"],
+        )
+
+        assert ranked[0]["id"] == 1
+
+    def test_short_memory_query_can_still_prefer_recent_context(self):
+        from backend.memory import _rank_memory_results
+
+        old = (datetime.now() - timedelta(days=400)).strftime("%Y-%m-%d %H:%M:%S")
+        recent = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ranked = _rank_memory_results(
+            [
+                {
+                    "id": 1,
+                    "content": "news archive",
+                    "importance": 5,
+                    "memory_type": "semantic",
+                    "created_at": old,
+                    "access_count": 0,
+                    "_semantic_score": 0.40,
+                },
+                {
+                    "id": 2,
+                    "content": "news fresh",
+                    "importance": 5,
+                    "memory_type": "semantic",
+                    "created_at": recent,
+                    "access_count": 0,
+                    "_semantic_score": 0.30,
+                },
+            ],
+            "news",
+            ["news"],
+        )
+
+        assert ranked[0]["id"] == 2
 
     def test_access_tracking_updates_returned_memory(self, monkeypatch):
         monkeypatch.setattr("backend.config.EMBEDDING_ENABLED", False)

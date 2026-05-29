@@ -749,13 +749,11 @@ function setupBackupControls() {
     btnList.addEventListener('click', async () => {
       const container = document.getElementById('backup-list-container');
       if (!container) return;
-      container.innerHTML = '';
-      container.appendChild(createLoadingState(t("settings.backupsLoading")));
+      container.replaceChildren(createLoadingState(t("settings.backupsLoading")));
       try {
         const data = await window.lexa.backupListDb();
-        container.innerHTML = '';
         if (!data.backups || data.backups.length === 0) {
-          container.appendChild(createEmptyState('\u{1F4E6}', t("settings.noBackupsTitle"), t("settings.noBackupsHint")));
+          container.replaceChildren(createEmptyState('\u{1F4E6}', t("settings.noBackupsTitle"), t("settings.noBackupsHint")));
           return;
         }
         const list = document.createElement('div');
@@ -795,10 +793,9 @@ function setupBackupControls() {
           item.appendChild(restoreBtn);
           list.appendChild(item);
         });
-        container.appendChild(list);
+        container.replaceChildren(list);
       } catch (e) {
-        container.innerHTML = '';
-        container.appendChild(createErrorState(t("settings.backupsLoadError")));
+        container.replaceChildren(createErrorState(t("settings.backupsLoadError")));
       }
     });
   }
@@ -826,7 +823,7 @@ async function loadVoiceSettings() {
     const { models } = await window.lexa.sttModels();
     const select = document.getElementById("stt-model-select");
     if (select && models && models.length) {
-      select.innerHTML = "";
+      select.replaceChildren();
       models.forEach(m => {
         const opt = document.createElement("option");
         opt.value = m.name;
@@ -974,7 +971,7 @@ async function loadElevenLabsSettings(voice) {
       const { voices } = await window.lexa.elevenlabsVoices();
       const select = document.getElementById("el-voice-select");
       if (select && voices && voices.length) {
-        select.innerHTML = "";
+        select.replaceChildren();
         voices.forEach(v => {
           const opt = document.createElement("option");
           opt.value = v.voice_id;
@@ -1134,28 +1131,24 @@ function _showTrialBar(el, mode, daysLeft) {
   el.className = "trial-status-bar trial-" + mode;
   if (mode === "active") {
     const safeDaysLeft = Math.max(0, Math.min(14, Number(daysLeft) || 0));
-    el.innerHTML = "";
     const text = document.createElement("span");
     text.textContent = t("settings.trialProgress", {days: daysLeft});
-    el.appendChild(text);
     const bar = document.createElement("div");
     bar.className = "trial-progress";
     const fill = document.createElement("div");
     fill.className = "trial-progress-fill trial-progress-days-" + safeDaysLeft;
     bar.appendChild(fill);
-    el.appendChild(bar);
+    el.replaceChildren(text, bar);
   } else if (mode === "grace") {
     el.textContent = t("settings.graceProgress", {days: daysLeft});
   } else {
-    el.innerHTML = "";
     const text = document.createElement("span");
     text.textContent = t("settings.trialExpiredText");
-    el.appendChild(text);
     const link = document.createElement("a");
     link.href = "#";
     link.textContent = t("settings.upgradeNow");
     link.addEventListener("click", (e) => { e.preventDefault(); activateLicense(); });
-    el.appendChild(link);
+    el.replaceChildren(text, link);
   }
 }
 
@@ -1216,7 +1209,7 @@ async function saveProfile() {
 
 // ── LANGUAGE / i18n (Phase 42.1) ─────────────────
 async function loadLanguagePreference() {
-  const lang = settingsSafeLanguage(localStorage.getItem("lexa-lang") || "de");
+  const lang = settingsSafeLanguage(lexaStorageGet("lexa-lang", "de"));
   const select = document.getElementById("language-select");
   if (select) select.value = lang;
   // Initialize i18n system — MUST await to prevent raw key display
@@ -1234,13 +1227,13 @@ async function changeLanguage(lang) {
     LexaI18n.translatePage();
     showToast(safeLang === "de" ? t("settings.langDe") : t("settings.langEn"), "success", 2000);
   }
-  localStorage.setItem("lexa-lang", safeLang);
+  lexaStorageSet("lexa-lang", safeLang);
 }
 
 // ── THEME & PERSONALIZATION (Phase 15) ──────────
 function toggleTheme(isDark) {
   document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
-  localStorage.setItem("lexa-theme", isDark ? "dark" : "light");
+  lexaStorageSet("lexa-theme", isDark ? "dark" : "light");
   showToast(isDark ? t("settings.darkModeActivated") : t("settings.lightModeActivated"), "info", 2000);
 }
 
@@ -1252,7 +1245,7 @@ function setAccentColor(color) {
   } else {
     document.documentElement.setAttribute("data-accent", safeColor);
   }
-  localStorage.setItem("lexa-accent", safeColor);
+  lexaStorageSet("lexa-accent", safeColor);
 
   // Update picker UI
   document.querySelectorAll(".accent-dot").forEach(d => {
@@ -1265,18 +1258,18 @@ function setAccentColor(color) {
 function setFontSize(size) {
   const safeSize = settingsSafeFontSize(size);
   document.documentElement.setAttribute("data-font-size", safeSize);
-  localStorage.setItem("lexa-fontsize", safeSize);
+  lexaStorageSet("lexa-fontsize", safeSize);
 }
 
 function loadThemePreferences() {
   // Theme
-  const theme = settingsSafeTheme(localStorage.getItem("lexa-theme") || "dark");
+  const theme = settingsSafeTheme(lexaStorageGet("lexa-theme", "dark"));
   document.documentElement.setAttribute("data-theme", theme);
   const themeToggle = document.getElementById("theme-toggle");
   if (themeToggle) themeToggle.checked = theme === "dark";
 
   // Accent
-  const accent = settingsSafeAccent(localStorage.getItem("lexa-accent") || "purple");
+  const accent = settingsSafeAccent(lexaStorageGet("lexa-accent", "purple"));
   if (accent !== "purple") {
     document.documentElement.setAttribute("data-accent", accent);
   } else {
@@ -1289,7 +1282,7 @@ function loadThemePreferences() {
   });
 
   // Font size
-  const fontSize = localStorage.getItem("lexa-fontsize");
+  const fontSize = lexaStorageGet("lexa-fontsize", "");
   if (fontSize) {
     const safeFontSize = settingsSafeFontSize(fontSize);
     document.documentElement.setAttribute("data-font-size", safeFontSize);

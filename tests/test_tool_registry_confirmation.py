@@ -44,7 +44,14 @@ def test_registered_tools_have_explicit_confirmation_field():
     assert all(isinstance(tool.get("confirmation_required"), bool) for tool in tools)
     assert tool_registry.get_tool("process_kill")["confirmation_required"] is True
     assert tool_registry.is_confirmation_tool("process_kill") is True
+    assert tool_registry.get_tool("desktop_click")["confirmation_required"] is True
+    assert tool_registry.get_tool("desktop_click_text")["confirmation_required"] is True
+    assert tool_registry.get_tool("desktop_type")["confirmation_required"] is True
+    assert tool_registry.get_tool("ui_click")["confirmation_required"] is True
     assert tool_registry.get_tool("system_info")["confirmation_required"] is False
+    assert tool_registry.get_tool("desktop_position")["confirmation_required"] is False
+    assert tool_registry.get_tool("ui_tree")["confirmation_required"] is False
+    assert tool_registry.get_tool("ui_find")["confirmation_required"] is False
     assert tool_registry.is_confirmation_tool("system_info") is False
     assert tool_registry.is_confirmation_tool("unknown_test_tool") is True
 

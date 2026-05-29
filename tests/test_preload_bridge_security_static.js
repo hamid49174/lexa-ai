@@ -127,6 +127,7 @@ assert("critical methods are classified critical", expectedCritical.every((name)
 assert("required high methods are classified high or critical", expectedHigh.every((name) => ["high", "critical"].includes(policies.get(name)?.risk)), expectedHigh.filter((name) => !["high", "critical"].includes(policies.get(name)?.risk)).join(", "));
 assert("all high and critical policies are accepted by main-process presence allowlist", highRiskMethods.every((name) => mainPresenceMethods.includes(name)), highRiskMethods.filter((name) => !mainPresenceMethods.includes(name)).join(", "));
 assert("read-only status methods stay low risk", ["health", "startupHealth", "aiStatus", "aiModels", "diagnostics", "healthTools", "commands", "timers", "agentStatus", "visionStatus"].every((name) => policies.get(name)?.risk === "low"));
+assert("preload stays compatible with Electron sandbox module limits", !preloadSrc.includes('require("path")') && !preloadSrc.includes("require('path')") && !preloadSrc.includes('require("node:path")'));
 
 console.log("\nBridge args hashing and batch validation:");
 const helperSandbox = new Function("crypto", `

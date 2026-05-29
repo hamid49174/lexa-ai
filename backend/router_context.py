@@ -7,7 +7,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from backend.context_monitor import context_monitor

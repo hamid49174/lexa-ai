@@ -2,7 +2,8 @@ from pathlib import Path
 import re
 
 
-FRONTEND_SRC = Path(__file__).resolve().parents[1] / "frontend" / "src"
+FRONTEND_ROOT = Path(__file__).resolve().parents[1] / "frontend"
+FRONTEND_SRC = FRONTEND_ROOT / "src"
 IGNORED_EXTERNAL_DIRS = {"vendor"}
 
 
@@ -50,7 +51,15 @@ def test_index_csp_has_electron_defense_in_depth_directives():
     for directive in [
         "object-src 'none'",
         "base-uri 'self'",
-        "frame-ancestors 'none'",
         "img-src 'self' data: blob: http: https:",
     ]:
         assert directive in csp, f"CSP missing directive: {directive}"
+    assert "frame-ancestors" not in csp, "frame-ancestors must be sent as a header; Chromium ignores it in meta CSP"
+
+
+def test_electron_main_sets_frame_ancestors_as_header():
+    main_js = (FRONTEND_ROOT / "main.js").read_text(encoding="utf-8")
+    assert "RENDERER_CSP_HEADER" in main_js
+    assert "frame-ancestors 'none'" in main_js
+    assert "ses.webRequest.onHeadersReceived" in main_js
+    assert 'responseHeaders["Content-Security-Policy"] = [RENDERER_CSP_HEADER]' in main_js

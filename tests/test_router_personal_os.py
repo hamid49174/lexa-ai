@@ -141,6 +141,43 @@ def test_obsidian_context_endpoint_returns_bounded_payload(monkeypatch):
     }]
 
 
+def test_obsidian_context_endpoint_uses_shared_chat_topic_when_topic_empty(monkeypatch):
+    import backend.router_personal_os as router_personal_os
+    from backend.context_bus import clear_shared_context, publish_chat_context
+
+    clear_shared_context()
+    publish_chat_context("Projekt Alpha Roadmap Recherche", source="unit")
+    calls = []
+
+    def fake_context(**kwargs):
+        calls.append(kwargs)
+        return {"ok": True, "files": []}
+
+    monkeypatch.setattr(router_personal_os, "build_obsidian_context_payload", fake_context)
+
+    res = _client(monkeypatch).get("/personal-os/obsidian-context?maxFiles=2&bodyChars=300")
+
+    clear_shared_context()
+    assert res.status_code == 200
+    assert calls[0]["topic"] == "Projekt Alpha Roadmap Recherche"
+    assert calls[0]["max_files"] == 2
+
+
+def test_personal_os_shared_context_endpoint_returns_latest_snapshot(monkeypatch):
+    from backend.context_bus import clear_shared_context, publish_chat_context
+
+    clear_shared_context()
+    publish_chat_context("Projekt Gamma Kontext", source="unit")
+
+    res = _client(monkeypatch).get("/personal-os/shared-context")
+
+    clear_shared_context()
+    assert res.status_code == 200
+    data = res.json()
+    assert data["fresh"] is True
+    assert data["topic"] == "Projekt Gamma Kontext"
+
+
 def test_personal_os_status_reports_review_tools(monkeypatch):
     import backend.router_personal_os as router_personal_os
 

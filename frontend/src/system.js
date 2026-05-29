@@ -1,61 +1,174 @@
-/* ════════════════════════════════════════════════
-   LEXA AI — System Module
+/* LEXA AI - System Module
    System Monitor view, System Tools (Window management,
    Autostart, Services, Port check, Uptime)
    Extracted from tools.js
-   ════════════════════════════════════════════════ */
+*/
 
-// ── SYSTEM VIEW ──────────────────────────────────
+// SYSTEM VIEW
 let systemAuditRefreshSeq = 0;
 let startupHealthRefreshSeq = 0;
 let hermesOverviewRefreshSeq = 0;
 
+function systemDisplayNumber(value, fallback = "0") {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return String(Math.round(num * 10) / 10);
+}
+
+function systemDisplayPercent(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.min(100, num));
+}
+
+function systemDisplayCount(value, fallback = "0") {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return String(Math.max(0, Math.floor(num)));
+}
+
+function systemBootTimeLabel(value) {
+  if (!value) return "?";
+  return String(value).split(" ")[1] || "?";
+}
+
+function createSystemQuickStat(value, label) {
+  const card = document.createElement("div");
+  card.className = "prod-stat-card";
+  const valueEl = document.createElement("div");
+  valueEl.className = "prod-stat-value";
+  valueEl.textContent = String(value || "?");
+  const labelEl = document.createElement("div");
+  labelEl.className = "prod-stat-label";
+  labelEl.textContent = String(label || "");
+  card.append(valueEl, labelEl);
+  return card;
+}
+
+function createSystemInfoBar(percent, color = "accent") {
+  const safePct = systemDisplayPercent(percent);
+  const tone = safePct > 80 ? "meter-error" : safePct > 60 ? "meter-warning" : color === "success" ? "meter-success" : "meter-accent";
+  const bar = document.createElement("div");
+  bar.className = `info-card-bar meter-width-${percentBucket(safePct)} ${tone}`;
+  return bar;
+}
+
+function createSystemInfoCard(label, value, subText, percent = null, color = "accent", extraValueClass = "") {
+  const card = document.createElement("div");
+  card.className = "info-card";
+  const labelEl = document.createElement("div");
+  labelEl.className = "info-card-label";
+  labelEl.textContent = String(label || "");
+  const valueEl = document.createElement("div");
+  valueEl.className = extraValueClass ? `info-card-value ${extraValueClass}` : "info-card-value";
+  valueEl.textContent = String(value || "");
+  card.append(labelEl, valueEl);
+  if (subText) {
+    const subEl = document.createElement("div");
+    subEl.className = "info-card-sub";
+    subEl.textContent = String(subText);
+    card.appendChild(subEl);
+  }
+  if (percent !== null && percent !== undefined) {
+    const track = document.createElement("div");
+    track.className = "info-card-bar-track";
+    track.appendChild(createSystemInfoBar(percent, color));
+    card.appendChild(track);
+  }
+  return card;
+}
+
+function createSystemTextElement(tagName, className, text) {
+  const element = document.createElement(tagName);
+  if (className) element.className = className;
+  element.textContent = String(text || "");
+  return element;
+}
+
+function createSystemActionButton(action, label) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "action-btn action-btn-sm";
+  button.dataset.action = action;
+  button.textContent = label;
+  return button;
+}
+
+function createSystemLoadingContent(id, className = "system-overview-content") {
+  const content = document.createElement("div");
+  content.id = id;
+  content.className = className;
+  content.setAttribute("aria-live", "polite");
+  content.setAttribute("aria-busy", "false");
+  content.appendChild(createSystemTextElement("div", "system-audit-empty", t("common.loading")));
+  return content;
+}
+
+function createSystemPanelHeader(kickerText, titleText, actions) {
+  const header = document.createElement("div");
+  header.className = "system-audit-header";
+  const copy = document.createElement("div");
+  copy.append(
+    createSystemTextElement("div", "system-audit-kicker", kickerText),
+    createSystemTextElement("h3", "section-title", titleText)
+  );
+  header.appendChild(copy);
+  if (actions?.length) {
+    const actionsWrap = document.createElement("div");
+    actionsWrap.className = "system-overview-actions";
+    actionsWrap.append(...actions);
+    header.appendChild(actionsWrap);
+  }
+  return header;
+}
+
 function createSystemView() {
   const div = document.createElement("div");
   div.className = "system-view active";
-  div.innerHTML = `
-    <div class="view-title">System <span>Monitor</span></div>
-    <div class="info-grid" id="system-grid"></div>
-    <div class="system-startup-panel" id="startup-health-panel">
-      <div class="system-audit-header">
-        <div>
-          <div class="system-audit-kicker">${escapeHtml(t("system.startupHealthKicker"))}</div>
-          <h3 class="section-title">${escapeHtml(t("system.startupHealthTitle"))}</h3>
-        </div>
-        <div class="system-overview-actions">
-          <button type="button" class="action-btn action-btn-sm" data-action="refreshStartupHealth">${escapeHtml(t("system.refresh"))}</button>
-        </div>
-      </div>
-      <div class="system-overview-content system-startup-content" id="startup-health-content" aria-live="polite" aria-busy="false">
-        <div class="system-audit-empty">${escapeHtml(t("common.loading"))}</div>
-      </div>
-    </div>
-    <div class="system-overview-panel" id="hermes-overview-panel">
-      <div class="system-audit-header">
-        <div>
-          <div class="system-audit-kicker">${escapeHtml(t("system.hermesCockpitKicker"))}</div>
-          <h3 class="section-title">${escapeHtml(t("system.hermesCockpitTitle"))}</h3>
-        </div>
-        <div class="system-overview-actions">
-          <button type="button" class="action-btn action-btn-sm" data-action="hermesOverviewAskInChat">${escapeHtml(t("system.hermesAskChat"))}</button>
-          <button type="button" class="action-btn action-btn-sm" data-action="refreshHermesOverview">${escapeHtml(t("system.refresh"))}</button>
-        </div>
-      </div>
-      <div class="system-overview-content" id="hermes-overview-content" aria-live="polite" aria-busy="false">
-        <div class="system-audit-empty">${escapeHtml(t("common.loading"))}</div>
-      </div>
-    </div>
-    <div class="system-audit-panel">
-      <div class="system-audit-header">
-        <div>
-          <div class="system-audit-kicker">${escapeHtml(t("system.trust"))}</div>
-          <h3 class="section-title">${escapeHtml(t("system.recentToolActivity"))}</h3>
-        </div>
-        <button type="button" class="action-btn action-btn-sm" data-action="refreshSystemAuditActivity">${escapeHtml(t("system.refresh"))}</button>
-      </div>
-      <div class="system-audit-list" id="system-audit-list" role="list" aria-live="polite" aria-busy="false"></div>
-    </div>
-  `;
+
+  const title = document.createElement("div");
+  title.className = "view-title";
+  title.append(document.createTextNode("System "), createSystemTextElement("span", "", "Monitor"));
+
+  const grid = document.createElement("div");
+  grid.className = "info-grid";
+  grid.id = "system-grid";
+
+  const startupPanel = document.createElement("div");
+  startupPanel.className = "system-startup-panel";
+  startupPanel.id = "startup-health-panel";
+  startupPanel.append(
+    createSystemPanelHeader(t("system.startupHealthKicker"), t("system.startupHealthTitle"), [
+      createSystemActionButton("refreshStartupHealth", t("system.refresh")),
+    ]),
+    createSystemLoadingContent("startup-health-content", "system-overview-content system-startup-content")
+  );
+
+  const hermesPanel = document.createElement("div");
+  hermesPanel.className = "system-overview-panel";
+  hermesPanel.id = "hermes-overview-panel";
+  hermesPanel.append(
+    createSystemPanelHeader(t("system.hermesCockpitKicker"), t("system.hermesCockpitTitle"), [
+      createSystemActionButton("hermesOverviewAskInChat", t("system.hermesAskChat")),
+      createSystemActionButton("refreshHermesOverview", t("system.refresh")),
+    ]),
+    createSystemLoadingContent("hermes-overview-content")
+  );
+
+  const auditPanel = document.createElement("div");
+  auditPanel.className = "system-audit-panel";
+  auditPanel.appendChild(createSystemPanelHeader(t("system.trust"), t("system.recentToolActivity"), [
+    createSystemActionButton("refreshSystemAuditActivity", t("system.refresh")),
+  ]));
+  const auditList = document.createElement("div");
+  auditList.className = "system-audit-list";
+  auditList.id = "system-audit-list";
+  auditList.setAttribute("role", "list");
+  auditList.setAttribute("aria-live", "polite");
+  auditList.setAttribute("aria-busy", "false");
+  auditPanel.appendChild(auditList);
+
+  div.append(title, grid, startupPanel, hermesPanel, auditPanel);
   return div;
 }
 
@@ -63,7 +176,7 @@ async function refreshSystemView() {
   const grid = document.getElementById("system-grid");
   if (!grid) return;
   if (!LexaState.get("backendOnline")) {
-    grid.innerHTML = '<div class="info-card"><div class="info-card-value text-error fs-16">' + escapeHtml(t("system.backendUnreachable")) + '</div></div>';
+    grid.replaceChildren(createSystemInfoCard("", t("system.backendUnreachable"), "", null, "accent", "text-error fs-16"));
     setStartupHealthMessage(t("common.backendOffline"), "bad");
     setHermesOverviewMessage(t("common.backendOffline"), "bad");
     setSystemAuditMessage(t("common.backendOffline"), "bad");
@@ -79,43 +192,36 @@ async function refreshSystemView() {
       return;
     }
     const d = res.data;
-    const infoBar = (pct, color) => {
-      const safePct = Math.min(100, pct);
-      const tone = pct > 80 ? "meter-error" : pct > 60 ? "meter-warning" : color === "success" ? "meter-success" : "meter-accent";
-      return `<div class="info-card-bar meter-width-${percentBucket(safePct)} ${tone}"></div>`;
-    };
-    grid.innerHTML = `
-      <div class="info-card">
-        <div class="info-card-label">${escapeHtml(t("system.cpuUsage"))}</div>
-        <div class="info-card-value">${d.cpu_percent}%</div>
-        <div class="info-card-sub">${escapeHtml(t("system.cores", {cores: d.cpu_cores, freq: d.cpu_freq_mhz || "?"}))}</div>
-        <div class="info-card-bar-track">${infoBar(d.cpu_percent, "accent")}</div>
-      </div>
-      <div class="info-card">
-        <div class="info-card-label">${escapeHtml(t("system.ram"))}</div>
-        <div class="info-card-value">${d.ram_used_gb} GB</div>
-        <div class="info-card-sub">${escapeHtml(t("system.ofTotal", {total: d.ram_total_gb, percent: d.ram_percent}))}</div>
-        <div class="info-card-bar-track">${infoBar(d.ram_percent, "accent")}</div>
-      </div>
-      <div class="info-card">
-        <div class="info-card-label">${escapeHtml(t("system.disk"))}</div>
-        <div class="info-card-value">${d.disk_used_gb} GB</div>
-        <div class="info-card-sub">${escapeHtml(t("system.ofTotal", {total: d.disk_total_gb, percent: d.disk_percent}))}</div>
-        <div class="info-card-bar-track">${infoBar(d.disk_percent, "success")}</div>
-      </div>
-      <div class="info-card">
-        <div class="info-card-label">${escapeHtml(t("system.battery"))}</div>
-        <div class="info-card-value">${d.battery_percent !== null ? d.battery_percent + "%" : "N/A"}</div>
-        <div class="info-card-sub">${d.battery_plugged ? escapeHtml(t("system.charging")) : escapeHtml(t("system.onBattery"))}</div>
-        ${d.battery_percent !== null ? `<div class="info-card-bar-track">${infoBar(d.battery_percent, "success")}</div>` : ""}
-      </div>
-    `;
+    const cpuPercent = systemDisplayPercent(d.cpu_percent);
+    const cpuCores = systemDisplayNumber(d.cpu_cores, "?");
+    const cpuFreq = systemDisplayNumber(d.cpu_freq_mhz, "?");
+    const ramUsed = systemDisplayNumber(d.ram_used_gb);
+    const ramTotal = systemDisplayNumber(d.ram_total_gb);
+    const ramPercent = systemDisplayPercent(d.ram_percent);
+    const diskUsed = systemDisplayNumber(d.disk_used_gb);
+    const diskTotal = systemDisplayNumber(d.disk_total_gb);
+    const diskPercent = systemDisplayPercent(d.disk_percent);
+    const batteryPercent = d.battery_percent !== null && d.battery_percent !== undefined
+      ? systemDisplayPercent(d.battery_percent)
+      : null;
+    grid.replaceChildren(
+      createSystemInfoCard(t("system.cpuUsage"), `${cpuPercent}%`, t("system.cores", {cores: cpuCores, freq: cpuFreq}), cpuPercent),
+      createSystemInfoCard(t("system.ram"), `${ramUsed} GB`, t("system.ofTotal", {total: ramTotal, percent: ramPercent}), ramPercent),
+      createSystemInfoCard(t("system.disk"), `${diskUsed} GB`, t("system.ofTotal", {total: diskTotal, percent: diskPercent}), diskPercent, "success"),
+      createSystemInfoCard(
+        t("system.battery"),
+        batteryPercent !== null ? `${batteryPercent}%` : "N/A",
+        d.battery_plugged ? t("system.charging") : t("system.onBattery"),
+        batteryPercent,
+        "success"
+      )
+    );
     refreshStartupHealth();
     refreshHermesOverview();
     refreshSystemAuditActivity();
   } catch (e) {
     console.warn("[System] Failed to refresh system view:", e.message || e);
-    grid.innerHTML = ""; const errCard = document.createElement("div"); errCard.className = "info-card"; const errVal = document.createElement("div"); errVal.className = "info-card-value text-error fs-16"; errVal.textContent = t("toast.loadError"); errCard.appendChild(errVal); grid.appendChild(errCard);
+    grid.replaceChildren(createSystemInfoCard("", t("toast.loadError"), "", null, "accent", "text-error fs-16"));
     refreshStartupHealth();
     setSystemAuditMessage(t("toast.loadError"), "bad");
     refreshHermesOverview();
@@ -157,7 +263,92 @@ function setStartupHealthMessage(message, tone = "muted", busy = false) {
 }
 
 function startupHealthMetric(counts) {
-  return `${Number(counts?.ok || 0)} / ${Number(counts?.warn || 0)} / ${Number(counts?.blocked || 0)}`;
+  return `${systemDisplayCount(counts?.ok)} / ${systemDisplayCount(counts?.warn)} / ${systemDisplayCount(counts?.blocked)}`;
+}
+
+function createSystemOverviewSummary(state, tone, summary) {
+  const row = document.createElement("div");
+  row.className = "system-overview-summary";
+  const stateEl = document.createElement("span");
+  stateEl.className = `system-overview-state system-audit-${tone}`;
+  stateEl.textContent = String(state || "unknown");
+  const summaryEl = document.createElement("div");
+  summaryEl.className = "system-overview-summary-text";
+  summaryEl.textContent = String(summary || "");
+  row.append(stateEl, summaryEl);
+  return row;
+}
+
+function createSystemOverviewMetric(label, value) {
+  const item = document.createElement("div");
+  item.className = "system-overview-metric";
+  const labelEl = document.createElement("span");
+  labelEl.textContent = String(label || "");
+  const valueEl = document.createElement("strong");
+  valueEl.textContent = String(value || "");
+  item.append(labelEl, valueEl);
+  return item;
+}
+
+function createSystemOverviewMuted(message) {
+  const muted = document.createElement("div");
+  muted.className = "system-overview-muted";
+  muted.textContent = String(message || "");
+  return muted;
+}
+
+function createSystemOverviewCheckRow(check) {
+  const tone = hermesOverviewTone(check?.state);
+  const row = document.createElement("div");
+  row.className = "system-overview-check";
+  const dot = document.createElement("span");
+  dot.className = `system-audit-dot system-audit-${tone}`;
+  dot.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.className = "system-overview-check-label";
+  label.textContent = String(check?.label || check?.id || "Check");
+  const status = document.createElement("span");
+  status.className = `system-audit-status system-audit-${tone}`;
+  status.textContent = String(check?.state || "unknown");
+  row.append(dot, label, status);
+  return row;
+}
+
+function createSystemOverviewFileRow(label, code) {
+  const row = document.createElement("div");
+  row.className = "system-overview-file";
+  const labelEl = document.createElement("span");
+  labelEl.textContent = String(label || "");
+  const codeEl = document.createElement("code");
+  codeEl.textContent = String(code || "");
+  row.append(labelEl, codeEl);
+  return row;
+}
+
+function createSystemOverviewSection(label, contentClass, children) {
+  const section = document.createElement("section");
+  section.className = "system-overview-section";
+  section.setAttribute("aria-label", String(label || ""));
+  const title = document.createElement("div");
+  title.className = "system-overview-section-title";
+  title.textContent = String(label || "");
+  const body = document.createElement("div");
+  body.className = contentClass;
+  body.append(...children);
+  section.append(title, body);
+  return section;
+}
+
+function createSystemOverviewTaskList(tasks, fallback) {
+  const list = document.createElement("ul");
+  list.className = "system-overview-tasks";
+  const rows = tasks.length ? tasks : [fallback];
+  rows.forEach((task) => {
+    const item = document.createElement("li");
+    item.textContent = String(task || "");
+    list.appendChild(item);
+  });
+  return list;
 }
 
 function renderStartupHealth(payload) {
@@ -174,61 +365,39 @@ function renderStartupHealth(payload) {
   const providers = Array.isArray(groups.providers?.available) ? groups.providers.available : [];
   const tools = groups.tools || {};
   const stateTone = hermesOverviewTone(payload.state);
-  const toolsPct = Number(tools.healthPct || 0);
-
-  const checkRows = checks.length ? checks.map((check) => {
-    const tone = hermesOverviewTone(check.state);
-    return `
-      <div class="system-overview-check">
-        <span class="system-audit-dot system-audit-${tone}" aria-hidden="true"></span>
-        <span class="system-overview-check-label">${escapeHtml(check.label || check.id || "Check")}</span>
-        <span class="system-audit-status system-audit-${tone}">${escapeHtml(check.state || "unknown")}</span>
-      </div>
-    `;
-  }).join("") : `<div class="system-overview-muted">${escapeHtml(t("system.startupHealthNoSummary"))}</div>`;
-
-  const providerRows = providers.length ? providers.map((provider) => `
-    <div class="system-overview-file">
-      <span>${escapeHtml(String(provider))}</span>
-      <code>${escapeHtml(groups.providers?.selected === provider ? "selected" : "available")}</code>
-    </div>
-  `).join("") : `<div class="system-overview-muted">${escapeHtml(t("system.startupNoProviders"))}</div>`;
+  const toolsPct = systemDisplayNumber(systemDisplayPercent(tools.healthPct));
+  const providerCount = systemDisplayCount(providers.length);
 
   target.setAttribute("aria-busy", "false");
-  target.innerHTML = `
-    <div class="system-overview-summary">
-      <span class="system-overview-state system-audit-${stateTone}">${escapeHtml(payload.state || "unknown")}</span>
-      <div class="system-overview-summary-text">${escapeHtml(payload.summary || t("system.startupHealthNoSummary"))}</div>
-    </div>
-    <div class="system-overview-metrics">
-      <div class="system-overview-metric">
-        <span>${escapeHtml(t("system.startupMetricChecks"))}</span>
-        <strong>${escapeHtml(startupHealthMetric(counts))}</strong>
-      </div>
-      <div class="system-overview-metric">
-        <span>${escapeHtml(t("system.startupMetricProviders"))}</span>
-        <strong>${providers.length}/4</strong>
-      </div>
-      <div class="system-overview-metric">
-        <span>${escapeHtml(t("system.startupMetricTools"))}</span>
-        <strong>${toolsPct}%</strong>
-      </div>
-    </div>
-    <div class="system-overview-grid">
-      <section class="system-overview-section" aria-label="${escapeHtml(t("system.startupChecks"))}">
-        <div class="system-overview-section-title">${escapeHtml(t("system.startupChecks"))}</div>
-        <div class="system-overview-checks">${checkRows}</div>
-      </section>
-      <section class="system-overview-section" aria-label="${escapeHtml(t("system.startupProviders"))}">
-        <div class="system-overview-section-title">${escapeHtml(t("system.startupProviders"))}</div>
-        <div class="system-overview-files">${providerRows}</div>
-      </section>
-      <section class="system-overview-section" aria-label="${escapeHtml(t("system.startupNextAction"))}">
-        <div class="system-overview-section-title">${escapeHtml(t("system.startupNextAction"))}</div>
-        <div class="system-overview-next">${escapeHtml(payload.nextAction || t("system.startupNoNextAction"))}</div>
-      </section>
-    </div>
-  `;
+  const metrics = document.createElement("div");
+  metrics.className = "system-overview-metrics";
+  metrics.append(
+    createSystemOverviewMetric(t("system.startupMetricChecks"), startupHealthMetric(counts)),
+    createSystemOverviewMetric(t("system.startupMetricProviders"), `${providerCount}/4`),
+    createSystemOverviewMetric(t("system.startupMetricTools"), `${toolsPct}%`)
+  );
+
+  const checkRows = checks.length
+    ? checks.map((check) => createSystemOverviewCheckRow(check))
+    : [createSystemOverviewMuted(t("system.startupHealthNoSummary"))];
+  const providerRows = providers.length
+    ? providers.map((provider) => createSystemOverviewFileRow(provider, groups.providers?.selected === provider ? "selected" : "available"))
+    : [createSystemOverviewMuted(t("system.startupNoProviders"))];
+  const nextText = document.createTextNode(String(payload.nextAction || t("system.startupNoNextAction")));
+
+  const grid = document.createElement("div");
+  grid.className = "system-overview-grid";
+  grid.append(
+    createSystemOverviewSection(t("system.startupChecks"), "system-overview-checks", checkRows),
+    createSystemOverviewSection(t("system.startupProviders"), "system-overview-files", providerRows),
+    createSystemOverviewSection(t("system.startupNextAction"), "system-overview-next", [nextText])
+  );
+
+  target.replaceChildren(
+    createSystemOverviewSummary(payload.state, stateTone, payload.summary || t("system.startupHealthNoSummary")),
+    metrics,
+    grid
+  );
 }
 
 async function refreshStartupHealth() {
@@ -257,7 +426,7 @@ async function refreshStartupHealth() {
 
 function hermesDraftMetric(counts) {
   const drafts = counts?.drafts || {};
-  return `${Number(drafts.pending || 0)} / ${Number(drafts.approved || 0)} / ${Number(drafts.rejected || 0)}`;
+  return `${systemDisplayCount(drafts.pending)} / ${systemDisplayCount(drafts.approved)} / ${systemDisplayCount(drafts.rejected)}`;
 }
 
 function renderHermesOverview(payload) {
@@ -273,66 +442,39 @@ function renderHermesOverview(payload) {
   const tasks = Array.isArray(payload.nextTasks) ? payload.nextTasks.slice(0, 4) : [];
   const counts = payload.counts || {};
   const stateTone = hermesOverviewTone(payload.healthState);
-  const contextCount = Number(counts.contextFiles ?? files.length ?? 0);
-
-  const checkRows = checks.map((check) => {
-    const tone = hermesOverviewTone(check.state);
-    return `
-      <div class="system-overview-check">
-        <span class="system-audit-dot system-audit-${tone}" aria-hidden="true"></span>
-        <span class="system-overview-check-label">${escapeHtml(check.label || check.id || "Check")}</span>
-        <span class="system-audit-status system-audit-${tone}">${escapeHtml(check.state || "unknown")}</span>
-      </div>
-    `;
-  }).join("");
-
-  const fileRows = files.length ? files.map((file) => `
-    <div class="system-overview-file">
-      <span>${escapeHtml(file.title || file.path || "OS-Datei")}</span>
-      <code>${escapeHtml(file.path || "")}</code>
-    </div>
-  `).join("") : `<div class="system-overview-muted">${escapeHtml(t("system.hermesNoContext"))}</div>`;
-
-  const taskRows = tasks.length ? tasks.map((task) => `
-    <li>${escapeHtml(task)}</li>
-  `).join("") : `<li>${escapeHtml(payload.nextAction || t("system.hermesNoNextTask"))}</li>`;
+  const contextCount = systemDisplayCount(counts.contextFiles ?? files.length ?? 0);
 
   target.setAttribute("aria-busy", "false");
-  target.innerHTML = `
-    <div class="system-overview-summary">
-      <span class="system-overview-state system-audit-${stateTone}">${escapeHtml(payload.healthState || "unknown")}</span>
-      <div class="system-overview-summary-text">${escapeHtml(payload.summary || t("system.hermesOverviewNoSummary"))}</div>
-    </div>
-    <div class="system-overview-metrics">
-      <div class="system-overview-metric">
-        <span>${escapeHtml(t("system.hermesMetricDrafts"))}</span>
-        <strong>${escapeHtml(hermesDraftMetric(counts))}</strong>
-      </div>
-      <div class="system-overview-metric">
-        <span>${escapeHtml(t("system.hermesMetricContext"))}</span>
-        <strong>${contextCount}</strong>
-      </div>
-      <div class="system-overview-metric">
-        <span>${escapeHtml(t("system.hermesMetricSafeMode"))}</span>
-        <strong>${payload.safeMode ? escapeHtml(t("common.yes")) : escapeHtml(t("common.no"))}</strong>
-      </div>
-    </div>
-    <div class="system-overview-grid">
-      <section class="system-overview-section" aria-label="${escapeHtml(t("system.hermesChecks"))}">
-        <div class="system-overview-section-title">${escapeHtml(t("system.hermesChecks"))}</div>
-        <div class="system-overview-checks">${checkRows}</div>
-      </section>
-      <section class="system-overview-section" aria-label="${escapeHtml(t("system.hermesContextFiles"))}">
-        <div class="system-overview-section-title">${escapeHtml(t("system.hermesContextFiles"))}</div>
-        <div class="system-overview-files">${fileRows}</div>
-      </section>
-      <section class="system-overview-section" aria-label="${escapeHtml(t("system.hermesNextAction"))}">
-        <div class="system-overview-section-title">${escapeHtml(t("system.hermesNextAction"))}</div>
-        <div class="system-overview-next">${escapeHtml(payload.nextAction || t("system.hermesNoNextTask"))}</div>
-        <ul class="system-overview-tasks">${taskRows}</ul>
-      </section>
-    </div>
-  `;
+  const metrics = document.createElement("div");
+  metrics.className = "system-overview-metrics";
+  metrics.append(
+    createSystemOverviewMetric(t("system.hermesMetricDrafts"), hermesDraftMetric(counts)),
+    createSystemOverviewMetric(t("system.hermesMetricContext"), contextCount),
+    createSystemOverviewMetric(t("system.hermesMetricSafeMode"), payload.safeMode ? t("common.yes") : t("common.no"))
+  );
+
+  const checkRows = checks.length
+    ? checks.map((check) => createSystemOverviewCheckRow(check))
+    : [createSystemOverviewMuted(t("system.startupHealthNoSummary"))];
+  const fileRows = files.length
+    ? files.map((file) => createSystemOverviewFileRow(file.title || file.path || "OS-Datei", file.path || ""))
+    : [createSystemOverviewMuted(t("system.hermesNoContext"))];
+  const nextText = document.createTextNode(String(payload.nextAction || t("system.hermesNoNextTask")));
+  const taskList = createSystemOverviewTaskList(tasks, payload.nextAction || t("system.hermesNoNextTask"));
+
+  const grid = document.createElement("div");
+  grid.className = "system-overview-grid";
+  grid.append(
+    createSystemOverviewSection(t("system.hermesChecks"), "system-overview-checks", checkRows),
+    createSystemOverviewSection(t("system.hermesContextFiles"), "system-overview-files", fileRows),
+    createSystemOverviewSection(t("system.hermesNextAction"), "system-overview-next", [nextText, taskList])
+  );
+
+  target.replaceChildren(
+    createSystemOverviewSummary(payload.healthState, stateTone, payload.summary || t("system.hermesOverviewNoSummary")),
+    metrics,
+    grid
+  );
 }
 
 async function refreshHermesOverview() {
@@ -501,7 +643,7 @@ async function refreshSystemAuditActivity() {
   }
 }
 
-// ── SYSTEM TOOLS (Phase 21: PC-Kontrolle erweitert) ──
+// SYSTEM TOOLS (Phase 21: PC-Kontrolle erweitert)
 
 async function refreshSysQuickBar() {
   if (!LexaState.get("backendOnline")) return;
@@ -511,21 +653,15 @@ async function refreshSysQuickBar() {
     if (!bar) return;
     if (res.success && res.data) {
       const d = res.data;
-      bar.innerHTML = `
-        <div class="prod-stat-card">
-          <div class="prod-stat-value">${escapeHtml(String(d.formatted || "?"))}</div>
-          <div class="prod-stat-label">Uptime</div>
-        </div>
-        <div class="prod-stat-card">
-          <div class="prod-stat-value">${d.boot_time ? escapeHtml(d.boot_time.split(" ")[1] || "?") : "?"}</div>
-          <div class="prod-stat-label">${escapeHtml(t("system.bootTime"))}</div>
-        </div>
-      `;
+      bar.replaceChildren(
+        createSystemQuickStat(d.formatted, "Uptime"),
+        createSystemQuickStat(systemBootTimeLabel(d.boot_time), t("system.bootTime"))
+      );
     }
   } catch (e) { console.warn("[System] Failed to refresh sys quick bar:", e.message || e); }
 }
 
-// ── Window Management ──
+// Window Management
 
 async function windowLayoutAction(layout) {
   if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
@@ -571,7 +707,7 @@ async function windowResizeAction() {
   } catch (e) { hideTyping(); addMessage(t("common.error") + ": " + e.message, "system"); }
 }
 
-// ── Autostart ──
+// Autostart
 
 async function viewAutostartList() {
   switchView("chat");
@@ -608,7 +744,7 @@ async function autostartAddAction() {
   } catch (e) { hideTyping(); addMessage(t("common.error") + ": " + e.message, "system"); }
 }
 
-// ── Services ──
+// Services
 
 async function viewServiceList() {
   switchView("chat");
@@ -628,7 +764,7 @@ async function viewServiceList() {
   } catch (e) { hideTyping(); addMessage(t("common.error") + ": " + e.message, "system"); }
 }
 
-// ── Port Check ──
+// Port Check
 
 async function portCheckAction() {
   const vals = await showInputModal(t("system.portCheckTitle"), [

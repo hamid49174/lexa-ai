@@ -21,7 +21,7 @@ from pathlib import Path
 import psutil
 import pyperclip
 
-from backend.security import is_command_allowed, audit_log
+from backend.security import is_command_allowed, audit_log, validate_url
 from backend.i18n import t
 from backend.plugin_loader import discover_plugins, list_plugins
 
@@ -30,6 +30,9 @@ from companion import browser as web
 from companion import file_tools
 from companion import media
 from companion import communication as comm
+from companion import desktop_control
+from companion import hermes_desktop
+from companion import ui_automation
 
 # Phase 4 Module
 from backend import memory as mem
@@ -47,8 +50,6 @@ from companion import dev_tools as devtools
 from companion import calendar_integration as calendar_int
 
 # Phase 40+ Module
-from companion import tool_health
-
 # Upgrade 3: Smart Reminders
 from backend import reminders
 from backend import hermes_adapter
@@ -89,6 +90,19 @@ class CompanionEngine:
             "file_search": self.search_files,
             "window_list": self.list_windows,
             "window_focus": self.focus_window,
+            "ui_tree": ui_automation.ui_tree,
+            "ui_find": ui_automation.ui_find,
+            "ui_click": ui_automation.ui_click,
+            "hermes_desktop_task": hermes_desktop.hermes_desktop_task,
+            "hermes_desktop_commit": hermes_desktop.hermes_desktop_commit,
+            "desktop_position": desktop_control.desktop_position,
+            "desktop_move": desktop_control.desktop_move,
+            "desktop_click": desktop_control.desktop_click,
+            "desktop_click_text": desktop_control.desktop_click_text,
+            "desktop_scroll": desktop_control.desktop_scroll,
+            "desktop_type": desktop_control.desktop_type,
+            "desktop_hotkey": desktop_control.desktop_hotkey,
+            "desktop_wait": desktop_control.desktop_wait,
             "brightness_set": self.set_brightness,
             "brightness_get": self.get_brightness,
             "wifi_status": self.wifi_status,
@@ -177,6 +191,7 @@ class CompanionEngine:
             "file_move": file_tools.file_move,
             "file_copy": file_tools.file_copy,
             "file_delete": file_tools.file_delete,
+            "file_write": file_tools.file_write,
             "file_open": file_tools.file_open,
             "file_recent_downloads": file_tools.file_recent_downloads,
             "folder_create": file_tools.folder_create,
@@ -489,7 +504,7 @@ class CompanionEngine:
             return f"Lautstärke konnte nicht gesetzt werden: {e}"
 
     def search_files(self, query: str = "", path: str = "C:/Users", extension: str = "",
-                      max_results: int = 50) -> list[str]:
+                     max_results: int = 50) -> list[str]:
         """Dateien suchen — Windows Search Index (instant) mit os.walk Fallback.
 
         Primary: Windows Search Index via ADODB (uses pre-built index, <100ms)
@@ -703,7 +718,7 @@ class CompanionEngine:
 "@
             [WinFocus]::Focus("{safe_title}")
             '''
-            result = subprocess.run(
+            subprocess.run(
                 ["powershell", "-Command", ps],
                 capture_output=True, text=True, timeout=10,
             )
@@ -903,13 +918,15 @@ class CompanionEngine:
         if not url:
             return t("command.noUrl")
         url = url.strip()
-        if not url.startswith(("http://", "https://")):
-            return "Nur http:// und https:// URLs erlaubt."
         if len(url) > 2000:
             return "URL zu lang."
+        try:
+            safe_url = validate_url(url)
+        except ValueError as e:
+            return str(e)
         import webbrowser
-        webbrowser.open(url)
-        return f"URL geöffnet: {url}"
+        webbrowser.open(safe_url)
+        return f"URL geöffnet: {safe_url}"
 
     def shutdown_pc(self, delay: int = 30) -> str:
         """PC herunterfahren (braucht Bestätigung)."""
@@ -922,7 +939,6 @@ class CompanionEngine:
         delay = max(0, min(3600, int(delay)))  # Clamp 0–3600s
         subprocess.Popen(["shutdown", "/r", "/t", str(delay)], shell=False)
         return f"PC startet in {delay} Sekunden neu."
-
 
     # ── Upgrade 6: Vision/OCR Commands ─────────────
 
@@ -959,23 +975,23 @@ class CompanionEngine:
         import time as _time
         now = _time.time()
         pending = []
-        for t in _timer_results:
-            if not t["acknowledged"] and (now - t["fired_at"]) < 60:
-                pending.append({"message": t["message"], "fired_at": t["fired_at"]})
+        for timer in _timer_results:
+            if not timer["acknowledged"] and (now - timer["fired_at"]) < 60:
+                pending.append({"message": timer["message"], "fired_at": timer["fired_at"]})
         return pending
 
     @staticmethod
     def acknowledge_timers() -> str:
         """Acknowledge all pending timer notifications."""
         count = 0
-        for t in _timer_results:
-            if not t["acknowledged"]:
-                t["acknowledged"] = True
+        for timer in _timer_results:
+            if not timer["acknowledged"]:
+                timer["acknowledged"] = True
                 count += 1
         # Clean up old acknowledged entries (older than 5 minutes)
         import time as _time
         now = _time.time()
-        _timer_results[:] = [t for t in _timer_results if (now - t["fired_at"]) < 300]
+        _timer_results[:] = [timer for timer in _timer_results if (now - timer["fired_at"]) < 300]
         return f"{count} Timer-Benachrichtigung(en) bestätigt."
 
 

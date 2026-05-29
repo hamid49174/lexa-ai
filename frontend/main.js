@@ -544,6 +544,19 @@ function isTrustedRendererUrl(rawUrl) {
   }
 }
 
+const RENDERER_CSP_HEADER = [
+  "default-src 'self'",
+  "script-src 'self' https://cdnjs.cloudflare.com",
+  "connect-src 'self' http://127.0.0.1:8000 ws://127.0.0.1:8000",
+  "style-src 'self' https://fonts.googleapis.com",
+  "img-src 'self' data: blob: http: https:",
+  "font-src https://fonts.gstatic.com",
+  "media-src blob:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
 function safeExternalUrl(rawUrl) {
   try {
     const parsed = new URL(String(rawUrl || ""));
@@ -812,6 +825,16 @@ function installElectronSecurityGuards(win) {
   });
 
   const ses = win.webContents.session;
+  if (ses?.webRequest && !ses.__lexaRendererCspHeaderInstalled) {
+    ses.__lexaRendererCspHeaderInstalled = true;
+    ses.webRequest.onHeadersReceived((details, callback) => {
+      const responseHeaders = { ...(details.responseHeaders || {}) };
+      if (isTrustedRendererUrl(details.url) && details.resourceType === "mainFrame") {
+        responseHeaders["Content-Security-Policy"] = [RENDERER_CSP_HEADER];
+      }
+      callback({ responseHeaders });
+    });
+  }
   if (ses && !ses.__lexaPermissionGuardInstalled) {
     ses.__lexaPermissionGuardInstalled = true;
     ses.setPermissionRequestHandler((webContents, permission, callback, details = {}) => {

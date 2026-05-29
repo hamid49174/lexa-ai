@@ -4,7 +4,6 @@ Replaces HTTP polling with instant event delivery (~0ms vs 150ms latency).
 """
 
 import asyncio
-import json
 import logging
 import time
 import threading
@@ -105,6 +104,7 @@ def has_ws_clients() -> bool:
 
 _last_volume_push: float = 0.0
 _VOLUME_THROTTLE_S: float = 0.15  # Max ~6 events/sec (was ~7/sec unthrottled)
+
 
 def push_volume(vol: float):
     """Push volume event (throttled, high frequency — only to WS clients)."""

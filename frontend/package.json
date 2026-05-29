@@ -9,8 +9,8 @@
     "build": "set \"ELECTRON_RUN_AS_NODE=\" && electron-builder --config electron-builder.json"
   },
   "devDependencies": {
-    "electron": "^33.3.1",
-    "electron-builder": "^25.0.0"
+    "electron": "33.3.1",
+    "electron-builder": "25.1.8"
   },
   "author": "alexsprogis",
   "license": "MIT"

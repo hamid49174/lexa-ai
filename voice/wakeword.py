@@ -10,7 +10,7 @@ import numpy as np
 from typing import Optional, Callable
 
 from voice.config import (
-    SAMPLE_RATE, VAD_CHUNK_SAMPLES,
+    SAMPLE_RATE,
     WAKE_PHRASES, WAKE_COOLDOWN_S, WAKE_WINDOW_S,
     LISTEN_TIMEOUT_S, MAX_UTTERANCE_S,
     WAKE_FALLBACK_STT_MIN_INTERVAL_S, WAKE_FALLBACK_STT_MAX_INTERVAL_S,

@@ -9,7 +9,12 @@
 function createLoadingState(text = t("common.loading")) {
   const div = document.createElement("div");
   div.className = "loading-state";
-  div.innerHTML = `<div class="loading-spinner"></div><div class="loading-text">${escapeHtml(text)}</div>`;
+  const spinner = document.createElement("div");
+  spinner.className = "loading-spinner";
+  const label = document.createElement("div");
+  label.className = "loading-text";
+  label.textContent = text;
+  div.append(spinner, label);
   return div;
 }
 
@@ -89,7 +94,7 @@ function positionNotifCenter(panel, anchor) {
   const hasAnchor = Boolean(anchor && typeof anchor.getBoundingClientRect === "function");
   panel.classList.toggle("notif-center-compact", compact);
   panel.classList.toggle("notif-center-short", shortViewport);
-  panel.classList.toggle("notif-center-anchored", hasAnchor);
+  panel.classList.toggle("notif-center-anchored", hasAnchor && !compact && !shortViewport);
 }
 
 function bindNotifCenterPositioning() {
@@ -126,8 +131,9 @@ function setNotifCenterOpen(open, options = {}) {
   _notifCenterOpen = Boolean(open);
   if (_notifCenterOpen) {
     const active = document.activeElement;
+    _notifCenterRestoreFocusEl = btn || null;
     if (active && active !== document.body && !panel.contains(active)) {
-      _notifCenterRestoreFocusEl = active;
+      _notifCenterRestoreFocusEl = btn || active;
     }
     positionNotifCenter(panel, btn);
     panel.classList.remove("hidden");
@@ -154,7 +160,13 @@ function setNotifCenterOpen(open, options = {}) {
       btn.setAttribute("aria-expanded", "false");
       btn.setAttribute("aria-controls", "notif-center");
     }
-    if (options.restoreFocus !== false) restoreFocus(_notifCenterRestoreFocusEl);
+    if (options.restoreFocus !== false) {
+      const focusTarget = _notifCenterRestoreFocusEl || btn;
+      if (_notifCenterRestoreFocusEl) restoreFocus(_notifCenterRestoreFocusEl);
+      else restoreFocus(btn);
+      setTimeout(() => restoreFocus(focusTarget), 0);
+      setTimeout(() => restoreFocus(focusTarget), 40);
+    }
     _notifCenterRestoreFocusEl = null;
   }
 }
@@ -168,10 +180,17 @@ function clearNotifCenter() {
   _unreadNotifs = 0;
   const list = document.getElementById("notif-center-list");
   if (list) {
-    list.innerHTML = '<div class="notif-center-empty">' + escapeHtml(t("notifications.empty")) + '</div>';
+    list.replaceChildren(createNotifCenterEmptyState());
   }
   const badge = document.getElementById("notif-badge");
   if (badge) badge.classList.add("hidden");
+}
+
+function createNotifCenterEmptyState() {
+  const empty = document.createElement("div");
+  empty.className = "notif-center-empty";
+  empty.textContent = t("notifications.empty");
+  return empty;
 }
 
 function _addToNotifCenter(message, type) {
@@ -220,10 +239,13 @@ function showToast(message, type = "info", duration = 3500) {
   const icons = { success: "\u2713", error: "\u2717", warning: "\u26A0", info: "\u2139" };
   const toast = document.createElement("div");
   toast.className = `toast ${type}`;
-  toast.innerHTML = `
-    <span class="toast-icon">${icons[type] || icons.info}</span>
-    <span class="toast-text">${escapeHtml(message)}</span>
-  `;
+  const icon = document.createElement("span");
+  icon.className = "toast-icon";
+  icon.textContent = icons[type] || icons.info;
+  const text = document.createElement("span");
+  text.className = "toast-text";
+  text.textContent = message;
+  toast.append(icon, text);
   if (!container) return;
   container.appendChild(toast);
   setTimeout(() => {
@@ -429,27 +451,7 @@ function showShortcutsOverlay() {
     ]},
   ];
 
-  const groupsHTML = shortcuts.map(g => `
-    <div class="sc-group">
-      <div class="sc-group-title">${g.group}</div>
-      ${g.items.map(s => `
-        <div class="sc-row">
-          <kbd class="sc-key">${s.key}</kbd>
-          <span class="sc-desc">${s.desc}</span>
-        </div>
-      `).join("")}
-    </div>
-  `).join("");
-
-  overlay.innerHTML = `
-    <div class="shortcuts-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("shortcuts.title"))}">
-      <div class="shortcuts-header">
-        <span>${escapeHtml(t("shortcuts.title"))}</span>
-        <button type="button" class="shortcuts-close" id="shortcuts-close-btn" aria-label="${escapeHtml(t("common.close"))}">&times;</button>
-      </div>
-      <div class="shortcuts-body">${groupsHTML}</div>
-    </div>
-  `;
+  overlay.appendChild(createShortcutsPanel(shortcuts));
 
   document.body.appendChild(overlay);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) closeShortcuts(); });
@@ -462,6 +464,53 @@ function showShortcutsOverlay() {
 }
 
 // ── COMMAND PALETTE (Ctrl+P) ────────────────────
+function createShortcutRow(item) {
+  const row = document.createElement("div");
+  row.className = "sc-row";
+  const key = document.createElement("kbd");
+  key.className = "sc-key";
+  key.textContent = item.key;
+  const desc = document.createElement("span");
+  desc.className = "sc-desc";
+  desc.textContent = item.desc;
+  row.append(key, desc);
+  return row;
+}
+
+function createShortcutGroup(group) {
+  const wrap = document.createElement("div");
+  wrap.className = "sc-group";
+  const title = document.createElement("div");
+  title.className = "sc-group-title";
+  title.textContent = group.group;
+  wrap.append(title, ...(group.items || []).map(createShortcutRow));
+  return wrap;
+}
+
+function createShortcutsPanel(shortcuts) {
+  const panel = document.createElement("div");
+  panel.className = "shortcuts-panel";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-label", t("shortcuts.title"));
+  const header = document.createElement("div");
+  header.className = "shortcuts-header";
+  const title = document.createElement("span");
+  title.textContent = t("shortcuts.title");
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "shortcuts-close";
+  closeBtn.id = "shortcuts-close-btn";
+  closeBtn.setAttribute("aria-label", t("common.close"));
+  closeBtn.textContent = "\u00d7";
+  header.append(title, closeBtn);
+  const body = document.createElement("div");
+  body.className = "shortcuts-body";
+  body.append(...shortcuts.map(createShortcutGroup));
+  panel.append(header, body);
+  return panel;
+}
+
 let _paletteRestoreFocusEl = null;
 
 function restoreFocus(el) {
@@ -499,12 +548,7 @@ function setupCommandPalette() {
     paletteEl = document.createElement("div");
     paletteEl.id = "command-palette";
     paletteEl.className = "cmd-palette-overlay";
-    paletteEl.innerHTML = `
-      <div class="cmd-palette" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("palette.title"))}">
-        <input type="text" id="palette-input" class="palette-input" placeholder="${escapeHtml(t("palette.placeholder"))}" aria-label="${escapeHtml(t("palette.placeholder"))}" aria-controls="palette-results" aria-autocomplete="list" autocomplete="off">
-        <div id="palette-results" class="palette-results" role="listbox" aria-label="${escapeHtml(t("palette.title"))}"></div>
-      </div>
-    `;
+    paletteEl.appendChild(createCommandPaletteShell());
     document.body.appendChild(paletteEl);
 
     paletteEl.addEventListener("click", (e) => {
@@ -530,6 +574,30 @@ function setupCommandPalette() {
       }
     });
   }
+}
+
+function createCommandPaletteShell() {
+  const panel = document.createElement("div");
+  panel.className = "cmd-palette";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-label", t("palette.title"));
+  const input = document.createElement("input");
+  input.type = "text";
+  input.id = "palette-input";
+  input.className = "palette-input";
+  input.placeholder = t("palette.placeholder");
+  input.setAttribute("aria-label", t("palette.placeholder"));
+  input.setAttribute("aria-controls", "palette-results");
+  input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("autocomplete", "off");
+  const results = document.createElement("div");
+  results.id = "palette-results";
+  results.className = "palette-results";
+  results.setAttribute("role", "listbox");
+  results.setAttribute("aria-label", t("palette.title"));
+  panel.append(input, results);
+  return panel;
 }
 
 function openPalette() {
@@ -570,6 +638,43 @@ function navigatePalette(dir) {
   }
 }
 
+function createPaletteEmptyState() {
+  const empty = document.createElement("div");
+  empty.className = "palette-empty";
+  empty.setAttribute("role", "status");
+  empty.textContent = t("modals.nothingFound");
+  return empty;
+}
+
+function createPaletteResultItem(item, index) {
+  const el = document.createElement("div");
+  el.id = `palette-item-${index}`;
+  el.className = "palette-item" + (index === 0 ? " selected" : "");
+  el.setAttribute("role", "option");
+  el.setAttribute("aria-selected", index === 0 ? "true" : "false");
+  el.setAttribute("aria-label", `${item.name}: ${item.desc}`);
+  el.tabIndex = -1;
+
+  const icon = document.createElement("span");
+  icon.className = "palette-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = item.icon;
+  const info = document.createElement("div");
+  info.className = "palette-item-info";
+  const name = document.createElement("span");
+  name.className = "palette-name";
+  name.textContent = item.name;
+  const desc = document.createElement("span");
+  desc.className = "palette-desc";
+  desc.textContent = item.desc;
+  info.append(name, desc);
+  const type = document.createElement("span");
+  type.className = "palette-type";
+  type.textContent = item.type === "view" ? "VIEW" : (item.cat || "CMD");
+  el.append(icon, info, type);
+  return el;
+}
+
 function renderPaletteResults(query) {
   const container = document.getElementById("palette-results");
   if (!container) return;
@@ -592,30 +697,17 @@ function renderPaletteResults(query) {
     ? allItems.filter(i => i.name.includes(query) || i.desc.toLowerCase().includes(query) || (i.cat || "").toLowerCase().includes(query))
     : allItems.slice(0, 15);
 
-  container.innerHTML = "";
+  container.replaceChildren();
 
   if (filtered.length === 0) {
     document.getElementById("palette-input")?.removeAttribute("aria-activedescendant");
-    container.innerHTML = '<div class="palette-empty" role="status">' + escapeHtml(t("modals.nothingFound")) + '</div>';
+    container.replaceChildren(createPaletteEmptyState());
     return;
   }
 
+  const fragment = document.createDocumentFragment();
   filtered.slice(0, 20).forEach((item, i) => {
-    const el = document.createElement("div");
-    el.id = `palette-item-${i}`;
-    el.className = "palette-item" + (i === 0 ? " selected" : "");
-    el.setAttribute("role", "option");
-    el.setAttribute("aria-selected", i === 0 ? "true" : "false");
-    el.setAttribute("aria-label", `${item.name}: ${item.desc}`);
-    el.tabIndex = -1;
-    el.innerHTML = `
-      <span class="palette-icon" aria-hidden="true">${item.icon}</span>
-      <div class="palette-item-info">
-        <span class="palette-name">${escapeHtml(item.name)}</span>
-        <span class="palette-desc">${escapeHtml(item.desc)}</span>
-      </div>
-      <span class="palette-type">${item.type === "view" ? "VIEW" : escapeHtml(item.cat || "CMD")}</span>
-    `;
+    const el = createPaletteResultItem(item, i);
     el.addEventListener("click", () => {
       if (item.type === "view") { switchView(item.name); closePalette({ restoreFocus: false }); }
       else if (item.type === "action") { 
@@ -625,8 +717,9 @@ function renderPaletteResults(query) {
       }
       else { insertCommand(item.name); closePalette({ restoreFocus: false }); }
     });
-    container.appendChild(el);
+    fragment.appendChild(el);
   });
+  container.replaceChildren(fragment);
   document.getElementById("palette-input")?.setAttribute("aria-activedescendant", "palette-item-0");
 }
 
@@ -709,7 +802,7 @@ function showOnboarding() {
     const isLast = currentStep === steps.length - 1;
     const isFirst = currentStep === 0;
 
-    overlay.innerHTML = "";
+    overlay.replaceChildren();
     const card = document.createElement("div");
     card.className = "onboarding-card";
 
@@ -786,7 +879,7 @@ function showOnboarding() {
       s.action().then((result) => {
         resultDiv.className = "onboarding-result onboarding-result-" + (result.type || "info");
         const statusIcons = { success: "\u2713", warning: "\u26A0", error: "\u2717", info: "\u2139" };
-        resultDiv.innerHTML = "";
+        resultDiv.replaceChildren();
         const statusIcon = document.createElement("span");
         statusIcon.className = "onboarding-result-icon";
         statusIcon.textContent = statusIcons[result.type] || statusIcons.info;
@@ -805,12 +898,12 @@ function showOnboarding() {
 
 function closeOnboarding() {
   document.getElementById("onboarding-overlay")?.remove();
-  localStorage.setItem("lexa-onboarded", "1");
+  lexaStorageSet("lexa-onboarded", "1");
   showToast(t("toast.enjoyLexa"), "success");
 }
 
 function checkOnboarding() {
-  if (!localStorage.getItem("lexa-onboarded")) {
+  if (!lexaStorageGet("lexa-onboarded")) {
     setTimeout(showOnboarding, 1000);
   }
 }

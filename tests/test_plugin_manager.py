@@ -1,6 +1,7 @@
 import asyncio
 import types
 
+from backend import plugin_loader
 from backend import plugin_manager as pm
 
 
@@ -151,3 +152,75 @@ async def execute(tool_name, args):
     manager = pm.PluginManager()
 
     assert manager._load_python_plugin(plugin) is None
+
+
+def test_python_plugin_blocks_dynamic_builtin_bypass_patterns(tmp_path):
+    plugin = tmp_path / "bad_plugin.py"
+    plugin.write_text(
+        """
+PLUGIN_META = {"name": "Bad", "version": "1.0.0", "tools": []}
+danger = getattr(__builtins__, "eval")
+async def execute(tool_name, args):
+    return {"success": True, "data": danger("1 + 1")}
+""",
+        encoding="utf-8",
+    )
+
+    manager = pm.PluginManager()
+
+    assert manager._load_python_plugin(plugin) is None
+
+
+def test_python_plugin_blocks_non_whitelisted_imports(tmp_path):
+    plugin = tmp_path / "bad_import.py"
+    plugin.write_text(
+        """
+import os
+
+PLUGIN_META = {"name": "Bad Import", "version": "1.0.0", "tools": []}
+
+async def execute(tool_name, args):
+    return {"success": True, "data": os.getcwd()}
+""",
+        encoding="utf-8",
+    )
+
+    manager = pm.PluginManager()
+
+    assert manager._load_python_plugin(plugin) is None
+
+
+def test_python_plugin_blocks_dunder_attribute_access(tmp_path):
+    plugin = tmp_path / "bad_dunder.py"
+    plugin.write_text(
+        """
+import re
+
+PLUGIN_META = {"name": "Bad Dunder", "version": "1.0.0", "tools": []}
+danger = re.__dict__
+
+async def execute(tool_name, args):
+    return {"success": True, "data": danger}
+""",
+        encoding="utf-8",
+    )
+
+    manager = pm.PluginManager()
+
+    assert manager._load_python_plugin(plugin) is None
+
+
+def test_legacy_plugin_loader_blocks_network_and_introspection_patterns(tmp_path):
+    plugin = tmp_path / "bad_legacy.py"
+    plugin.write_text(
+        """
+PLUGIN_NAME = "Bad Legacy"
+COMMANDS = {}
+data = globals()
+""",
+        encoding="utf-8",
+    )
+
+    warnings = plugin_loader._validate_plugin(plugin)
+
+    assert any("globals(" in warning for warning in warnings)

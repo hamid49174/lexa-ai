@@ -10,11 +10,54 @@ import logging
 import subprocess
 import shutil
 import webbrowser
+import ipaddress
+import socket
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
 
 from backend.i18n import t
 
 logger = logging.getLogger("lexa.browser")
+
+_BLOCKED_HOSTS: frozenset[str] = frozenset({
+    "169.254.169.254",
+    "169.254.169.253",
+    "metadata.google.internal",
+    "metadata.google",
+    "100.100.100.200",
+    "169.254.0.1",
+})
+_LOCAL_HOSTNAMES: frozenset[str] = frozenset({
+    "localhost",
+})
+_REDIRECT_STATUS_CODES: frozenset[int] = frozenset({301, 302, 303, 307, 308})
+_MAX_SAFE_REDIRECTS = 5
+_BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+
+class _UnsafeBrowserUrl(ValueError):
+    """Raised when a browser helper is redirected to a blocked target."""
+
+
+def _is_dangerous_ip_address(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+        addr = addr.ipv4_mapped
+    return (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_reserved
+        or addr.is_multicast
+        or addr.is_unspecified
+    )
+
+
+def _is_dangerous_ip(hostname: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return _is_dangerous_ip_address(addr)
 
 
 def _validate_url(url: str) -> str | None:
@@ -30,7 +73,143 @@ def _validate_url(url: str) -> str | None:
             return f"Unsicheres URL-Schema: {scheme}"
     if len(url) > 2000:
         return "URL zu lang (max 2000 Zeichen)."
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if not hostname:
+        return "Ungueltige URL."
+    try:
+        parsed.port
+    except ValueError:
+        return "Ungueltiger URL-Port."
+    if hostname in _BLOCKED_HOSTS:
+        return t("security.blockedInternal", host=hostname)
+    if hostname in _LOCAL_HOSTNAMES or hostname.endswith(".localhost"):
+        return t("security.blockedInternal", host=hostname)
+    if _is_dangerous_ip(hostname):
+        return t("security.blockedPrivate", host=hostname)
     return None
+
+
+def _safe_redirect_target(current_url: str, location: str | None) -> tuple[str, str | None]:
+    if not location:
+        return "", "Weiterleitung ohne Ziel blockiert."
+    target = urljoin(current_url, location)
+    err = _validate_url(target)
+    if err:
+        return "", err
+    return target, None
+
+
+def _raise_if_unsafe_browser_url(url: str) -> None:
+    err = _validate_url(url)
+    if err:
+        raise _UnsafeBrowserUrl(err)
+    err = _resolved_browser_url_error(url)
+    if err:
+        raise _UnsafeBrowserUrl(err)
+
+
+def _resolved_browser_url_error(url: str) -> str | None:
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        resolved = socket.getaddrinfo(hostname, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror:
+        return None
+    for _, _, _, _, addr in resolved:
+        try:
+            ip = ipaddress.ip_address(addr[0])
+        except ValueError:
+            continue
+        if _is_dangerous_ip_address(ip):
+            return t("security.blockedSsrf", ip=ip)
+    return None
+
+
+def _httpx_get_checked_html(httpx_module, url: str) -> str:
+    current_url = url
+    with httpx_module.Client(
+        timeout=15,
+        follow_redirects=False,
+        headers={"User-Agent": _BROWSER_USER_AGENT},
+    ) as client:
+        for _ in range(_MAX_SAFE_REDIRECTS + 1):
+            _raise_if_unsafe_browser_url(current_url)
+            resp = client.get(current_url)
+            if resp.status_code not in _REDIRECT_STATUS_CODES:
+                return resp.text
+            location = resp.headers.get("location") or resp.headers.get("Location")
+            next_url, err = _safe_redirect_target(str(resp.url), location)
+            if err:
+                raise _UnsafeBrowserUrl(err)
+            current_url = next_url
+    raise _UnsafeBrowserUrl("Zu viele Weiterleitungen blockiert.")
+
+
+def _is_playwright_navigation_request(request) -> bool:
+    marker = getattr(request, "is_navigation_request", None)
+    if callable(marker):
+        try:
+            return bool(marker())
+        except Exception:
+            pass
+    if marker is not None:
+        return bool(marker)
+    return getattr(request, "resource_type", "") == "document"
+
+
+def _playwright_request_error(url: str, is_navigation: bool) -> str | None:
+    if url.startswith(("http://", "https://")):
+        err = _validate_url(url)
+        if err:
+            return err
+        if is_navigation:
+            return _resolved_browser_url_error(url)
+        return None
+    if is_navigation:
+        return _validate_url(url) or "Unsichere Browser-Navigation blockiert."
+    return None
+
+
+def _install_playwright_navigation_guard(page) -> dict[str, str | None]:
+    blocked = {"message": None}
+
+    def _guard(route):
+        request = getattr(route, "request", None)
+        request_url = getattr(request, "url", "")
+        is_navigation = _is_playwright_navigation_request(request)
+        err = _playwright_request_error(request_url, is_navigation)
+        if err:
+            if is_navigation:
+                blocked["message"] = err
+            try:
+                route.abort()
+            finally:
+                logger.warning("Blocked unsafe browser request: %s", request_url)
+            return
+        route.continue_()
+
+    try:
+        page.route("**/*", _guard)
+    except Exception as exc:
+        raise RuntimeError(f"Browser-Sicherheitsfilter konnte nicht aktiviert werden: {exc}") from exc
+    return blocked
+
+
+def _guarded_page_goto(page, url: str, **kwargs):
+    _raise_if_unsafe_browser_url(url)
+    blocked = _install_playwright_navigation_guard(page)
+    try:
+        response = page.goto(url, **kwargs)
+    except Exception as exc:
+        if blocked["message"]:
+            raise _UnsafeBrowserUrl(blocked["message"]) from exc
+        raise
+    final_url = getattr(page, "url", "") or ""
+    if final_url and final_url != "about:blank":
+        _raise_if_unsafe_browser_url(final_url)
+    return response
 
 
 import os as _os
@@ -226,7 +405,7 @@ def open_url(url: str) -> dict:
         }
     page = browser.new_page()
     try:
-        page.goto(url, timeout=30000)
+        _guarded_page_goto(page, url, timeout=30000)
         title = page.title()
         return {"url": url, "title": title, "status": "opened"}
     except Exception as e:
@@ -254,7 +433,7 @@ def search_youtube(query: str) -> dict:
         page = browser.new_page()
         from urllib.parse import quote_plus
         search_url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
-        page.goto(search_url, timeout=30000)
+        _guarded_page_goto(page, search_url, timeout=30000)
         page.wait_for_selector("ytd-video-renderer", timeout=10000)
 
         results = page.evaluate("""
@@ -286,7 +465,7 @@ def play_youtube(query: str) -> dict:
             except RuntimeError:
                 return {"status": "url_found", "title": video["title"], "url": video["url"], "note": "Playwright nicht verfügbar", "source": "yt-dlp"}
             page = browser.new_page()
-            page.goto(video["url"], timeout=30000)
+            _guarded_page_goto(page, video["url"], timeout=30000)
             page.wait_for_load_state("domcontentloaded")
             return {
                 "status": "playing",
@@ -314,7 +493,7 @@ def play_youtube(query: str) -> dict:
         page = browser.new_page()
         from urllib.parse import quote_plus
         search_url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
-        page.goto(search_url, timeout=30000)
+        _guarded_page_goto(page, search_url, timeout=30000)
         page.wait_for_selector("ytd-video-renderer", timeout=10000)
 
         first_video = page.query_selector("ytd-video-renderer #video-title")
@@ -349,7 +528,11 @@ def website_screenshot(url: str, filename: str = "") -> str:
             filename = ""  # will be regenerated below
     browser = _get_browser()
     page = browser.new_page()
-    page.goto(url, timeout=30000)
+    try:
+        _guarded_page_goto(page, url, timeout=30000)
+    except _UnsafeBrowserUrl as e:
+        page.close()
+        return t("error.generic", error=str(e))
     page.wait_for_load_state("networkidle")
 
     if not filename:
@@ -381,7 +564,12 @@ def website_to_pdf(url: str, filename: str = "") -> str:
     browser = _get_browser()
     context = browser.new_context()
     page = context.new_page()
-    page.goto(url, timeout=30000)
+    try:
+        _guarded_page_goto(page, url, timeout=30000)
+    except _UnsafeBrowserUrl as e:
+        page.close()
+        context.close()
+        return t("error.generic", error=str(e))
     page.wait_for_load_state("networkidle")
 
     if not filename:
@@ -410,17 +598,25 @@ def _scrape_lightweight(url: str, max_chars: int = 5000) -> dict | None:
 
     try:
         import httpx
-        resp = httpx.get(url, timeout=15, follow_redirects=True, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        })
-        html = resp.text
+        html = _httpx_get_checked_html(httpx, url)
     except ImportError:
         # Fallback to urllib
         import urllib.request
+
+        class _SafeBrowserRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                target, err = _safe_redirect_target(req.full_url, newurl)
+                if err:
+                    raise _UnsafeBrowserUrl(err)
+                _raise_if_unsafe_browser_url(target)
+                return super().redirect_request(req, fp, code, msg, headers, target)
+
+        _raise_if_unsafe_browser_url(url)
         req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": _BROWSER_USER_AGENT
         })
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        opener = urllib.request.build_opener(_SafeBrowserRedirectHandler)
+        with opener.open(req, timeout=15) as resp:
             html = resp.read().decode("utf-8", errors="replace")
 
     if not html:
@@ -502,6 +698,8 @@ def scrape_text(url: str, max_chars: int = 5000, use_browser: bool = False) -> d
             result = _scrape_lightweight(url, max_chars)
             if result and result.get("text") and len(result["text"]) >= 100:
                 return result
+        except _UnsafeBrowserUrl as e:
+            return {"error": str(e)}
         except Exception as e:
             logger.debug(f"trafilatura scrape failed: {e}")
 
@@ -512,7 +710,7 @@ def scrape_text(url: str, max_chars: int = 5000, use_browser: bool = False) -> d
         return {"error": str(e)}
     page = browser.new_page()
     try:
-        page.goto(url, timeout=30000)
+        _guarded_page_goto(page, url, timeout=30000)
         page.wait_for_load_state("networkidle")
 
         # Strategy 2: Inject Mozilla Readability.js (same as Firefox Reader Mode)
@@ -742,7 +940,7 @@ def check_price(url: str, selector: str = "") -> dict:
         return {"url": url, "error": str(e)}
     page = browser.new_page()
     try:
-        page.goto(url, timeout=30000)
+        _guarded_page_goto(page, url, timeout=30000)
         page.wait_for_load_state("networkidle")
 
         result = page.evaluate(_PRICE_CHECK_JS, selector)

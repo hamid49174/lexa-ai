@@ -84,7 +84,7 @@ async def get_note(note_id: int):
         raise HTTPException(status_code=404, detail="Notiz nicht gefunden.")
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("get_note error")
         raise HTTPException(status_code=500, detail=t("memory.noteLoadError"))
 
@@ -103,7 +103,7 @@ async def update_note(note_id: int, req: Request):
         return {"status": "ok"}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("update_note error")
         raise HTTPException(status_code=500, detail=t("memory.noteUpdateError"))
 

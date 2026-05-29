@@ -124,7 +124,7 @@ async def _run_routine(routine: dict):
 
         try:
             if _companion_execute:
-                result = _companion_execute(command, safe_params)
+                _companion_execute(command, safe_params)
                 logger.info(f"Scheduler: {command} -> OK")
                 audit_log("scheduler", "executed", f"CMD={command} ROUTINE={name}")
             else:

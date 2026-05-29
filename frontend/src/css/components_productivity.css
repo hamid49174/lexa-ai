@@ -1,0 +1,478 @@
+/* Productivity component styles. */
+
+/* ── PRODUCTIVITY VIEW (Phase 19) ────────────────── */
+.prod-stats-bar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.prod-stat-card {
+  flex: 1;
+  min-width: 100px;
+  background: var(--bg-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  text-align: center;
+  transition: border-color 0.2s;
+}
+
+.prod-stat-card:hover {
+  border-color: var(--glass-border-hover);
+}
+
+.prod-stat-card.prod-stat-active {
+  border-color: var(--accent);
+  background: rgba(168, 85, 247, 0.08);
+}
+
+.prod-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.2;
+}
+
+.prod-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+
+
+.prod-section .section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.prod-section .section-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+/* To-Do Items */
+.todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  transition: all 0.15s;
+}
+
+.todo-item:hover {
+  border-color: var(--glass-border-hover);
+  background: var(--bg-hover);
+}
+
+.todo-item.todo-done {
+  opacity: 0.5;
+}
+
+.todo-item.todo-done .todo-title {
+  text-decoration: line-through;
+}
+
+.todo-item.priority-urgent {
+  border-left: 3px solid var(--error);
+}
+
+.todo-item.priority-high {
+  border-left: 3px solid var(--warning);
+}
+
+.todo-item.priority-low {
+  border-left: 3px solid var(--text-muted);
+}
+
+.todo-check {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.todo-check:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.todo-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.todo-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.todo-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.todo-priority,
+.todo-category,
+.todo-due {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-surface2);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.todo-due-overdue {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--error);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+.todo-item.todo-overdue {
+  border-left: 2px solid var(--error);
+}
+
+.todo-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.todo-action-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.todo-action-btn:hover {
+  background: var(--bg-surface2);
+  color: var(--accent);
+}
+
+.todo-action-btn.todo-delete:hover {
+  color: var(--error);
+}
+
+.todo-inline-input {
+  width: 100%;
+  background: var(--bg-surface2);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 14px;
+  padding: 2px 6px;
+  outline: none;
+}
+
+.todo-title {
+  cursor: default;
+}
+.todo-title:hover {
+  color: var(--accent);
+}
+
+/* Pomodoro */
+.pomodoro-display {
+  text-align: center;
+  padding: 16px;
+}
+
+.pomodoro-timer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.pomodoro-ring-wrap {
+  position: relative;
+  width: 130px;
+  height: 130px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pomodoro-ring { display: block; }
+
+.pomo-ring-bg {
+  stroke: rgba(168, 85, 247, 0.12);
+}
+
+.pomo-ring-fill {
+  stroke: url(#pomoGrad);
+  stroke: var(--accent);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.9s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pomodoro-ring-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.pomodoro-time {
+  font-size: 28px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  line-height: 1;
+}
+
+.pomodoro-pct {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.pomodoro-task {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  text-align: center;
+}
+
+
+
+.pomodoro-stats {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+/* Habits */
+.habits-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.habit-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  transition: all 0.15s;
+}
+
+.habit-item:hover {
+  border-color: var(--glass-border-hover);
+}
+
+.habit-item.habit-done {
+  border-color: var(--success);
+}
+
+.habit-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.habit-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.habit-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.habit-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.habit-streak,
+.habit-progress {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.habit-streak {
+  color: var(--warning);
+}
+
+.habit-progress-bar {
+  width: 60px;
+  height: 6px;
+  background: var(--bg-surface2);
+  border-radius: 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.habit-progress-fill {
+  height: 100%;
+  background: var(--gradient);
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+.habit-progress-0 { width: 0%; }
+.habit-progress-5 { width: 5%; }
+.habit-progress-10 { width: 10%; }
+.habit-progress-15 { width: 15%; }
+.habit-progress-20 { width: 20%; }
+.habit-progress-25 { width: 25%; }
+.habit-progress-30 { width: 30%; }
+.habit-progress-35 { width: 35%; }
+.habit-progress-40 { width: 40%; }
+.habit-progress-45 { width: 45%; }
+.habit-progress-50 { width: 50%; }
+.habit-progress-55 { width: 55%; }
+.habit-progress-60 { width: 60%; }
+.habit-progress-65 { width: 65%; }
+.habit-progress-70 { width: 70%; }
+.habit-progress-75 { width: 75%; }
+.habit-progress-80 { width: 80%; }
+.habit-progress-85 { width: 85%; }
+.habit-progress-90 { width: 90%; }
+.habit-progress-95 { width: 95%; }
+.habit-progress-100 { width: 100%; }
+
+.habit-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.habit-week {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.habit-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bg-surface2);
+  border: 1px solid var(--border);
+  transition: background 0.2s;
+}
+
+.habit-dot-done {
+  background: var(--success);
+  border-color: var(--success);
+}
+
+.habit-dot-today {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.3);
+}
+
+/* Time Tracking */
+.time-tracking-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background: rgba(52, 211, 153, 0.08);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--success);
+  font-variant-numeric: tabular-nums;
+}
+
+.tt-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: blink 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+
+
+.time-report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.time-report-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+}
+
+.time-app-name {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.time-duration {
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-weight: 600;
+}

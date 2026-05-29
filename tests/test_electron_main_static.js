@@ -82,6 +82,7 @@ assert("denies renderer-created windows", src.includes("setWindowOpenHandler") &
 assert("opens only safe external URLs outside Lexa webContents", src.includes("function safeExternalUrl") && src.includes('["http:", "https:", "mailto:"]') && src.includes("electron.shell.openExternal"));
 assert("blocks unsafe renderer navigation", src.includes('webContents.on("will-navigate"') && src.includes("event.preventDefault();") && src.includes("isTrustedRendererUrl(url)"));
 assert("limits trusted renderer URLs to frontend src files", src.includes("fileURLToPath") && src.includes('path.join(__dirname, "src")') && src.includes("isPathInside"));
+assert("sends frame-ancestors through a response header, not meta CSP", src.includes("RENDERER_CSP_HEADER") && src.includes("frame-ancestors 'none'") && src.includes("ses.webRequest.onHeadersReceived") && src.includes('responseHeaders["Content-Security-Policy"] = [RENDERER_CSP_HEADER]') && src.includes('details.resourceType === "mainFrame"'));
 assert("defaults permission requests to deny except trusted audio capture", src.includes("setPermissionRequestHandler") && src.includes('permission === "media"') && src.includes('mediaTypes.includes("audio")') && src.includes('!mediaTypes.includes("video")') && src.includes("callback(Boolean(allowAudioCapture))"));
 
 console.log("\nElectron bridge audit and smoke guard:");

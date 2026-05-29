@@ -134,10 +134,10 @@ async function imageBatchResize() {
 
 const GIT_REPO_KEY = "lexa-git-repo";
 function getLastGitRepo() {
-  return localStorage.getItem(GIT_REPO_KEY) || "C:\\Users\\admin\\OneDrive\\Desktop\\lexa\\lexa-ai";
+  return lexaStorageGet(GIT_REPO_KEY, "C:\\Users\\admin\\OneDrive\\Desktop\\lexa\\lexa-ai");
 }
 function setLastGitRepo(path) {
-  if (path) localStorage.setItem(GIT_REPO_KEY, path);
+  if (path) lexaStorageSet(GIT_REPO_KEY, path);
 }
 
 async function gitStatusAction() {

@@ -1,0 +1,136 @@
+/* Tool and media control view styles. Loaded after views.css. */
+
+/* ── TOOL VIEWS ──────────────────────────────── */
+.tool-view {
+  display: none;
+  padding: 72px 24px 24px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.tool-view.active {
+  display: block;
+}
+
+.tool-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.tool-card {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 20px 16px;
+  cursor: pointer;
+  transition: all 0.25s;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+}
+
+.tool-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(168, 85, 247, 0.08) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+
+.tool-card:hover {
+  border-color: var(--glass-border-hover);
+  transform: translateY(-3px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3), 0 0 20px rgba(168, 85, 247, 0.1);
+}
+
+.tool-card:hover::before {
+  opacity: 1;
+}
+
+.tool-icon {
+  font-size: 32px;
+  margin-bottom: 10px;
+}
+
+.tool-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.tool-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.tool-results {
+  margin-top: 20px;
+  padding: 16px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent2);
+  white-space: pre-wrap;
+  display: none;
+  backdrop-filter: blur(10px);
+}
+
+.tool-results.active {
+  display: block;
+}
+
+/* ── MEDIA CONTROLS ──────────────────────────── */
+.media-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  backdrop-filter: blur(10px);
+}
+
+.media-btn {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-surface3);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.media-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: scale(1.05);
+}
+
+.media-btn-main {
+  width: 72px;
+  height: 72px;
+  background: var(--gradient);
+  border: none;
+  color: #fff;
+}
+
+.media-btn-main:hover {
+  transform: scale(1.08);
+  box-shadow: 0 4px 24px var(--accent-glow);
+  color: #fff;
+}

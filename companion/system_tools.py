@@ -9,7 +9,6 @@ import re
 import subprocess
 import socket
 import os
-from pathlib import Path
 
 from backend.i18n import t
 
@@ -433,8 +432,8 @@ def service_start_cmd(name: str = "") -> str:
         stderr = result.stderr.strip()
         # Detect permission/access denied errors
         if any(kw in stderr.lower() for kw in ["access is denied", "zugriff verweigert",
-                                                  "accessdenied", "permission", "berechtigung",
-                                                  "cannot open", "service controller"]):
+                                               "accessdenied", "permission", "berechtigung",
+                                               "cannot open", "service controller"]):
             is_admin = _check_admin()
             if not is_admin:
                 return (f"Dienst '{name}' konnte nicht gestartet werden: Admin-Rechte erforderlich.\n"
@@ -466,8 +465,8 @@ def service_stop_cmd(name: str = "") -> str:
 
         stderr = result.stderr.strip()
         if any(kw in stderr.lower() for kw in ["access is denied", "zugriff verweigert",
-                                                  "accessdenied", "permission", "berechtigung",
-                                                  "cannot open", "service controller"]):
+                                               "accessdenied", "permission", "berechtigung",
+                                               "cannot open", "service controller"]):
             is_admin = _check_admin()
             if not is_admin:
                 return (f"Dienst '{name}' konnte nicht gestoppt werden: Admin-Rechte erforderlich.\n"

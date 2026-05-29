@@ -74,6 +74,8 @@ const sandboxFactory = new Function(`
   ${extractFn(preloadSrc, "firstPayloadObject")}
   ${extractFn(preloadSrc, "objectKeys")}
   ${extractFn(preloadSrc, "hasOnlyKeys")}
+  ${extractFn(preloadSrc, "normalizeBridgePathSegments")}
+  ${extractFn(preloadSrc, "bridgePathInfo")}
   ${extractFn(preloadSrc, "normalizedBridgePath")}
   ${extractFn(preloadSrc, "isPathTraversal")}
   ${extractFn(preloadSrc, "isSensitivePersonalOsPath")}
@@ -105,6 +107,10 @@ policy = classifyBridgeCall("personalOsReadFile", ["00_System/Soul.md"]);
 assert("core Personal OS reads are high and presence-gated", policy.risk === "high" && policy.requires_user_presence && policy.classification_reason === "personal_os_sensitive_path");
 policy = classifyBridgeCall("personalOsReadFile", ["../.env"]);
 assert("path traversal Personal OS reads are blocked", policy.blocked === true && policy.risk === "high" && policy.classification_reason === "personal_os_path_traversal");
+policy = classifyBridgeCall("personalOsReadFile", ["\\\\?\\C:\\Users\\admin\\.env"]);
+assert("Windows device paths are blocked", policy.blocked === true && policy.classification_reason === "personal_os_path_traversal");
+policy = classifyBridgeCall("personalOsReadFile", ["....//secret.md"]);
+assert("ambiguous dot-only path segments are blocked", policy.blocked === true && policy.classification_reason === "personal_os_path_traversal");
 policy = classifyBridgeCall("conversationExport", [42, "markdown"]);
 assert("full conversation export is treated as high-risk privacy read", policy.risk === "high" && policy.requires_user_presence && policy.classification_reason === "conversation_full_export");
 policy = classifyBridgeCall("personalOsContextPack", [{ maxFiles: 50, bodyChars: 50000 }]);

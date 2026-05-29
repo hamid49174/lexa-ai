@@ -13,6 +13,20 @@ echo.
 set "ERRORS=0"
 set "WARNINGS=0"
 
+:: Personal OS may live next to the synced Desktop while Lexa lives in this repo.
+if not defined PERSONAL_OS_ROOT (
+    if exist "%USERPROFILE%\OneDrive - Office\Desktop\OS\11_Integrations\MCP\os-mcp-server\dist\index.js" (
+        set "PERSONAL_OS_ROOT=%USERPROFILE%\OneDrive - Office\Desktop\OS"
+    ) else if exist "%USERPROFILE%\OneDrive\Desktop\OS\11_Integrations\MCP\os-mcp-server\dist\index.js" (
+        set "PERSONAL_OS_ROOT=%USERPROFILE%\OneDrive\Desktop\OS"
+    ) else if exist "%USERPROFILE%\Desktop\OS\11_Integrations\MCP\os-mcp-server\dist\index.js" (
+        set "PERSONAL_OS_ROOT=%USERPROFILE%\Desktop\OS"
+    )
+)
+if not defined PERSONAL_OS_SDK_ROOT (
+    if defined PERSONAL_OS_ROOT set "PERSONAL_OS_SDK_ROOT=%PERSONAL_OS_ROOT%"
+)
+
 :: ========================================
 ::  0. Free old Lexa backend port
 :: ========================================
@@ -52,10 +66,10 @@ if not exist "venv\Scripts\python.exe" (
     call :OK "venv exists"
 )
 
-venv\Scripts\pip list --format=freeze 2>nul | findstr /i "fastapi" >nul 2>&1
+venv\Scripts\python.exe -m pip show fastapi >nul 2>&1
 if errorlevel 1 (
     call :WARN "Dependencies missing - installing from requirements.txt..."
-    venv\Scripts\pip install -r requirements.txt --quiet
+    venv\Scripts\python.exe -m pip install -r requirements.txt --quiet
     if errorlevel 1 (
         call :ERROR "pip install failed! Check requirements.txt."
         goto :fatal

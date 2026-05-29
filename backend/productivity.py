@@ -5,7 +5,6 @@ To-Do System, Pomodoro Timer, Gewohnheits-Tracker, Zeiterfassung, Fokus-Modus
 import os
 import sqlite3
 import logging
-import json
 import re
 import threading
 import time
@@ -802,12 +801,15 @@ def _detect_focus_mode_from_db() -> dict:
 _focus_mode: dict = {"active": False, "blocked_sites": [], "backup": None}
 
 # Deferred init — will be called on first access or module load
+
+
 def _init_focus_state() -> None:
     global _focus_mode
     try:
         _focus_mode = _detect_focus_mode_from_db()
     except Exception:
         pass
+
 
 # Try to init, but don't fail module load if DB isn't ready
 try:
@@ -966,7 +968,6 @@ def weekly_stats(days: int = 7) -> list[dict]:
     db = _get_db()
     today = date.today()
     cutoff = (today - timedelta(days=days - 1)).isoformat()
-    today_iso = today.isoformat()
 
     # Batch query: todos done per day
     todos_by_date: dict[str, int] = {}

@@ -6,6 +6,7 @@ rate-limit buckets between tests.
 """
 
 import time
+import importlib
 
 import pytest
 
@@ -20,6 +21,8 @@ def _reset_rate_limits():
     import backend.security as sec
     for bucket in sec._RATE_LIMITS.values():
         bucket["timestamps"].clear()
+    for bucket in sec._ACTION_RATE_LIMITS.values():
+        bucket["entries"].clear()
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +69,52 @@ class TestRateLimit:
         assert check_rate_limit("default") is False
         assert _RATE_LIMITS["audit_read"]["max"] > _RATE_LIMITS["default"]["max"]
         assert check_rate_limit("audit_read") is True
+
+    def test_rate_limit_buckets_use_config_environment(self, monkeypatch):
+        import backend.config as config
+        import backend.security as security
+
+        monkeypatch.setenv("LEXA_RATE_LIMIT_CHAT", "2")
+        monkeypatch.setenv("LEXA_RATE_LIMIT_AUDIT_READ", "7")
+
+        loaded_config = importlib.reload(config)
+        loaded_security = importlib.reload(security)
+        try:
+            assert loaded_config.RATE_LIMIT_CHAT == 2
+            assert loaded_security._RATE_LIMITS["chat"]["max"] == 2
+            assert loaded_security._RATE_LIMITS["audit_read"]["max"] == 7
+        finally:
+            monkeypatch.delenv("LEXA_RATE_LIMIT_CHAT", raising=False)
+            monkeypatch.delenv("LEXA_RATE_LIMIT_AUDIT_READ", raising=False)
+            importlib.reload(config)
+            importlib.reload(security)
+
+    def test_risk_weighted_action_budget_blocks_mutations_first(self, monkeypatch):
+        from backend.security import _ACTION_RATE_LIMITS, check_action_rate_limit
+
+        monkeypatch.setitem(_ACTION_RATE_LIMITS["execute"], "max", 20)
+        for _ in range(4):
+            result = check_action_rate_limit("file_delete")
+            assert result["allowed"] is True
+
+        blocked = check_action_rate_limit("file_delete")
+        read_only = check_action_rate_limit("system_info")
+
+        assert blocked["allowed"] is False
+        assert blocked["read_only_only"] is True
+        assert read_only["allowed"] is True
+        assert read_only["read_only_only"] is True
+
+    def test_risk_weighted_action_budget_expires_old_entries(self):
+        from backend.security import _ACTION_RATE_LIMITS, check_action_rate_limit
+
+        bucket = _ACTION_RATE_LIMITS["execute"]
+        bucket["entries"].append((time.time() - 120, bucket["max"]))
+
+        result = check_action_rate_limit("file_delete")
+
+        assert result["allowed"] is True
+        assert result["remaining"] == bucket["max"] - 5
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +200,13 @@ class TestValidatePath:
             validate_path("C:\\Windows\\SysWOW64\\notepad.exe")
 
 
+    def test_similar_prefix_path_is_not_blocked(self):
+        """A sibling path with a similar prefix is not treated as System32."""
+        from backend.security import validate_path
+        result = validate_path("C:\\Windows\\System32Extra\\note.txt")
+        assert "System32Extra" in result
+
+
 # ---------------------------------------------------------------------------
 #  URL validation
 # ---------------------------------------------------------------------------
@@ -186,6 +242,68 @@ class TestValidateUrl:
         with pytest.raises(ValueError, match="interne Adresse"):
             validate_url("http://169.254.169.254/latest/meta-data/")
 
+    def test_private_ip_blocked_in_english_locale(self):
+        """Private IP blocking is independent of the active translation text."""
+        from backend.i18n import get_language, set_language
+        from backend.security import validate_url
+
+        previous_language = get_language()
+        try:
+            assert set_language("en") is True
+            with pytest.raises(ValueError, match="internal/private"):
+                validate_url("http://127.0.0.1:8000/")
+        finally:
+            set_language(previous_language)
+
+    @pytest.mark.parametrize("url", [
+        "http://localhost:8000/health",
+        "http://LOCALHOST:8000/health",
+        "http://app.localhost/status",
+        "http://localhost.:8000/health",
+        "http://app.localhost./status",
+    ])
+    def test_localhost_hostnames_blocked(self, url):
+        """Localhost hostnames are blocked, not only loopback IP literals."""
+        from backend.security import validate_url
+        with pytest.raises(ValueError, match="interne Adresse"):
+            validate_url(url)
+
+    def test_cloud_metadata_hostname_with_trailing_dot_blocked(self):
+        """Metadata hostnames stay blocked when written as absolute DNS names."""
+        from backend.security import validate_url
+        with pytest.raises(ValueError, match="interne Adresse"):
+            validate_url("http://metadata.google.internal./computeMetadata/v1/")
+
+    @pytest.mark.parametrize("url", [
+        "localhost/health",
+        "app.localhost/status",
+        "metadata.google.internal/computeMetadata/v1/",
+        "169.254.169.254/latest/meta-data/",
+    ])
+    def test_no_scheme_internal_hosts_are_checked_after_https_prepended(self, url):
+        """Bare URLs are normalized before host safety checks run."""
+        from backend.security import validate_url
+        with pytest.raises(ValueError):
+            validate_url(url)
+
+    @pytest.mark.parametrize("url", [
+        "http://",
+        "https://",
+        "https:///path",
+        "https://?query=only",
+    ])
+    def test_http_urls_require_hostname(self, url):
+        """HTTP(S) URLs without a hostname are rejected before network tools see them."""
+        from backend.security import validate_url
+        with pytest.raises(ValueError, match="Host fehlt"):
+            validate_url(url)
+
+    def test_http_url_with_invalid_port_is_rejected(self):
+        """Invalid ports are reported during validation instead of leaking downstream."""
+        from backend.security import validate_url
+        with pytest.raises(ValueError, match="Port"):
+            validate_url("https://example.com:notaport/path")
+
     def test_no_scheme_gets_https_prepended(self):
         """A URL without a scheme gets https:// prepended."""
         from backend.security import validate_url
@@ -202,6 +320,7 @@ class TestIsCommandAllowed:
         """Commands in the always_allowed list return 'allowed'."""
         from backend.security import is_command_allowed
         assert is_command_allowed("app_open") == "allowed"
+        assert is_command_allowed("file_write") == "allowed"
         assert is_command_allowed("note_create") == "allowed"
         assert is_command_allowed("todo_list") == "allowed"
         assert is_command_allowed("personal_os_diagnostics") == "allowed"
@@ -209,6 +328,10 @@ class TestIsCommandAllowed:
         assert is_command_allowed("personal_os_context_pack") == "allowed"
         assert is_command_allowed("personal_os_lexa_code_loop") == "allowed"
         assert is_command_allowed("personal_os_review_draft") == "allowed"
+        assert is_command_allowed("desktop_position") == "allowed"
+        assert is_command_allowed("desktop_wait") == "allowed"
+        assert is_command_allowed("ui_tree") == "allowed"
+        assert is_command_allowed("ui_find") == "allowed"
 
     def test_confirmation_required_returns_confirmation(self):
         """Commands in confirmation_required return 'confirmation_required'."""
@@ -216,6 +339,10 @@ class TestIsCommandAllowed:
         assert is_command_allowed("shutdown") == "confirmation_required"
         assert is_command_allowed("email_send") == "confirmation_required"
         assert is_command_allowed("todo_delete") == "confirmation_required"
+        assert is_command_allowed("desktop_click") == "confirmation_required"
+        assert is_command_allowed("desktop_click_text") == "confirmation_required"
+        assert is_command_allowed("desktop_type") == "confirmation_required"
+        assert is_command_allowed("ui_click") == "confirmation_required"
 
     def test_always_blocked_returns_blocked(self):
         """Commands in the always_blocked list return 'blocked'."""
@@ -228,6 +355,82 @@ class TestIsCommandAllowed:
         """A command not in any list returns 'unknown'."""
         from backend.security import is_command_allowed
         assert is_command_allowed("fly_to_moon") == "unknown"
+
+
+class TestValidateParams:
+    def test_file_write_content_keeps_large_text(self):
+        from backend.security import validate_params
+
+        content = "x" * 6000
+        result = validate_params("file_write", {"path": "C:\\Users\\admin\\Desktop\\demo.txt", "content": content})
+
+        assert len(result["content"]) == 6000
+
+    def test_other_large_string_params_are_still_truncated(self):
+        from backend.security import validate_params
+
+        result = validate_params("clipboard_write", {"text": "x" * 6000})
+
+        assert len(result["text"]) == 5000
+
+    def test_desktop_type_text_is_tightly_limited(self):
+        from backend.security import validate_params
+
+        result = validate_params("desktop_type", {"text": "x" * 1500})
+
+        assert len(result["text"]) == 1000
+
+    def test_desktop_click_text_target_is_tightly_limited(self):
+        from backend.security import validate_params
+
+        result = validate_params("desktop_click_text", {"text": "x" * 150})
+
+        assert len(result["text"]) == 80
+
+    def test_ui_click_target_is_tightly_limited(self):
+        from backend.security import validate_params
+
+        result = validate_params("ui_click", {"text": "x" * 150})
+
+        assert len(result["text"]) == 80
+
+    def test_url_lists_are_validated(self):
+        from backend.security import validate_params
+
+        result = validate_params("multi_server_check", {"urls": ["example.com/status"]})
+
+        assert result["urls"] == ["https://example.com/status"]
+
+    def test_url_lists_block_internal_hosts(self):
+        from backend.security import validate_params
+
+        with pytest.raises(ValueError, match="interne Adresse"):
+            validate_params("multi_server_check", {"urls": ["http://localhost:8000/health"]})
+
+    def test_path_lists_are_validated(self):
+        from backend.security import validate_params
+
+        with pytest.raises(ValueError, match="Verzeichnis"):
+            validate_params("merge_pdfs", {"pdf_paths": ["C:\\Windows\\System32\\cmd.exe"]})
+
+    def test_command_specific_path_aliases_are_validated(self):
+        from backend.security import validate_params
+
+        with pytest.raises(ValueError, match="Verzeichnis"):
+            validate_params(
+                "file_move",
+                {
+                    "source": "C:\\Users\\admin\\Desktop\\note.txt",
+                    "destination": "C:\\Windows\\System32\\note.txt",
+                },
+            )
+
+    def test_unrelated_source_param_is_not_treated_as_path(self):
+        from backend.security import validate_params
+
+        result = validate_params("memory_add", {"content": "x", "source": "user"})
+
+        assert result["source"] == "user"
 
 
 # ---------------------------------------------------------------------------

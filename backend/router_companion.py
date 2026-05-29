@@ -14,7 +14,14 @@ from backend.companion_confirmation import (
     consume_confirmation,
     create_confirmation,
 )
-from backend.security import is_command_allowed, check_rate_limit, audit_log, validate_params, read_recent_audit_entries
+from backend.security import (
+    audit_log,
+    check_action_rate_limit,
+    check_rate_limit,
+    is_command_allowed,
+    read_recent_audit_entries,
+    validate_params,
+)
 from backend.i18n import t
 from backend.personal_os_actions import execute_personal_os_action, is_personal_os_action
 from backend.agent_reflection import reflect_action
@@ -198,6 +205,18 @@ async def execute_command(req: CommandRequest):
             data=t("command.valid", command=command),
         )
 
+    action_budget = check_action_rate_limit(command)
+    if not action_budget.get("allowed", False):
+        audit_log(
+            command,
+            "risk_rate_limited",
+            f"source=companion_execute used={action_budget.get('used')} limit={action_budget.get('limit')}",
+        )
+        return CommandResponse(
+            success=False,
+            error="Too many risky actions in a short time. Read-only actions remain available.",
+        )
+
     if is_personal_os_action(command):
         result = await execute_personal_os_action(command, safe_params)
         validated = _validate_result(result)
@@ -373,7 +392,7 @@ async def execute_batch(req: BatchCommandRequest):
         if cmd.dry_run:
             audit_log(cmd.command, "dry_run")
             entry = {"command": cmd.command, "success": True, "dry_run": True,
-                      "data": t("command.validShort", command=cmd.command)}
+                     "data": t("command.validShort", command=cmd.command)}
             results.append(entry)
             continue
 

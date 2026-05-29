@@ -8,9 +8,7 @@ Audio caching by content hash prevents re-generation.
 Text chunking at sentence boundaries for long responses.
 """
 
-import os
 import re
-import json
 import logging
 import hashlib
 import asyncio
@@ -174,6 +172,7 @@ async def _speak_with_provider(provider: str, text: str, target: str) -> str:
 # ═══════════════════════════════════════════════════
 #  TEXT CHUNKING
 # ═══════════════════════════════════════════════════
+
 
 def _chunk_text(text: str, max_chars: int = MAX_TTS_CHUNK_CHARS) -> list[str]:
     """Split long text into chunks at sentence boundaries."""
@@ -468,7 +467,7 @@ async def _speak_multi(chunks: list[str], text_hash: str,
 
         logger.info(f"TTS concatenated {len(chunks)} chunks")
         return target
-    except Exception as e:
+    except Exception:
         for cp in chunk_paths:
             try:
                 Path(cp).unlink()
@@ -490,6 +489,7 @@ def speak(text: str, output_path: str = "") -> str:
 
     if loop and loop.is_running():
         import concurrent.futures
+
         def _run():
             new_loop = asyncio.new_event_loop()
             try:

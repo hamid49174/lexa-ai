@@ -1,12 +1,100 @@
 import pytest
+from pydantic import ValidationError
 
-from backend.tool_registry import ToolSchemaValidationError, validate_tool_arguments
+from backend.tool_registry import ToolSchemaValidationError, get_tool, validate_tool_arguments
+from backend.tool_schema import build_parameter_descriptor, build_tool_definition
+
+
+def test_pydantic_tool_schema_builder_emits_openai_shape():
+    parameter = build_parameter_descriptor(
+        "name",
+        "string",
+        "Application name",
+        required=True,
+    )
+    tool = build_tool_definition("app_open", "Open an app", [parameter])
+
+    assert tool["type"] == "function"
+    assert tool["function"]["parameters"]["type"] == "object"
+    assert tool["function"]["parameters"]["required"] == ["name"]
+    assert tool["function"]["parameters"]["properties"]["name"]["type"] == "string"
+
+
+def test_pydantic_tool_schema_builder_rejects_invalid_array_items():
+    with pytest.raises(ValidationError):
+        build_parameter_descriptor(
+            "items",
+            "array",
+            "Invalid array",
+            items_type="unsupported",
+        )
+
+
+def test_registered_tools_keep_openai_schema_shape():
+    tool = get_tool("file_write")
+    parameters = tool["function"]["parameters"]
+
+    assert parameters["type"] == "object"
+    assert parameters["properties"]["path"]["type"] == "string"
+    assert parameters["properties"]["content"]["type"] == "string"
+    assert set(parameters["required"]) == {"path", "content"}
 
 
 def test_valid_tool_arguments_pass_from_registry_schema():
     args = validate_tool_arguments("app_open", {"name": "notepad"})
 
     assert args == {"name": "notepad"}
+
+
+def test_file_write_arguments_pass_from_registry_schema():
+    args = validate_tool_arguments(
+        "file_write",
+        {"path": "example.py", "content": "print('hi')", "create_dirs": True},
+    )
+
+    assert args["path"] == "example.py"
+    assert args["content"] == "print('hi')"
+    assert args["create_dirs"] is True
+
+
+def test_desktop_click_arguments_pass_from_registry_schema():
+    args = validate_tool_arguments(
+        "desktop_click",
+        {"x": 10, "y": 20, "button": "left", "clicks": 1},
+    )
+
+    assert args == {"x": 10, "y": 20, "button": "left", "clicks": 1}
+
+
+def test_desktop_click_rejects_unknown_button():
+    with pytest.raises(ToolSchemaValidationError, match="one of"):
+        validate_tool_arguments(
+            "desktop_click",
+            {"x": 10, "y": 20, "button": "side", "clicks": 1},
+        )
+
+
+def test_desktop_click_text_arguments_pass_from_registry_schema():
+    args = validate_tool_arguments(
+        "desktop_click_text",
+        {"text": "Mikrofon", "button": "left", "occurrence": 1},
+    )
+
+    assert args == {"text": "Mikrofon", "button": "left", "occurrence": 1}
+
+
+def test_ui_click_arguments_pass_from_registry_schema():
+    args = validate_tool_arguments(
+        "ui_click",
+        {"text": "Mikrofon", "control_type": "Button", "button": "left", "fallback_ocr": True},
+    )
+
+    assert args == {
+        "text": "Mikrofon",
+        "control_type": "Button",
+        "button": "left",
+        "fallback_ocr": True,
+    }
 
 
 def test_missing_required_tool_argument_is_rejected():

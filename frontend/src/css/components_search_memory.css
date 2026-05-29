@@ -1,0 +1,642 @@
+/* Search, onboarding, note, snippet, and accent component styles. */
+
+/* ── GLOBAL SEARCH OVERLAY (Phase 13) ─────────── */
+.search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 80px;
+}
+
+.search-overlay.visible {
+  display: flex;
+}
+
+.search-panel {
+  width: 520px;
+  max-height: 500px;
+  background: var(--bg-surface);
+  border: 1px solid var(--glass-border-hover);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow), var(--shadow-glow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: paletteIn 0.15s ease-out;
+}
+
+.search-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 15px;
+  font-family: var(--font);
+  outline: none;
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.search-close-btn:hover {
+  color: var(--text);
+}
+
+.search-results {
+  overflow-y: auto;
+  max-height: 400px;
+  padding: 8px;
+}
+
+.search-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 10px 8px;
+  font-family: var(--font-mono);
+}
+
+.search-category {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 1px;
+  padding: 10px 10px 4px;
+  text-transform: uppercase;
+}
+
+.search-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.search-item:hover {
+  background: var(--bg-hover);
+}
+
+.search-item-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  width: 28px;
+  text-align: center;
+}
+
+.search-item mark {
+  background: rgba(168, 85, 247, 0.3);
+  color: var(--accent2);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.cmd-item mark {
+  background: rgba(168, 85, 247, 0.3);
+  color: var(--accent2);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.search-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-item-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-item-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 1px;
+}
+
+.search-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 30px;
+  font-size: 13px;
+}
+
+/* ── CONVERSATION ACTIONS (Export + Delete) ───── */
+.conv-header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.conv-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.conv-item:hover .conv-actions {
+  opacity: 1;
+}
+
+.conv-action-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.conv-action-btn:hover {
+  color: var(--accent2);
+  background: var(--accent-soft);
+}
+
+/* ── MODEL SELECTOR (Phase 14) ────────────────── */
+.settings-select {
+  background: var(--bg-surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 6px 10px;
+  font-family: var(--font);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  min-width: 160px;
+}
+
+.settings-select:hover {
+  border-color: var(--glass-border-hover);
+}
+
+.settings-select:focus {
+  border-color: var(--accent);
+}
+
+.settings-select option {
+  background: var(--bg-surface2);
+  color: var(--text);
+}
+
+/* Range slider for voice speed */
+.settings-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 140px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-surface2);
+  outline: none;
+  cursor: pointer;
+}
+.settings-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(168, 85, 247, 0.4);
+  transition: transform 0.15s;
+}
+.settings-range::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+.settings-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: none;
+}
+
+/* ── ONBOARDING WIZARD (Phase 17) ──────────────── */
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.onboarding-card {
+  width: 420px;
+  background: var(--bg-surface);
+  border: 1px solid var(--glass-border-hover);
+  border-radius: var(--radius);
+  padding: 40px 36px 30px;
+  text-align: center;
+  box-shadow: var(--shadow), var(--shadow-glow);
+  animation: paletteIn 0.3s ease-out;
+}
+
+.onboarding-icon {
+  font-size: 56px;
+  margin-bottom: 16px;
+  line-height: 1;
+}
+
+.onboarding-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+.onboarding-text {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 24px;
+}
+
+.onboarding-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.onboarding-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: all 0.3s;
+}
+
+.onboarding-dot.active {
+  background: var(--accent);
+  width: 24px;
+  border-radius: 4px;
+}
+
+.onboarding-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.onboarding-next {
+  flex: 1;
+  padding: 10px 20px;
+  background: var(--gradient);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.onboarding-next:hover {
+  opacity: 0.9;
+}
+
+.onboarding-skip,
+.onboarding-back {
+  padding: 10px 20px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font);
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.onboarding-skip:hover,
+.onboarding-back:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.onboarding-result {
+  margin: 12px 0 4px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  animation: fadeIn 0.3s ease;
+}
+.onboarding-result-loading {
+  background: rgba(168, 85, 247, 0.12);
+  color: var(--text-muted);
+  justify-content: center;
+}
+.onboarding-result-success {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: var(--success);
+}
+.onboarding-result-warning {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: var(--warning);
+}
+.onboarding-result-error {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--error);
+}
+.onboarding-result-info {
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  color: var(--accent);
+}
+.onboarding-result-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.onboarding-result-msg {
+  flex: 1;
+}
+
+/* ── SNIPPET CARDS (Phase 16) ──────────────────── */
+.snippet-card {
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.snippet-card:hover {
+  background: var(--bg-hover);
+  border-color: var(--glass-border-hover);
+}
+
+.snippet-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.snippet-card:hover .snippet-delete {
+  opacity: 1;
+}
+
+.snippet-delete:hover {
+  color: var(--error);
+}
+
+.note-delete-btn {
+  position: absolute; top: 8px; right: 8px;
+  background: none; border: none; color: var(--text-muted);
+  font-size: 16px; cursor: pointer; opacity: 0;
+  transition: opacity 0.15s, color 0.15s; padding: 2px 6px; border-radius: 4px;
+}
+.note-card:hover .note-delete-btn { opacity: 1; }
+.note-delete-btn:hover { color: var(--error); background: rgba(239,68,68,0.08); }
+
+.note-card-clickable { cursor: pointer; }
+
+/* Note Modal */
+.note-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2500;
+}
+.note-modal-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: min(640px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+.note-modal-panel-narrow {
+  max-width: 420px;
+}
+.note-modal-panel-medium {
+  max-width: 400px;
+}
+.note-modal-panel-compact {
+  max-width: 360px;
+}
+.note-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.note-modal-heading {
+  font-size: 16px;
+  font-weight: 600;
+  flex: 1;
+}
+.note-modal-form {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.note-modal-form-relaxed {
+  gap: 12px;
+}
+.note-modal-row {
+  display: flex;
+  gap: 8px;
+}
+.note-modal-row-center {
+  align-items: center;
+}
+.note-modal-flex {
+  flex: 1;
+}
+.note-modal-preset-btn {
+  flex: 1;
+  padding: 6px;
+  font-size: 12px;
+}
+.note-modal-preset-btn.active {
+  background: var(--accent);
+}
+.note-modal-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.note-modal-number-input {
+  width: 80px;
+}
+.note-modal-title-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 600;
+  outline: none;
+  padding: 4px 0;
+}
+.note-modal-title-input:focus { border-bottom: 1px solid var(--accent); }
+.note-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+.note-modal-close:hover { color: var(--text-primary); }
+.note-modal-meta {
+  padding: 6px 20px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.note-modal-textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 12px 20px;
+  resize: none;
+  outline: none;
+  min-height: 280px;
+  font-family: var(--font-mono);
+}
+.note-modal-textarea-compact {
+  min-height: 120px;
+}
+.note-modal-footer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+.action-btn-secondary {
+  background: var(--bg-surface2);
+}
+.action-btn-danger {
+  background: var(--error);
+}
+.memory-cleanup-btn {
+  margin-top: 12px;
+}
+
+.clipboard-entry {
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  font-family: var(--font-mono);
+}
+
+.clipboard-entry:hover {
+  background: var(--bg-hover);
+  border-color: var(--glass-border-hover);
+}
+
+/* ── ACCENT PICKER (Phase 15) ──────────────────── */
+.accent-picker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.accent-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.accent-dot:hover {
+  transform: scale(1.15);
+}
+
+.accent-dot.active {
+  border-color: var(--text);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.2);
+}
+
+.accent-dot.active::after {
+  content: "\2713";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.input-hint .kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--bg-surface3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: var(--text-muted);
+}

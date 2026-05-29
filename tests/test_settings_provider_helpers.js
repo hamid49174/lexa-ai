@@ -35,6 +35,9 @@ function createElement(tag) {
       this.children.push(child);
       return child;
     },
+    replaceChildren(...children) {
+      this.children = children;
+    },
     set innerHTML(value) {
       this._innerHTML = String(value || "");
       if (this._innerHTML === "") this.children = [];
@@ -101,6 +104,7 @@ const select = createElement("select");
 const desc = createElement("div");
 const rendered = context.settingsRenderAiModelSelection(groupedData, select, desc);
 assert("render helper populates grouped model options", rendered === true && select.children.length === 1 && select.children[0].children.length === 2 && desc.textContent === "Aktiv: GPT-4o mini", JSON.stringify(select));
+assert("render helper clears select with replaceChildren", helperSrc.includes("select.replaceChildren()") && !helperSrc.includes("select.innerHTML"));
 assert("render helper marks the active model option", select.children[0].children[0].selected === true && select.children[0].children[1].selected === false, JSON.stringify(select.children[0].children));
 
 const unsafeSelect = createElement("select");

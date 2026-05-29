@@ -10,7 +10,6 @@ import email.mime.multipart
 import email.mime.base
 import email.encoders
 import logging
-import os
 import keyring
 from datetime import datetime, timedelta
 from pathlib import Path

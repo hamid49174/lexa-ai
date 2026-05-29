@@ -17,8 +17,7 @@ from pydantic import BaseModel
 from backend.security import check_rate_limit, audit_log
 from backend.i18n import t
 from backend.voice_ws import (
-    push_event, push_volume, push_state, push_command,
-    push_response, push_response_chunk, push_error,
+    push_event, push_volume, push_state,
     pop_fallback_events, register_ws_client, unregister_ws_client,
 )
 from voice.config import (
@@ -38,43 +37,56 @@ from voice.config import (
 #  REQUEST MODELS
 # ═══════════════════════════════════════════════════
 
+
 class TTSRequest(BaseModel):
     text: str = ""
+
 
 class STTModelRequest(BaseModel):
     model: str = "base"
 
+
 class STTLanguageRequest(BaseModel):
     language: str = "de"
+
 
 class STTEngineRequest(BaseModel):
     engine: str = "deepgram"
 
+
 class DeepgramKeyRequest(BaseModel):
     api_key: str = ""
+
 
 class SensitivityRequest(BaseModel):
     sensitivity: float = 0.015
 
+
 class ElevenLabsKeyRequest(BaseModel):
     api_key: str = ""
+
 
 class ElevenLabsVoiceRequest(BaseModel):
     voice_id: str = ""
 
+
 class ElevenLabsModelRequest(BaseModel):
     model: str = "eleven_multilingual_v2"
+
 
 class ElevenLabsSettingsRequest(BaseModel):
     stability: float | None = None
     similarity: float | None = None
     style: float | None = None
 
+
 class ElevenLabsToggleRequest(BaseModel):
     enabled: bool = True
 
+
 class CartesiaKeyRequest(BaseModel):
     api_key: str = ""
+
 
 class CartesiaVoiceRequest(BaseModel):
     voice_id: str = ""

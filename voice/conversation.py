@@ -84,11 +84,11 @@ def _collect_tts_results(futures: list[concurrent.futures.Future],
             if path:
                 paths.append(path)
         except concurrent.futures.TimeoutError:
-            logger.error(f"[Conv] TTS {i+1}/{len(futures)} timed out")
+            logger.error(f"[Conv] TTS {i + 1}/{len(futures)} timed out")
         except concurrent.futures.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"[Conv] TTS {i+1}/{len(futures)} failed: {e}")
+            logger.error(f"[Conv] TTS {i + 1}/{len(futures)} failed: {e}")
     return paths
 
 
@@ -350,13 +350,10 @@ class ConversationEngine:
     def run_conversation(self, initial_command: str, sd,
                          is_listening: Callable[[], bool]) -> None:
         """Multi-turn conversation loop until exit phrase or timeout."""
-        import numpy as np
         from voice.stt import transcribe_audio_data
-        from voice.vad import is_speech, calibrate_noise_floor
+        from voice.vad import calibrate_noise_floor
         from voice.config import (
-            SAMPLE_RATE, VAD_CHUNK_SAMPLES, RECORD_CHUNK_MS,
-            SILENCE_MS_BASE, MIN_SPEECH_MS, LISTEN_TIMEOUT_S, MAX_UTTERANCE_S,
-            PRE_SPEECH_CHUNKS,
+            SAMPLE_RATE, LISTEN_TIMEOUT_S, MAX_UTTERANCE_S,
         )
         from backend.voice_ws import push_state
 

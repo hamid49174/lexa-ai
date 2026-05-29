@@ -5,6 +5,190 @@
    ════════════════════════════════════════════════ */
 
 // ── DASHBOARD ───────────────────────────────────
+function setDashboardAiStatusMessage(target, message, className = "") {
+  if (!target) return;
+  const span = document.createElement("span");
+  if (className) span.className = className;
+  span.textContent = message;
+  target.replaceChildren(span);
+}
+
+function createDashboardAiRow(label, status, active = false) {
+  const row = document.createElement("div");
+  row.className = "dash-ai-row";
+  const dot = document.createElement("span");
+  dot.className = active ? "dash-dot active" : "dash-dot";
+  const labelNode = document.createTextNode(` ${label} `);
+  const tag = document.createElement("span");
+  tag.className = "dash-ai-tag";
+  tag.textContent = status;
+  row.append(dot, labelNode, tag);
+  return row;
+}
+
+function renderDashboardAiStatus(target, ai, hermes) {
+  if (!target) return;
+  const providers = [
+    ["groq", "Groq"],
+    ["openai", "OpenAI"],
+    ["gemini", "Gemini"],
+    ["anthropic", "Claude"],
+  ];
+  const activeProvider = String(ai?.active_provider || "");
+  const activeLabel = providers.find(([key]) => key === activeProvider)?.[1] || activeProvider || t("dashboard.unknownProvider");
+  const fragment = document.createDocumentFragment();
+
+  providers.forEach(([key, label]) => {
+    const ok = Boolean(ai?.[key]?.available);
+    fragment.appendChild(createDashboardAiRow(label, ok ? t("dashboard.aiReady") : t("dashboard.aiOffline"), ok));
+  });
+
+  const fallbackCount = Array.isArray(ai?.fallback_available) ? ai.fallback_available.length : 0;
+  if (ai?.fallback_enabled) {
+    fragment.appendChild(createDashboardAiRow(
+      t("dashboard.aiFallback"),
+      fallbackCount ? t("dashboard.aiReady") : t("dashboard.aiOffline"),
+      Boolean(fallbackCount),
+    ));
+  }
+
+  if (hermes) {
+    const hermesReady = Boolean(hermes.can_run_tasks);
+    const hermesState = String(hermes.state || "unknown");
+    const hermesLabel = hermesState === "ready"
+      ? t("dashboard.aiReady")
+      : hermesState === "attention" ? t("dashboard.needsAttention") : t("dashboard.aiOffline");
+    fragment.appendChild(createDashboardAiRow("Hermes", hermesLabel, hermesReady));
+  }
+
+  const providerRow = document.createElement("div");
+  providerRow.className = "dash-ai-provider";
+  providerRow.append(document.createTextNode(`${t("dashboard.aiActive")}: `));
+  const activeStrong = document.createElement("strong");
+  activeStrong.textContent = activeLabel;
+  providerRow.appendChild(activeStrong);
+  fragment.appendChild(providerRow);
+
+  target.replaceChildren(fragment);
+}
+
+function createDashboardRoutineItem(routine) {
+  const item = document.createElement("div");
+  item.className = "dash-routine-item";
+  const dot = document.createElement("span");
+  dot.className = routine?.enabled ? "dash-routine-dot active" : "dash-routine-dot";
+  const nameEl = document.createElement("span");
+  nameEl.className = "dash-routine-name";
+  nameEl.textContent = String(routine?.name || "");
+  const timeEl = document.createElement("span");
+  timeEl.className = "dash-routine-time";
+  timeEl.textContent = String(routine?.schedule || "");
+  item.append(dot, nameEl, timeEl);
+  return item;
+}
+
+function renderDashboardRoutines(target, routines) {
+  if (!target) return;
+  if (!Array.isArray(routines) || routines.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "dash-empty";
+    empty.textContent = t("dashboard.noRoutines");
+    target.replaceChildren(empty);
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  routines.forEach((routine) => {
+    fragment.appendChild(createDashboardRoutineItem(routine));
+  });
+  target.replaceChildren(fragment);
+}
+
+function dashboardTodoCount(todos) {
+  return Array.isArray(todos?.todos) ? todos.todos.length : 0;
+}
+
+function dashboardPomodoroState(pomo) {
+  const running = Boolean(pomo?.running);
+  if (!running) return { running: false, label: t("dashboard.noPomodoro"), valueClass: "off" };
+  const remaining = Number(pomo?.remaining_sec);
+  if (Number.isFinite(remaining) && remaining >= 0) {
+    const totalSeconds = Math.floor(remaining);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return {
+      running: true,
+      label: t("dashboard.pomodoroRemaining", {time: `${minutes}:${String(seconds).padStart(2, "0")}`}),
+      valueClass: "ok",
+    };
+  }
+  return { running: true, label: t("dashboard.pomodoroRunning"), valueClass: "ok" };
+}
+
+function createDashboardProductivityRow(label, value, rowClass = "", valueClass = "") {
+  const row = document.createElement("div");
+  row.className = rowClass ? `dash-prod-row ${rowClass}` : "dash-prod-row";
+  const labelEl = document.createElement("span");
+  labelEl.className = "dash-prod-label";
+  labelEl.textContent = label;
+  const valueEl = document.createElement("span");
+  valueEl.className = valueClass ? `dash-prod-value ${valueClass}` : "dash-prod-value";
+  valueEl.textContent = value;
+  row.append(labelEl, valueEl);
+  return row;
+}
+
+function renderDashboardProductivityStats(target, todos, pomo, focus) {
+  const pendingCount = dashboardTodoCount(todos);
+  const pomodoro = dashboardPomodoroState(pomo);
+  const focusOn = Boolean(focus?.active);
+  if (!target) return { pendingCount, pomRunning: pomodoro.running };
+
+  const fragment = document.createDocumentFragment();
+  fragment.appendChild(createDashboardProductivityRow(
+    `\u2610 ${t("dashboard.openTasks")}`,
+    String(pendingCount),
+    pendingCount > 0 ? "warn" : "",
+    pendingCount > 5 ? "warn" : "ok",
+  ));
+  fragment.appendChild(createDashboardProductivityRow(
+    "\u23F3 Pomodoro",
+    pomodoro.label,
+    pomodoro.running ? "active" : "",
+    pomodoro.valueClass,
+  ));
+  fragment.appendChild(createDashboardProductivityRow(
+    `\u{1F3AF} ${t("focus.mode")}`,
+    focusOn ? t("dashboard.focusActive") : t("dashboard.focusOff"),
+    focusOn ? "active" : "",
+    focusOn ? "ok" : "off",
+  ));
+  target.replaceChildren(fragment);
+  return { pendingCount, pomRunning: pomodoro.running };
+}
+
+function createDashboardMemoryItem(count, label) {
+  const item = document.createElement("div");
+  item.className = "dash-mem-item";
+  const countEl = document.createElement("span");
+  countEl.className = "dash-mem-num";
+  countEl.textContent = count;
+  item.append(countEl, document.createTextNode(label));
+  return item;
+}
+
+function renderDashboardMemoryStats(target, mem) {
+  if (!target) return;
+  const grid = document.createElement("div");
+  grid.className = "dash-mem-grid";
+  grid.append(
+    createDashboardMemoryItem(dashCount(mem?.notes), t("dashboard.memNotes")),
+    createDashboardMemoryItem(dashCount(mem?.memories), t("dashboard.memReminders")),
+    createDashboardMemoryItem(dashCount(mem?.interactions), t("dashboard.memChats")),
+    createDashboardMemoryItem(dashCount(mem?.routines), t("dashboard.memRoutines")),
+  );
+  target.replaceChildren(grid);
+}
+
 async function refreshDashboard() {
   const versionLabel = `v${LexaState.get("backendVersion") || "1.0.0"}`;
 
@@ -21,7 +205,7 @@ async function refreshDashboard() {
 
   if (!LexaState.get("backendOnline")) {
     const aiStatusEl = document.getElementById("dash-ai-status");
-    if (aiStatusEl) aiStatusEl.innerHTML = `<span class="text-error">${t("dashboard.backendOffline")}</span>`;
+    setDashboardAiStatusMessage(aiStatusEl, t("dashboard.backendOffline"), "text-error");
     const subEl = document.getElementById("dash-greeting-sub");
     if (subEl) subEl.textContent = `Lexa AI ${versionLabel} \u2014 ${t("dashboard.backendOffline")}`;
     return;
@@ -59,21 +243,22 @@ async function refreshDashboard() {
       const setDash = (id, val) => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.textContent = val + "%";
-        applyMetricTone(el, val);
+        const pct = dashPercent(val);
+        el.textContent = pct + "%";
+        applyMetricTone(el, pct);
         const bar = document.getElementById(id + "-bar");
-        if (bar) applyMeterClass(bar, val, metricToneClass(val));
+        if (bar) applyMeterClass(bar, pct, metricToneClass(pct));
       };
       setDash("dash-cpu", d.cpu_percent);
       setDash("dash-ram", d.ram_percent);
       setDash("dash-disk", d.disk_percent);
       const battEl = document.getElementById("dash-battery");
       if (battEl) {
-        const bv = d.battery_percent !== null ? d.battery_percent : "--";
-        battEl.textContent = bv + "%";
-        if (bv !== "--") applyMetricTone(battEl, bv <= 30 ? 90 : 20, "metric-success");
+        const bv = dashBatteryPercent(d.battery_percent);
+        battEl.textContent = bv !== null ? bv + "%" : "--";
+        if (bv !== null) applyMetricTone(battEl, bv <= 30 ? 90 : 20, "metric-success");
         const battBar = document.getElementById("dash-battery-bar");
-        if (battBar && bv !== "--") applyMeterClass(battBar, bv, bv > 30 ? "meter-success" : "meter-error");
+        if (battBar && bv !== null) applyMeterClass(battBar, bv, bv > 30 ? "meter-success" : "meter-error");
       }
     }
   }
@@ -83,34 +268,8 @@ async function refreshDashboard() {
     const ai = aiRes.value;
     const aiEl = document.getElementById("dash-ai-status");
     if (aiEl) {
-      const providers = [
-        ["groq", "Groq"],
-        ["openai", "OpenAI"],
-        ["gemini", "Gemini"],
-        ["anthropic", "Claude"],
-      ];
-      const activeLabel = providers.find(([key]) => key === ai.active_provider)?.[1] || escapeHtml(String(ai.active_provider || t("dashboard.unknownProvider")));
-      const rows = providers.map(([key, label]) => {
-        const ok = ai[key]?.available;
-        const dot = ok ? '<span class="dash-dot active"></span>' : '<span class="dash-dot"></span>';
-        return `<div class="dash-ai-row">${dot} ${label} <span class="dash-ai-tag">${ok ? t("dashboard.aiReady") : t("dashboard.aiOffline")}</span></div>`;
-      }).join("");
-      const fallbackCount = Array.isArray(ai.fallback_available) ? ai.fallback_available.length : 0;
-      const fallbackRow = ai.fallback_enabled
-        ? `<div class="dash-ai-row">${fallbackCount ? '<span class="dash-dot active"></span>' : '<span class="dash-dot"></span>'} ${escapeHtml(t("dashboard.aiFallback"))} <span class="dash-ai-tag">${fallbackCount ? escapeHtml(t("dashboard.aiReady")) : escapeHtml(t("dashboard.aiOffline"))}</span></div>`
-        : "";
       const hermes = healthRes.status === "fulfilled" ? healthRes.value?.hermes : null;
-      const hermesReady = Boolean(hermes?.can_run_tasks);
-      const hermesState = hermes?.state || "unknown";
-      const hermesRow = hermes
-        ? `<div class="dash-ai-row">${hermesReady ? '<span class="dash-dot active"></span>' : '<span class="dash-dot"></span>'} Hermes <span class="dash-ai-tag">${escapeHtml(hermesState === "ready" ? t("dashboard.aiReady") : hermesState === "attention" ? t("dashboard.needsAttention") : t("dashboard.aiOffline"))}</span></div>`
-        : "";
-      aiEl.innerHTML = `
-        ${rows}
-        ${fallbackRow}
-        ${hermesRow}
-        <div class="dash-ai-provider">${t("dashboard.aiActive")}: <strong>${activeLabel}</strong></div>
-      `;
+      renderDashboardAiStatus(aiEl, ai, hermes);
     }
   }
 
@@ -118,35 +277,14 @@ async function refreshDashboard() {
   if (memRes.status === "fulfilled") {
     const mem = memRes.value;
     const memEl = document.getElementById("dash-memory-stats");
-    if (memEl) {
-      memEl.innerHTML = `
-        <div class="dash-mem-grid">
-          <div class="dash-mem-item"><span class="dash-mem-num">${mem.notes || 0}</span>${t("dashboard.memNotes")}</div>
-          <div class="dash-mem-item"><span class="dash-mem-num">${mem.memories || 0}</span>${t("dashboard.memReminders")}</div>
-          <div class="dash-mem-item"><span class="dash-mem-num">${mem.interactions || 0}</span>${t("dashboard.memChats")}</div>
-          <div class="dash-mem-item"><span class="dash-mem-num">${mem.routines || 0}</span>${t("dashboard.memRoutines")}</div>
-        </div>
-      `;
-    }
+    renderDashboardMemoryStats(memEl, mem);
   }
 
   // Routines
   if (routRes.status === "fulfilled") {
     const routinesData = routRes.value;
     const routEl = document.getElementById("dash-routines-list");
-    if (routEl) {
-      if (routinesData.routines?.length > 0) {
-        routEl.innerHTML = routinesData.routines.map(r => `
-          <div class="dash-routine-item">
-            <span class="dash-routine-dot ${r.enabled ? "active" : ""}"></span>
-            <span class="dash-routine-name">${escapeHtml(String(r.name || ""))}</span>
-            <span class="dash-routine-time">${escapeHtml(String(r.schedule || ""))}</span>
-          </div>
-        `).join("");
-      } else {
-        routEl.innerHTML = `<div class="dash-empty">${t("dashboard.noRoutines")}</div>`;
-      }
-    }
+    renderDashboardRoutines(routEl, routinesData.routines);
   }
 
   // Productivity stats
@@ -156,36 +294,7 @@ async function refreshDashboard() {
       const todos = todosRes.status === "fulfilled" ? todosRes.value : { todos: [] };
       const pomo = pomoRes.status === "fulfilled" ? pomoRes.value : { running: false };
       const focus = focusRes.status === "fulfilled" ? focusRes.value : { active: false };
-      const pendingCount = todos.todos?.length ?? 0;
-      const pomRunning = pomo.running;
-      const focusOn = focus.active;
-
-      let pomLabel = t("dashboard.noPomodoro");
-      let pomClass = "off";
-      if (pomRunning && pomo.remaining_sec != null) {
-        const m = Math.floor(pomo.remaining_sec / 60);
-        const s = pomo.remaining_sec % 60;
-        pomLabel = t("dashboard.pomodoroRemaining", {time: `${m}:${String(s).padStart(2, "0")}`});
-        pomClass = "ok";
-      } else if (pomRunning) {
-        pomLabel = t("dashboard.pomodoroRunning");
-        pomClass = "ok";
-      }
-
-      prodEl.innerHTML = `
-        <div class="dash-prod-row${pendingCount > 0 ? " warn" : ""}">
-          <span class="dash-prod-label">&#9744; ${t("dashboard.openTasks")}</span>
-          <span class="dash-prod-value${pendingCount > 5 ? " warn" : " ok"}">${pendingCount}</span>
-        </div>
-        <div class="dash-prod-row${pomRunning ? " active" : ""}">
-          <span class="dash-prod-label">&#9203; Pomodoro</span>
-          <span class="dash-prod-value ${pomClass}">${pomLabel}</span>
-        </div>
-        <div class="dash-prod-row${focusOn ? " active" : ""}">
-          <span class="dash-prod-label">&#127919; ${t("focus.mode")}</span>
-          <span class="dash-prod-value${focusOn ? " ok" : " off"}">${focusOn ? t("dashboard.focusActive") : t("dashboard.focusOff")}</span>
-        </div>
-      `;
+      const { pendingCount, pomRunning } = renderDashboardProductivityStats(prodEl, todos, pomo, focus);
 
       // Keep quick-action button in sync with pomodoro state
       const pomoBtn = document.getElementById("dash-btn-pomo");
@@ -214,13 +323,40 @@ async function refreshDashboard() {
   }
 }
 
+function dashCount(value) {
+  const count = Number(value);
+  if (!Number.isFinite(count) || count < 0) return "0";
+  return String(Math.floor(count));
+}
+
+function dashChartCount(value) {
+  const count = Number(value);
+  if (!Number.isFinite(count) || count < 0) return 0;
+  return Math.floor(count);
+}
+
+function dashPercent(value) {
+  return clampPercent(value);
+}
+
+function dashBatteryPercent(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  return clampPercent(num);
+}
+
 function renderWeeklyChart(container, days) {
-  if (!days.length) { container.textContent = t("empty.noData"); return; }
+  const safeDays = Array.isArray(days) ? days.map((day) => ({
+    label: String(day?.label || ""),
+    todosDone: dashChartCount(day?.todos_done),
+    pomodoros: dashChartCount(day?.pomodoros),
+    habitsDone: dashChartCount(day?.habits_done),
+  })) : [];
+  if (!safeDays.length) { container.textContent = t("empty.noData"); return; }
 
   // Find max value across all metrics for scaling
-  const maxVal = Math.max(1, ...days.map(d => Math.max(d.todos_done, d.pomodoros, d.habits_done)));
-
-  container.innerHTML = "";
+  const maxVal = Math.max(1, ...safeDays.map(d => Math.max(d.todosDone, d.pomodoros, d.habitsDone)));
 
   // Legend
   const legend = document.createElement("div");
@@ -234,13 +370,11 @@ function renderWeeklyChart(container, days) {
     item.appendChild(document.createTextNode(label));
     legend.appendChild(item);
   });
-  container.appendChild(legend);
-
   // Chart
   const chart = document.createElement("div");
   chart.className = "weekly-chart-bars";
 
-  days.forEach(day => {
+  safeDays.forEach(day => {
     const col = document.createElement("div");
     col.className = "weekly-col";
 
@@ -249,9 +383,9 @@ function renderWeeklyChart(container, days) {
     barsWrap.className = "weekly-bars-group";
 
     [
-      { val: day.todos_done, cls: "weekly-bar-todos", title: t("dashboard.chartTodosDone", {count: day.todos_done}) },
+      { val: day.todosDone, cls: "weekly-bar-todos", title: t("dashboard.chartTodosDone", {count: day.todosDone}) },
       { val: day.pomodoros, cls: "weekly-bar-pomo", title: t("dashboard.chartPomodorosCount", {count: day.pomodoros}) },
-      { val: day.habits_done, cls: "weekly-bar-habits", title: t("dashboard.chartHabitsCount", {count: day.habits_done}) },
+      { val: day.habitsDone, cls: "weekly-bar-habits", title: t("dashboard.chartHabitsCount", {count: day.habitsDone}) },
     ].forEach(({ val, cls, title }) => {
       const barWrap = document.createElement("div");
       barWrap.className = "weekly-bar-wrap";
@@ -280,7 +414,7 @@ function renderWeeklyChart(container, days) {
     chart.appendChild(col);
   });
 
-  container.appendChild(chart);
+  container.replaceChildren(legend, chart);
 }
 
 function clampPercent(value) {

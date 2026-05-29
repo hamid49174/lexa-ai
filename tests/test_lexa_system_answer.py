@@ -6,6 +6,7 @@ from backend import lexa_system_answer as answer
 def test_lexa_system_answer_detects_os_hermes_opinion_questions():
     assert answer.looks_like_lexa_system_question("wie findest du mein os und hermes")
     assert answer.looks_like_lexa_system_question("was bringt das spaeter fuer Lexa wenn ich die app veroeffentliche")
+    assert answer.looks_like_lexa_system_question("was h\u00e4ltst du sp\u00e4ter von Lexa wenn ich sie ver\u00f6ffentliche")
     assert not answer.looks_like_lexa_system_question("wie findest du kuenstliche intelligenz")
 
 

@@ -52,6 +52,7 @@ def clear_pending_confirmation() -> None:
     _pending_confirmation = None
     _pending_confirmation_ts = 0.0
 
+
 # ── Simple timestamp-based cache (bounded to prevent memory leaks) ──
 _cache: dict[str, dict] = {}
 

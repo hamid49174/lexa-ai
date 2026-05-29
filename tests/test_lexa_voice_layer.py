@@ -8,6 +8,13 @@ def test_system_prompt_uses_central_lexa_voice_rules():
     assert SYSTEM_PROMPT_CORE == LEXA_SYSTEM_PROMPT_CORE
     assert "Deutsch, per du, kurz" in SYSTEM_PROMPT_CORE
     assert "Keine Modell-, Provider- oder Fallback-Namen" in SYSTEM_PROMPT_CORE
+    assert "QUALITAETSSTANDARD" in SYSTEM_PROMPT_CORE
+    assert "Fakten, Annahmen, Entscheidungen" in SYSTEM_PROMPT_CORE
+    assert "Zeiten konsistent rechnen" in SYSTEM_PROMPT_CORE
+    assert "keine nicht genannten Aufgaben erfinden" in SYSTEM_PROMPT_CORE
+    assert "keine Schein-Komplexitaet" in SYSTEM_PROMPT_CORE
+    assert "Sequenz-/Tensor-Shapes" in SYSTEM_PROMPT_CORE
+    assert "technisch noch laeuft" in SYSTEM_PROMPT_CORE
     assert "Draft/Approval" in SYSTEM_PROMPT_CORE
 
 

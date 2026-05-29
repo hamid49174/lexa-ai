@@ -5,6 +5,7 @@
  */
 
 const path = require("path");
+require("./electron_smoke_safe_io");
 
 if (!process.versions.electron) {
   const { spawnSync } = require("child_process");
@@ -154,11 +155,7 @@ async function main() {
 
       async function resetChat() {
         clearRenderedChatMessages();
-        try {
-          localStorage.removeItem("lexa-chat-history");
-          localStorage.removeItem("lexa-chat-draft");
-          localStorage.removeItem("lexa-active-conversation");
-        } catch (_) {}
+        clearChatVolatileState();
         LexaState.set("backendOnline", true);
         LexaState.set("isLoading", false);
         LexaState.set("currentConversationId", null);
@@ -200,7 +197,7 @@ async function main() {
         const streamCall = fetchCalls.find((call) => call.url.endsWith("/chat/stream"));
         let streamBody = {};
         try { streamBody = JSON.parse(streamCall?.body || "{}"); } catch (_) {}
-        const history = JSON.parse(localStorage.getItem("lexa-chat-history") || "[]");
+        const history = typeof chatCachedHistorySnapshot === "function" ? chatCachedHistorySnapshot() : [];
         return {
           name,
           waitOk: wait.ok,
