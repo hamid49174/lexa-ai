@@ -31,6 +31,7 @@ let memoryGraphState = null;
 let _clipboardHistoryRevealRunning = false;
 let _memoryCleanupRunning = false;
 let _routineToggleRunning = false;
+let _snippetDeleteRunning = false;
 
 function setMemoryActionBusy(button, busy) {
   if (!button) return;
@@ -818,7 +819,7 @@ async function refreshMemoryView() {
           bindMemoryCardAction(card, () => useSnippet(snippetText), t("memory.useSnippetLabel", { name: s.name || "" }));
           deleteBtn.addEventListener("click", (e) => {
             e.stopPropagation();
-            deleteSnippet(s.name);
+            deleteSnippet(s.name, deleteBtn);
           });
           snippetsList.appendChild(card);
         });
@@ -1243,11 +1244,23 @@ function createSnippet() {
   nameInput.focus();
 }
 
-async function deleteSnippet(name) {
-  await window.lexa.snippetDelete(name);
-  invalidateSnippetCache();
-  showToast(t("snippets.deleted"), "info");
-  refreshMemoryView();
+async function deleteSnippet(name, triggerBtn) {
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  if (_snippetDeleteRunning) return;
+  _snippetDeleteRunning = true;
+  setMemoryActionBusy(triggerBtn, true);
+  try {
+    await window.lexa.snippetDelete(name);
+    invalidateSnippetCache();
+    showToast(t("snippets.deleted"), "info");
+    refreshMemoryView();
+  } catch (e) {
+    console.warn("[Memory] Failed to delete snippet:", e.message || e);
+    showToast(t("toast.executionError"), "error", 2200);
+  } finally {
+    _snippetDeleteRunning = false;
+    if (triggerBtn?.isConnected) setMemoryActionBusy(triggerBtn, false);
+  }
 }
 
 async function useSnippet(text) {
