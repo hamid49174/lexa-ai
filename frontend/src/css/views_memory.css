@@ -157,9 +157,10 @@
   padding: 0;
   overflow: hidden;
   background:
-    radial-gradient(circle at 18% 18%, rgba(139, 92, 246, 0.12), transparent 34%),
-    radial-gradient(circle at 78% 70%, rgba(45, 212, 191, 0.08), transparent 30%),
-    #06070d;
+    radial-gradient(circle at 25% 18%, rgba(88, 80, 214, 0.15), transparent 34%),
+    radial-gradient(circle at 72% 58%, rgba(45, 212, 191, 0.10), transparent 32%),
+    linear-gradient(120deg, rgba(22, 12, 34, 0.48), rgba(4, 8, 14, 0.92) 58%, rgba(2, 13, 15, 0.82)),
+    #05060b;
 }
 
 #memory-view.active {
@@ -260,6 +261,7 @@
   margin: 0 clamp(8px, 2.8vw, 36px);
   border-radius: 10px;
   overflow: hidden;
+  isolation: isolate;
 }
 
 .memory-graph-stage::before {
@@ -268,10 +270,14 @@
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.024) 1px, transparent 1px);
-  background-size: 42px 42px;
-  mask-image: radial-gradient(circle at center, black 0%, black 62%, transparent 100%);
+    radial-gradient(ellipse at 50% 50%, rgba(99, 102, 241, 0.10), transparent 54%),
+    radial-gradient(ellipse at 36% 48%, rgba(45, 212, 191, 0.08), transparent 34%),
+    radial-gradient(ellipse at 65% 52%, rgba(167, 139, 250, 0.08), transparent 36%),
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.014) 1px, transparent 1px);
+  background-size: auto, auto, auto, 54px 54px, 54px 54px;
+  mask-image: radial-gradient(ellipse at center, black 0%, black 68%, transparent 100%);
+  opacity: 0.9;
 }
 
 .memory-graph-svg {
@@ -282,15 +288,68 @@
   min-height: 520px;
 }
 
+.memory-graph-brain-backdrop {
+  pointer-events: none;
+}
+
+.memory-graph-brain-aura {
+  fill: url(#memory-graph-brain-aura);
+  opacity: 0.88;
+  filter: blur(9px);
+}
+
+.memory-graph-brain-outline {
+  fill: url(#memory-graph-brain-fill);
+  stroke: rgba(191, 219, 254, 0.28);
+  stroke-width: 1.4;
+}
+
+.memory-graph-brain-stem {
+  fill: none;
+  stroke: rgba(45, 212, 191, 0.18);
+  stroke-linecap: round;
+  stroke-width: 12;
+}
+
+.memory-graph-brain-midline {
+  fill: none;
+  stroke: rgba(245, 243, 255, 0.22);
+  stroke-dasharray: 10 12;
+  stroke-linecap: round;
+  stroke-width: 1.2;
+}
+
+.memory-graph-brain-fold {
+  fill: none;
+  opacity: 0.62;
+  stroke: rgba(191, 219, 254, 0.18);
+  stroke-linecap: round;
+  stroke-width: 1.5;
+}
+
+.memory-graph-brain-fold:nth-of-type(odd) {
+  stroke: rgba(45, 212, 191, 0.16);
+}
+
 .memory-graph-link {
+  fill: none;
   stroke: rgba(139, 156, 255, 0.27);
   stroke-linecap: round;
+  stroke-linejoin: round;
   transition: opacity 0.16s ease, stroke 0.16s ease;
 }
 
 .memory-graph-link-related,
 .memory-graph-link-mentions {
-  stroke: rgba(52, 211, 153, 0.24);
+  stroke: rgba(52, 211, 153, 0.28);
+}
+
+.memory-graph-link-keyword {
+  stroke: rgba(45, 212, 191, 0.23);
+}
+
+.memory-graph-link-contains {
+  stroke: rgba(167, 139, 250, 0.24);
 }
 
 .memory-graph-link.is-active {
@@ -315,6 +374,7 @@
 .memory-graph-node.is-active {
   stroke: #fff;
   stroke-width: 2.2;
+  filter: url(#memory-graph-glow) drop-shadow(0 0 12px rgba(255, 255, 255, 0.24));
 }
 
 .memory-graph-node.is-neighbor {
@@ -329,7 +389,7 @@
 .memory-graph-label {
   fill: rgba(245, 243, 255, 0.72);
   font-family: var(--font);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   opacity: 0;
   pointer-events: none;
