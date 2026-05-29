@@ -48,6 +48,7 @@ function translateDiagnosticsText(text) {
 
 let _voiceDiagnosticsRunning = false;
 let _systemDiagnosticsRunning = false;
+let _aiModelChangeRunning = false;
 let _hermesGatewayAutostartRunning = false;
 let _hermesGatewayAutostartLastPayload = null;
 
@@ -214,6 +215,10 @@ async function loadModelSelection() {
 }
 
 async function changeAiModel(modelId) {
+  if (!modelId || _aiModelChangeRunning) return;
+  const select = document.getElementById("model-select");
+  _aiModelChangeRunning = true;
+  setSettingsActionBusy(select, true);
   try {
     const result = await window.lexa.setAiModel(modelId);
     showToast(result.status || t("chat.modelChanged"), "success");
@@ -222,6 +227,9 @@ async function changeAiModel(modelId) {
   } catch (e) {
     console.warn("[Settings] Failed to change AI model:", e.message || e);
     showToast(t("toast.modelChangeFailed"), "error");
+  } finally {
+    _aiModelChangeRunning = false;
+    setSettingsActionBusy(select, false);
   }
 }
 
