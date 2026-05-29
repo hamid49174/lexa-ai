@@ -279,18 +279,19 @@
 /* ═══ VOICE STATUS BAR ═══ */
 .voice-status-bar {
   position: fixed;
-  top: 94px;
+  top: 78px;
   left: 50%;
-  width: min(640px, calc(100vw - 40px));
+  width: fit-content;
+  max-width: min(420px, calc(100vw - 32px));
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   transform: translateX(-50%);
-  padding: 6px 9px;
+  padding: 7px 10px;
   background: rgba(10, 10, 17, 0.82);
   border: 1px solid var(--glass-border);
-  border-radius: 10px;
-  box-shadow: var(--shadow);
+  border-radius: 999px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
   backdrop-filter: blur(20px);
   font-size: 12px;
   font-style: normal;
@@ -305,15 +306,16 @@
   display: none;
 }
 .voice-status-bar.active {
-  border-color: rgba(165, 154, 255, 0.2);
-  background: rgba(13, 12, 22, 0.86);
+  border-color: rgba(165, 154, 255, 0.18);
+  background: rgba(13, 12, 22, 0.9);
 }
 
 .voice-status-left {
   display: flex;
   align-items: center;
   gap: 7px;
-  min-width: 120px;
+  min-width: 0;
+  max-width: 160px;
   overflow: hidden;
   white-space: nowrap;
 }
@@ -361,23 +363,28 @@
 .voice-status-center {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex: 1;
-  justify-content: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  justify-content: flex-start;
   min-width: 0;
   overflow: hidden;
 }
 
 #voice-level-meter {
-  width: 72px;
-  min-width: 52px;
-  max-width: 72px;
+  display: none;
+  width: 54px;
+  min-width: 42px;
+  max-width: 54px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.032);
+  background: rgba(255, 255, 255, 0.035);
   border: 1px solid rgba(255, 255, 255, 0.055);
-  height: 16px;
+  height: 14px;
   opacity: 0.72;
   flex: 0 0 auto;
+}
+
+.voice-status-bar.has-volume #voice-level-meter {
+  display: block;
 }
 
 .voice-status-bar[data-state="speaking"] {
@@ -409,7 +416,7 @@
 .voice-live-transcript {
   font-style: normal;
   color: rgba(218, 211, 255, 0.78);
-  max-width: 340px;
+  max-width: 190px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -419,7 +426,7 @@
 }
 
 .voice-live-transcript.empty {
-  color: transparent;
+  display: none;
 }
 
 .voice-status-right {
@@ -450,6 +457,10 @@
   display: none;
 }
 
+.voice-provider-badge.same-as-state {
+  display: none;
+}
+
 .voice-latency {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.36);
@@ -458,19 +469,19 @@
 
 @media (max-width: 720px) {
   .voice-status-bar {
-    top: 88px;
-    width: calc(100vw - 20px);
-    gap: 8px;
-    padding: 7px 10px;
+    top: 64px;
+    max-width: calc(100vw - 20px);
+    gap: 6px;
+    padding: 7px 9px;
   }
 
   .voice-status-left {
-    min-width: 112px;
+    max-width: 138px;
   }
 
   #voice-level-meter {
-    width: 56px;
-    min-width: 44px;
+    width: 46px;
+    min-width: 40px;
   }
 
   .voice-status-right {
@@ -662,4 +673,3 @@
   box-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
   animation: dotPulseVoice 0.5s infinite;
 }
-

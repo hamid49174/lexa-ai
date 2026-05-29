@@ -648,6 +648,15 @@ function _voiceStatusBarEventUpdate({ state, provider, transcript, latency, volu
     if (VoiceStatusBar._visible) VoiceStatusBar.setVolume(volume);
     return;
   }
+  if (safeState === "idle" && !provider && !transcript && !latency) {
+    if (!VoiceStatusBar._bar && typeof VoiceStatusBar.init === "function") VoiceStatusBar.init();
+    VoiceStatusBar.setState("idle");
+    VoiceStatusBar.setProvider("");
+    VoiceStatusBar.setTranscript("");
+    VoiceStatusBar.setLatency(0);
+    VoiceStatusBar.hide();
+    return;
+  }
   if (safeState === "speaking") {
     if (!VoiceStatusBar._bar && typeof VoiceStatusBar.init === "function") VoiceStatusBar.init();
     VoiceStatusBar.setState("idle");
@@ -1027,17 +1036,20 @@ const VoiceStatusBar = {
       bargein: _voiceText("app.voiceStateBargein", "Interrupted, listening"),
     };
     _voiceStatusSetText(this._text, labels[safeState] || labels.idle, 48);
+    this._syncProviderVisibility();
     this._refreshA11yLabel();
   },
 
   clearVolume() {
     if (!this._meterCtx || !this._meter) return;
+    this._bar?.classList.remove("has-volume");
     this._meterCtx.clearRect(0, 0, this._meter.width, this._meter.height);
   },
 
   setVolume(vol) {
     if (!this._meterCtx || !this._meter) return;
     const level = Math.max(0, Math.min(1, Number(vol) || 0));
+    this._bar?.classList.toggle("has-volume", level > 0.02);
     const ctx = this._meterCtx;
     const w = this._meter.width;
     const h = this._meter.height;
@@ -1098,8 +1110,16 @@ const VoiceStatusBar = {
     if (this._provider) {
       const clipped = _voiceStatusSetText(this._provider, name, 48);
       this._provider.classList.toggle("empty", !clipped);
+      this._syncProviderVisibility();
       this._refreshA11yLabel();
     }
+  },
+
+  _syncProviderVisibility() {
+    if (!this._provider) return;
+    const providerText = String(this._provider.textContent || "").trim();
+    const stateText = String(this._text?.textContent || "").trim();
+    this._provider.classList.toggle("same-as-state", Boolean(providerText) && providerText === stateText);
   },
 
   _refreshA11yLabel() {

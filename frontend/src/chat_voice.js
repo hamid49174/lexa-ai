@@ -182,7 +182,7 @@ function voiceStatusBarReset(options) {
   VoiceStatusBar.setTranscript("");
   VoiceStatusBar.setProvider("");
   VoiceStatusBar.setLatency(0);
-  if (hide) VoiceStatusBar.hide();
+  if (hide || !options?.showIdle) VoiceStatusBar.hide();
 }
 
 function voiceSpeechPending() {

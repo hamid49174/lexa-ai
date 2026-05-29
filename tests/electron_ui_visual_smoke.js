@@ -2197,7 +2197,7 @@ async function main() {
     result.voiceStatus?.position !== "fixed" ||
     result.voiceStatus?.zIndex < 10000 ||
     result.voiceStatus?.height > 52 ||
-    result.voiceStatus?.width > 680 ||
+    result.voiceStatus?.width > 430 ||
     !result.voiceStatus?.inViewport ||
     result.voiceStatus?.mainTop > 50
   ) {
