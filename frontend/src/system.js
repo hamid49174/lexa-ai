@@ -5,6 +5,7 @@
 */
 
 // SYSTEM VIEW
+let systemViewRefreshSeq = 0;
 let systemAuditRefreshSeq = 0;
 let startupHealthRefreshSeq = 0;
 let hermesOverviewRefreshSeq = 0;
@@ -175,6 +176,7 @@ function createSystemView() {
 async function refreshSystemView() {
   const grid = document.getElementById("system-grid");
   if (!grid) return;
+  const requestId = ++systemViewRefreshSeq;
   if (!LexaState.get("backendOnline")) {
     grid.replaceChildren(createSystemInfoCard("", t("system.backendUnreachable"), "", null, "accent", "text-error fs-16"));
     setStartupHealthMessage(t("common.backendOffline"), "bad");
@@ -186,6 +188,7 @@ async function refreshSystemView() {
     const res = typeof window.requestSystemInfoCached === "function"
       ? await window.requestSystemInfoCached({ maxAgeMs: 5000, force: true })
       : await window.lexa.execute("system_info");
+    if (requestId !== systemViewRefreshSeq || !LexaState.get("backendOnline")) return;
     if (!res.success) {
       refreshStartupHealth();
       refreshHermesOverview();
@@ -220,6 +223,7 @@ async function refreshSystemView() {
     refreshHermesOverview();
     refreshSystemAuditActivity();
   } catch (e) {
+    if (requestId !== systemViewRefreshSeq || !LexaState.get("backendOnline")) return;
     console.warn("[System] Failed to refresh system view:", e.message || e);
     grid.replaceChildren(createSystemInfoCard("", t("toast.loadError"), "", null, "accent", "text-error fs-16"));
     refreshStartupHealth();
