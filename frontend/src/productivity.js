@@ -8,6 +8,7 @@
 
 const _todoMutationRunning = new Set();
 const _habitMutationRunning = new Set();
+let _pomodoroMutationRunning = false;
 
 function productivityLocale() {
   try {
@@ -73,6 +74,13 @@ function setHabitRowBusy(triggerBtn, busy) {
     delete button.dataset.lexaWasDisabled;
     button.removeAttribute("aria-busy");
   });
+}
+
+function setPomodoroActionBusy(button, busy) {
+  if (!button) return;
+  button.disabled = Boolean(busy);
+  if (busy) button.setAttribute("aria-busy", "true");
+  else button.removeAttribute("aria-busy");
 }
 
 function renderTimeTrackingLiveStatus(target, label, timeText, currentApp) {
@@ -669,7 +677,8 @@ function _renderPomodoroDisplay(remaining, total, task) {
   stopBtn.textContent = t("productivity.stopBtn");
   stopBtn.title = t("productivity.stopBtn");
   stopBtn.setAttribute("aria-label", t("productivity.stopBtn"));
-  stopBtn.addEventListener("click", stopPomodoro);
+  setPomodoroActionBusy(stopBtn, _pomodoroMutationRunning);
+  stopBtn.addEventListener("click", () => stopPomodoro(stopBtn));
   controls.replaceChildren(stopBtn);
 }
 
@@ -795,15 +804,29 @@ function startPomodoro() {
   startBtn.type = "button";
   startBtn.className = "action-btn";
   startBtn.textContent = t("productivity.startBtn");
+  startBtn.title = t("productivity.startBtn");
+  startBtn.setAttribute("aria-label", t("productivity.startBtn"));
   startBtn.addEventListener("click", async () => {
+    if (_pomodoroMutationRunning) return;
+    if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
     const task = taskInput.value.trim();
     const dur = Math.max(1, Math.min(120, parseInt(durInput.value) || 25));
-    overlay.remove();
-    document.removeEventListener("keydown", escHandler);
-    await window.lexa.pomodoroStart(task, dur);
-    showToast(t("pomodoro.started", {dur}), "success");
-    refreshPomodoro();
-    refreshProdStats();
+    _pomodoroMutationRunning = true;
+    setPomodoroActionBusy(startBtn, true);
+    try {
+      await window.lexa.pomodoroStart(task, dur);
+      showToast(t("pomodoro.started", {dur}), "success");
+      overlay.remove();
+      document.removeEventListener("keydown", escHandler);
+      refreshPomodoro();
+      refreshProdStats();
+    } catch (e) {
+      console.warn("[Productivity] Failed to start pomodoro:", e.message || e);
+      showToast(t("toast.executionError"), "error", 2200);
+    } finally {
+      _pomodoroMutationRunning = false;
+      if (startBtn?.isConnected) setPomodoroActionBusy(startBtn, false);
+    }
   });
   footer.appendChild(startBtn);
   const cancelBtn = document.createElement("button");
@@ -821,10 +844,25 @@ function startPomodoro() {
   taskInput.focus();
 }
 
-async function stopPomodoro() {
-  await window.lexa.pomodoroStop();
-  showToast(t("pomodoro.stopped"), "info");
-  refreshPomodoro();
+async function stopPomodoro(triggerBtn) {
+  if (_pomodoroMutationRunning) return;
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  _pomodoroMutationRunning = true;
+  setPomodoroActionBusy(triggerBtn, true);
+  try {
+    await window.lexa.pomodoroStop();
+    _pomoLocal.running = false;
+    LexaState.clearInterval("pomodoro");
+    showToast(t("pomodoro.stopped"), "info");
+    refreshPomodoro();
+    refreshProdStats();
+  } catch (e) {
+    console.warn("[Productivity] Failed to stop pomodoro:", e.message || e);
+    showToast(t("toast.executionError"), "error", 2200);
+  } finally {
+    _pomodoroMutationRunning = false;
+    if (triggerBtn?.isConnected) setPomodoroActionBusy(triggerBtn, false);
+  }
 }
 
 // ── HABITS ──
