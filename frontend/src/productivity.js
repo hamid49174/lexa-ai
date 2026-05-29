@@ -8,6 +8,8 @@
 
 const _todoMutationRunning = new Set();
 const _habitMutationRunning = new Set();
+let _todoCreateRunning = false;
+let _habitCreateRunning = false;
 let _pomodoroMutationRunning = false;
 let _timeTrackingToggleRunning = false;
 let _focusModeToggleRunning = false;
@@ -78,19 +80,33 @@ function setHabitRowBusy(triggerBtn, busy) {
   });
 }
 
-function setPomodoroActionBusy(button, busy) {
+function setProductivityButtonBusy(button, busy) {
   if (!button) return;
-  button.disabled = Boolean(busy);
-  if (busy) button.setAttribute("aria-busy", "true");
-  else button.removeAttribute("aria-busy");
+  if (busy) {
+    if (button.dataset.lexaBusyApplied !== "true") {
+      button.dataset.lexaWasDisabled = button.disabled ? "true" : "false";
+      button.dataset.lexaBusyApplied = "true";
+    }
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    return;
+  }
+  if (button.dataset.lexaBusyApplied === "true") {
+    button.disabled = button.dataset.lexaWasDisabled === "true";
+    delete button.dataset.lexaWasDisabled;
+    delete button.dataset.lexaBusyApplied;
+  }
+  button.removeAttribute("aria-busy");
+}
+
+function setPomodoroActionBusy(button, busy) {
+  setProductivityButtonBusy(button, busy);
 }
 
 function setProductivityActionButtonsBusy(selector, busy) {
   document.querySelectorAll(selector).forEach((button) => {
     if (!(button instanceof HTMLButtonElement)) return;
-    button.disabled = Boolean(busy);
-    if (busy) button.setAttribute("aria-busy", "true");
-    else button.removeAttribute("aria-busy");
+    setProductivityButtonBusy(button, busy);
   });
 }
 
@@ -463,8 +479,10 @@ function createTodo(prefillTitle = "") {
   saveBtn.className = "action-btn";
   saveBtn.textContent = t("productivity.createBtn");
   saveBtn.addEventListener("click", async () => {
+    if (_todoCreateRunning) return;
     const title = titleInput.value.trim();
     if (!title) { showToast(t("todo.titleEmpty"), "error"); return; }
+    if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
     const todo = {
       title,
       priority: prioSel.value,
@@ -472,18 +490,30 @@ function createTodo(prefillTitle = "") {
       due_date: dueInput.value || undefined,
       category: catInput.value.trim() || undefined,
     };
-    await window.lexa.todoCreate(todo);
-    showToast(t("todo.created"), "success");
-    overlay.remove();
-    document.removeEventListener("keydown", escHandler);
-    if (LexaState.get("currentView") === "productivity") { refreshTodos(); refreshProdStats(); }
-    // Update sidebar badge
-    const pendingRes = await window.lexa.todos("open").catch(() => ({ todos: [] }));
-    const pendingCount = (pendingRes.todos || []).length;
-    const badge = document.getElementById("nav-todo-badge");
-    if (badge) {
-      badge.textContent = pendingCount > 99 ? "99+" : pendingCount;
-      pendingCount > 0 ? badge.classList.remove("hidden") : badge.classList.add("hidden");
+    _todoCreateRunning = true;
+    setProductivityButtonBusy(saveBtn, true);
+    try {
+      await window.lexa.todoCreate(todo);
+      showToast(t("todo.created"), "success");
+      overlay.remove();
+      document.removeEventListener("keydown", escHandler);
+      if (LexaState.get("currentView") === "productivity") {
+        await Promise.allSettled([refreshTodos(), refreshProdStats()]);
+      }
+      // Update sidebar badge
+      const pendingRes = await window.lexa.todos("open").catch(() => ({ todos: [] }));
+      const pendingCount = (pendingRes.todos || []).length;
+      const badge = document.getElementById("nav-todo-badge");
+      if (badge) {
+        badge.textContent = pendingCount > 99 ? "99+" : pendingCount;
+        pendingCount > 0 ? badge.classList.remove("hidden") : badge.classList.add("hidden");
+      }
+    } catch (e) {
+      console.warn("[Productivity] Failed to create todo:", e.message || e);
+      showToast(t("toast.executionError"), "error", 2200);
+    } finally {
+      _todoCreateRunning = false;
+      if (saveBtn?.isConnected) setProductivityButtonBusy(saveBtn, false);
     }
   });
   footer.appendChild(saveBtn);
@@ -961,15 +991,27 @@ function createHabit() {
   saveBtn.className = "action-btn";
   saveBtn.textContent = t("productivity.createBtn");
   saveBtn.addEventListener("click", async () => {
+    if (_habitCreateRunning) return;
     const name = nameInput.value.trim();
     if (!name) { showToast(t("habits.nameEmpty"), "error"); return; }
+    if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
     const target = Math.max(1, parseInt(targetInput.value) || 1);
     const desc = descInput.value.trim();
-    await window.lexa.habitCreate({ name, target, description: desc || undefined });
-    showToast(t("habits.created", {name}), "success");
-    overlay.remove();
-    document.removeEventListener("keydown", escHandler);
-    refreshHabits();
+    _habitCreateRunning = true;
+    setProductivityButtonBusy(saveBtn, true);
+    try {
+      await window.lexa.habitCreate({ name, target, description: desc || undefined });
+      showToast(t("habits.created", {name}), "success");
+      overlay.remove();
+      document.removeEventListener("keydown", escHandler);
+      await Promise.allSettled([refreshHabits(), refreshProdStats()]);
+    } catch (e) {
+      console.warn("[Productivity] Failed to create habit:", e.message || e);
+      showToast(t("toast.executionError"), "error", 2200);
+    } finally {
+      _habitCreateRunning = false;
+      if (saveBtn?.isConnected) setProductivityButtonBusy(saveBtn, false);
+    }
   });
   footer.appendChild(saveBtn);
   const cancelBtn = document.createElement("button");
