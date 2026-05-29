@@ -83,12 +83,44 @@ function appendMarkdownSegment(parent, segment) {
 
     let first = true;
     while (i < lines.length && lines[i].trim() && !isMarkdownBlockStart(lines[i])) {
-      if (!first) appendLineBreak(parent);
-      appendInlineMarkdown(parent, lines[i]);
+      const field = appendChatFieldLine(parent, lines[i]);
+      if (!field) {
+        if (!first) appendLineBreak(parent);
+        appendInlineMarkdown(parent, lines[i]);
+      }
       first = false;
       i += 1;
     }
   }
+}
+
+function chatFieldLineParts(line) {
+  const raw = String(line || "").trim();
+  if (!raw || raw.includes("://")) return null;
+  const match = raw.match(/^(?:\*\*|\*)?([^*:\n][^:\n]{1,56}?):(?:\*\*|\*)?\s+(.+)$/);
+  if (!match) return null;
+  const label = match[1].trim();
+  const value = match[2].trim();
+  if (!label || !value || label.length > 56) return null;
+  if (/[.!?]$/.test(label) || /\s{2,}/.test(label)) return null;
+  return { label, value };
+}
+
+function appendChatFieldLine(parent, line) {
+  const parts = chatFieldLineParts(line);
+  if (!parts) return false;
+  const row = document.createElement("div");
+  row.className = "chat-field";
+  const label = document.createElement("strong");
+  label.className = "chat-field-label";
+  label.textContent = `${parts.label}:`;
+  const value = document.createElement("span");
+  value.className = "chat-field-value";
+  appendInlineMarkdown(value, parts.value);
+  row.appendChild(label);
+  row.appendChild(value);
+  parent.appendChild(row);
+  return true;
 }
 
 function appendFormattedMessage(parent, text) {

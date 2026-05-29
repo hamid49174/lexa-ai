@@ -264,6 +264,9 @@ const mixedMessage = formatMessage("## Title\n\n- **Item**\n\n```js\nalert('<x>'
 assert("formatMessage handles mixed markdown blocks", mixedMessage.includes('<h3 class="chat-h3">Title</h3>') && mixedMessage.includes("<ul") && mixedMessage.includes("<pre") && mixedMessage.includes("<a "), mixedMessage);
 assert("formatMessage escapes mixed code content", mixedMessage.includes("&lt;x&gt;") && !mixedMessage.includes("<x>"), mixedMessage);
 
+const fieldMessage = formatMessage("*Farbe:* Dunkel\nKennzeichen:* A 005 AC");
+assert("formatMessage renders common analysis labels as clean field rows", fieldMessage.includes('class="chat-field"') && fieldMessage.includes('class="chat-field-label">Farbe:</strong>') && fieldMessage.includes('class="chat-field-label">Kennzeichen:</strong>') && !fieldMessage.includes("Farbe:*"), fieldMessage);
+
 console.log("\nformatMessage():");
 
 const r1 = formatMessage('<script>alert("xss")</script>');

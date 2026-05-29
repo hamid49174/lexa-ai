@@ -971,6 +971,90 @@ body {
   color: rgba(250, 250, 255, 0.96);
 }
 
+.message .msg-text :where(.chat-h3, .chat-h4, .chat-ol, .chat-ul, .chat-quote, .table-wrap, .code-block-wrap) {
+  margin-block-start: 12px;
+  margin-block-end: 0;
+}
+
+.message .msg-text :where(.chat-h3, .chat-h4):first-child,
+.message .msg-text :where(.chat-ol, .chat-ul, .chat-quote, .table-wrap, .code-block-wrap):first-child {
+  margin-block-start: 0;
+}
+
+.message .msg-text strong {
+  color: rgba(255, 255, 255, 0.98);
+  font-weight: 760;
+}
+
+.message .msg-text em {
+  color: rgba(235, 232, 247, 0.92);
+  font-style: normal;
+  font-weight: 650;
+}
+
+.message .msg-text .chat-h3,
+.message .msg-text .chat-h4 {
+  color: rgba(255, 255, 255, 0.96);
+  font-weight: 780;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.message .msg-text .chat-h3 {
+  font-size: 15px;
+}
+
+.message .msg-text .chat-h4 {
+  font-size: 14px;
+}
+
+.message .msg-text .chat-field {
+  display: grid;
+  grid-template-columns: minmax(8ch, max-content) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px 10px;
+  margin: 6px 0;
+}
+
+.message .msg-text .chat-field:first-child {
+  margin-top: 0;
+}
+
+.message .msg-text .chat-field-label {
+  color: rgba(255, 255, 255, 0.96);
+  font-weight: 780;
+  white-space: nowrap;
+}
+
+.message .msg-text .chat-field-value {
+  min-width: 0;
+  color: rgba(235, 233, 246, 0.92);
+}
+
+.message .msg-text .chat-ol,
+.message .msg-text .chat-ul {
+  padding-left: 22px;
+}
+
+.message .msg-text .chat-ol > li,
+.message .msg-text .chat-ul > li {
+  margin: 6px 0;
+  padding-left: 2px;
+}
+
+.message .msg-text .chat-ol > li::marker {
+  color: rgba(190, 181, 255, 0.9);
+  font-weight: 760;
+}
+
+.message .msg-text .chat-quote {
+  padding: 10px 12px;
+  border-left: 2px solid rgba(168, 154, 255, 0.42);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(229, 226, 244, 0.88);
+}
+
 .message .msg-copy-btn,
 .message .msg-thumbs-btn,
 .message .msg-action-btn {
@@ -1162,6 +1246,15 @@ body {
 
   .msg-text {
     max-width: min(100%, calc(100vw - 34px));
+  }
+
+  .message .msg-text .chat-field {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .message .msg-text .chat-field-label {
+    white-space: normal;
   }
 
   .msg-body,
