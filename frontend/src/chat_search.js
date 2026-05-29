@@ -4,6 +4,7 @@
 
 let searchDebounce = null;
 let searchRestoreFocusEl = null;
+let searchRequestSeq = 0;
 function restoreSearchFocus() {
   const el = searchRestoreFocusEl;
   searchRestoreFocusEl = null;
@@ -94,9 +95,15 @@ function openSearchOverlay() {
     overlay.replaceChildren(createSearchOverlayPanel());
     document.body.appendChild(overlay);
     overlay.addEventListener("click", (e) => { if (e.target === overlay) closeSearchOverlay(); });
-    document.getElementById("search-close-btn").addEventListener("click", closeSearchOverlay);
-    document.getElementById("search-input").addEventListener("input", (e) => { clearTimeout(searchDebounce); searchDebounce = setTimeout(() => performSearch(e.target.value.trim()), 300); });
-    document.getElementById("search-input").addEventListener("keydown", (e) => { if (e.key === "Escape") closeSearchOverlay(); });
+    const closeBtn = overlay.querySelector("#search-close-btn");
+    const inputEl = overlay.querySelector("#search-input");
+    closeBtn?.addEventListener("click", closeSearchOverlay);
+    inputEl?.addEventListener("input", (e) => {
+      const requestSeq = ++searchRequestSeq;
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => performSearch(e.target.value.trim(), requestSeq), 300);
+    });
+    inputEl?.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSearchOverlay(); });
     overlay.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closeSearchOverlay();
       if (e.key === "Tab") trapSearchFocus(overlay, e);
@@ -107,21 +114,33 @@ function openSearchOverlay() {
     searchRestoreFocusEl = active;
   }
   overlay.classList.add("visible");
-  const input = document.getElementById("search-input"); input.value = ""; input.focus();
-  renderSearchEmpty(document.getElementById("search-results"), t("chat.searchHint"));
+  searchRequestSeq += 1;
+  if (searchDebounce) clearTimeout(searchDebounce);
+  searchDebounce = null;
+  const input = overlay.querySelector("#search-input");
+  if (input) {
+    input.value = "";
+    input.focus();
+  }
+  renderSearchEmpty(overlay.querySelector("#search-results"), t("chat.searchHint"));
 }
 function closeSearchOverlay(options = {}) {
   document.getElementById("search-overlay")?.classList.remove("visible");
+  if (searchDebounce) clearTimeout(searchDebounce);
+  searchDebounce = null;
+  searchRequestSeq += 1;
   if (options.restoreFocus !== false) restoreSearchFocus();
   else searchRestoreFocusEl = null;
 }
-async function performSearch(query) {
+async function performSearch(query, requestSeq = ++searchRequestSeq) {
   const container = document.getElementById("search-results");
   if (!container) return;
+  if (requestSeq !== searchRequestSeq) return;
   if (!query) { renderSearchEmpty(container, t("chat.searchHint")); return; }
   if (query.length < 2) { renderSearchEmpty(container, t("chat.searchMinChars")); return; }
   try {
     const data = await window.lexa.search(query);
+    if (requestSeq !== searchRequestSeq) return;
     container.replaceChildren();
     const buildSearchItem = (icon, title, meta, action) => {
       const item = document.createElement("div");
@@ -162,6 +181,7 @@ async function performSearch(query) {
     // FTS deep search — adds additional results from full-text index
     try {
       const fts = await window.lexa.ftsSearch(query);
+      if (requestSeq !== searchRequestSeq) return;
       if (fts && fts.total > 0) {
         // Collect existing note/memory IDs to avoid duplicates
         const existingNoteIds = new Set((data.notes || []).map(n => n.id));
@@ -188,11 +208,18 @@ async function performSearch(query) {
           total += ftsMemories.length;
         }
       }
-    } catch (e) { console.warn("[Chat] FTS search not available:", e.message || e); }
+    } catch (e) {
+      if (requestSeq !== searchRequestSeq) return;
+      console.warn("[Chat] FTS search not available:", e.message || e);
+    }
 
     if (total === 0) renderSearchEmpty(container, t("chat.searchNoResults"));
     else { const countEl = document.createElement("div"); countEl.className = "search-count"; countEl.textContent = t("chat.searchResults", {count: total}); container.prepend(countEl); }
-  } catch (e) { console.error("[Chat] Search failed:", e.message || e); renderSearchEmpty(container, t("chat.searchError")); }
+  } catch (e) {
+    if (requestSeq !== searchRequestSeq) return;
+    console.error("[Chat] Search failed:", e.message || e);
+    renderSearchEmpty(container, t("chat.searchError"));
+  }
 }
 
 function renderSearchEmpty(container, message) {

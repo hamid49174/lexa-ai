@@ -983,8 +983,8 @@ if (isLexaSmokeMockAllowed()) {
     conversationLoad: async (id) => runSmokeMock("conversationLoad", [id], async () => ok()),
     conversationExport: async (id) => ({ text: `# Conversation ${id}\n\nMock export.` }),
     historyClear: async () => runSmokeMock("historyClear", [], async () => ok()),
-    search: async () => ({ conversations: [], notes: [], memories: [] }),
-    ftsSearch: async () => ({ results: [] }),
+    search: async (query) => runSmokeMock("search", [query], async () => ({ conversations: [], notes: [], memories: [] })),
+    ftsSearch: async (query) => runSmokeMock("ftsSearch", [query], async () => ({ results: [], total: 0, notes: [], memories: [] })),
     rebuildFts: async () => ok(),
     diagnostics: async () => ({
       ok: true,

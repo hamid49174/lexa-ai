@@ -3,6 +3,29 @@
  */
 
 let dragCounter = 0;
+function setFileUploadBusy(isBusy) {
+  LexaState.set("isLoading", Boolean(isBusy));
+  sendBtn.disabled = Boolean(isBusy);
+  const attachBtn = document.getElementById("attach-btn");
+  if (attachBtn) {
+    attachBtn.disabled = Boolean(isBusy);
+    attachBtn.setAttribute("aria-busy", isBusy ? "true" : "false");
+  }
+}
+
+function saveFileUploadConversationSnapshot() {
+  try { saveChatHistory(); }
+  catch (e) { console.warn("[Chat] Failed to save local upload history:", e.message || e); }
+  try {
+    const savePromise = saveCurrentConversation();
+    if (savePromise && typeof savePromise.catch === "function") {
+      savePromise.catch((e) => console.warn("[Chat] Failed to save upload conversation:", e.message || e));
+    }
+  } catch (e) {
+    console.warn("[Chat] Failed to start upload conversation save:", e.message || e);
+  }
+}
+
 function setupDragDrop() {
   const chatContainer = document.getElementById("chat-container");
   const overlay = document.getElementById("drop-zone-overlay");
@@ -86,15 +109,26 @@ async function handleFileUpload(file) {
   const maxSize = 2 * 1024 * 1024;
   if (file.size > maxSize) { showToast(t("toast.fileTooLarge"), "error"); return; }
   if (!LexaState.get("currentConversationId")) {
+    let result = null;
     try {
-      const result = await window.lexa.conversationCreate(t("chat.newChatTitle"));
-      LexaState.set("currentConversationId", result.id);
-      chatSetActiveConversationId(result.id);
-      await refreshConversationSidebar();
+      result = await window.lexa.conversationCreate(t("chat.newChatTitle"));
     } catch (e) {
       console.warn("[Chat] Failed to create conversation for file upload:", e.message || e);
       showToast(t("toast.createError"), "error");
       return;
+    }
+    if (!result?.id) {
+      console.warn("[Chat] Failed to create conversation for file upload: missing id");
+      showToast(t("toast.createError"), "error");
+      return;
+    }
+    LexaState.set("currentConversationId", result.id);
+    chatSetActiveConversationId(result.id);
+    try {
+      await refreshConversationSidebar();
+    } catch (e) {
+      console.warn("[Chat] Upload conversation created but sidebar refresh failed:", e.message || e);
+      showToast(t("toast.conversationRefreshFailed"), "warning", 3000);
     }
   }
   const userMsg = chatInput.value.trim();
@@ -102,21 +136,25 @@ async function handleFileUpload(file) {
   chatInput.value = ""; syncChatInputSize();
   const isFirst = chatMessages.querySelectorAll(".user-message").length <= 1;
   if (isFirst) autoTitleConversation(file.name);
-  LexaState.set("isLoading", true); sendBtn.disabled = true; showTyping();
+  setFileUploadBusy(true); showTyping();
   try {
     const res = await window.lexa.chatFile(file, userMsg || "");
-    hideTyping();
     if (res.detail) { addMessage(res.detail, "system"); showToast(t("toast.fileError"), "error"); }
     else {
       addFileUploadResponse(res);
       if (res.action) handleChatToolActionBlocked(res.action, { source: "file-upload" });
       playTTS(fileUploadDisplayReply(res));
     }
-  } catch (err) { hideTyping(); addMessage(t("chat.uploadErrorMsg", {error: err.message}), "system"); showToast(t("toast.uploadError"), "error"); }
-  saveChatHistory(); saveCurrentConversation(); LexaState.set("isLoading", false); sendBtn.disabled = false;
+  } catch (err) {
+    addMessage(t("chat.uploadErrorMsg", {error: err.message}), "system");
+    showToast(t("toast.uploadError"), "error");
+  } finally {
+    hideTyping();
+    saveFileUploadConversationSnapshot();
+    setFileUploadBusy(false);
+  }
 }
 function getFileIcon(ext) {
   const icons = { PY: "\u{1F40D}", JS: "\u{1F7E8}", TS: "\u{1F535}", HTML: "\u{1F310}", CSS: "\u{1F3A8}", JSON: "\u{1F4CB}", MD: "\u{1F4DD}", TXT: "\u{1F4C4}", CSV: "\u{1F4CA}", LOG: "\u{1F4DC}", PDF: "\u{1F4D5}", PNG: "\u{1F5BC}", JPG: "\u{1F5BC}", JPEG: "\u{1F5BC}", GIF: "\u{1F5BC}", SVG: "\u{1F5BC}", SQL: "\u{1F5C3}", XML: "\u{1F4C3}", YAML: "\u2699", YML: "\u2699" };
   return icons[ext] || "\u{1F4CE}";
 }
-

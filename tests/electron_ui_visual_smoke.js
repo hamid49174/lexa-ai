@@ -374,6 +374,57 @@ async function main() {
         activeElementId: document.activeElement?.id || "",
       };
 
+      let searchOverlayState = {
+        available: typeof openSearchOverlay === "function" && typeof closeSearchOverlay === "function",
+      };
+      if (searchOverlayState.available && window.lexaSmoke?.set) {
+        window.lexaSmoke.reset();
+        window.lexaSmoke.set("search", [
+          {
+            delayMs: 220,
+            response: {
+              conversations: [{ id: "slow-search", title: "Old slow search result", message_count: 1, updated_at: "" }],
+              notes: [],
+              memories: [],
+            },
+          },
+          {
+            delayMs: 10,
+            response: {
+              conversations: [{ id: "fast-search", title: "Fresh fast search result", message_count: 1, updated_at: "" }],
+              notes: [],
+              memories: [],
+            },
+          },
+        ]);
+        window.lexaSmoke.set("ftsSearch", { response: { results: [], total: 0, notes: [], memories: [] } });
+        openSearchOverlay();
+        const searchInput = document.getElementById("search-input");
+        if (searchInput) {
+          searchInput.value = "slow";
+          searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+          await new Promise((resolve) => setTimeout(resolve, 340));
+          searchInput.value = "fast";
+          searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+          await new Promise((resolve) => setTimeout(resolve, 520));
+        }
+        const searchResults = document.getElementById("search-results");
+        const searchText = searchResults?.textContent || "";
+        const calls = window.lexaSmoke.calls("search") || [];
+        closeSearchOverlay();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        searchOverlayState = {
+          ...searchOverlayState,
+          input: Boolean(searchInput),
+          hasFresh: searchText.includes("Fresh fast search result"),
+          hasOld: searchText.includes("Old slow search result"),
+          callQueries: calls.map((entry) => entry.args?.[0] || ""),
+          visibleAfterClose: Boolean(document.getElementById("search-overlay")?.classList.contains("visible")),
+        };
+        window.lexaSmoke.clear("search");
+        window.lexaSmoke.clear("ftsSearch");
+      }
+
       const voiceStatusBar = document.getElementById("voice-status-bar");
       let voiceStatus = { bar: Boolean(voiceStatusBar), available: typeof VoiceStatusBar !== "undefined" };
       let orbListeningSurface = { available: typeof voiceStatusBarUpdate === "function" };
@@ -761,6 +812,7 @@ async function main() {
           openState: notifOpenState,
           closedState: notifClosedState,
         },
+        searchOverlay: searchOverlayState,
         voiceStatus,
         orbListeningSurface,
         layout,
@@ -2127,6 +2179,16 @@ async function main() {
     result.notifications.closedState?.activeElementId !== "notif-bell-btn"
   ) {
     failures.push(`notification center dialog state is incomplete: ${JSON.stringify(result.notifications)}`);
+  }
+  if (
+    !result.searchOverlay?.available ||
+    !result.searchOverlay?.input ||
+    !result.searchOverlay?.hasFresh ||
+    result.searchOverlay?.hasOld ||
+    result.searchOverlay?.visibleAfterClose ||
+    result.searchOverlay?.callQueries?.join(",") !== "slow,fast"
+  ) {
+    failures.push(`global search stale result guard failed: ${JSON.stringify(result.searchOverlay)}`);
   }
   if (
     !result.voiceStatus?.bar ||
