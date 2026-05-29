@@ -55,6 +55,8 @@ function _initDelegation() {
   document.addEventListener("click", (e) => {
     const el = e.target.closest("[data-action]");
     if (!el) return;
+    const tag = String(el.tagName || "").toUpperCase();
+    if (["INPUT", "SELECT", "TEXTAREA", "OPTION"].includes(tag)) return;
     _safeDispatch(el, el.dataset, null);
   });
   document.addEventListener("keydown", (e) => {
