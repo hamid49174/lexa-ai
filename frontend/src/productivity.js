@@ -15,6 +15,7 @@ let _todoRefreshSeq = 0;
 let _habitRefreshSeq = 0;
 let _pomodoroRefreshSeq = 0;
 let _pomodoroMutationRunning = false;
+let _timeTrackingRefreshSeq = 0;
 let _timeTrackingToggleRunning = false;
 let _focusModeToggleRunning = false;
 
@@ -1133,11 +1134,13 @@ async function deleteHabit(name, triggerBtn) {
 
 async function refreshTimeTracking() {
   try {
+    const refreshSeq = ++_timeTrackingRefreshSeq;
     const [ttRes, focusRes, reportRes] = await Promise.allSettled([
       window.lexa.timeTracking(),
       window.lexa.focusStatus(),
       window.lexa.timeTrackingReport(1),
     ]);
+    if (refreshSeq !== _timeTrackingRefreshSeq) return;
     const ttStatus = ttRes.status === "fulfilled" ? ttRes.value : {};
     const focusStatus = focusRes.status === "fulfilled" ? focusRes.value : {};
     const report = reportRes.status === "fulfilled" ? reportRes.value : {};
