@@ -145,9 +145,6 @@ async function main() {
       const shell = document.querySelector("#memory-view .memory-graph-shell");
       const nodes = Array.from(document.querySelectorAll("#memory-graph-svg .memory-graph-node"));
       const links = Array.from(document.querySelectorAll("#memory-graph-svg .memory-graph-link"));
-      const brainBackdrop = document.querySelector("#memory-graph-svg .memory-graph-brain-backdrop");
-      const brainFolds = document.querySelectorAll("#memory-graph-svg .memory-graph-brain-fold").length;
-      const curvedLinks = links.filter((link) => link.tagName.toLowerCase() === "path" && /^M\\s/.test(link.getAttribute("d") || "")).length;
       const labels = Array.from(document.querySelectorAll("#memory-graph-svg .memory-graph-label")).map((el) => ({
         text: el.textContent || "",
         html: el.innerHTML || "",
@@ -212,9 +209,6 @@ async function main() {
         viewBox,
         nodeCount: nodes.length,
         linkCount: links.length,
-        brainBackdrop: Boolean(brainBackdrop),
-        brainFolds,
-        curvedLinks,
         labels,
         oldVisibleSections,
         inspectorState,
@@ -236,7 +230,6 @@ async function main() {
   console.log("\nMemory graph smoke:");
   assert("Memory view switches to graph-only shell", result.active === true && result.shell === true, JSON.stringify(result));
   assert("Smoke graph renders SVG nodes and links", result.rendered?.ok === true && result.nodeCount >= 3 && result.linkCount >= 2 && /^\d+ \d+ \d+ \d+$/.test(result.viewBox || ""), JSON.stringify(result));
-  assert("Memory graph renders neural brain backdrop and curved pathways", result.brainBackdrop === true && result.brainFolds >= 5 && result.curvedLinks >= Math.min(2, result.linkCount), JSON.stringify(result));
   assert("Old Memory dashboard sections are absent from the visible view", Array.isArray(result.oldVisibleSections) && result.oldVisibleSections.length === 0, JSON.stringify(result.oldVisibleSections));
   assert("Unsafe graph labels render as inert text", result.labels.some((label) => label.text.includes("<img src=x onerror=alert(1)>") && /&lt;img src=x onerror=alert\(1\)&gt;/.test(label.html || "")), JSON.stringify(result.labels));
   assert("Inspector displays unsafe preview without executable nodes", result.inspectorState?.text?.includes("<script>alert(1)</script>") && !/<script/i.test(result.inspectorState?.html || ""), JSON.stringify(result.inspectorState));

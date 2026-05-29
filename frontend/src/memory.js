@@ -27,7 +27,6 @@ function bindMemoryCardAction(el, handler, label) {
 }
 
 const MEMORY_GRAPH_NS = "http://www.w3.org/2000/svg";
-const MEMORY_GRAPH_GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 let memoryGraphState = null;
 let memoryGraphRefreshSeq = 0;
 let _clipboardHistoryRevealRunning = false;
@@ -353,157 +352,6 @@ function memoryGraphCreateSvgElement(name, attrs = {}) {
   return el;
 }
 
-function memoryGraphAppendGradient(defs, id, stops) {
-  const gradient = memoryGraphCreateSvgElement("radialGradient", { id, cx: "50%", cy: "44%", r: "74%" });
-  stops.forEach(([offset, color, opacity]) => {
-    gradient.appendChild(memoryGraphCreateSvgElement("stop", {
-      offset,
-      "stop-color": color,
-      "stop-opacity": opacity,
-    }));
-  });
-  defs.appendChild(gradient);
-}
-
-function memoryGraphAppendBrainDefs(defs) {
-  memoryGraphAppendGradient(defs, "memory-graph-brain-fill", [
-    ["0%", "#2dd4bf", "0.18"],
-    ["42%", "#8b5cf6", "0.14"],
-    ["76%", "#60a5fa", "0.08"],
-    ["100%", "#03040a", "0"],
-  ]);
-  memoryGraphAppendGradient(defs, "memory-graph-brain-aura", [
-    ["0%", "#a78bfa", "0.22"],
-    ["46%", "#2dd4bf", "0.12"],
-    ["100%", "#03040a", "0"],
-  ]);
-}
-
-function memoryGraphCreateBrainBackdrop(svg, width, height) {
-  const x = (value) => (width * value).toFixed(1);
-  const y = (value) => (height * value).toFixed(1);
-  const layer = memoryGraphCreateSvgElement("g", {
-    class: "memory-graph-brain-backdrop",
-    "aria-hidden": "true",
-  });
-
-  const aura = memoryGraphCreateSvgElement("path", {
-    class: "memory-graph-brain-aura",
-    d: `M ${x(0.17)} ${y(0.56)}
-      C ${x(0.10)} ${y(0.39)} ${x(0.21)} ${y(0.19)} ${x(0.36)} ${y(0.19)}
-      C ${x(0.42)} ${y(0.08)} ${x(0.50)} ${y(0.17)} ${x(0.50)} ${y(0.28)}
-      C ${x(0.51)} ${y(0.17)} ${x(0.60)} ${y(0.08)} ${x(0.66)} ${y(0.19)}
-      C ${x(0.82)} ${y(0.19)} ${x(0.91)} ${y(0.40)} ${x(0.84)} ${y(0.57)}
-      C ${x(0.93)} ${y(0.76)} ${x(0.74)} ${y(0.91)} ${x(0.61)} ${y(0.80)}
-      C ${x(0.57)} ${y(0.91)} ${x(0.43)} ${y(0.91)} ${x(0.39)} ${y(0.80)}
-      C ${x(0.25)} ${y(0.91)} ${x(0.08)} ${y(0.75)} ${x(0.17)} ${y(0.56)} Z`,
-  });
-
-  const outline = memoryGraphCreateSvgElement("path", {
-    class: "memory-graph-brain-outline",
-    d: `M ${x(0.19)} ${y(0.55)}
-      C ${x(0.14)} ${y(0.42)} ${x(0.19)} ${y(0.29)} ${x(0.31)} ${y(0.24)}
-      C ${x(0.35)} ${y(0.13)} ${x(0.48)} ${y(0.15)} ${x(0.50)} ${y(0.26)}
-      C ${x(0.54)} ${y(0.14)} ${x(0.68)} ${y(0.13)} ${x(0.72)} ${y(0.25)}
-      C ${x(0.84)} ${y(0.30)} ${x(0.89)} ${y(0.43)} ${x(0.85)} ${y(0.56)}
-      C ${x(0.91)} ${y(0.71)} ${x(0.78)} ${y(0.84)} ${x(0.65)} ${y(0.80)}
-      C ${x(0.58)} ${y(0.89)} ${x(0.43)} ${y(0.89)} ${x(0.35)} ${y(0.80)}
-      C ${x(0.23)} ${y(0.84)} ${x(0.11)} ${y(0.70)} ${x(0.19)} ${y(0.55)} Z`,
-  });
-
-  const stem = memoryGraphCreateSvgElement("path", {
-    class: "memory-graph-brain-stem",
-    d: `M ${x(0.46)} ${y(0.78)}
-      C ${x(0.47)} ${y(0.86)} ${x(0.42)} ${y(0.91)} ${x(0.48)} ${y(0.96)}
-      C ${x(0.56)} ${y(0.92)} ${x(0.52)} ${y(0.86)} ${x(0.54)} ${y(0.78)}`,
-  });
-
-  const midline = memoryGraphCreateSvgElement("path", {
-    class: "memory-graph-brain-midline",
-    d: `M ${x(0.50)} ${y(0.25)}
-      C ${x(0.47)} ${y(0.37)} ${x(0.53)} ${y(0.48)} ${x(0.49)} ${y(0.58)}
-      C ${x(0.46)} ${y(0.68)} ${x(0.53)} ${y(0.75)} ${x(0.50)} ${y(0.84)}`,
-  });
-
-  const folds = [
-    `M ${x(0.30)} ${y(0.34)} C ${x(0.40)} ${y(0.27)} ${x(0.45)} ${y(0.38)} ${x(0.35)} ${y(0.44)} C ${x(0.26)} ${y(0.50)} ${x(0.41)} ${y(0.56)} ${x(0.31)} ${y(0.65)}`,
-    `M ${x(0.24)} ${y(0.47)} C ${x(0.34)} ${y(0.42)} ${x(0.42)} ${y(0.50)} ${x(0.34)} ${y(0.58)} C ${x(0.28)} ${y(0.64)} ${x(0.39)} ${y(0.71)} ${x(0.43)} ${y(0.78)}`,
-    `M ${x(0.37)} ${y(0.25)} C ${x(0.30)} ${y(0.34)} ${x(0.43)} ${y(0.36)} ${x(0.40)} ${y(0.46)} C ${x(0.36)} ${y(0.58)} ${x(0.47)} ${y(0.62)} ${x(0.43)} ${y(0.73)}`,
-    `M ${x(0.62)} ${y(0.25)} C ${x(0.70)} ${y(0.33)} ${x(0.57)} ${y(0.37)} ${x(0.61)} ${y(0.47)} C ${x(0.66)} ${y(0.58)} ${x(0.53)} ${y(0.63)} ${x(0.58)} ${y(0.74)}`,
-    `M ${x(0.70)} ${y(0.34)} C ${x(0.60)} ${y(0.27)} ${x(0.55)} ${y(0.38)} ${x(0.65)} ${y(0.44)} C ${x(0.75)} ${y(0.51)} ${x(0.58)} ${y(0.57)} ${x(0.69)} ${y(0.66)}`,
-    `M ${x(0.76)} ${y(0.47)} C ${x(0.65)} ${y(0.41)} ${x(0.57)} ${y(0.51)} ${x(0.66)} ${y(0.59)} C ${x(0.73)} ${y(0.65)} ${x(0.61)} ${y(0.72)} ${x(0.57)} ${y(0.79)}`,
-    `M ${x(0.42)} ${y(0.43)} C ${x(0.48)} ${y(0.39)} ${x(0.53)} ${y(0.40)} ${x(0.58)} ${y(0.45)} C ${x(0.52)} ${y(0.50)} ${x(0.49)} ${y(0.54)} ${x(0.54)} ${y(0.61)}`,
-  ];
-
-  layer.append(aura, outline, stem, midline);
-  folds.forEach((d, index) => {
-    layer.appendChild(memoryGraphCreateSvgElement("path", {
-      class: `memory-graph-brain-fold memory-graph-brain-fold-${index + 1}`,
-      d,
-    }));
-  });
-  svg.appendChild(layer);
-}
-
-function memoryGraphBrainSide(node) {
-  if (node.type === "hub") return 0;
-  const knownSides = {
-    conversations: -1,
-    notes: 1,
-    memories: 1,
-    snippets: -1,
-    routines: 1,
-    keywords: 0,
-  };
-  if (Object.prototype.hasOwnProperty.call(knownSides, node.group)) return knownSides[node.group];
-  return memoryGraphHash(node.group || node.type) % 2 === 0 ? -1 : 1;
-}
-
-function memoryGraphBrainAnchor(node, index, total, width, height) {
-  const seed = memoryGraphHash(`${node.group}:${node.id}`);
-  const side = memoryGraphBrainSide(node);
-  const centerX = width * 0.5;
-  const centerY = height * 0.51;
-  if (node.type === "hub") {
-    return { x: centerX, y: centerY + height * 0.08, side: 0 };
-  }
-
-  const lobeSide = side || (seed % 2 === 0 ? -1 : 1);
-  const lobeCenterX = centerX + lobeSide * width * 0.18;
-  const lobeCenterY = centerY + (node.type === "keyword" ? -height * 0.01 : 0);
-  const angle = seed * 0.0009 + index * MEMORY_GRAPH_GOLDEN_ANGLE;
-  const edgeBias = node.type === "keyword" ? 0.88 : node.type === "group" ? 0.42 : 0.58;
-  const seedDepth = ((seed % 997) / 997) * 0.32;
-  const depth = Math.min(0.95, edgeBias + seedDepth);
-  const rx = width * (node.type === "group" ? 0.14 : node.type === "keyword" ? 0.30 : 0.24);
-  const ry = height * (node.type === "group" ? 0.18 : node.type === "keyword" ? 0.34 : 0.29);
-  let x = lobeCenterX + Math.cos(angle) * rx * depth;
-  let y = lobeCenterY + Math.sin(angle) * ry * depth;
-
-  if (node.type === "group") {
-    const groupRank = index / Math.max(1, total - 1);
-    x = centerX + lobeSide * width * (0.08 + groupRank * 0.13);
-    y = centerY - height * 0.08 + Math.sin(angle) * height * 0.18;
-  } else if (node.type === "routine" || node.type === "snippet") {
-    y += height * 0.07;
-  }
-
-  return {
-    x: Math.max(width * 0.16, Math.min(width * 0.84, x)),
-    y: Math.max(height * 0.18, Math.min(height * 0.84, y)),
-    side: lobeSide,
-  };
-}
-
-function memoryGraphBrainBounds(width, height) {
-  return {
-    left: width * 0.13,
-    right: width * 0.87,
-    top: height * 0.16,
-    bottom: height * 0.88,
-  };
-}
-
 function memoryGraphApplyFocus(graph, activeId = "") {
   graph.activeId = activeId || "";
   const query = (graph.filter || "").trim().toLowerCase();
@@ -529,15 +377,15 @@ function memoryGraphApplyFocus(graph, activeId = "") {
 }
 
 function memoryGraphLayout(nodes, links, width, height) {
+  const groups = [...new Set(nodes.map((node) => node.group || node.type))].sort();
+  const groupAngles = new Map(groups.map((group, index) => [group, -Math.PI / 2 + (Math.PI * 2 * index) / Math.max(1, groups.length)]));
   nodes.forEach((node, index) => {
     const seed = memoryGraphHash(node.id);
-    const anchor = memoryGraphBrainAnchor(node, index, nodes.length, width, height);
-    const jitter = ((seed % 1000) / 1000 - 0.5) * 18;
-    node.anchorX = anchor.x;
-    node.anchorY = anchor.y;
-    node.brainSide = anchor.side;
-    node.x = anchor.x + Math.cos(seed) * jitter;
-    node.y = anchor.y + Math.sin(seed) * jitter;
+    const groupAngle = groupAngles.get(node.group) ?? 0;
+    const jitter = ((seed % 1000) / 1000 - 0.5) * 0.9;
+    const radius = node.type === "hub" ? 0 : Math.min(width, height) * (0.16 + ((seed % 7) * 0.026) + (index % 5) * 0.012);
+    node.x = width / 2 + Math.cos(groupAngle + jitter) * radius;
+    node.y = height / 2 + Math.sin(groupAngle + jitter) * radius;
     node.vx = 0;
     node.vy = 0;
     node.radius = Math.max(3.2, Math.min(15, 3.2 + node.weight * 1.15));
@@ -552,7 +400,8 @@ function memoryGraphLayout(nodes, links, width, height) {
 
 function memoryGraphStep(graph) {
   const { nodes, links, width, height } = graph;
-  const bounds = memoryGraphBrainBounds(width, height);
+  const centerX = width / 2;
+  const centerY = height / 2;
   const phase = Date.now() / 9000;
 
   links.forEach((link) => {
@@ -586,53 +435,37 @@ function memoryGraphStep(graph) {
   }
 
   nodes.forEach((node) => {
-    const nodeSeed = memoryGraphHash(node.id);
-    const drift = node.type === "hub" ? 0 : 4;
-    const anchorX = (node.anchorX || width / 2) + Math.cos(phase + nodeSeed) * drift;
-    const anchorY = (node.anchorY || height / 2) + Math.sin(phase + nodeSeed) * drift;
+    const groupSeed = memoryGraphHash(node.group);
+    const groupAngle = (groupSeed % 628) / 100;
+    const anchorRadius = node.type === "hub" ? 0 : Math.min(width, height) * 0.22;
+    const anchorX = centerX + Math.cos(groupAngle + Math.sin(phase + groupSeed) * 0.08) * anchorRadius;
+    const anchorY = centerY + Math.sin(groupAngle + Math.cos(phase + groupSeed) * 0.08) * anchorRadius;
     if (!node.fixed) {
-      node.vx += (anchorX - node.x) * 0.0024;
-      node.vy += (anchorY - node.y) * 0.0024;
-      node.vx *= 0.84;
-      node.vy *= 0.84;
+      node.vx += (anchorX - node.x) * 0.0018;
+      node.vy += (anchorY - node.y) * 0.0018;
+      node.vx *= 0.86;
+      node.vy *= 0.86;
       node.x += node.vx;
       node.y += node.vy;
-      node.x = Math.max(bounds.left, Math.min(bounds.right, node.x));
-      node.y = Math.max(bounds.top, Math.min(bounds.bottom, node.y));
+      node.x = Math.max(22, Math.min(width - 22, node.x));
+      node.y = Math.max(22, Math.min(height - 22, node.y));
     }
   });
-}
-
-function memoryGraphLinkPath(link) {
-  const a = link.sourceNode;
-  const b = link.targetNode;
-  if (!a || !b) return "";
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-  const sign = memoryGraphHash(`${link.source}:${link.target}:${link.kind}`) % 2 === 0 ? 1 : -1;
-  const curve = Math.min(82, Math.max(14, dist * 0.17)) * sign;
-  const nx = -dy / dist;
-  const ny = dx / dist;
-  const c1x = a.x + dx * 0.33 + nx * curve;
-  const c1y = a.y + dy * 0.33 + ny * curve;
-  const c2x = a.x + dx * 0.67 + nx * curve * 0.66;
-  const c2y = a.y + dy * 0.67 + ny * curve * 0.66;
-  return `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} C ${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
 }
 
 function memoryGraphPaint(graph) {
   graph.links.forEach((link) => {
     if (!link.sourceNode || !link.targetNode) return;
-    link.el.setAttribute("d", memoryGraphLinkPath(link));
+    link.el.setAttribute("x1", link.sourceNode.x.toFixed(1));
+    link.el.setAttribute("y1", link.sourceNode.y.toFixed(1));
+    link.el.setAttribute("x2", link.targetNode.x.toFixed(1));
+    link.el.setAttribute("y2", link.targetNode.y.toFixed(1));
   });
   graph.nodes.forEach((node) => {
     node.el.setAttribute("cx", node.x.toFixed(1));
     node.el.setAttribute("cy", node.y.toFixed(1));
-    const labelOffset = node.brainSide < 0 ? -(node.radius + 8) : node.radius + 8;
-    node.labelEl.setAttribute("x", (node.x + labelOffset).toFixed(1));
+    node.labelEl.setAttribute("x", (node.x + node.radius + 7).toFixed(1));
     node.labelEl.setAttribute("y", (node.y + 4).toFixed(1));
-    node.labelEl.setAttribute("text-anchor", node.brainSide < 0 ? "end" : "start");
   });
 }
 
@@ -691,7 +524,6 @@ function renderMemoryGraph(data) {
   svg.replaceChildren();
 
   const defs = memoryGraphCreateSvgElement("defs");
-  memoryGraphAppendBrainDefs(defs);
   const filter = memoryGraphCreateSvgElement("filter", { id: "memory-graph-glow", x: "-50%", y: "-50%", width: "200%", height: "200%" });
   filter.appendChild(memoryGraphCreateSvgElement("feGaussianBlur", { stdDeviation: "3.5", result: "coloredBlur" }));
   const merge = memoryGraphCreateSvgElement("feMerge");
@@ -700,7 +532,6 @@ function renderMemoryGraph(data) {
   filter.appendChild(merge);
   defs.appendChild(filter);
   svg.appendChild(defs);
-  memoryGraphCreateBrainBackdrop(svg, width, height);
 
   const linkLayer = memoryGraphCreateSvgElement("g", { class: "memory-graph-links" });
   const nodeLayer = memoryGraphCreateSvgElement("g", { class: "memory-graph-nodes" });
@@ -717,10 +548,9 @@ function renderMemoryGraph(data) {
   const graph = { nodes, links, neighbors, width, height, activeId: "", filter: "", frame: 0 };
 
   links.forEach((link) => {
-    const el = memoryGraphCreateSvgElement("path", {
+    const el = memoryGraphCreateSvgElement("line", {
       class: `memory-graph-link memory-graph-link-${link.kind}`,
       "data-kind": link.kind,
-      d: memoryGraphLinkPath(link),
       "stroke-width": Math.max(0.5, Math.min(2.8, link.weight * 0.42)).toFixed(2),
     });
     link.el = el;
@@ -807,7 +637,6 @@ function renderMemoryGraph(data) {
 
   renderMemoryGraphLegend(graph);
   updateMemoryGraphInspector(null, graph);
-  memoryGraphPaint(graph);
   startMemoryGraphAnimation(graph);
   memoryGraphApplyFocus(graph, "");
 }
