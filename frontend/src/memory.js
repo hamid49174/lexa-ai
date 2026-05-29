@@ -28,6 +28,7 @@ function bindMemoryCardAction(el, handler, label) {
 
 const MEMORY_GRAPH_NS = "http://www.w3.org/2000/svg";
 let memoryGraphState = null;
+let memoryGraphRefreshSeq = 0;
 let _clipboardHistoryRevealRunning = false;
 let _memoryCleanupRunning = false;
 let _routineToggleRunning = false;
@@ -641,6 +642,7 @@ function renderMemoryGraph(data) {
 }
 
 async function refreshMemoryGraphView() {
+  const requestId = ++memoryGraphRefreshSeq;
   const empty = document.getElementById("memory-graph-empty");
   if (empty) {
     empty.textContent = "Lade Gedächtnis-Graph...";
@@ -654,15 +656,21 @@ async function refreshMemoryGraphView() {
     const data = typeof window.lexa.memoryGraph === "function"
       ? await window.lexa.memoryGraph(180)
       : { nodes: [], links: [] };
+    if (requestId !== memoryGraphRefreshSeq || LexaState.get("currentView") !== "memory") return;
     const graphData = Array.isArray(data?.nodes) && data.nodes.length > 0
       ? data
       : await loadMemoryGraphFallbackData();
+    if (requestId !== memoryGraphRefreshSeq || LexaState.get("currentView") !== "memory") return;
     renderMemoryGraph(graphData);
   } catch (error) {
+    if (requestId !== memoryGraphRefreshSeq || LexaState.get("currentView") !== "memory") return;
     console.warn("[Memory] Graph render failed:", error.message || error);
     try {
-      renderMemoryGraph(await loadMemoryGraphFallbackData());
+      const fallbackData = await loadMemoryGraphFallbackData();
+      if (requestId !== memoryGraphRefreshSeq || LexaState.get("currentView") !== "memory") return;
+      renderMemoryGraph(fallbackData);
     } catch (fallbackError) {
+      if (requestId !== memoryGraphRefreshSeq || LexaState.get("currentView") !== "memory") return;
       console.warn("[Memory] Graph fallback failed:", fallbackError.message || fallbackError);
       renderMemoryGraphEmpty("Gedächtnis-Graph konnte nicht geladen werden.");
     }
