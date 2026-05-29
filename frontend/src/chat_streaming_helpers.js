@@ -8,6 +8,10 @@ function chatStreamBufferedLines(buffer) {
   return { lines, buffer: lines.pop() || "" };
 }
 
+function chatStreamDebugEnabled() {
+  return typeof window !== "undefined" && window?.LEXA_DEBUG_STREAM === true;
+}
+
 function parseChatStreamDataLine(line) {
   if (!line.startsWith("data: ")) return null;
   const raw = line.slice(6).trim();
@@ -15,7 +19,9 @@ function parseChatStreamDataLine(line) {
   try {
     return JSON.parse(raw);
   } catch (e) {
-    console.warn("SSE parse error:", e, "raw:", raw);
+    const meta = { rawLength: raw.length };
+    if (chatStreamDebugEnabled()) meta.rawPreview = raw.slice(0, 80);
+    console.warn("SSE parse error:", e?.message || e, meta);
     return null;
   }
 }

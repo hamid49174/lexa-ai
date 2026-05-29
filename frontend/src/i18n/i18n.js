@@ -19,6 +19,10 @@ const LexaI18n = (() => {
   let _loaded = false;
   let _loadPromise = null;
 
+  function _debug(message) {
+    if (window.LEXA_DEBUG_I18N === true) console.debug(message);
+  }
+
   // ── Core translation function ──────────────────
   function t(key, params) {
     const template = _strings[key] || _fallback[key] || key;
@@ -43,7 +47,7 @@ const LexaI18n = (() => {
       try {
         const data = await window.lexa.loadI18n(lang);
         if (data && typeof data === "object" && Object.keys(data).length > 0) {
-          console.log(`[i18n] Loaded ${lang} via IPC (${Object.keys(data).length} keys)`);
+          _debug(`[i18n] Loaded ${lang} via IPC (${Object.keys(data).length} keys)`);
           return data;
         }
       } catch (e) {
@@ -63,7 +67,7 @@ const LexaI18n = (() => {
       const resp = await fetch(basePath + info.file);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      console.log(`[i18n] Loaded ${lang} via fetch (${Object.keys(data).length} keys)`);
+      _debug(`[i18n] Loaded ${lang} via fetch (${Object.keys(data).length} keys)`);
       return data;
     } catch (e) {
       console.warn(`[i18n] fetch() also failed for ${lang}: ${e.message}`);
@@ -93,7 +97,7 @@ const LexaI18n = (() => {
       detail: { lang: _currentLang }
     }));
 
-    console.log(`[i18n] Initialized: ${_currentLang} (${Object.keys(_strings).length} strings, fallback: ${Object.keys(_fallback).length})`);
+    _debug(`[i18n] Initialized: ${_currentLang} (${Object.keys(_strings).length} strings, fallback: ${Object.keys(_fallback).length})`);
   }
 
   // ── Switch language ────────────────────────────

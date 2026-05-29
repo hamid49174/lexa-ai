@@ -26,7 +26,7 @@ function assert(desc, ok, detail = "") {
 const warnings = [];
 const context = {
   console: {
-    warn: (...args) => warnings.push(args.map((arg) => String(arg && arg.message || arg)).join(" ")),
+    warn: (...args) => warnings.push(args),
   },
   JSON,
   String,
@@ -51,7 +51,9 @@ assert("data parser ignores empty data lines", context.parseChatStreamDataLine("
 
 const malformed = context.parseChatStreamDataLine("data: {not-json}");
 assert("data parser returns null for malformed JSON", malformed === null, JSON.stringify(malformed));
-assert("data parser logs malformed JSON without throwing", warnings.length === 1 && /SSE parse error/.test(warnings[0]) && /not-json/.test(warnings[0]), JSON.stringify(warnings));
+assert("data parser logs malformed JSON without throwing", warnings.length === 1 && warnings[0][0] === "SSE parse error:", JSON.stringify(warnings));
+assert("data parser redacts malformed raw stream content by default", warnings[0][2]?.rawLength === "{not-json}".length && !JSON.stringify(warnings).includes("not-json"), JSON.stringify(warnings));
+assert("stream debug raw preview is opt-in", helperSrc.includes("function chatStreamDebugEnabled") && helperSrc.includes("LEXA_DEBUG_STREAM") && helperSrc.includes("rawPreview") && !helperSrc.includes('console.warn("SSE parse error:", e, "raw:", raw)'));
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

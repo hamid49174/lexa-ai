@@ -132,6 +132,10 @@ window.analyser = null;
 window.dataArray = null;
 window.isAudioInitialized = false;
 
+function lexaAppDebugLog(message) {
+  if (window.LEXA_DEBUG_APP === true) console.debug(message);
+}
+
 // ── INIT ─────────────────────────────────────────
 async function init() {
   _initDelegation(); // Wire all data-action handlers before anything else
@@ -177,7 +181,7 @@ async function init() {
       LexaState.clearAllIntervals();
     });
 
-    console.log("Lexa UI fully initialized.");
+    lexaAppDebugLog("Lexa UI fully initialized.");
 
     // Keep the default composer calm; advanced workflows remain in the slash palette.
     const PLACEHOLDERS = [
@@ -802,7 +806,7 @@ async function _initWakeWord() {
           LexaState.set("wakeWordActive", true);
           _startWakeWordPolling();
           _setWakeWordPreference(true);
-          console.log("[WakeWord] Aktiviert (Versuch " + attempt + ")");
+          lexaAppDebugLog("[WakeWord] Aktiviert (Versuch " + attempt + ")");
           break;
         } else {
           console.warn("[WakeWord] " + t("common.error") + ":", res?.error || "unbekannt");
