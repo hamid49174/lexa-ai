@@ -10,6 +10,7 @@ const _todoMutationRunning = new Set();
 const _habitMutationRunning = new Set();
 let _todoCreateRunning = false;
 let _habitCreateRunning = false;
+let _todoExportRunning = false;
 let _pomodoroMutationRunning = false;
 let _timeTrackingToggleRunning = false;
 let _focusModeToggleRunning = false;
@@ -617,6 +618,11 @@ async function deleteTodo(id, triggerBtn) {
 }
 
 async function exportTodos() {
+  if (_todoExportRunning) return;
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  _todoExportRunning = true;
+  setProductivityActionButtonsBusy('button[data-action="exportTodos"]', true);
+  let url = "";
   try {
     const data = await window.lexa.todos("");
     const todos = data.todos || [];
@@ -641,15 +647,19 @@ async function exportTodos() {
     });
     const md = lines.join("\n");
     const blob = new Blob([md], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
+    url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `todos_${new Date().toISOString().slice(0, 10)}.md`;
     a.click();
-    URL.revokeObjectURL(url);
     showToast(t("todo.exported", {count: todos.length}), "success");
   } catch (e) {
-    showToast(t("todo.exportFailed", {error: e.message}), "error");
+    console.warn("[Productivity] Failed to export todos:", e.message || e);
+    showToast(t("toast.exportFailed"), "error", 2200);
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+    _todoExportRunning = false;
+    setProductivityActionButtonsBusy('button[data-action="exportTodos"]', false);
   }
 }
 
