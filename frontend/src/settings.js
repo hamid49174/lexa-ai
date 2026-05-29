@@ -47,6 +47,8 @@ function translateDiagnosticsText(text) {
 }
 
 let _voiceDiagnosticsRunning = false;
+let _hermesGatewayAutostartRunning = false;
+let _hermesGatewayAutostartLastPayload = null;
 
 function setSettingsActionBusy(button, busy) {
   if (!button) return;
@@ -470,6 +472,7 @@ function normalizeHermesGatewayAutostart(payload) {
 }
 
 function renderHermesGatewayAutostart(payload) {
+  _hermesGatewayAutostartLastPayload = payload;
   const state = normalizeHermesGatewayAutostart(payload);
   const statusEl = document.getElementById("hermes-gateway-autostart-status");
   const toggle = document.getElementById("hermes-gateway-autostart-toggle");
@@ -478,9 +481,11 @@ function renderHermesGatewayAutostart(payload) {
 
   if (toggle) {
     toggle.checked = state.enabled;
-    toggle.disabled = !canToggle;
+    toggle.disabled = _hermesGatewayAutostartRunning || !canToggle;
     toggle.title = title;
     toggle.setAttribute("aria-disabled", toggle.disabled ? "true" : "false");
+    if (_hermesGatewayAutostartRunning) toggle.setAttribute("aria-busy", "true");
+    else toggle.removeAttribute("aria-busy");
   }
 
   if (statusEl) {
@@ -513,6 +518,10 @@ function setupHermesGatewayAutostartControls() {
 async function toggleHermesGatewayAutostart(enabled) {
   const toggle = document.getElementById("hermes-gateway-autostart-toggle");
   const previous = !Boolean(enabled);
+  if (_hermesGatewayAutostartRunning) {
+    if (toggle) toggle.checked = previous;
+    return;
+  }
   if (!LexaState.get("backendOnline") || !window.lexa?.hermesGatewayAutostartSet) {
     if (toggle) toggle.checked = previous;
     renderHermesGatewayAutostart({ supported: false, enabled: false, can_enable: false, error: "Backend offline." });
@@ -520,7 +529,12 @@ async function toggleHermesGatewayAutostart(enabled) {
     return;
   }
 
-  if (toggle) toggle.disabled = true;
+  _hermesGatewayAutostartRunning = true;
+  if (toggle) {
+    toggle.disabled = true;
+    toggle.setAttribute("aria-disabled", "true");
+    toggle.setAttribute("aria-busy", "true");
+  }
   try {
     const result = await window.lexa.hermesGatewayAutostartSet(Boolean(enabled));
     renderHermesGatewayAutostart(result?.autostart || result);
@@ -535,6 +549,14 @@ async function toggleHermesGatewayAutostart(enabled) {
     try {
       renderHermesGatewayAutostart(await window.lexa.hermesGatewayAutostartStatus?.());
     } catch (_) {}
+  } finally {
+    _hermesGatewayAutostartRunning = false;
+    if (_hermesGatewayAutostartLastPayload) renderHermesGatewayAutostart(_hermesGatewayAutostartLastPayload);
+    else if (toggle) {
+      toggle.disabled = false;
+      toggle.setAttribute("aria-disabled", "false");
+      toggle.removeAttribute("aria-busy");
+    }
   }
 }
 
