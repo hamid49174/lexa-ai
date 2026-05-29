@@ -11,6 +11,7 @@ const _habitMutationRunning = new Set();
 let _todoCreateRunning = false;
 let _habitCreateRunning = false;
 let _todoExportRunning = false;
+let _todoRefreshSeq = 0;
 let _pomodoroMutationRunning = false;
 let _timeTrackingToggleRunning = false;
 let _focusModeToggleRunning = false;
@@ -252,8 +253,11 @@ async function refreshProdStats() {
 
 async function refreshTodos() {
   try {
+    const refreshSeq = ++_todoRefreshSeq;
     const filter = document.getElementById("todo-filter")?.value || "";
     const data = await window.lexa.todos(filter);
+    const currentFilter = document.getElementById("todo-filter")?.value || "";
+    if (refreshSeq !== _todoRefreshSeq || currentFilter !== filter) return;
     const list = document.getElementById("todo-list");
     if (!list) return;
     list.replaceChildren();
