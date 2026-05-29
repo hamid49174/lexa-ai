@@ -157,9 +157,10 @@
   padding: 0;
   overflow: hidden;
   background:
-    radial-gradient(circle at 18% 18%, rgba(139, 92, 246, 0.12), transparent 34%),
-    radial-gradient(circle at 78% 70%, rgba(45, 212, 191, 0.08), transparent 30%),
-    #06070d;
+    radial-gradient(circle at 48% 42%, rgba(55, 80, 255, 0.16), transparent 34%),
+    radial-gradient(circle at 48% 58%, rgba(24, 196, 255, 0.08), transparent 42%),
+    radial-gradient(circle at 76% 72%, rgba(45, 212, 191, 0.06), transparent 34%),
+    #03060a;
 }
 
 #memory-view.active {
@@ -182,12 +183,12 @@
   inset: 0;
   pointer-events: none;
   background-image:
-    radial-gradient(1px 1px at 10% 20%, rgba(255,255,255,0.22) 0, transparent 100%),
-    radial-gradient(1px 1px at 28% 76%, rgba(255,255,255,0.16) 0, transparent 100%),
-    radial-gradient(1px 1px at 56% 32%, rgba(255,255,255,0.13) 0, transparent 100%),
-    radial-gradient(1px 1px at 82% 18%, rgba(255,255,255,0.18) 0, transparent 100%),
-    radial-gradient(1px 1px at 90% 72%, rgba(255,255,255,0.12) 0, transparent 100%);
-  opacity: 0.72;
+    radial-gradient(1px 1px at 12% 18%, rgba(114, 137, 255, 0.22) 0, transparent 100%),
+    radial-gradient(1px 1px at 29% 80%, rgba(191, 219, 254, 0.14) 0, transparent 100%),
+    radial-gradient(1px 1px at 58% 26%, rgba(129, 140, 248, 0.14) 0, transparent 100%),
+    radial-gradient(1px 1px at 84% 22%, rgba(34, 211, 238, 0.14) 0, transparent 100%),
+    radial-gradient(1px 1px at 88% 74%, rgba(191, 219, 254, 0.10) 0, transparent 100%);
+  opacity: 0.54;
 }
 
 .memory-graph-toolbar {
@@ -260,6 +261,7 @@
   margin: 0 clamp(8px, 2.8vw, 36px);
   border-radius: 10px;
   overflow: hidden;
+  isolation: isolate;
 }
 
 .memory-graph-stage::before {
@@ -268,10 +270,13 @@
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.024) 1px, transparent 1px);
-  background-size: 42px 42px;
-  mask-image: radial-gradient(circle at center, black 0%, black 62%, transparent 100%);
+    radial-gradient(ellipse at center, rgba(67, 97, 255, 0.16), transparent 52%),
+    radial-gradient(ellipse at 51% 54%, rgba(34, 211, 238, 0.08), transparent 46%),
+    linear-gradient(rgba(148, 163, 255, 0.014) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 255, 0.012) 1px, transparent 1px);
+  background-size: auto, auto, 58px 58px, 58px 58px;
+  mask-image: radial-gradient(ellipse at center, black 0%, black 72%, transparent 100%);
+  opacity: 0.8;
 }
 
 .memory-graph-svg {
@@ -282,15 +287,39 @@
   min-height: 520px;
 }
 
-.memory-graph-link {
-  stroke: rgba(139, 156, 255, 0.27);
+.memory-graph-neural-cloud {
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+.memory-graph-neural-filament {
+  stroke: rgba(80, 104, 255, 0.9);
   stroke-linecap: round;
+  stroke-width: 0.55;
+}
+
+.memory-graph-neural-dot {
+  fill: rgba(106, 132, 255, 0.86);
+  filter: drop-shadow(0 0 4px rgba(91, 114, 255, 0.7));
+}
+
+.memory-graph-neural-dot-hub {
+  fill: rgba(226, 236, 255, 0.96);
+  filter:
+    drop-shadow(0 0 5px rgba(180, 198, 255, 0.82))
+    drop-shadow(0 0 14px rgba(80, 104, 255, 0.45));
+}
+
+.memory-graph-link {
+  stroke: rgba(87, 111, 255, 0.36);
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px rgba(80, 104, 255, 0.24));
   transition: opacity 0.16s ease, stroke 0.16s ease;
 }
 
 .memory-graph-link-related,
 .memory-graph-link-mentions {
-  stroke: rgba(52, 211, 153, 0.24);
+  stroke: rgba(56, 189, 248, 0.32);
 }
 
 .memory-graph-link.is-active {
@@ -305,8 +334,8 @@
 .memory-graph-node {
   cursor: grab;
   filter: url(#memory-graph-glow);
-  stroke: rgba(245, 243, 255, 0.62);
-  stroke-width: 1.1;
+  stroke: rgba(226, 236, 255, 0.76);
+  stroke-width: 0.9;
   transition: opacity 0.16s ease, stroke-width 0.16s ease, filter 0.16s ease;
 }
 
@@ -314,7 +343,10 @@
 .memory-graph-node:focus-visible,
 .memory-graph-node.is-active {
   stroke: #fff;
-  stroke-width: 2.2;
+  stroke-width: 1.9;
+  filter:
+    url(#memory-graph-glow)
+    drop-shadow(0 0 12px rgba(191, 219, 254, 0.42));
 }
 
 .memory-graph-node.is-neighbor {
@@ -327,9 +359,9 @@
 }
 
 .memory-graph-label {
-  fill: rgba(245, 243, 255, 0.72);
+  fill: rgba(226, 236, 255, 0.78);
   font-family: var(--font);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   opacity: 0;
   pointer-events: none;

@@ -27,6 +27,7 @@ function bindMemoryCardAction(el, handler, label) {
 }
 
 const MEMORY_GRAPH_NS = "http://www.w3.org/2000/svg";
+const MEMORY_GRAPH_GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 let memoryGraphState = null;
 let memoryGraphRefreshSeq = 0;
 let _clipboardHistoryRevealRunning = false;
@@ -60,14 +61,14 @@ function memoryGraphHash(value) {
 
 function memoryGraphColor(type) {
   const colors = {
-    hub: "#a78bfa",
+    hub: "#dbeafe",
     group: "#7dd3fc",
-    type: "#c084fc",
-    keyword: "#34d399",
+    type: "#818cf8",
+    keyword: "#38bdf8",
     note: "#8b9cff",
-    memory: "#f0abfc",
+    memory: "#c4b5fd",
     conversation: "#60a5fa",
-    routine: "#fbbf24",
+    routine: "#22d3ee",
     snippet: "#2dd4bf",
   };
   return colors[type] || "#9ca3af";
@@ -352,6 +353,81 @@ function memoryGraphCreateSvgElement(name, attrs = {}) {
   return el;
 }
 
+function memoryGraphUnit(value) {
+  return (memoryGraphHash(value) % 10000) / 10000;
+}
+
+function memoryGraphCloudPoint(index, total, width, height) {
+  const seed = memoryGraphHash(`neural-cloud:${index}`);
+  const angle = index * MEMORY_GRAPH_GOLDEN_ANGLE + memoryGraphUnit(`angle:${seed}`) * 0.45;
+  const radius = Math.pow((index + 0.5) / Math.max(1, total), 0.48) * (0.88 + memoryGraphUnit(`r:${seed}`) * 0.18);
+  const rx = width * (0.31 + memoryGraphUnit(`rx:${seed}`) * 0.08);
+  const ry = height * (0.30 + memoryGraphUnit(`ry:${seed}`) * 0.08);
+  const lobe = Math.sin(angle * 2.1) * width * 0.025;
+  const x = width * 0.5 + Math.cos(angle) * rx * radius + lobe;
+  const y = height * 0.52 + Math.sin(angle) * ry * radius + Math.sin(angle * 3.2) * height * 0.018;
+  return {
+    x: Math.max(width * 0.08, Math.min(width * 0.92, x)),
+    y: Math.max(height * 0.08, Math.min(height * 0.92, y)),
+    seed,
+  };
+}
+
+function memoryGraphCreateNeuralCloud(svg, width, height, nodeCount, linkCount) {
+  const pointCount = Math.max(160, Math.min(360, Math.round(nodeCount * 3.2 + linkCount * 0.9 + 140)));
+  const filamentCount = Math.max(260, Math.min(720, Math.round(pointCount * 1.85)));
+  const points = Array.from({ length: pointCount }, (_item, index) => memoryGraphCloudPoint(index, pointCount, width, height));
+  const layer = memoryGraphCreateSvgElement("g", {
+    class: "memory-graph-neural-cloud",
+    "aria-hidden": "true",
+  });
+  const filamentLayer = memoryGraphCreateSvgElement("g", { class: "memory-graph-neural-filaments" });
+  const dotLayer = memoryGraphCreateSvgElement("g", { class: "memory-graph-neural-dots" });
+
+  for (let index = 0; index < filamentCount; index += 1) {
+    const sourceIndex = index % pointCount;
+    const seed = memoryGraphHash(`filament:${index}:${pointCount}`);
+    const hop = 1 + (seed % 17) + Math.floor(index / pointCount) * 3;
+    let targetIndex = (sourceIndex + hop) % pointCount;
+    const source = points[sourceIndex];
+    let target = points[targetIndex];
+    let dx = target.x - source.x;
+    let dy = target.y - source.y;
+    let distance = Math.sqrt(dx * dx + dy * dy);
+    if (distance > Math.min(width, height) * 0.42) {
+      targetIndex = (sourceIndex + 1 + (index % 5)) % pointCount;
+      target = points[targetIndex];
+      dx = target.x - source.x;
+      dy = target.y - source.y;
+      distance = Math.sqrt(dx * dx + dy * dy);
+    }
+    if (distance > Math.min(width, height) * 0.48) continue;
+    const filament = memoryGraphCreateSvgElement("line", {
+      class: "memory-graph-neural-filament",
+      x1: source.x.toFixed(1),
+      y1: source.y.toFixed(1),
+      x2: target.x.toFixed(1),
+      y2: target.y.toFixed(1),
+      "stroke-opacity": (0.08 + memoryGraphUnit(`opacity:${seed}`) * 0.16).toFixed(2),
+    });
+    filamentLayer.appendChild(filament);
+  }
+
+  points.forEach((point, index) => {
+    const hub = index % 29 === 0 || index % 43 === 0;
+    const dot = memoryGraphCreateSvgElement("circle", {
+      class: hub ? "memory-graph-neural-dot memory-graph-neural-dot-hub" : "memory-graph-neural-dot",
+      cx: point.x.toFixed(1),
+      cy: point.y.toFixed(1),
+      r: (hub ? 1.8 + memoryGraphUnit(`hub:${point.seed}`) * 1.7 : 0.55 + memoryGraphUnit(`dot:${point.seed}`) * 0.9).toFixed(2),
+    });
+    dotLayer.appendChild(dot);
+  });
+
+  layer.append(filamentLayer, dotLayer);
+  svg.appendChild(layer);
+}
+
 function memoryGraphApplyFocus(graph, activeId = "") {
   graph.activeId = activeId || "";
   const query = (graph.filter || "").trim().toLowerCase();
@@ -367,7 +443,7 @@ function memoryGraphApplyFocus(graph, activeId = "") {
     node.el?.classList.toggle("is-neighbor", Boolean(activeId && neighborSet?.has(node.id)));
     node.el?.classList.toggle("is-dim", !matches || !related);
     node.labelEl?.classList.toggle("is-dim", !matches || !related);
-    node.labelEl?.classList.toggle("is-visible", matches && (node.id === activeId || node.weight >= 4.8 || node.type === "group" || node.type === "hub"));
+    node.labelEl?.classList.toggle("is-visible", matches && (node.id === activeId || node.type === "hub" || node.weight >= 8.5));
   });
   graph.links.forEach((link) => {
     const visible = !activeId || link.source === activeId || link.target === activeId;
@@ -382,13 +458,24 @@ function memoryGraphLayout(nodes, links, width, height) {
   nodes.forEach((node, index) => {
     const seed = memoryGraphHash(node.id);
     const groupAngle = groupAngles.get(node.group) ?? 0;
-    const jitter = ((seed % 1000) / 1000 - 0.5) * 0.9;
-    const radius = node.type === "hub" ? 0 : Math.min(width, height) * (0.16 + ((seed % 7) * 0.026) + (index % 5) * 0.012);
-    node.x = width / 2 + Math.cos(groupAngle + jitter) * radius;
-    node.y = height / 2 + Math.sin(groupAngle + jitter) * radius;
+    const cloudAngle = index * MEMORY_GRAPH_GOLDEN_ANGLE + memoryGraphUnit(`layout:${node.id}`) * 0.7;
+    const cloudRadius = node.type === "hub"
+      ? 0
+      : Math.min(width, height) * (0.08 + Math.pow(memoryGraphUnit(`radius:${node.id}`), 0.55) * 0.34);
+    const groupPull = node.type === "hub" ? 0 : Math.min(width, height) * 0.11;
+    const anchorX = width / 2
+      + Math.cos(cloudAngle) * cloudRadius * 1.18
+      + Math.cos(groupAngle) * groupPull;
+    const anchorY = height / 2
+      + Math.sin(cloudAngle) * cloudRadius * 0.86
+      + Math.sin(groupAngle) * groupPull * 0.72;
+    node.anchorX = Math.max(width * 0.12, Math.min(width * 0.88, anchorX));
+    node.anchorY = Math.max(height * 0.12, Math.min(height * 0.88, anchorY));
+    node.x = node.anchorX;
+    node.y = node.anchorY;
     node.vx = 0;
     node.vy = 0;
-    node.radius = Math.max(3.2, Math.min(15, 3.2 + node.weight * 1.15));
+    node.radius = Math.max(2.4, Math.min(12.5, 2.8 + node.weight * 0.95));
     node.color = memoryGraphColor(node.type);
   });
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
@@ -411,8 +498,8 @@ function memoryGraphStep(graph) {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-    const desired = link.kind === "contains" ? 92 : link.kind === "mentions" ? 118 : 150;
-    const pull = (dist - desired) * 0.004 * link.weight;
+    const desired = link.kind === "contains" ? 62 : link.kind === "mentions" ? 86 : 112;
+    const pull = (dist - desired) * 0.005 * link.weight;
     const fx = (dx / dist) * pull;
     const fy = (dy / dist) * pull;
     if (!a.fixed) { a.vx += fx; a.vy += fy; }
@@ -426,7 +513,7 @@ function memoryGraphStep(graph) {
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       const distSq = Math.max(64, dx * dx + dy * dy);
-      const force = (a.radius + b.radius + 38) / distSq;
+      const force = (a.radius + b.radius + 22) / distSq;
       const fx = dx * force;
       const fy = dy * force;
       if (!a.fixed) { a.vx -= fx; a.vy -= fy; }
@@ -435,20 +522,19 @@ function memoryGraphStep(graph) {
   }
 
   nodes.forEach((node) => {
-    const groupSeed = memoryGraphHash(node.group);
-    const groupAngle = (groupSeed % 628) / 100;
-    const anchorRadius = node.type === "hub" ? 0 : Math.min(width, height) * 0.22;
-    const anchorX = centerX + Math.cos(groupAngle + Math.sin(phase + groupSeed) * 0.08) * anchorRadius;
-    const anchorY = centerY + Math.sin(groupAngle + Math.cos(phase + groupSeed) * 0.08) * anchorRadius;
+    const nodeSeed = memoryGraphHash(node.id);
+    const drift = node.type === "hub" ? 0 : 3.8;
+    const anchorX = (node.anchorX || centerX) + Math.cos(phase + nodeSeed) * drift;
+    const anchorY = (node.anchorY || centerY) + Math.sin(phase + nodeSeed) * drift;
     if (!node.fixed) {
-      node.vx += (anchorX - node.x) * 0.0018;
-      node.vy += (anchorY - node.y) * 0.0018;
-      node.vx *= 0.86;
-      node.vy *= 0.86;
+      node.vx += (anchorX - node.x) * 0.0026;
+      node.vy += (anchorY - node.y) * 0.0026;
+      node.vx *= 0.85;
+      node.vy *= 0.85;
       node.x += node.vx;
       node.y += node.vy;
-      node.x = Math.max(22, Math.min(width - 22, node.x));
-      node.y = Math.max(22, Math.min(height - 22, node.y));
+      node.x = Math.max(width * 0.07, Math.min(width * 0.93, node.x));
+      node.y = Math.max(height * 0.08, Math.min(height * 0.92, node.y));
     }
   });
 }
@@ -532,6 +618,7 @@ function renderMemoryGraph(data) {
   filter.appendChild(merge);
   defs.appendChild(filter);
   svg.appendChild(defs);
+  memoryGraphCreateNeuralCloud(svg, width, height, nodes.length, links.length);
 
   const linkLayer = memoryGraphCreateSvgElement("g", { class: "memory-graph-links" });
   const nodeLayer = memoryGraphCreateSvgElement("g", { class: "memory-graph-nodes" });

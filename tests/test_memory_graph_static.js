@@ -60,9 +60,11 @@ assert("Renderer uses SVG DOM APIs rather than innerHTML for graph nodes", memor
 assert("Renderer sanitizes graph class tokens", memorySrc.includes("function memoryGraphClassToken(") && memorySrc.includes("replace(/[^a-z0-9_-]+/g"));
 assert("Renderer supports Obsidian-style focus/filter/fit interactions", memorySrc.includes("function memoryGraphApplyFocus(") && memorySrc.includes('document.getElementById("memory-graph-filter")') && memorySrc.includes('document.getElementById("memory-graph-fit-btn")'));
 assert("Renderer stops graph animation away from Memory view", memorySrc.includes('LexaState.get("currentView") !== "memory"') && memorySrc.includes("cancelAnimationFrame(memoryGraphState.frame)"));
+assert("Renderer adds a dense neural-cloud backdrop without turning decorative nodes into graph nodes", memorySrc.includes("function memoryGraphCreateNeuralCloud(") && memorySrc.includes("memory-graph-neural-dot") && memorySrc.includes("memory-graph-neural-filament"));
 
 assert("Graph CSS owns the Memory view surface", viewsCss.includes("#memory-view") && viewsCss.includes(".memory-graph-shell") && viewsCss.includes(".memory-graph-stage"));
 assert("Graph CSS styles nodes, links, inspector, and legend", [".memory-graph-node", ".memory-graph-link", ".memory-graph-inspector", ".memory-graph-legend"].every((selector) => viewsCss.includes(selector)));
+assert("Graph CSS styles the blue neural cloud surface", [".memory-graph-neural-cloud", ".memory-graph-neural-dot", ".memory-graph-neural-filament"].every((selector) => viewsCss.includes(selector)));
 assert("Graph CSS avoids decorative card dashboard layout for Memory view", !memoryView.includes("memory-section") && !memoryView.includes("info-grid"));
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
