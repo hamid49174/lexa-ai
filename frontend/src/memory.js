@@ -32,6 +32,7 @@ let _clipboardHistoryRevealRunning = false;
 let _memoryCleanupRunning = false;
 let _routineToggleRunning = false;
 let _snippetDeleteRunning = false;
+let _noteDeleteRunning = false;
 
 function setMemoryActionBusy(button, busy) {
   if (!button) return;
@@ -771,13 +772,24 @@ async function refreshMemoryView() {
         delBtn.textContent = "\u00d7";
         delBtn.addEventListener("click", async (e) => {
           e.stopPropagation();
-          const result = await showInputModal(t("common.confirm"), [
-            { name: "confirm", label: t("memory.noteDeleteConfirm", {title: n.title}), type: "text", required: true }
-          ], t("common.confirm"));
-          if (!result || result.confirm.toLowerCase() !== "ja") return;
-          await window.lexa.execute("note_delete", { title: n.title }, true);
-          showToast(t("notes.deleted"), "info");
-          refreshMemoryView();
+          if (_noteDeleteRunning) return;
+          _noteDeleteRunning = true;
+          setMemoryActionBusy(delBtn, true);
+          try {
+            const result = await showInputModal(t("common.confirm"), [
+              { name: "confirm", label: t("memory.noteDeleteConfirm", {title: n.title}), type: "text", required: true }
+            ], t("common.confirm"));
+            if (!result || result.confirm.toLowerCase() !== "ja") return;
+            await window.lexa.execute("note_delete", { title: n.title }, true);
+            showToast(t("notes.deleted"), "info");
+            refreshMemoryView();
+          } catch (err) {
+            console.warn("[Memory] Failed to delete note:", err.message || err);
+            showToast(t("toast.executionError"), "error", 2200);
+          } finally {
+            _noteDeleteRunning = false;
+            if (delBtn?.isConnected) setMemoryActionBusy(delBtn, false);
+          }
         });
         card.appendChild(delBtn);
 
