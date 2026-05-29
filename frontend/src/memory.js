@@ -29,12 +29,19 @@ function bindMemoryCardAction(el, handler, label) {
 const MEMORY_GRAPH_NS = "http://www.w3.org/2000/svg";
 let memoryGraphState = null;
 let _clipboardHistoryRevealRunning = false;
+let _memoryCleanupRunning = false;
 
 function setMemoryActionBusy(button, busy) {
   if (!button) return;
   button.disabled = Boolean(busy);
   if (busy) button.setAttribute("aria-busy", "true");
   else button.removeAttribute("aria-busy");
+}
+
+function setMemoryActionButtonsBusy(actionName, busy) {
+  document.querySelectorAll(`[data-action="${actionName}"]`).forEach((button) => {
+    setMemoryActionBusy(button, busy);
+  });
 }
 
 function memoryGraphHash(value) {
@@ -1263,10 +1270,16 @@ async function showDiagnostics() {
 
 async function runMemoryCleanup() {
   if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  if (_memoryCleanupRunning) return;
+  _memoryCleanupRunning = true;
+  setMemoryActionButtonsBusy("runMemoryCleanup", true);
   try {
     const d = await window.lexa.memoryCleanup(90, 3);
     showToast(t("memory.cleanupDone", {count: d.deleted}), d.deleted > 0 ? "success" : "info");
   } catch (e) {
     showToast(t("memory.cleanupFailed", {error: e.message}), "error");
+  } finally {
+    _memoryCleanupRunning = false;
+    setMemoryActionButtonsBusy("runMemoryCleanup", false);
   }
 }
