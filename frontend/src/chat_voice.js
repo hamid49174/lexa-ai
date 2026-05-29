@@ -672,11 +672,19 @@ function toggleChatView() {
   window._chatViewOpen = !window._chatViewOpen;
   if (window._chatViewOpen) {
     msgs.classList.remove("hidden");
-    msgs.scrollTop = msgs.scrollHeight;
     if (arrow) arrow.classList.add("flipped");
     if (orb) orb.classList.add("compact");
     if (greeting) greeting.classList.add("hidden");
     if (cards) cards.classList.add("hidden");
+    const settle = window.requestAnimationFrame || ((fn) => setTimeout(fn, 0));
+    settle(() => {
+      const lastMessage = msgs.querySelector(".message:last-of-type");
+      if (lastMessage && typeof scrollChatMessageIntoCleanView === "function") {
+        scrollChatMessageIntoCleanView(lastMessage, { preferStartForLong: lastMessage.classList.contains("system-message") });
+      } else {
+        msgs.scrollTop = msgs.scrollHeight;
+      }
+    });
   } else {
     msgs.classList.add("hidden");
     if (arrow) arrow.classList.remove("flipped");

@@ -392,7 +392,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   msg.appendChild(avatar);
   msg.appendChild(body);
   chatMessages.appendChild(msg);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
+  scrollChatMessageIntoCleanView(msg, { preferStartForLong: !isUser });
   trimChatMessages();
   if (!silent) saveChatHistory();
 }
@@ -401,6 +401,19 @@ function renderFormattedMessage(target, text) {
   if (!target) return;
   target.replaceChildren();
   appendFormattedMessage(target, String(text || ""));
+}
+
+function scrollChatMessageIntoCleanView(messageEl, options = {}) {
+  const container = messageEl?.closest?.(".chat-messages") || chatMessages;
+  if (!container) return;
+  const preferStartForLong = Boolean(options.preferStartForLong);
+  const messageHeight = Number(messageEl?.offsetHeight || 0);
+  const viewHeight = Number(container.clientHeight || 0);
+  if (preferStartForLong && messageHeight > 0 && viewHeight > 0 && messageHeight > viewHeight * 0.82) {
+    container.scrollTop = Math.max(0, Number(messageEl.offsetTop || 0) - 18);
+    return;
+  }
+  container.scrollTop = container.scrollHeight;
 }
 
 function renderStreamingText(target, text, showCursor = true) {
@@ -875,6 +888,7 @@ async function sendMessage() {
       });
       if (suggestions.length > 0) body.appendChild(suggestDiv);
     }
+    scrollChatMessageIntoCleanView(msgEl, { preferStartForLong: true });
     setMessagePersistText(msgEl, fullText || textEl.textContent);
     if (getMessagePersistText(msgEl)) {
       copyBtn.disabled = false;
