@@ -47,6 +47,7 @@ function translateDiagnosticsText(text) {
 }
 
 let _voiceDiagnosticsRunning = false;
+let _systemDiagnosticsRunning = false;
 let _hermesGatewayAutostartRunning = false;
 let _hermesGatewayAutostartLastPayload = null;
 
@@ -54,6 +55,12 @@ function setSettingsActionBusy(button, busy) {
   if (!button) return;
   button.disabled = Boolean(busy);
   button.setAttribute("aria-busy", busy ? "true" : "false");
+}
+
+function setSettingsActionButtonsBusy(actionName, busy) {
+  document.querySelectorAll(`[data-action="${actionName}"]`).forEach((button) => {
+    setSettingsActionBusy(button, busy);
+  });
 }
 
 // ── SETTINGS VIEW ────────────────────────────────
@@ -561,6 +568,7 @@ async function toggleHermesGatewayAutostart(enabled) {
 }
 
 async function runSystemDiagnostics() {
+  if (_systemDiagnosticsRunning) return;
   if (!LexaState.get("backendOnline")) {
     renderSystemReadiness({
       ok: false,
@@ -574,13 +582,22 @@ async function runSystemDiagnostics() {
     return;
   }
 
+  _systemDiagnosticsRunning = true;
+  setSettingsActionButtonsBusy("runSystemDiagnostics", true);
   showToast("System Diagnostics laufen...", "info");
-  await refreshSettingsView();
-  const readinessStatus = document.getElementById("readiness-status");
-  const state = readinessStatus?.textContent || "READY";
+  try {
+    await refreshSettingsView();
+    const readinessStatus = document.getElementById("readiness-status");
+    const state = readinessStatus?.textContent || "READY";
   if (state === "READY") showToast("System Readiness ist grün.", "success");
-  else if (state === "ATTENTION") showToast("System Readiness braucht Aufmerksamkeit.", "warning", 5000);
-  else showToast("System Readiness ist blockiert.", "error", 6000);
+    else if (state === "ATTENTION") showToast("System Readiness braucht Aufmerksamkeit.", "warning", 5000);
+    else showToast("System Readiness ist blockiert.", "error", 6000);
+  } catch (e) {
+    showToast(t("settings.errorPrefix", {message: e.message || e}), "error");
+  } finally {
+    _systemDiagnosticsRunning = false;
+    setSettingsActionButtonsBusy("runSystemDiagnostics", false);
+  }
 }
 
 function settingsClip(value, max = 180) {

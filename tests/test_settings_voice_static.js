@@ -59,8 +59,10 @@ const architectureRowsSource = extractFn(src, "voiceDiagnosticsArchitectureRows"
 const appendRowSource = extractFn(src, "appendVoiceDiagnosticRow");
 const renderDiagnosticsSource = extractFn(src, "renderVoiceDiagnostics");
 const runDiagnosticsSource = extractFn(src, "runVoiceDiagnostics");
+const runSystemDiagnosticsSource = extractFn(src, "runSystemDiagnostics");
 const setupBackupControlsSource = extractFn(src, "setupBackupControls");
 const settingsBusySource = extractFn(src, "setSettingsActionBusy");
+const settingsActionButtonsBusySource = extractFn(src, "setSettingsActionButtonsBusy");
 const settingsLocaleSource = extractFn(src, "settingsLocale");
 const settingsFormatDateSource = extractFn(src, "settingsFormatDate");
 const settingsFormatDateTimeSource = extractFn(src, "settingsFormatDateTime");
@@ -76,6 +78,7 @@ assert("settings refresh renders aggregate voice diagnostics", src.includes("ren
 assert("settings refresh renders voice offline state before backend return", src.includes('if (!LexaState.get("backendOnline")) {') && src.includes('renderVoiceDiagnostics({ ok: false, state: "blocked", summary: "Backend offline.", checks: [] });'));
 assert("settings voice diagnostics uses explicit audio probe", runDiagnosticsSource.includes("window.lexa.voiceDiagnostics(true)"));
 assert("settings voice diagnostics blocks duplicate runs and exposes busy state", src.includes("let _voiceDiagnosticsRunning = false") && runDiagnosticsSource.includes("if (_voiceDiagnosticsRunning) return") && runDiagnosticsSource.includes("_voiceDiagnosticsRunning = true") && runDiagnosticsSource.includes("setSettingsActionBusy(btn, true)") && runDiagnosticsSource.includes("_voiceDiagnosticsRunning = false") && runDiagnosticsSource.includes("setSettingsActionBusy(btn, false)") && settingsBusySource.includes('button.setAttribute("aria-busy", busy ? "true" : "false")'));
+assert("settings system diagnostics blocks duplicate refreshes and restores action buttons", src.includes("let _systemDiagnosticsRunning = false") && settingsActionButtonsBusySource.includes('document.querySelectorAll(`[data-action="${actionName}"]`)') && settingsActionButtonsBusySource.includes("setSettingsActionBusy(button, busy)") && runSystemDiagnosticsSource.includes("if (_systemDiagnosticsRunning) return") && runSystemDiagnosticsSource.includes("_systemDiagnosticsRunning = true") && runSystemDiagnosticsSource.includes('setSettingsActionButtonsBusy("runSystemDiagnostics", true)') && runSystemDiagnosticsSource.includes("await refreshSettingsView()") && runSystemDiagnosticsSource.includes("finally") && runSystemDiagnosticsSource.includes("_systemDiagnosticsRunning = false") && runSystemDiagnosticsSource.includes('setSettingsActionButtonsBusy("runSystemDiagnostics", false)'));
 assert("settings voice diagnostics treats wake-word-only warning as ready", displayStateSource.includes("voiceDiagnosticsWakeWordOnly(diagnostics)") && displayStateSource.includes('return "ready"'));
 assert("settings voice diagnostics isolates wake-word-only warning", wakeWordOnlySource.includes('problemChecks.length === 1') && wakeWordOnlySource.includes('problemChecks[0]?.id === "wakeword"'));
 assert("settings voice diagnostics explains wake word inactive separately", renderDiagnosticsSource.includes("Voice core ready. Wake Word ist ausgeschaltet."));
