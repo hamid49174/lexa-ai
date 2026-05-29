@@ -13,6 +13,7 @@ let _habitCreateRunning = false;
 let _todoExportRunning = false;
 let _todoRefreshSeq = 0;
 let _habitRefreshSeq = 0;
+let _pomodoroRefreshSeq = 0;
 let _pomodoroMutationRunning = false;
 let _timeTrackingToggleRunning = false;
 let _focusModeToggleRunning = false;
@@ -784,7 +785,9 @@ function _pomoClientTick() {
 
 async function refreshPomodoro() {
   try {
+    const refreshSeq = ++_pomodoroRefreshSeq;
     const status = await window.lexa.pomodoroStatus();
+    if (refreshSeq !== _pomodoroRefreshSeq) return;
     const display = document.getElementById("pomodoro-display");
     const controls = document.getElementById("pomodoro-controls");
     if (!display || !controls) return;
