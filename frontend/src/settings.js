@@ -49,6 +49,8 @@ function translateDiagnosticsText(text) {
 let _voiceDiagnosticsRunning = false;
 let _systemDiagnosticsRunning = false;
 let _aiModelChangeRunning = false;
+let _sttModelChangeRunning = false;
+let _sttEngineChangeRunning = false;
 let _hermesGatewayAutostartRunning = false;
 let _hermesGatewayAutostartLastPayload = null;
 
@@ -913,7 +915,10 @@ async function loadVoiceSettings() {
 }
 
 async function changeSttModel(modelName) {
-  if (!modelName) return;
+  if (!modelName || _sttModelChangeRunning) return;
+  const select = document.getElementById("stt-model-select");
+  _sttModelChangeRunning = true;
+  setSettingsActionBusy(select, true);
   try {
     showToast(t("settings.sttModelChanged", {model: modelName}), "info");
     const result = await window.lexa.sttSetModel(modelName);
@@ -926,12 +931,18 @@ async function changeSttModel(modelName) {
     }
   } catch (e) {
     showToast(t("common.error") + ": " + e.message, "error");
+  } finally {
+    _sttModelChangeRunning = false;
+    setSettingsActionBusy(select, false);
   }
 }
 
 // ── DEEPGRAM + STT ENGINE ────────────────────────
 async function changeSttEngine(engine) {
-  if (!engine) return;
+  if (!engine || _sttEngineChangeRunning) return;
+  const select = document.getElementById("stt-engine-select");
+  _sttEngineChangeRunning = true;
+  setSettingsActionBusy(select, true);
   try {
     const res = await window.lexa.sttSetEngine(engine);
     if (res.success) {
@@ -943,7 +954,12 @@ async function changeSttEngine(engine) {
     } else {
       showToast(res.error || t("settings.errorGeneric"), "error");
     }
-  } catch (e) { showToast(t("settings.errorPrefix", {message: e.message}), "error"); }
+  } catch (e) {
+    showToast(t("settings.errorPrefix", {message: e.message}), "error");
+  } finally {
+    _sttEngineChangeRunning = false;
+    setSettingsActionBusy(select, false);
+  }
 }
 
 async function setDeepgramKeyAction() {
