@@ -59,6 +59,8 @@ const architectureRowsSource = extractFn(src, "voiceDiagnosticsArchitectureRows"
 const appendRowSource = extractFn(src, "appendVoiceDiagnosticRow");
 const renderDiagnosticsSource = extractFn(src, "renderVoiceDiagnostics");
 const runDiagnosticsSource = extractFn(src, "runVoiceDiagnostics");
+const setupBackupControlsSource = extractFn(src, "setupBackupControls");
+const settingsBusySource = extractFn(src, "setSettingsActionBusy");
 const settingsLocaleSource = extractFn(src, "settingsLocale");
 const settingsFormatDateSource = extractFn(src, "settingsFormatDate");
 const settingsFormatDateTimeSource = extractFn(src, "settingsFormatDateTime");
@@ -73,6 +75,7 @@ assert("settings microphone stops tracks on startup failure", testMicrophoneSour
 assert("settings refresh renders aggregate voice diagnostics", src.includes("renderVoiceDiagnostics(voice)"));
 assert("settings refresh renders voice offline state before backend return", src.includes('if (!LexaState.get("backendOnline")) {') && src.includes('renderVoiceDiagnostics({ ok: false, state: "blocked", summary: "Backend offline.", checks: [] });'));
 assert("settings voice diagnostics uses explicit audio probe", runDiagnosticsSource.includes("window.lexa.voiceDiagnostics(true)"));
+assert("settings voice diagnostics blocks duplicate runs and exposes busy state", src.includes("let _voiceDiagnosticsRunning = false") && runDiagnosticsSource.includes("if (_voiceDiagnosticsRunning) return") && runDiagnosticsSource.includes("_voiceDiagnosticsRunning = true") && runDiagnosticsSource.includes("setSettingsActionBusy(btn, true)") && runDiagnosticsSource.includes("_voiceDiagnosticsRunning = false") && runDiagnosticsSource.includes("setSettingsActionBusy(btn, false)") && settingsBusySource.includes('button.setAttribute("aria-busy", busy ? "true" : "false")'));
 assert("settings voice diagnostics treats wake-word-only warning as ready", displayStateSource.includes("voiceDiagnosticsWakeWordOnly(diagnostics)") && displayStateSource.includes('return "ready"'));
 assert("settings voice diagnostics isolates wake-word-only warning", wakeWordOnlySource.includes('problemChecks.length === 1') && wakeWordOnlySource.includes('problemChecks[0]?.id === "wakeword"'));
 assert("settings voice diagnostics explains wake word inactive separately", renderDiagnosticsSource.includes("Voice core ready. Wake Word ist ausgeschaltet."));
@@ -108,6 +111,7 @@ assert("settings active TTS status follows the actual engine", src.includes("tts
 assert("settings TTS copy no longer claims Cartesia is primary", html.includes("TTS PROVIDER") && html.includes("OpenAI prim") && html.includes("OpenAI/ElevenLabs/Cartesia/SAPI") && !html.includes("CARTESIA SONIC (Primary TTS)"));
 assert("settings voice diagnostics clips visible error text", renderDiagnosticsSource.includes("settingsClip(") && runDiagnosticsSource.includes("settingsClip("));
 assert("settings page exposes voice diagnostics action", html.includes('id="voice-diagnostics-panel"') && html.includes('data-action="runVoiceDiagnostics"'));
+assert("settings backup and index actions block duplicate runs", setupBackupControlsSource.includes('btnCreate.getAttribute("aria-busy") === "true"') && setupBackupControlsSource.includes("setSettingsActionBusy(btnCreate, true)") && setupBackupControlsSource.includes("setSettingsActionBusy(btnCreate, false)") && setupBackupControlsSource.includes('btnList.getAttribute("aria-busy") === "true"') && setupBackupControlsSource.includes("setSettingsActionBusy(btnList, true)") && setupBackupControlsSource.includes("setSettingsActionBusy(btnList, false)") && setupBackupControlsSource.includes('restoreBtn.getAttribute("aria-busy") === "true"') && setupBackupControlsSource.includes("setSettingsActionBusy(restoreBtn, true)") && setupBackupControlsSource.includes("setSettingsActionBusy(restoreBtn, false)") && setupBackupControlsSource.includes('btnFts.getAttribute("aria-busy") === "true"') && setupBackupControlsSource.includes("setSettingsActionBusy(btnFts, true)") && setupBackupControlsSource.includes("setSettingsActionBusy(btnFts, false)"));
 assert("settings CSS includes voice diagnostics states", viewsCss.includes(".voice-diagnostics-panel") && viewsCss.includes(".voice-diagnostic-check.blocked"));
 assert("settings dates follow the active app locale", settingsLocaleSource.includes("t?._locale") && settingsLocaleSource.includes('return "en-US"') && settingsFormatDateSource.includes("toLocaleDateString(settingsLocale())") && settingsFormatDateTimeSource.includes("toLocaleString(settingsLocale())") && src.includes("settingsFormatDate(lic.expires)") && src.includes("settingsFormatDateTime(b.created)") && !src.includes("toLocaleDateString(\"de-DE\")") && !src.includes("toLocaleString('de-DE')"));
 

@@ -46,6 +46,14 @@ function translateDiagnosticsText(text) {
   return translated;
 }
 
+let _voiceDiagnosticsRunning = false;
+
+function setSettingsActionBusy(button, busy) {
+  if (!button) return;
+  button.disabled = Boolean(busy);
+  button.setAttribute("aria-busy", busy ? "true" : "false");
+}
+
 // ── SETTINGS VIEW ────────────────────────────────
 async function refreshSettingsView() {
   // Desktop settings (work even when backend is offline)
@@ -693,6 +701,7 @@ function renderVoiceDiagnostics(diagnostics) {
 }
 
 async function runVoiceDiagnostics() {
+  if (_voiceDiagnosticsRunning) return;
   if (!LexaState.get("backendOnline")) {
     const offline = { ok: false, state: "blocked", summary: "Backend offline.", checks: [] };
     renderVoiceDiagnostics(offline);
@@ -701,7 +710,8 @@ async function runVoiceDiagnostics() {
   }
 
   const btn = document.querySelector('[data-action="runVoiceDiagnostics"]');
-  if (btn) btn.disabled = true;
+  _voiceDiagnosticsRunning = true;
+  setSettingsActionBusy(btn, true);
   showToast("Voice Diagnostics laufen...", "info");
   try {
     const diagnostics = typeof window.lexa.voiceDiagnostics === "function"
@@ -721,7 +731,8 @@ async function runVoiceDiagnostics() {
     renderVoiceDiagnostics({ ok: false, state: "blocked", summary: error, checks: [] });
     showToast("Voice Diagnostics Fehler: " + settingsClip(error, 120), "error");
   } finally {
-    if (btn) btn.disabled = false;
+    _voiceDiagnosticsRunning = false;
+    setSettingsActionBusy(btn, false);
   }
 }
 
@@ -732,12 +743,16 @@ function setupBackupControls() {
   if (btnCreate && !btnCreate._lexaBound) {
     btnCreate._lexaBound = true;
     btnCreate.addEventListener('click', async () => {
+      if (btnCreate.disabled || btnCreate.getAttribute("aria-busy") === "true") return;
+      setSettingsActionBusy(btnCreate, true);
       showToast(t("settings.backupCreating"), 'info');
       try {
         const result = await window.lexa.backupCreateDb();
         showToast(t("settings.backupCreated", {path: result.path || 'OK'}), 'success');
       } catch (e) {
         showToast(t("settings.backupFailed", {error: e.message}), 'error');
+      } finally {
+        setSettingsActionBusy(btnCreate, false);
       }
     });
   }
@@ -747,8 +762,10 @@ function setupBackupControls() {
   if (btnList && !btnList._lexaBound) {
     btnList._lexaBound = true;
     btnList.addEventListener('click', async () => {
+      if (btnList.disabled || btnList.getAttribute("aria-busy") === "true") return;
       const container = document.getElementById('backup-list-container');
       if (!container) return;
+      setSettingsActionBusy(btnList, true);
       container.replaceChildren(createLoadingState(t("settings.backupsLoading")));
       try {
         const data = await window.lexa.backupListDb();
@@ -777,17 +794,21 @@ function setupBackupControls() {
           restoreBtn.className = 'btn-small';
           restoreBtn.textContent = t("settings.restoreBtn");
           restoreBtn.addEventListener('click', async () => {
+            if (restoreBtn.disabled || restoreBtn.getAttribute("aria-busy") === "true") return;
+            setSettingsActionBusy(restoreBtn, true);
             const fname = b.filename || b.path;
-            const result = await showInputModal(t("common.confirm"), [
-              { name: "confirm", label: t("settings.restoreConfirm", {name: fname}), type: "text", required: true }
-            ], t("common.confirm"));
-            if (!result || result.confirm.toLowerCase() !== "ja") return;
-            showToast(t("settings.restoreRunning"), 'info');
             try {
+              const result = await showInputModal(t("common.confirm"), [
+                { name: "confirm", label: t("settings.restoreConfirm", {name: fname}), type: "text", required: true }
+              ], t("common.confirm"));
+              if (!result || result.confirm.toLowerCase() !== "ja") return;
+              showToast(t("settings.restoreRunning"), 'info');
               const res = await window.lexa.backupRestoreDb(b.path);
               showToast(res.result || t("settings.restoreRunning"), 'success');
             } catch (e) {
               showToast(t("settings.restoreFailed", {error: e.message}), 'error');
+            } finally {
+              setSettingsActionBusy(restoreBtn, false);
             }
           });
           item.appendChild(restoreBtn);
@@ -796,6 +817,8 @@ function setupBackupControls() {
         container.replaceChildren(list);
       } catch (e) {
         container.replaceChildren(createErrorState(t("settings.backupsLoadError")));
+      } finally {
+        setSettingsActionBusy(btnList, false);
       }
     });
   }
@@ -805,12 +828,16 @@ function setupBackupControls() {
   if (btnFts && !btnFts._lexaBound) {
     btnFts._lexaBound = true;
     btnFts.addEventListener('click', async () => {
+      if (btnFts.disabled || btnFts.getAttribute("aria-busy") === "true") return;
+      setSettingsActionBusy(btnFts, true);
       showToast(t("settings.ftsRebuilding"), 'info');
       try {
         await window.lexa.rebuildFts();
         showToast(t("settings.ftsRebuilt"), 'success');
       } catch (e) {
         showToast(t("common.error") + ': ' + e.message, 'error');
+      } finally {
+        setSettingsActionBusy(btnFts, false);
       }
     });
   }

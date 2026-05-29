@@ -459,7 +459,8 @@ function showShortcutsOverlay() {
     if (e.key === "Escape") closeShortcuts();
     if (e.key === "Tab") trapFocusIn(overlay, e);
   });
-  document.getElementById("shortcuts-close-btn").addEventListener("click", closeShortcuts);
+  const closeBtn = overlay.querySelector("#shortcuts-close-btn");
+  closeBtn?.addEventListener("click", closeShortcuts);
   setTimeout(() => document.getElementById("shortcuts-close-btn")?.focus(), 0);
 }
 
@@ -548,6 +549,7 @@ function setupCommandPalette() {
     paletteEl = document.createElement("div");
     paletteEl.id = "command-palette";
     paletteEl.className = "cmd-palette-overlay";
+    paletteEl.setAttribute("aria-hidden", "true");
     paletteEl.appendChild(createCommandPaletteShell());
     document.body.appendChild(paletteEl);
 
@@ -558,11 +560,14 @@ function setupCommandPalette() {
       if (e.key === "Tab") trapFocusIn(paletteEl, e);
     });
 
-    document.getElementById("palette-input").addEventListener("input", (e) => {
+    const input = paletteEl.querySelector("#palette-input");
+    if (!input) return;
+
+    input.addEventListener("input", (e) => {
       renderPaletteResults(e.target.value.toLowerCase().trim());
     });
 
-    document.getElementById("palette-input").addEventListener("keydown", (e) => {
+    input.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closePalette();
       if (e.key === "Enter") {
         const first = document.querySelector(".palette-item.selected") || document.querySelector(".palette-item");
@@ -603,19 +608,23 @@ function createCommandPaletteShell() {
 function openPalette() {
   setupCommandPalette();
   const overlay = document.getElementById("command-palette");
+  const input = overlay?.querySelector("#palette-input");
+  if (!overlay || !input) return;
   const active = document.activeElement;
   if (active && active !== document.body && !overlay.contains(active)) {
     _paletteRestoreFocusEl = active;
   }
   overlay.classList.add("visible");
-  const input = document.getElementById("palette-input");
+  overlay.setAttribute("aria-hidden", "false");
   input.value = "";
   input.focus();
   renderPaletteResults("");
 }
 
 function closePalette(options = {}) {
-  document.getElementById("command-palette")?.classList.remove("visible");
+  const overlay = document.getElementById("command-palette");
+  overlay?.classList.remove("visible");
+  overlay?.setAttribute("aria-hidden", "true");
   document.getElementById("palette-input")?.removeAttribute("aria-activedescendant");
   if (options.restoreFocus !== false) restoreFocus(_paletteRestoreFocusEl);
   _paletteRestoreFocusEl = null;
@@ -693,8 +702,9 @@ function renderPaletteResults(query) {
   }));
   const allItems = [...viewItems, ...cmdItems];
 
-  const filtered = query
-    ? allItems.filter(i => i.name.includes(query) || i.desc.toLowerCase().includes(query) || (i.cat || "").toLowerCase().includes(query))
+  const normalizedQuery = String(query || "").toLowerCase();
+  const filtered = normalizedQuery
+    ? allItems.filter(i => String(i.name || "").toLowerCase().includes(normalizedQuery) || String(i.desc || "").toLowerCase().includes(normalizedQuery) || String(i.cat || "").toLowerCase().includes(normalizedQuery))
     : allItems.slice(0, 15);
 
   container.replaceChildren();
