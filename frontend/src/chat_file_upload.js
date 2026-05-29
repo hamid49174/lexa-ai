@@ -42,14 +42,54 @@ function setupDragDrop() {
 function triggerFileUpload() { document.getElementById("file-input")?.click(); }
 function handleFileSelect(event) { const file = event.target.files?.[0]; if (file) handleFileUpload(file); event.target.value = ""; }
 
+function buildFileUploadIcon(ext) {
+  const icon = document.createElement("div");
+  icon.className = "file-card-icon";
+  icon.textContent = getFileIcon(ext);
+  return icon;
+}
+
+function buildFileUploadPreview(file, ext) {
+  if (!fileUploadCanPreview(file)) return null;
+  if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return null;
+  let previewUrl = "";
+  try {
+    previewUrl = URL.createObjectURL(file);
+  } catch (_) {
+    return null;
+  }
+  const img = document.createElement("img");
+  img.className = "file-card-preview";
+  img.alt = "";
+  img.decoding = "async";
+  img.setAttribute("aria-hidden", "true");
+  const revokePreviewUrl = () => {
+    if (!previewUrl) return;
+    URL.revokeObjectURL(previewUrl);
+    previewUrl = "";
+  };
+  img.addEventListener("load", revokePreviewUrl, { once: true });
+  img.addEventListener("error", () => {
+    revokePreviewUrl();
+    img.parentElement?.classList.remove("file-card-with-preview");
+    img.replaceWith(buildFileUploadIcon(ext));
+  }, { once: true });
+  img.src = previewUrl;
+  return img;
+}
+
 function buildFileUploadCard(file) {
   const ext = fileUploadExtension(file);
   const card = document.createElement("div");
   card.className = "file-card";
 
-  const icon = document.createElement("div");
-  icon.className = "file-card-icon";
-  icon.textContent = getFileIcon(ext);
+  const preview = buildFileUploadPreview(file, ext);
+  if (preview) {
+    card.classList.add("file-card-with-preview");
+    card.appendChild(preview);
+  } else {
+    card.appendChild(buildFileUploadIcon(ext));
+  }
 
   const info = document.createElement("div");
   info.className = "file-card-info";
@@ -64,7 +104,6 @@ function buildFileUploadCard(file) {
 
   info.appendChild(name);
   info.appendChild(meta);
-  card.appendChild(icon);
   card.appendChild(info);
   return card;
 }

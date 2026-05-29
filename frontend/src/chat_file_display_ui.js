@@ -12,6 +12,13 @@ function fileUploadExtension(file) {
   return name.includes(".") ? name.split(".").pop().toUpperCase() : "FILE";
 }
 
+function fileUploadCanPreview(file) {
+  const type = String(file?.type || "").toLowerCase();
+  const ext = fileUploadExtension(file);
+  if (type === "image/svg+xml" || ext === "SVG") return false;
+  return type.startsWith("image/") || ["PNG", "JPG", "JPEG", "GIF", "WEBP", "BMP", "AVIF"].includes(ext);
+}
+
 function fileInfoBadgeText(fileInfo) {
   const parts = [
     String(fileInfo?.type || "file").toUpperCase(),

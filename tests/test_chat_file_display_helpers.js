@@ -47,6 +47,10 @@ assert("missing file size falls back safely", context.fileUploadSizeLabel(null) 
 assert("file extension helper uppercases suffix", context.fileUploadExtension({ name: "report.final.md" }) === "MD");
 assert("file extension helper falls back when no suffix exists", context.fileUploadExtension({ name: "README" }) === "FILE");
 assert("file extension helper preserves unsafe suffix as text", context.fileUploadExtension({ name: "bad.<script>" }) === "<SCRIPT>");
+assert("image preview helper allows raster mime types", context.fileUploadCanPreview({ name: "screen.bin", type: "image/png" }) === true);
+assert("image preview helper allows raster image extensions", context.fileUploadCanPreview({ name: "photo.jpg", type: "" }) === true);
+assert("image preview helper blocks svg previews", context.fileUploadCanPreview({ name: "icon.svg", type: "image/svg+xml" }) === false);
+assert("image preview helper rejects normal documents", context.fileUploadCanPreview({ name: "report.md", type: "text/markdown" }) === false);
 assert("file info badge text includes type and size", context.fileInfoBadgeText({ type: "md", size_kb: 12 }) === "MD \u00b7 12 KB");
 assert("file info badge text includes line count when present", context.fileInfoBadgeText({ type: "txt", size_kb: 4, line_count: 7 }) === "TXT \u00b7 4 KB \u00b7 7 lines");
 assert("file info badge text marks pending vision provider state", context.fileInfoBadgeText({ type: "png", size_kb: 20, analysis_status: "vision_provider_required" }) === "PNG \u00b7 20 KB \u00b7 Vision ready");

@@ -561,6 +561,7 @@ function assert(desc, ok, detail = "") {
   const uploadSource = extractFn(chatFileUploadSrc, "handleFileUpload");
   const uploadMessageSource = extractFn(chatFileUploadSrc, "addFileUploadMessage");
   const uploadCardSource = extractFn(chatFileUploadSrc, "buildFileUploadCard");
+  const uploadPreviewSource = extractFn(chatFileUploadSrc, "buildFileUploadPreview");
   const uploadResponseSource = extractFn(chatFileUploadSrc, "addFileUploadResponse");
   const uploadBadgeSource = extractFn(chatFileUploadSrc, "buildFileInfoBadge");
   assert("file upload blocks while chat is loading", uploadSource.includes('LexaState.get("isLoading")') && uploadSource.includes('t("chat.uploadBusy")'));
@@ -569,6 +570,7 @@ function assert(desc, ok, detail = "") {
   assert("file upload resets busy state through finally", chatFileUploadSrc.includes("function setFileUploadBusy") && chatFileUploadSrc.includes("function saveFileUploadConversationSnapshot") && uploadSource.includes("setFileUploadBusy(true)") && uploadSource.includes("} finally {") && uploadSource.includes("hideTyping();") && uploadSource.includes("saveFileUploadConversationSnapshot();") && uploadSource.includes("setFileUploadBusy(false)"));
   assert("file upload renders card through DOM helper", uploadSource.includes("addFileUploadMessage(file, userMsg)") && !uploadSource.includes("fileCardHtml"));
   assert("file upload card avoids raw HTML string rendering", uploadCardSource.includes("document.createElement") && uploadCardSource.includes("textContent = file.name") && !uploadCardSource.includes("innerHTML"));
+  assert("file upload image card renders local preview safely", chatFileUploadSrc.includes("function buildFileUploadIcon") && uploadCardSource.includes("buildFileUploadPreview(file, ext)") && uploadCardSource.includes('card.classList.add("file-card-with-preview")') && uploadPreviewSource.includes("fileUploadCanPreview(file)") && uploadPreviewSource.includes('img.className = "file-card-preview"') && uploadPreviewSource.includes("URL.createObjectURL(file)") && uploadPreviewSource.includes("URL.revokeObjectURL(previewUrl)") && uploadPreviewSource.includes("img.replaceWith(buildFileUploadIcon(ext))"));
   assert("file upload message inserts card into user bubble", uploadMessageSource.includes('querySelectorAll(".message.user-message")') && uploadMessageSource.includes("buildFileUploadCard(file)"));
   assert("file upload busy label is translated", deI18n.includes('"chat.uploadBusy"') && enI18n.includes('"chat.uploadBusy"'));
   assert("file upload response uses DOM badge helper", uploadSource.includes("addFileUploadResponse(res)") && uploadResponseSource.includes("buildFileInfoBadge(res.file_info)"));

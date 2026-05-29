@@ -154,6 +154,16 @@ async function main() {
       const fileName = fileCard?.querySelector(".file-card-name");
       const fileMeta = fileCard?.querySelector(".file-card-meta");
 
+      const pngBytes = Uint8Array.from(
+        atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="),
+        (char) => char.charCodeAt(0)
+      );
+      const imageFile = new File([pngBytes], "screen.png", { type: "image/png" });
+      addFileUploadMessage(imageFile, "");
+      const imageMsg = document.querySelector("#chat-messages .message.user-message:last-child");
+      const imageCard = imageMsg?.querySelector(".file-card");
+      const imagePreview = imageCard?.querySelector(".file-card-preview");
+
       addFileUploadResponse({
         reply: "Attachment result <script>alert(1)</script> with **markdown**.",
         file_info: {
@@ -231,6 +241,12 @@ async function main() {
           nameHtml: fileName?.innerHTML || "",
           metaText: fileMeta?.textContent || "",
         },
+        imagePreview: {
+          exists: Boolean(imagePreview),
+          src: imagePreview?.getAttribute("src") || "",
+          ariaHidden: imagePreview?.getAttribute("aria-hidden") || "",
+          cardClass: imageCard?.className || "",
+        },
         resultBadge: {
           text: fileBadge?.textContent || "",
           html: fileBadge?.innerHTML || "",
@@ -268,6 +284,7 @@ async function main() {
   assert("in-memory file upload card renders", fileCard.exists === true, JSON.stringify(fileCard));
   assert("unsafe file name is displayed as text", fileCard.nameText.includes("<img src=x onerror=alert(1)>") && /&lt;img src=x onerror=alert\(1\)&gt;/.test(fileCard.nameHtml || "") && !/<img/i.test(fileCard.nameHtml || ""), JSON.stringify(fileCard));
   assert("file metadata renders extension and size", /MD/i.test(fileCard.metaText || "") && /\d+(\.\d+)?\s*(B|KB)/.test(fileCard.metaText || ""), JSON.stringify(fileCard));
+  assert("image file upload card renders a local preview", result.imagePreview?.exists === true && /^blob:/.test(result.imagePreview?.src || "") && result.imagePreview?.ariaHidden === "true" && /file-card-with-preview/.test(result.imagePreview?.cardClass || ""), JSON.stringify(result.imagePreview || {}));
 
   const resultBadge = result.resultBadge || {};
   assert("file result badge renders metadata safely", resultBadge.text.includes("MD<SCRIPT>") && resultBadge.text.includes("12<script> KB") && resultBadge.text.includes("3") && !/<script/i.test(resultBadge.html || ""), JSON.stringify(resultBadge));
