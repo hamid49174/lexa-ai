@@ -51,8 +51,16 @@ let _systemDiagnosticsRunning = false;
 let _aiModelChangeRunning = false;
 let _sttModelChangeRunning = false;
 let _sttEngineChangeRunning = false;
+let _settingsSecretActionRunning = false;
 let _hermesGatewayAutostartRunning = false;
 let _hermesGatewayAutostartLastPayload = null;
+const SETTINGS_SECRET_ACTIONS = [
+  "setDeepgramKey",
+  "deleteDeepgramKey",
+  "setCartesiaKey",
+  "deleteCartesiaKey",
+  "elevenlabsKeyAction",
+];
 
 function setSettingsActionBusy(button, busy) {
   if (!button) return;
@@ -64,6 +72,22 @@ function setSettingsActionButtonsBusy(actionName, busy) {
   document.querySelectorAll(`[data-action="${actionName}"]`).forEach((button) => {
     setSettingsActionBusy(button, busy);
   });
+}
+
+function setSettingsSecretActionsBusy(busy) {
+  SETTINGS_SECRET_ACTIONS.forEach((actionName) => setSettingsActionButtonsBusy(actionName, busy));
+}
+
+async function runSettingsSecretAction(actionFn) {
+  if (_settingsSecretActionRunning) return;
+  _settingsSecretActionRunning = true;
+  setSettingsSecretActionsBusy(true);
+  try {
+    await actionFn();
+  } finally {
+    _settingsSecretActionRunning = false;
+    setSettingsSecretActionsBusy(false);
+  }
 }
 
 // ── SETTINGS VIEW ────────────────────────────────
@@ -963,59 +987,67 @@ async function changeSttEngine(engine) {
 }
 
 async function setDeepgramKeyAction() {
-  const result = await showInputModal(t("settings.deepgramTitle"), [
-    { name: "apiKey", label: t("settings.deepgramKeyLabel"), type: "text", required: true }
-  ], t("common.save"));
-  if (!result || !result.apiKey) return;
+  await runSettingsSecretAction(async () => {
+    const result = await showInputModal(t("settings.deepgramTitle"), [
+      { name: "apiKey", label: t("settings.deepgramKeyLabel"), type: "text", required: true }
+    ], t("common.save"));
+    if (!result || !result.apiKey) return;
 
-  try {
-    const res = await window.lexa.deepgramSetKey(result.apiKey);
-    if (res.success) {
-      showToast(t("settings.deepgramKeySaved"), "success");
-      refreshSettingsView();
-    } else {
-      showToast(res.error || t("settings.errorGeneric"), "error");
-    }
-  } catch (e) { showToast(t("settings.errorPrefix", {message: e.message}), "error"); }
+    try {
+      const res = await window.lexa.deepgramSetKey(result.apiKey);
+      if (res.success) {
+        showToast(t("settings.deepgramKeySaved"), "success");
+        refreshSettingsView();
+      } else {
+        showToast(res.error || t("settings.errorGeneric"), "error");
+      }
+    } catch (e) { showToast(t("settings.errorPrefix", {message: e.message}), "error"); }
+  });
 }
 
 async function deleteDeepgramKeyAction() {
-  try {
-    const res = await window.lexa.deepgramDeleteKey();
-    if (res.success) {
-      showToast(t("settings.deepgramKeyRemoved"), "info");
-      refreshSettingsView();
-    }
-  } catch (e) { showToast(t("settings.errorPrefix", {message: e.message}), "error"); }
+  await runSettingsSecretAction(async () => {
+    try {
+      const res = await window.lexa.deepgramDeleteKey();
+      if (res.success) {
+        showToast(t("settings.deepgramKeyRemoved"), "info");
+        refreshSettingsView();
+      }
+    } catch (e) { showToast(t("settings.errorPrefix", {message: e.message}), "error"); }
+  });
 }
 
 // ── CARTESIA SETTINGS ───────────────────────────
 
 async function setCartesiaKeyAction() {
-  const result = await showInputModal("Cartesia API Key", [
-    { name: "apiKey", label: "API Key (sk_car_...)", type: "text", required: true }
-  ], "Speichern");
-  if (!result || !result.apiKey) return;
+  await runSettingsSecretAction(async () => {
+    const result = await showInputModal("Cartesia API Key", [
+      { name: "apiKey", label: "API Key (sk_car_...)", type: "text", required: true }
+    ], "Speichern");
+    if (!result || !result.apiKey) return;
 
-  try {
-    const res = await window.lexa.cartesiaSetKey(result.apiKey);
-    if (res.success) {
-      showToast("Cartesia Key gespeichert", "success");
-      refreshSettingsView();
-    } else {
-      showToast(res.error || "Fehler beim Speichern", "error");
-    }
-  } catch (e) { showToast("Fehler: " + e.message, "error"); }
+    try {
+      const res = await window.lexa.cartesiaSetKey(result.apiKey);
+      if (res.success) {
+        showToast("Cartesia Key gespeichert", "success");
+        refreshSettingsView();
+      } else {
+        showToast(res.error || "Fehler beim Speichern", "error");
+      }
+    } catch (e) { showToast("Fehler: " + e.message, "error"); }
+  });
 }
 
 async function deleteCartesiaKeyAction() {
-  try {
-    const res = await window.lexa.cartesiaDeleteKey();
-    if (res.success) {
-      showToast("Cartesia Key entfernt", "info");
-      refreshSettingsView();
-    }
-  } catch (e) { showToast("Fehler: " + e.message, "error"); }
+  await runSettingsSecretAction(async () => {
+    try {
+      const res = await window.lexa.cartesiaDeleteKey();
+      if (res.success) {
+        showToast("Cartesia Key entfernt", "info");
+        refreshSettingsView();
+      }
+    } catch (e) { showToast("Fehler: " + e.message, "error"); }
+  });
 }
 
 // ── ELEVENLABS SETTINGS ─────────────────────────
@@ -1081,22 +1113,24 @@ async function loadElevenLabsSettings(voice) {
 }
 
 async function elevenlabsKeyAction() {
-  const result = await showInputModal(t("settings.elKeyTitle"), [
-    { name: "apiKey", label: t("settings.elKeyInputLabel"), type: "text", required: true }
-  ], t("common.save"));
-  if (!result || !result.apiKey) return;
+  await runSettingsSecretAction(async () => {
+    const result = await showInputModal(t("settings.elKeyTitle"), [
+      { name: "apiKey", label: t("settings.elKeyInputLabel"), type: "text", required: true }
+    ], t("common.save"));
+    if (!result || !result.apiKey) return;
 
-  try {
-    const res = await window.lexa.elevenlabsSetKey(result.apiKey);
-    if (res.success) {
-      showToast(t("settings.elKeySaveSuccess"), "success");
-      refreshSettingsView();
-    } else {
-      showToast(res.error || t("common.error"), "error");
+    try {
+      const res = await window.lexa.elevenlabsSetKey(result.apiKey);
+      if (res.success) {
+        showToast(t("settings.elKeySaveSuccess"), "success");
+        refreshSettingsView();
+      } else {
+        showToast(res.error || t("common.error"), "error");
+      }
+    } catch (e) {
+      showToast(t("common.error") + ": " + e.message, "error");
     }
-  } catch (e) {
-    showToast(t("common.error") + ": " + e.message, "error");
-  }
+  });
 }
 
 async function elevenlabsToggleAction(enabled) {
