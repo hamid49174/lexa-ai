@@ -7,6 +7,7 @@
 // ── PRODUCTIVITY VIEW ────────────────────────────
 
 const _todoMutationRunning = new Set();
+const _habitMutationRunning = new Set();
 
 function productivityLocale() {
   try {
@@ -54,6 +55,23 @@ function setTodoRowBusy(triggerBtn, busy) {
     button.disabled = Boolean(busy);
     if (busy) button.setAttribute("aria-busy", "true");
     else button.removeAttribute("aria-busy");
+  });
+}
+
+function setHabitRowBusy(triggerBtn, busy) {
+  const row = triggerBtn?.closest?.(".habit-item");
+  if (row) row.setAttribute("aria-busy", busy ? "true" : "false");
+  const buttons = row ? row.querySelectorAll("button") : (triggerBtn ? [triggerBtn] : []);
+  buttons.forEach((button) => {
+    if (busy) {
+      button.dataset.lexaWasDisabled = button.disabled ? "true" : "false";
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      return;
+    }
+    button.disabled = button.dataset.lexaWasDisabled === "true";
+    delete button.dataset.lexaWasDisabled;
+    button.removeAttribute("aria-busy");
   });
 }
 
@@ -150,7 +168,7 @@ function createHabitItem(habit) {
   logBtn.disabled = Boolean(habit?.today_done);
   logBtn.title = t("productivity.logHabitLabel", { name });
   logBtn.setAttribute("aria-label", t("productivity.logHabitLabel", { name }));
-  logBtn.addEventListener("click", () => logHabit(name));
+  logBtn.addEventListener("click", () => logHabit(name, logBtn));
 
   const deleteBtn = document.createElement("button");
   deleteBtn.type = "button";
@@ -158,7 +176,7 @@ function createHabitItem(habit) {
   deleteBtn.textContent = "\u2715";
   deleteBtn.title = t("productivity.deleteHabitLabel", { name });
   deleteBtn.setAttribute("aria-label", t("productivity.deleteHabitLabel", { name }));
-  deleteBtn.addEventListener("click", () => deleteHabit(name));
+  deleteBtn.addEventListener("click", () => deleteHabit(name, deleteBtn));
 
   actions.append(logBtn, deleteBtn);
   item.append(info, progressBar, actions);
@@ -920,32 +938,58 @@ function createHabit() {
   nameInput.focus();
 }
 
-async function logHabit(name) {
-  await window.lexa.habitLog(name);
-  showToast(t("habits.logged", {name}), "success");
-  // Check for streak milestones
+async function logHabit(name, triggerBtn) {
+  const key = String(name || "");
+  if (!key || _habitMutationRunning.has(key)) return;
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  _habitMutationRunning.add(key);
+  setHabitRowBusy(triggerBtn, true);
   try {
-    const habitsData = await window.lexa.habits();
-    const h = (habitsData.habits || []).find(x => x.name === name);
-    if (h) {
-      const streak = parseInt(h.streak) || 0;
-      const milestones = [7, 14, 21, 30, 60, 100, 365];
-      if (milestones.includes(streak)) {
-        playBeep("pomodoro");
-        showToast(t("habits.streakMilestone", {streak, name}), "success", 6000);
-        sendNotification("Lexa \uD83C\uDF89", t("productivity.streakNotification", {streak, name}));
+    await window.lexa.habitLog(name);
+    showToast(t("habits.logged", {name}), "success");
+    // Check for streak milestones
+    try {
+      const habitsData = await window.lexa.habits();
+      const h = (habitsData.habits || []).find(x => x.name === name);
+      if (h) {
+        const streak = parseInt(h.streak) || 0;
+        const milestones = [7, 14, 21, 30, 60, 100, 365];
+        if (milestones.includes(streak)) {
+          playBeep("pomodoro");
+          showToast(t("habits.streakMilestone", {streak, name}), "success", 6000);
+          sendNotification("Lexa \uD83C\uDF89", t("productivity.streakNotification", {streak, name}));
+        }
       }
-    }
-  } catch (e) { console.warn("[Productivity] Failed to check habit streak:", e.message || e); }
-  refreshHabits();
-  refreshProdStats();
+    } catch (e) { console.warn("[Productivity] Failed to check habit streak:", e.message || e); }
+    refreshHabits();
+    refreshProdStats();
+  } catch (e) {
+    console.warn("[Productivity] Failed to log habit:", e.message || e);
+    showToast(t("toast.executionError"), "error", 2200);
+  } finally {
+    _habitMutationRunning.delete(key);
+    if (triggerBtn?.isConnected) setHabitRowBusy(triggerBtn, false);
+  }
 }
 
-async function deleteHabit(name) {
-  await window.lexa.habitDelete(name);
-  showToast(t("habits.deleted"), "info");
-  refreshHabits();
-  refreshProdStats();
+async function deleteHabit(name, triggerBtn) {
+  const key = String(name || "");
+  if (!key || _habitMutationRunning.has(key)) return;
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  _habitMutationRunning.add(key);
+  setHabitRowBusy(triggerBtn, true);
+  try {
+    await window.lexa.habitDelete(name);
+    showToast(t("habits.deleted"), "info");
+    refreshHabits();
+    refreshProdStats();
+  } catch (e) {
+    console.warn("[Productivity] Failed to delete habit:", e.message || e);
+    showToast(t("toast.executionError"), "error", 2200);
+  } finally {
+    _habitMutationRunning.delete(key);
+    if (triggerBtn?.isConnected) setHabitRowBusy(triggerBtn, false);
+  }
 }
 
 // ── TIME TRACKING & FOCUS ──
