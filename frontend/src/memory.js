@@ -28,6 +28,14 @@ function bindMemoryCardAction(el, handler, label) {
 
 const MEMORY_GRAPH_NS = "http://www.w3.org/2000/svg";
 let memoryGraphState = null;
+let _clipboardHistoryRevealRunning = false;
+
+function setMemoryActionBusy(button, busy) {
+  if (!button) return;
+  button.disabled = Boolean(busy);
+  if (busy) button.setAttribute("aria-busy", "true");
+  else button.removeAttribute("aria-busy");
+}
 
 function memoryGraphHash(value) {
   let hash = 2166136261;
@@ -919,15 +927,26 @@ function renderClipboardPrivacyPrompt() {
   button.type = "button";
   button.className = "action-btn mt-2";
   button.textContent = t("memory.revealClipboardHistory");
-  button.addEventListener("click", revealClipboardHistory);
+  button.addEventListener("click", (event) => revealClipboardHistory(event.currentTarget));
   card.appendChild(hint);
   card.appendChild(button);
   cbList.replaceChildren(card);
 }
 
-async function revealClipboardHistory() {
-  const cbData = await window.lexa.clipboardHistory();
-  renderClipboardEntries(cbData.entries || []);
+async function revealClipboardHistory(triggerBtn) {
+  if (_clipboardHistoryRevealRunning) return;
+  _clipboardHistoryRevealRunning = true;
+  setMemoryActionBusy(triggerBtn, true);
+  try {
+    const cbData = await window.lexa.clipboardHistory();
+    renderClipboardEntries(Array.isArray(cbData?.entries) ? cbData.entries : []);
+  } catch (e) {
+    console.warn("[Memory] Failed to reveal clipboard history:", e.message || e);
+    showToast(t("toast.executionError"), "error", 2200);
+  } finally {
+    _clipboardHistoryRevealRunning = false;
+    if (triggerBtn?.isConnected) setMemoryActionBusy(triggerBtn, false);
+  }
 }
 
 async function clearClipboardHistory() {
