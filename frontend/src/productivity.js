@@ -9,6 +9,8 @@
 const _todoMutationRunning = new Set();
 const _habitMutationRunning = new Set();
 let _pomodoroMutationRunning = false;
+let _timeTrackingToggleRunning = false;
+let _focusModeToggleRunning = false;
 
 function productivityLocale() {
   try {
@@ -81,6 +83,15 @@ function setPomodoroActionBusy(button, busy) {
   button.disabled = Boolean(busy);
   if (busy) button.setAttribute("aria-busy", "true");
   else button.removeAttribute("aria-busy");
+}
+
+function setProductivityActionButtonsBusy(selector, busy) {
+  document.querySelectorAll(selector).forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) return;
+    button.disabled = Boolean(busy);
+    if (busy) button.setAttribute("aria-busy", "true");
+    else button.removeAttribute("aria-busy");
+  });
 }
 
 function renderTimeTrackingLiveStatus(target, label, timeText, currentApp) {
@@ -1049,10 +1060,12 @@ async function refreshTimeTracking() {
     if (ttBtn) {
       ttBtn.textContent = ttStatus.running ? t("productivity.trackingStop") : t("productivity.trackingStart");
       ttBtn.classList.toggle("action-btn-danger", Boolean(ttStatus.running));
+      setProductivityActionButtonsBusy("#time-tracking-btn, button[data-action=\"toggleTimeTracking\"]", _timeTrackingToggleRunning);
     }
     if (focusBtn) {
       focusBtn.textContent = focusStatus.active ? t("productivity.focusOff2") : t("productivity.focusModeBtn");
       focusBtn.classList.toggle("action-btn-danger", Boolean(focusStatus.active));
+      setProductivityActionButtonsBusy("#focus-mode-btn, button[data-action=\"toggleFocusMode\"]", _focusModeToggleRunning);
     }
     // Focus mode banner in chat view
     const focusBanner = document.getElementById("focus-mode-banner");
@@ -1093,6 +1106,10 @@ async function refreshTimeTracking() {
 }
 
 async function toggleTimeTracking() {
+  if (_timeTrackingToggleRunning) return;
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  _timeTrackingToggleRunning = true;
+  setProductivityActionButtonsBusy("#time-tracking-btn, button[data-action=\"toggleTimeTracking\"]", true);
   try {
     const status = await window.lexa.timeTracking();
     if (status.running) {
@@ -1102,12 +1119,21 @@ async function toggleTimeTracking() {
       await window.lexa.timeTrackingStart();
       showToast(t("timeTracking.started"), "success");
     }
-    refreshTimeTracking();
-    refreshProdStats();
-  } catch (e) { console.warn("[Productivity] Failed to toggle time tracking:", e.message || e); }
+    await Promise.allSettled([refreshTimeTracking(), refreshProdStats()]);
+  } catch (e) {
+    console.warn("[Productivity] Failed to toggle time tracking:", e.message || e);
+    showToast(t("toast.executionError"), "error", 2200);
+  } finally {
+    _timeTrackingToggleRunning = false;
+    setProductivityActionButtonsBusy("#time-tracking-btn, button[data-action=\"toggleTimeTracking\"]", false);
+  }
 }
 
 async function toggleFocusMode() {
+  if (_focusModeToggleRunning) return;
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  _focusModeToggleRunning = true;
+  setProductivityActionButtonsBusy("#focus-mode-btn, button[data-action=\"toggleFocusMode\"]", true);
   try {
     const status = await window.lexa.focusStatus();
     if (status.active) {
@@ -1117,7 +1143,12 @@ async function toggleFocusMode() {
       await window.lexa.focusOn();
       showToast(t("focus.enabled"), "success");
     }
-    refreshTimeTracking();
-    refreshProdStats();
-  } catch (e) { console.warn("[Productivity] Failed to toggle focus mode:", e.message || e); }
+    await Promise.allSettled([refreshTimeTracking(), refreshProdStats()]);
+  } catch (e) {
+    console.warn("[Productivity] Failed to toggle focus mode:", e.message || e);
+    showToast(t("toast.executionError"), "error", 2200);
+  } finally {
+    _focusModeToggleRunning = false;
+    setProductivityActionButtonsBusy("#focus-mode-btn, button[data-action=\"toggleFocusMode\"]", false);
+  }
 }
