@@ -259,6 +259,34 @@ function bindCommandItemAction(el, handler, label) {
   el.addEventListener("click", handler);
 }
 
+async function copyCommandName(btn, name) {
+  if (btn?.disabled) return;
+  const commandName = String(name || "").trim();
+  if (!commandName) return;
+  if (btn) {
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+  }
+  try {
+    if (typeof copyTextToClipboard === "function") {
+      await copyTextToClipboard(commandName);
+    } else if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(commandName);
+    } else {
+      throw new Error("clipboard_unavailable");
+    }
+    showToast(t("commands.copied", { name: commandName }), "success", 2000);
+  } catch (e) {
+    console.warn("[Commands] Copy command failed:", e.message || e);
+    showToast(t("toast.copyFailed") || "Kopieren fehlgeschlagen", "warning", 2000);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+    }
+  }
+}
+
 function createCommandEmptyState(message) {
   const emptyDiv = document.createElement("div");
   emptyDiv.className = "empty-state";
@@ -370,7 +398,7 @@ function buildCmdItem(c, query, statusLabel) {
   }, t("cmd.insertCommandLabel", { name: c.name }));
   copyBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    navigator.clipboard?.writeText(c.name).then(() => showToast(t("commands.copied", {name: c.name}), "success", 2000));
+    copyCommandName(copyBtn, c.name);
   });
 
   return item;
