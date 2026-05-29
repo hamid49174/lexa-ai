@@ -54,6 +54,7 @@ let _sttEngineChangeRunning = false;
 let _settingsSecretActionRunning = false;
 let _hermesGatewayAutostartRunning = false;
 let _hermesGatewayAutostartLastPayload = null;
+let _settingsRefreshSeq = 0;
 const SETTINGS_SECRET_ACTIONS = [
   "setDeepgramKey",
   "deleteDeepgramKey",
@@ -92,6 +93,7 @@ async function runSettingsSecretAction(actionFn) {
 
 // ── SETTINGS VIEW ────────────────────────────────
 async function refreshSettingsView() {
+  const requestId = ++_settingsRefreshSeq;
   // Desktop settings (work even when backend is offline)
   try {
     const autostartToggle = document.getElementById("autostart-toggle");
@@ -129,6 +131,7 @@ async function refreshSettingsView() {
     window.lexa.diagnostics(),
     window.lexa.hermesGatewayAutostartStatus?.(),
   ]);
+  if (requestId !== _settingsRefreshSeq || !LexaState.get("backendOnline")) return;
 
   const ai = aiRes.status === "fulfilled" ? aiRes.value : { groq: {}, openai: {}, gemini: {}, anthropic: {} };
   const voice = voiceRes.status === "fulfilled" ? voiceRes.value : { tts: {}, stt: {} };
