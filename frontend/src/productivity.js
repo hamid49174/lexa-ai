@@ -12,6 +12,7 @@ let _todoCreateRunning = false;
 let _habitCreateRunning = false;
 let _todoExportRunning = false;
 let _todoRefreshSeq = 0;
+let _habitRefreshSeq = 0;
 let _pomodoroMutationRunning = false;
 let _timeTrackingToggleRunning = false;
 let _focusModeToggleRunning = false;
@@ -950,7 +951,9 @@ async function stopPomodoro(triggerBtn) {
 
 async function refreshHabits() {
   try {
+    const refreshSeq = ++_habitRefreshSeq;
     const data = await window.lexa.habits();
+    if (refreshSeq !== _habitRefreshSeq) return;
     const list = document.getElementById("habits-list");
     if (!list) return;
     const habits = Array.isArray(data.habits) ? data.habits : [];
