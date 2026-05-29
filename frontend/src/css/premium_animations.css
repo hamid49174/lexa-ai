@@ -1057,6 +1057,31 @@ body {
   transform: translate(-50%, 0) !important;
 }
 
+.user-message .msg-copy-btn::after,
+.user-message .msg-action-btn::after {
+  top: calc(100% + 6px);
+  bottom: auto;
+}
+
+.user-message .msg-del-btn::after {
+  left: auto;
+  right: 0;
+  transform: translateY(-2px);
+}
+
+.user-message .msg-del-btn:hover::after,
+.user-message .msg-del-btn:focus::after,
+.user-message .msg-del-btn:focus-visible::after {
+  transform: translateY(0) !important;
+}
+
+.message .msg-del-btn:hover,
+.message .msg-del-btn:focus-visible {
+  border-color: rgba(248, 113, 113, 0.42);
+  background: rgba(239, 68, 68, 0.2);
+  color: rgba(254, 226, 226, 0.98);
+}
+
 .message .msg-more-menu .msg-thumbs-btn:hover,
 .message .msg-more-menu .msg-action-btn:hover,
 .message .msg-more-menu .msg-thumbs-btn:focus-visible,
