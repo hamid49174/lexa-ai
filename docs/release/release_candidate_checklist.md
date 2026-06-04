@@ -163,7 +163,7 @@ PublicRelease additionally requires release signing, installer proof, website de
 
 ## 16. Phase 5A External Blocker Operations
 
-- [ ] Remote CI is either proven with a GitHub Actions run URL and commit SHA, or explicitly marked external because no GitHub remote exists.
+- [ ] Remote CI is proven with a GitHub Actions run URL and commit SHA, or explicitly marked external because the configured remote has not run yet.
 - [ ] VM installer install/uninstall is either proven in a disposable VM/Sandbox, or explicitly marked not yet proven.
 - [ ] Signing checklist is complete without committing certificates, keys, passphrases, or signing secrets.
 - [ ] Website remains `static-external` for InternalRC, with PublicRC blocked until public config values and Stripe.js/CSP approval are recorded.

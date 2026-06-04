@@ -33,11 +33,36 @@ jobs:
       - name: Build backend bundle
         run: python build_backend.py
 
+      - name: Require Windows signing secrets
+        shell: pwsh
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CSC_LINK) -or [string]::IsNullOrWhiteSpace($env:CSC_KEY_PASSWORD)) {
+            throw "Windows signing secrets are required for release tags."
+          }
+
       - name: Build Electron app
         working-directory: frontend
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
         run: |
-          npm install
+          npm ci
           npm run build
+
+      - name: Verify installer signature
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -LiteralPath dist -Filter "*.exe" -File | Sort-Object Length -Descending | Select-Object -First 1
+          if (-not $installer) {
+            throw "No Windows installer found in dist."
+          }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+          if ($signature.Status -ne "Valid") {
+            throw "Release installer is not signed with a valid Authenticode signature. Status: $($signature.Status)"
+          }
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

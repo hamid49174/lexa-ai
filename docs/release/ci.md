@@ -2,15 +2,17 @@
 
 Phase 4A adds CI-ready quality gates without deployment, uploads, secrets, or external model/API calls. Phase 4B adds a local CI core mode and clean-clone smoke so the workflow is closer to a fresh runner.
 
-Phase 4D status: no remote GitHub Actions run has been proven from this workspace because the local repository has no configured GitHub remote. The workflow is therefore CI-ready and locally simulated, but remote CI remains "not yet remotely proven" until a branch is pushed to GitHub and the workflow run is inspected.
+Phase 4D status: no remote GitHub Actions run had been proven from this workspace because the local repository did not have a configured GitHub remote. The workflow was CI-ready and locally simulated, but remote CI remained "not yet remotely proven" until a branch was pushed to GitHub and the workflow run was inspected.
 
-Phase 4E status: `git remote -v` still returns no configured remote in this workspace. Remote CI is therefore not executable from here without a manual GitHub repository setup step. `scripts\run_quality_gates.ps1 -Mode CI` remains the local CI-core proof, but PublicRC/PublicRelease stay blocked until GitHub Actions has actually run remotely.
+Phase 4E status: `scripts\run_quality_gates.ps1 -Mode CI` remains the local CI-core proof, but PublicRC/PublicRelease stay blocked until GitHub Actions has actually run remotely.
 
-Phase 4F status: `scripts\check_remote_ci_readiness.ps1` now performs the local readiness check. It verifies GitHub remote presence, workflow existence, absence of secret references, absence of release artifact uploads, absence of user-data paths, and local CI/RC script support. In this workspace it reports `RemoteCIReady: no` because no GitHub remote is configured.
+Phase 4F status: `scripts\check_remote_ci_readiness.ps1` performs the local readiness check. It verifies GitHub remote presence, workflow existence, absence of secret references, absence of release artifact uploads, absence of user-data paths, and local CI/RC script support.
 
-Phase 5A status: remote CI is not ambiguous anymore. It is an external blocker because `git remote -v` has no configured GitHub remote in this workspace. The repository contains the workflow and local CI proof, but PublicRC stays blocked until a GitHub repository exists, the branch is pushed, and the workflow result is recorded.
+Phase 5A status: remote CI is not ambiguous anymore. The repository contains the workflow and local CI proof, but PublicRC stays blocked until the branch is pushed and the workflow result is recorded.
 
-Phase 5B status: remote CI is still not proven. The correct next action is a user/external step, not a code patch: create or choose the GitHub repository, set the remote, push the current branch, run the workflow, and record the run URL plus commit SHA. No upload, release action, secret, or external service credential is added by Lexa release hardening.
+Phase 5B status: remote CI is still not proven. The correct next action is a user/external step, not another local code patch: push the current branch, run the workflow, and record the run URL plus commit SHA. No release action, secret, or external service credential is added by Lexa release hardening.
+
+Phase 5C status: the local `origin` remote is configured as `https://github.com/alexsprogis/lexa-ai.git`. `RemoteCIReady: yes` means the local repository is ready to prove CI remotely; it does not mean GitHub Actions has already run.
 
 ## GitHub Actions
 
@@ -64,19 +66,18 @@ Remote CI is considered proven only when all of these are true:
 - the run completes without secrets, deployment, uploads, or user-data dependencies
 - the run result is linked or recorded in release notes
 
-In this workspace there is currently no GitHub remote, so PublicRC and PublicRelease remain blocked by remote-CI proof.
+In this workspace the GitHub remote is configured, but PublicRC and PublicRelease remain blocked by remote-CI proof until a real GitHub Actions run URL and commit SHA are recorded.
 
 ## Manual Remote CI Setup
 
 To prove remote CI without adding secrets or deployment:
 
-1. Create or select the GitHub repository for Lexa.
-2. Add the remote locally, for example `git remote add origin <github-url>`.
-3. Push the current branch.
-4. Open the GitHub Actions tab and run or inspect `.github/workflows/quality-gates.yml`.
-5. Confirm the run uses no secrets, no deployment, no artifact upload, and no user-data paths.
-6. Record the run URL and commit SHA in release notes.
-7. Re-run `scripts\run_release_candidate_check.ps1 -Target PublicRC`.
+1. Confirm `origin` points to `https://github.com/alexsprogis/lexa-ai.git`.
+2. Push the current branch.
+3. Open the GitHub Actions tab and run or inspect `.github/workflows/quality-gates.yml`.
+4. Confirm the run uses no secrets, no deployment, no artifact upload, and no user-data paths.
+5. Record the run URL and commit SHA in release notes.
+6. Re-run `scripts\run_release_candidate_check.ps1 -Target PublicRC`.
 
 Record these proof fields in release notes or a release review issue:
 
@@ -90,7 +91,7 @@ Record these proof fields in release notes or a release review issue:
 Phase 5B proof owner split:
 
 - Agent can keep the workflow, readiness script, local CI mode, and RC checks safe.
-- User must configure the GitHub remote and approve any push.
+- User must approve any push and confirm the GitHub Actions run.
 - External infrastructure must run GitHub Actions and provide the workflow result.
 - PublicRC remains blocked until the remote proof fields above are recorded.
 
@@ -109,5 +110,5 @@ Readiness script expected outcomes:
 - Packaging smoke defaults to config and artifact scanning. Use `scripts\run_packaging_smoke.ps1 -Build` for an isolated local installer build attempt.
 - `CICore` is intended for CI-safe checks. `LocalFull` includes local Electron/OS/Hermes/Website gates. `StrictRC` is for a fuller local release proof, including package build and installer requirement.
 - Existing `release.yml` remains a tag-triggered release workflow. Phase 4A does not run it and does not publish anything.
-- Remote CI is not yet proven in this workspace because no Git remote is configured.
+- Remote CI is not yet proven in this workspace until the configured GitHub remote has a recorded Actions run for the current commit.
 - If OS, Hermes, or Website paths are absent on CI, the corresponding local-only gate must warn or skip explicitly rather than silently pretending to validate external data.

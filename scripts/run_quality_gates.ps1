@@ -60,6 +60,21 @@ $PhaseGateTests = @(
   "tests/test_synthetic_trace_generator.py",
   "tests/test_router_stripe_security.py"
 )
+$BackendCoverageTests = @(
+  "tests/test_security.py",
+  "tests/test_tool_registry_confirmation.py",
+  "tests/test_local_auth.py",
+  "tests/test_router_backup.py",
+  "tests/test_router_rate_limits.py",
+  "tests/test_main_v1_surface_static.py",
+  "tests/test_router_stripe_security.py",
+  "tests/test_backend_data_dir_static.py",
+  "tests/test_context_bus.py",
+  "tests/test_error_response.py",
+  "tests/test_agent_trace_sampling.py",
+  "tests/test_lexa_system_answer.py",
+  "tests/test_workflow_templates.py"
+)
 $RiskyPaths = @(
   "personal_os",
   "tmp",
@@ -233,6 +248,15 @@ function Invoke-PythonPhaseGate {
   Invoke-Gate "python phase gate" { & $Python -m pytest -q @PhaseGateTests }
 }
 
+function Invoke-BackendCoverageSmoke {
+  if (!(Test-Path $Python)) {
+    throw "Python venv not found at $Python"
+  }
+  Invoke-Gate "backend coverage smoke" {
+    & $Python -m pytest -q --cov=backend --cov-report=term-missing:skip-covered @BackendCoverageTests
+  }
+}
+
 function Invoke-FullPython {
   if (!(Test-Path $Python)) {
     throw "Python venv not found at $Python"
@@ -299,6 +323,7 @@ if ($Mode -eq "Eval") {
 }
 
 Invoke-PythonPhaseGate
+Invoke-BackendCoverageSmoke
 Invoke-EvalSuite
 Invoke-VendorAssetCheck
 Invoke-JsStaticGate

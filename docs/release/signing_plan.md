@@ -1,13 +1,14 @@
 # Windows Signing Plan
 
-Phase 4D status: Lexa can build an Electron installer locally, but the installer is unsigned. Unsigned installers are acceptable for development smoke checks and InternalRC review, not for PublicRC or PublicRelease.
+Phase 4D status: Lexa can build an Electron installer locally, but the installer is unsigned unless Windows signing credentials are supplied from a protected secret store. Unsigned installers are acceptable for development smoke checks and InternalRC review, not for PublicRC or PublicRelease.
 
 ## Current State
 
 - Electron packaging is configured through `frontend/electron-builder.json`.
 - Local packaging smoke can create an NSIS installer.
 - Installer smoke verifies artifact presence, size, and forbidden content.
-- Code signing is not configured.
+- Electron Builder is configured to sign/edit the Windows executable when signing credentials are supplied through the environment.
+- The tag-based GitHub release workflow requires Windows signing secrets and verifies the Authenticode signature before creating a GitHub Release.
 - No certificate, key, password, or signing secret exists in the repository.
 - Phase 4E prepares the signing gates without adding keys or certificates.
 
@@ -59,7 +60,7 @@ Before a public release:
 5. The installer must be signed.
 6. The signed installer must be scanned for user data and secrets.
 
-Until then, signing remains a release-review warning for InternalRC and a blocking gate for PublicRC/PublicRelease.
+Until then, missing real signing credentials remain a release-review warning for InternalRC and a blocking gate for PublicRC/PublicRelease.
 
 ## Script Support
 
@@ -113,3 +114,19 @@ Still forbidden:
 - `.pfx`, `.p12`, `.pem`, `.key`, `.pvk`, private `.crt`/`.cer`, keystores, passphrases, signing env files, or signtool password commands in Git
 - signing from an unprotected branch
 - release signing before artifact scans and installer VM proof are complete
+
+## Phase 5C Repository Signing Support
+
+Repository-side signing support is now ready without committing secrets:
+
+- `frontend/electron-builder.json` keeps `forceCodeSigning` disabled for development builds, but enables `signAndEditExecutable`.
+- `.github/workflows/release.yml` maps protected GitHub secrets into `CSC_LINK` and `CSC_KEY_PASSWORD` only for tag releases.
+- The release workflow fails before release creation if signing secrets are missing.
+- The release workflow verifies `Get-AuthenticodeSignature` returns `Valid` for the built installer before publishing.
+- The normal CI workflow no longer uploads unsigned installer artifacts; signed public artifacts are produced only through the release workflow.
+
+Still external:
+
+- choose the certificate/provider
+- store `WINDOWS_CSC_LINK` and `WINDOWS_CSC_KEY_PASSWORD` in protected secrets
+- run the tag workflow and record the signed artifact proof

@@ -33,3 +33,29 @@ def test_electron_builder_excludes_backend_runtime_artifacts():
     assert "!**/audit.log" in filters
     assert "!**/bridge-audit.log" in filters
     assert "!**/lexa_memory.db*" in filters
+
+
+def test_electron_builder_allows_secure_release_signing_without_forcing_dev_signing():
+    config_text = (REPO_ROOT / "frontend" / "electron-builder.json").read_text(encoding="utf-8")
+    config = json.loads(config_text)
+    win_config = config["win"]
+
+    assert win_config["signAndEditExecutable"] is True
+    assert win_config["forceCodeSigning"] is False
+    assert ".pfx" not in config_text.lower()
+    assert ".p12" not in config_text.lower()
+    assert "csc_key_password" not in config_text.lower()
+
+
+def test_release_workflow_requires_and_verifies_signed_installer():
+    release_workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    ci_workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "WINDOWS_CSC_LINK" in release_workflow
+    assert "WINDOWS_CSC_KEY_PASSWORD" in release_workflow
+    assert "Require Windows signing secrets" in release_workflow
+    assert "Get-AuthenticodeSignature" in release_workflow
+    assert "Status -ne \"Valid\"" in release_workflow
+    assert "npm ci" in release_workflow
+    assert "actions/upload-artifact" not in ci_workflow
+    assert "run_packaging_smoke.ps1 -ArtifactRoot dist" in ci_workflow

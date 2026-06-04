@@ -37,7 +37,7 @@
     ],
     "icon": "src/icon.ico",
     "forceCodeSigning": false,
-    "signAndEditExecutable": false
+    "signAndEditExecutable": true
   },
   "nsis": {
     "oneClick": false,

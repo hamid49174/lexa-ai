@@ -1,7 +1,8 @@
 param(
   [string]$RepoRoot = "",
   [switch]$Build,
-  [string]$ArtifactRoot = ""
+  [string]$ArtifactRoot = "",
+  [switch]$KeepArtifactRoot
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,9 +26,12 @@ $forbiddenNames = @(".env", "audit.log", "bridge-audit.log", "lexa_memory.db")
 $forbiddenPathRegex = '(?i)(personal_os|hermes_workspace|evals[\\/]+results|tmp[\\/]+agent_traces|lexa_memory\.db|bridge-audit\.log|audit\.log|\.env$|\.env[\\/])'
 $riskyConfigPathRegex = '(?i)((^|[\\/]+)\.env(?=$|["},:\]\s]|\.|[\\/]+)|(^|[\\/]+)\.(netrc|npmrc|pnpmrc|pypirc)(?=$|["},:\]\s])|(^|[\\/]+)\.yarnrc(\.yml)?(?=$|["},:\]\s])|(^|[\\/]+)\.aws[\\/]+(credentials|config)(?=$|["},:\]\s])|(^|[\\/]+)\.azure[\\/]+(accessTokens|azureProfile)\.json(?=$|["},:\]\s])|(^|[\\/]+)(\.config[\\/]+gcloud|\.gcloud)[\\/]+application_default_credentials\.json(?=$|["},:\]\s])|(^|[\\/]+)\.docker[\\/]+config\.json(?=$|["},:\]\s])|(^|[\\/]+)\.kube[\\/]+config(?=$|["},:\]\s])|(^|[\\/]+)(credentials|secrets)\.(json|ya?ml|toml|ini|conf)(?=$|["},:\]\s])|(^|[\\/]+)client_secret[^\\/]*\.json(?=$|["},:\]\s])|(^|[\\/]+)service[-_]?account[^\\/]*\.json(?=$|["},:\]\s])|(^|[\\/]+)\.ssh[\\/]+(id_dsa|id_ecdsa|id_ed25519|id_rsa)(?=$|["},:\]\s])|(^|[\\/]+)(id_dsa|id_ecdsa|id_ed25519|id_rsa)(?=$|["},:\]\s])|(^|[\\/]+)pip\.(conf|ini)(?=$|["},:\]\s])|\.(pfx|p12|pem|ppk|key|pvk|cer|crt|spc|jks|keystore)(?=$|["},:\]\s])|(codesign|code-sign|signing|signtool)[^\\/]*\.(json|ya?ml|toml|ini|conf|txt|env|xml)(?=$|["},:\]\s])|(windows|electron)[_-]?(signing|certificate|cert)[^\\/]*\.(json|ya?ml|toml|ini|conf|txt|env|xml)(?=$|["},:\]\s]))'
 
+$artifactRootWasProvided = -not [string]::IsNullOrWhiteSpace($ArtifactRoot)
+$generatedArtifactRoot = $false
 if (-not $ArtifactRoot) {
   if ($Build) {
     $ArtifactRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("lexa-packaging-smoke-" + [guid]::NewGuid().ToString("N"))
+    $generatedArtifactRoot = $true
   } else {
     $ArtifactRoot = Join-Path $RepoRoot "dist"
   }
@@ -144,6 +148,9 @@ if ($Build) {
   Push-Location $frontendRoot
   try {
     npx.cmd --no-install electron-builder --config electron-builder.json "--config.directories.output=$ArtifactRoot"
+    if ($LASTEXITCODE -ne 0) {
+      throw "electron-builder failed with exit code $LASTEXITCODE"
+    }
   } finally {
     Pop-Location
   }
@@ -153,6 +160,9 @@ if ($Build) {
     throw "Packaged app runtime smoke target not found after build: $packagedApp"
   }
   powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "smoke_packaged.ps1") -AppPath $packagedApp -TimeoutSeconds 45
+  if ($LASTEXITCODE -ne 0) {
+    throw "Packaged runtime smoke failed with exit code $LASTEXITCODE"
+  }
 } else {
   Write-Host "Build execution skipped. Use -Build for an isolated local package build smoke."
 }
@@ -177,4 +187,13 @@ if ($stagedArtifacts.Count -gt 0) {
 }
 Write-Host "ok: no build artifacts are staged"
 Write-Host "Packaging smoke completed. Artifact path: $ArtifactRoot"
+if ($generatedArtifactRoot -and -not $artifactRootWasProvided -and -not $KeepArtifactRoot -and (Test-Path -LiteralPath $ArtifactRoot)) {
+  $tempRoot = [System.IO.Path]::GetTempPath()
+  $resolvedArtifactRoot = (Resolve-Path -LiteralPath $ArtifactRoot).Path
+  if (-not $resolvedArtifactRoot.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to clean generated artifact root outside temp: $resolvedArtifactRoot"
+  }
+  Remove-Item -LiteralPath $resolvedArtifactRoot -Recurse -Force
+  Write-Host "ok: generated artifact root cleaned: $resolvedArtifactRoot"
+}
 exit 0

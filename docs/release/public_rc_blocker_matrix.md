@@ -4,7 +4,7 @@ Phase 4F turned the remaining PublicRC work into explicit blockers, warnings, ow
 
 | Blocker ID | Area | Status | InternalRC impact | PublicRC impact | PublicRelease impact | Why it matters | What is missing | Next concrete step | Owner | Can code help | Needs external prerequisite |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PRC-001 | CI | not proven | warning | blocking | blocking | Remote CI proves the clean repository works outside the local workstation. | No GitHub remote or Actions run is recorded. | Create GitHub repo or remote, push branch, run `.github/workflows/quality-gates.yml`, record run URL and SHA. | user | yes | yes |
+| PRC-001 | CI | not proven | warning | blocking | blocking | Remote CI proves the clean repository works outside the local workstation. | GitHub remote is configured, but no Actions run is recorded for the current commit. | Push branch, run `.github/workflows/quality-gates.yml`, record run URL and SHA. | user | yes | yes |
 | PRC-002 | Installer | not proven | warning | blocking | blocking | Installer install/uninstall must be proven outside the productive machine. | Disposable VM or Windows Sandbox execution evidence. | Run `scripts\run_installer_smoke.ps1 -InstallerPath <installer> -Install -Uninstall -VMOnly` inside an approved VM flow. | user | yes | yes |
 | PRC-003 | Signing | blocked | warning | blocking | blocking | Unsigned installers create trust and SmartScreen problems. | Code signing certificate and secure signing process. | Obtain certificate, configure signing outside Git, rerun packaging and installer smoke. | user / external | yes | yes |
 | PRC-004 | Website | partly proven | warning | blocking | blocking | Website release needs reproducible validation and real public runtime config. | Package-based static lint and ignored runtime-config path exist, but real public Supabase/Stripe values are not supplied. | Create `config.runtime.js` from `config.runtime.example.js` outside Git and rerun website smoke for the public target. | user | yes | partly |
@@ -20,7 +20,7 @@ Phase 4F turned the remaining PublicRC work into explicit blockers, warnings, ow
 
 | Blocker | Category | Phase 5B result | Next action |
 | --- | --- | --- | --- |
-| Remote GitHub Actions proof | External infrastructure needed | Not proven because this repository has no GitHub remote configured. | User creates/chooses GitHub repo, sets remote, pushes branch, runs Actions, records run URL and SHA. |
+| Remote GitHub Actions proof | External infrastructure needed | GitHub remote is configured, but no remote Actions run has been recorded for the current commit. | User pushes branch, runs Actions, records run URL and SHA. |
 | VM installer install/uninstall proof | User/external execution needed | Not proven by this workspace. Installer smoke can print readiness and plan; it does not install into the productive machine. | Run `scripts\run_installer_smoke.ps1 -InstallerPath <installer> -Install -Uninstall -VMOnly` only inside an approved disposable VM or Windows Sandbox. |
 | Windows installer signing | External certificate decision needed | Prepared, not solved. No certificate, key, passphrase, or signing secret is present or allowed in Git. | Choose certificate/provider, store secrets outside Git, configure signing, rebuild, verify publisher. |
 | Website release target | Partly solved locally | Website remains `static-external`, but a minimal website-local package/lint target, Supabase vendor bundle, and ignored runtime-config path now exist. | Supply `config.runtime.js` outside Git and decide whether a separate website repo/CI is needed before PublicRC. |
@@ -64,7 +64,7 @@ No external proof was created by this local snapshot. PRC-001, PRC-002, PRC-003,
 
 ## Phase 5A Decisions
 
-- Remote CI remains external because `git remote -v` has no configured GitHub remote in this workspace.
+- Remote CI remains external because the configured GitHub remote still needs a recorded Actions run for the current commit.
 - VM installer install/uninstall remains external because this repository cannot prove an isolated Windows VM run by itself.
 - Signing remains external because no certificate, key, passphrase, or signing secret is present or allowed in Git.
 - Website remains `static-external` for InternalRC. PublicRC remains blocked until ignored `config.runtime.js` public values and Stripe.js/CSP approval are recorded.
@@ -73,7 +73,7 @@ No external proof was created by this local snapshot. PRC-001, PRC-002, PRC-003,
 
 ## Phase 5B Status
 
-- Remote CI remains an external/user blocker: no GitHub remote is configured, so no remote Actions run can be triggered from this workspace without upload/push approval.
+- Remote CI remains an external/user blocker: the GitHub remote is configured, but no remote Actions run is recorded yet and push/run approval is still required.
 - VM installer proof remains not proven: the script can report VM/Sandbox readiness and print the proof plan, but no real install/uninstall was executed.
 - Signing remains blocked by external certificate and secret-store decisions. InternalRC can warn; PublicRC/PublicRelease require a signed installer.
 - Website remains `static-external` with local package/lint proof; PublicRC remains blocked until ignored `config.runtime.js` values and Stripe.js/CSP approval are recorded.
@@ -85,7 +85,7 @@ No external proof was created by this local snapshot. PRC-001, PRC-002, PRC-003,
 
 Some blockers cannot be solved by patching this repository alone:
 
-- GitHub remote and Actions execution require repository access.
+- GitHub Actions execution requires repository access and push/run approval.
 - VM installer proof requires a disposable Windows VM or Sandbox.
 - Signing requires certificate procurement and secure secret handling.
 - OS cleanup requires human review of private external data.

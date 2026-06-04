@@ -36,6 +36,9 @@ def test_quality_gates_include_release_script_tests_and_startup_smoke():
     assert "test_start_launcher_static.py" in src
     assert "test_fastapi_lifespan.py" in src
     assert "test_router_stripe_security.py" in src
+    assert "test_workflow_templates.py" in src
+    assert "Invoke-BackendCoverageSmoke" in src
+    assert "--cov=backend" in src
     assert "check_risky_artifacts.ps1" in src
     assert "sync-vendor.cjs" in src
     assert "electron_startup_health_smoke.js" in src
@@ -302,7 +305,7 @@ def test_dependency_repro_discovers_env_and_desktop_os_roots():
     assert "07_Automations\\Workflows\\raw-inbox-worker" in src
 
 
-def test_packaging_smoke_blocks_forbidden_content_without_cleanup():
+def test_packaging_smoke_blocks_forbidden_content_and_guards_temp_cleanup():
     src = read("scripts/run_packaging_smoke.ps1")
 
     assert "electron-builder.json" in src
@@ -310,7 +313,10 @@ def test_packaging_smoke_blocks_forbidden_content_without_cleanup():
     assert "lexa_memory.db" in src
     assert "bridge-audit.log" in src
     assert "npx.cmd --no-install electron-builder" in src
-    assert "Remove-Item" not in src
+    assert "[switch]$KeepArtifactRoot" in src
+    assert "StartsWith($tempRoot" in src
+    assert "Refusing to clean generated artifact root outside temp" in src
+    assert "Remove-Item -LiteralPath $resolvedArtifactRoot -Recurse -Force" in src
 
 
 def test_installer_smoke_guards_explicit_installer_paths():

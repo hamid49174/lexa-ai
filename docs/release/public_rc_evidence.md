@@ -8,7 +8,7 @@ This ledger records local evidence only. It does not prove external PublicRC blo
 - Branch: `codex/lexa-stabilization-review`
 - Latest full internal regression snapshot commit under test: `b876228b08b2106193b2fb10a9a71ec58463e41c`
 - Baseline commit inspected before PublicRC hardening: `672d2e714595f4c24d7115bb757fba03f3e85faf`
-- GitHub remote: not configured in this workspace
+- GitHub remote at snapshot time: not configured. Current workspace now has `origin` set to `https://github.com/alexsprogis/lexa-ai.git`; remote CI still needs a recorded Actions run URL and commit SHA.
 
 ## Full InternalRC Regression Snapshot
 
@@ -19,7 +19,7 @@ This snapshot was run locally against commit `d77db0ea8e7fb402c7ec33660048fae511
 | Git status | `git status --short` | clean before snapshot |
 | Branch | `git branch --show-current` | `codex/lexa-stabilization-review` |
 | Commit under test | `git rev-parse HEAD` | `d77db0ea8e7fb402c7ec33660048fae511ad4936` |
-| Remote CI readiness | `git remote -v`; `powershell -ExecutionPolicy Bypass -File scripts\check_remote_ci_readiness.ps1` | no GitHub remote configured; `RemoteCIReady: no` |
+| Remote CI readiness | `git remote -v`; `powershell -ExecutionPolicy Bypass -File scripts\check_remote_ci_readiness.ps1` | historical snapshot: remote was not configured; current workspace must recheck readiness before PublicRC |
 | Full Python suite | `venv\Scripts\python.exe -m pytest -q` | `786 passed, 1 skipped in 63.74s` |
 | Eval suite | `venv\Scripts\python.exe evals\runners\run_eval_suite.py --all` | `65/65 passed, 0 failed` |
 | Eval regression gate | `powershell -ExecutionPolicy Bypass -File scripts\run_eval_regression_gate.ps1` | passed; `0 blocking` regressions |
@@ -79,7 +79,7 @@ This snapshot was run locally on 2026-05-21 against commit `b876228b08b2106193b2
 | OS quality gates | `powershell -ExecutionPolicy Bypass -File scripts\run_os_quality_gates.ps1 -AllowMissing` | completed OS SDK TypeScript, draft check, phase2a smoke, OS MCP server type/check, and Raw Inbox Worker type/check without deleting, migrating, or archiving drafts; draft counts: total 15, pending 0, approved 11, rejected 3, conflict 0, missing 1, invalid 0 |
 | Website smoke | `powershell -ExecutionPolicy Bypass -File scripts\run_website_smoke.ps1` | exit 0 with static-external warnings: `tmp_*.js` files need review, config placeholders remain, external CDN resources need CSP/vendor review, and there is no package-based build/lint proof |
 | Dependency reproducibility | `powershell -ExecutionPolicy Bypass -File scripts\check_dependency_repro.ps1` | completed with 1 warning: `python` is not available on PATH; website package/lock are optional missing for the static-external website |
-| Remote CI readiness | `powershell -ExecutionPolicy Bypass -File scripts\check_remote_ci_readiness.ps1` | `RemoteCIReady: no`; no GitHub remote configured |
+| Remote CI readiness | `powershell -ExecutionPolicy Bypass -File scripts\check_remote_ci_readiness.ps1` | historical snapshot: `RemoteCIReady: no` because remote was not configured at that time |
 | Clean clone/copy smoke | `powershell -ExecutionPolicy Bypass -File scripts\run_clean_clone_smoke.ps1` | completed; install/gates skipped by script defaults; temp clean copy retained for inspection |
 | Packaging config smoke | `powershell -ExecutionPolicy Bypass -File scripts\run_packaging_smoke.ps1` | passed; build skipped by design; existing `dist` installer status: unsigned; no build artifacts staged |
 | VM installer proof plan | `powershell -ExecutionPolicy Bypass -File scripts\run_installer_smoke.ps1 -PlanOnly -Target InternalRC` | plan-only output; Windows Sandbox available: `True`; Hyper-V available: `False`; VM marker: `False`; does not prove install/uninstall |
@@ -138,7 +138,7 @@ Electron smoke exact results:
 | Git status | `git status --short` | clean before edits |
 | Current branch | `git branch --show-current` | `codex/lexa-stabilization-review` |
 | Current commit at start of evidence capture | `git rev-parse HEAD` | `672d2e714595f4c24d7115bb757fba03f3e85faf`; final hardening commit is recorded in Git after this ledger is committed |
-| Remote CI readiness | `git remote -v` | no remotes configured; remote CI not proven |
+| Remote CI readiness | `git remote -v` | historical snapshot: no remotes were configured; current workspace now has `origin`, but remote CI remains not proven until Actions runs |
 | Backend/launcher/script targeted tests | `venv\Scripts\python.exe -m pytest -q tests/test_router_companion.py tests/test_start_launcher_static.py tests/test_quality_gate_scripts.py` | `40 passed` |
 | Electron main static test | `node tests/test_electron_main_static.js` | `59 passed, 0 failed` |
 | Preload bridge static test | `node tests/test_preload_bridge_security_static.js` | `41 passed, 0 failed` |
@@ -154,13 +154,13 @@ Electron smoke exact results:
 | Installer VM plan | `powershell -ExecutionPolicy Bypass -File scripts\run_installer_smoke.ps1 -PlanOnly` | exit 0; Windows Sandbox capability detected; plan-only mode does not prove install/uninstall |
 | Isolated installer build | `powershell -ExecutionPolicy Bypass -File scripts\run_packaging_smoke.ps1 -Build -ArtifactRoot <temp-artifact-root>` | passed; NSIS installer built in a temp artifact root; forbidden artifact scan passed; signing status: unsigned |
 | Built-installer smoke | `powershell -ExecutionPolicy Bypass -File scripts\run_installer_smoke.ps1 -ArtifactRoot <temp-artifact-root> -RequireInstaller -Target InternalRC` | passed for InternalRC with unsigned warning; install/uninstall not requested and not proven |
-| InternalRC checker | `powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target InternalRC -SkipFullQualityGate -AllowMissingOS -AllowMissingWebsite` | exit 0; decision: `Needs Review`; warnings: no GitHub remote/remote CI proof, unsigned installer |
+| InternalRC checker | `powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target InternalRC -SkipFullQualityGate -AllowMissingOS -AllowMissingWebsite` | exit 0; decision: `Needs Review`; historical warnings included missing remote CI proof and unsigned installer |
 | PublicRC checker | `powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target PublicRC -SkipFullQualityGate -AllowMissingOS -AllowMissingWebsite` | exit 1; decision: `Blocked`; blockers: remote CI, VM installer proof, signing, website target/CDN/CSP/SRI, OS cleanup review, remote artifact-policy proof |
 | PublicRelease checker | `powershell -ExecutionPolicy Bypass -File scripts\run_release_candidate_check.ps1 -Target PublicRelease -SkipFullQualityGate -AllowMissingOS -AllowMissingWebsite` | exit 1; decision: `Blocked`; PublicRC blockers plus privacy/trace consent approval and public release workflow requirements |
 
 ## External Blockers
 
-- Remote CI: blocked until a GitHub remote exists, the branch is pushed, and a GitHub Actions run URL plus commit SHA are recorded.
+- Remote CI: blocked until the branch is pushed and a GitHub Actions run URL plus commit SHA are recorded for the configured remote.
 - VM/Sandbox installer test: blocked until install/uninstall proof is run in an approved disposable VM or Windows Sandbox.
 - Windows signing: blocked until certificate, protected secret storage, signed artifact, and signer verification exist.
 - Website release target: blocked for PublicRC until release ownership, package/static validation, and CDN/CSP/SRI policy are approved.

@@ -114,12 +114,25 @@ def test_packaging_build_runs_packaged_runtime_smoke():
     assert "smoke_packaged.ps1" in src
     assert "-AppPath $packagedApp" in src
     assert "-TimeoutSeconds 45" in src
+    assert "electron-builder failed with exit code" in src
+    assert "Packaged runtime smoke failed with exit code" in src
 
 
 def test_packaging_smoke_blocks_isolated_dist_build_artifacts_from_staging():
     src = (REPO_ROOT / "scripts" / "run_packaging_smoke.ps1").read_text(encoding="utf-8")
 
     assert '"dist-*-build"' in src
+
+
+def test_packaging_smoke_cleans_generated_temp_artifacts_only_after_success():
+    src = (REPO_ROOT / "scripts" / "run_packaging_smoke.ps1").read_text(encoding="utf-8")
+
+    assert "[switch]$KeepArtifactRoot" in src
+    assert "$generatedArtifactRoot = $true" in src
+    assert "StartsWith($tempRoot" in src
+    assert "Refusing to clean generated artifact root outside temp" in src
+    assert "Remove-Item -LiteralPath $resolvedArtifactRoot -Recurse -Force" in src
+    assert "generated artifact root cleaned" in src
 
 
 def test_packaging_smoke_runs_central_risky_artifact_check():

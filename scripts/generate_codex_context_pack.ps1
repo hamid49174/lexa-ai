@@ -45,9 +45,19 @@ $head = if ($hasGit) { (git rev-parse --short HEAD 2>$null) } else { "source-cop
 $recent = if ($hasGit) { @(git log --oneline -5 2>$null) } else { @() }
 $remote = if ($hasGit) { @(git remote -v 2>$null) } else { @() }
 $remoteStatus = if ($remote.Count -gt 0) { "configured" } else { "not configured" }
+$remoteCiRisk = if ($remote.Count -gt 0) {
+  "Remote GitHub Actions run is not yet proven until a real workflow run URL and commit SHA are recorded."
+} else {
+  "Remote GitHub Actions run is not yet proven because no GitHub remote is configured."
+}
+$remoteDecision = if ($remote.Count -gt 0) {
+  "GitHub Actions run proof"
+} else {
+  "GitHub remote"
+}
 
 $recentLines = if ($recent.Count -gt 0) {
-  ($recent | ForEach-Object { "- " + $_ }) -join [Environment]::NewLine
+  ($recent | ForEach-Object { "- " + ([string]$_).Trim() }) -join "`n"
 } else {
   "- unavailable"
 }
@@ -100,9 +110,9 @@ $recentLines
 - scripts\run_release_candidate_check.ps1 -Target InternalRC
 - scripts\check_remote_ci_readiness.ps1
 
-## Open PublicRC Blockers
+## Open Release Risks
 
-- Remote GitHub Actions run is not yet proven when no GitHub remote is configured.
+- $remoteCiRisk
 - Installer install/uninstall in a disposable VM or sandbox is not yet proven.
 - Installer is unsigned.
 - Website is currently a static external target with local package/lint proof, but public config and Stripe.js/CSP approval remain unresolved.
@@ -112,7 +122,7 @@ $recentLines
 ## Agent/User/External Split
 
 - Agent-solvable: keep scripts, docs, redaction, artifact scans, local CI modes, and RC output honest.
-- User decisions: GitHub remote, website public config/CSP approval, OS cleanup approval, privacy/trace consent, signing provider.
+- User decisions: $remoteDecision, website public config/CSP approval, OS cleanup approval, privacy/trace consent, signing provider.
 - External infrastructure: GitHub Actions run, disposable VM/Sandbox proof, certificate/secret store.
 - Later work: website packaging/repo structure and public privacy UI after release-owner decision.
 - Proven items should have recorded command output, run URL, commit SHA, or review signoff.
@@ -145,6 +155,7 @@ $targetDir = Split-Path -Parent $target
 if ($targetDir -and !(Test-Path -LiteralPath $targetDir)) {
   New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
 }
-Set-Content -LiteralPath $target -Value $pack -Encoding UTF8
+$normalizedPack = (($pack -replace "`r`n", "`n") -replace "`r", "`n").TrimEnd() + "`n"
+[System.IO.File]::WriteAllText($target, $normalizedPack, [System.Text.UTF8Encoding]::new($false))
 Write-Host "Codex context pack written: $target"
 exit 0

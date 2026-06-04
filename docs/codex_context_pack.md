@@ -1,101 +1,74 @@
 # Codex Context Pack
 
-This pack gives Codex a safe project-level starting context for Lexa work. It is intentionally not a dump of the Personal OS, private conversations, eval results, traces, logs, or user data.
+This file is generated from safe Lexa repository metadata and fixed release-readiness facts. It intentionally excludes Personal OS contents, user data, eval results, traces, logs, secrets, signing keys, certificates, and build artifacts.
 
 ## Current Project State
 
-- Phase 1: Local Auth, Companion Confirmation, tool ranking, and CSP/static gates are complete.
-- Phase 2: OS Draft Envelope, plugin permission policy, Electron/DOM/preload hardening, repo hygiene, and release quality gates are complete.
-- Phase 3: offline eval suite, Agent Protocol, trace replay, agent simulation, eval regression baseline, and failure triage are complete.
-- Phase 4A-4C: release-readiness gates, clean install, CI-core, packaging smoke, installer smoke, collision-safe eval reports, signing plan, and release proof docs are in place.
-- Phase 4D: release tiers and safe Codex context pack are in place.
-- Phase 4E: PublicRC blockers are being handled as explicit external proof items: remote CI, VM installer proof, signing, website release target, and OS cleanup review.
-- Phase 4F: PublicRC blockers are now tracked through a blocker matrix, remote-CI readiness script, RC next actions, and context workflow checks.
-- Phase 5A: PublicRC blockers are operationalized as proof paths or explicit external prerequisites; PublicRelease privacy/trace consent has a checklist but is not approved.
-- Phase 5B: external proof work is split into agent-solvable checks, user decisions, external infrastructure, later work, and proven items. No external blocker should be described as solved without recorded proof.
+- Current Lexa commit: f2d1a17
+- GitHub remote status: configured
+- Release targets: InternalRC, PublicRC, PublicRelease
+- InternalRC may proceed with documented warnings.
+- Phase 4F readiness focus: blocker matrix, remote CI readiness, VM installer proof, signing readiness, website target, OS cleanup review, and safe context workflow.
+- Phase 5A readiness focus: turn each PublicRC blocker into either a practical proof path or an explicit external prerequisite.
+- Phase 5B readiness focus: classify every remaining PublicRC blocker as agent-solvable, user-decision, external-infrastructure, later, or proven.
+- PublicRC/PublicRelease remain blocked until remote CI proof, VM installer proof, signing, website release target proof, OS cleanup review, and public privacy/trace review are complete.
 
-Recent anchor commits:
+## Recent Commits
 
-- `935d5a686491303c1608de10158b1f20d5e80c7b` - Phase 4D release tiers and context pack
-- `e1246774ec3f2d061d5295852ed0bb4fc4162ccc` - Phase 4C release proof hardening
-- `48e2ddc057369ad50cbbc154e48fe17fac763d39` - Phase 4B clean clone and packaging readiness
-- `5e6011beedd3303d81d1a178612ca26c06c0b04a` - Phase 4A full release candidate readiness gates
-
-## Architecture Map
-
-- Backend: `backend/`
-- Electron frontend: `frontend/`
-- Offline evals: `evals/`
-- Release and quality scripts: `scripts/`
-- Release docs: `docs/release/`
-- Tests: `tests/`
-- External Personal OS mount: `personal_os/`
-- External Website layer: `C:\Users\admin\OneDrive - Office\lexa\lexa-website`
-- External Hermes workspace: `hermes_workspace/`
+- f2d1a17 Allow certifi CA bundle in artifact scan
+- 8a936bd Stabilize Lexa release readiness
+- c790f92 Make memory graph a neural cloud
+- 7a21ecc Revert "Make memory graph brain-like"
+- a7e3e41 Make memory graph brain-like
 
 ## Safe Context Sources
 
-Use these first:
-
-- `AGENTS.md`
-- `README.md`
-- `docs/dev-testing.md`
-- `docs/release/release_candidate_checklist.md`
-- `docs/release/public_rc_blocker_matrix.md`
-- `docs/release/privacy_trace_consent_checklist.md`
-- `docs/release/ci.md`
-- `docs/release/signing_plan.md`
-- `docs/release/website_strategy.md`
-- `docs/release/os_repo_cleanup_plan.md`
-- `evals/README.md`
+- AGENTS.md
+- README.md
+- docs/dev-testing.md
+- docs/release/release_candidate_checklist.md
+- docs/release/public_rc_blocker_matrix.md
+- docs/release/privacy_trace_consent_checklist.md
+- docs/release/ci.md
+- docs/release/signing_plan.md
+- docs/release/website_strategy.md
+- docs/release/os_repo_cleanup_plan.md
+- evals/README.md
 
 ## Do Not Load Or Commit
 
-- `personal_os/` content except when the user explicitly asks for a scoped OS check
-- real `lexa_memory.db*`
-- `audit.log` or `bridge-audit.log`
-- `hermes_workspace/`
-- `evals/results/`
-- real traces under `tmp/agent_traces/`
-- build outputs and installers
-- private OS/Obsidian content
-- `.env`, `*.env`, signing keys, or certificates
+- personal_os/ contents unless explicitly scoped by the user
+- real memory databases, audit logs, bridge audit logs, traces, eval results, installers, build output, secrets, signing keys, certificates, private OS/Obsidian content
+
+## Required Gates
+
+- scripts\run_quality_gates.ps1 -Mode Quick
+- scripts\run_quality_gates.ps1 -Mode Full
+- scripts\run_quality_gates.ps1 -Mode CI
+- scripts\run_eval_regression_gate.ps1
+- scripts\run_release_candidate_check.ps1 -Target InternalRC
+- scripts\check_remote_ci_readiness.ps1
 
 ## Open Release Risks
 
-- Remote GitHub Actions has not been proven from this workspace because no GitHub remote is configured.
-- Installer install/uninstall is prepared but not proven in a disposable VM/sandbox.
-- Installer is unsigned; this blocks PublicRC/PublicRelease.
-- Website is a static external target without package-based lint/build proof.
-- OS repo remains a separately dirty repository and needs a human-reviewed cleanup project.
-- Public release privacy/trace consent has a checklist, but is not finalized or approved.
+- Remote GitHub Actions run is not yet proven until a real workflow run URL and commit SHA are recorded.
+- Installer install/uninstall in a disposable VM or sandbox is not yet proven.
+- Installer is unsigned.
+- Website is currently a static external target with local package/lint proof, but public config and Stripe.js/CSP approval remain unresolved.
+- External OS cleanup remains a separate reviewed project.
+- Public release privacy/trace consent checklist exists only as a release review artifact until approved.
 
 ## Agent/User/External Split
 
-| Area | Classification | Next action |
-| --- | --- | --- |
-| Remote CI | external infrastructure | User sets GitHub remote, pushes branch, records Actions run URL and SHA. |
-| VM installer proof | external/user execution | User approves disposable VM/Sandbox run and records install, launch, smoke, uninstall, and leftover review. |
-| Signing | external/user decision | User selects certificate and secure store; agent keeps risky-artifact and installer checks strict. |
-| Website target | user/product decision | User chooses static release process, minimal package target, separate repo, or later monorepo phase. |
-| OS cleanup | user review project | Separate backup-first OS cleanup with OS gates before and after. |
-| Privacy/trace consent | user/legal/product decision | Review and approve consent, retention, export/delete, provider-use, and public docs. |
+- Agent-solvable: keep scripts, docs, redaction, artifact scans, local CI modes, and RC output honest.
+- User decisions: GitHub Actions run proof, website public config/CSP approval, OS cleanup approval, privacy/trace consent, signing provider.
+- External infrastructure: GitHub Actions run, disposable VM/Sandbox proof, certificate/secret store.
+- Later work: website packaging/repo structure and public privacy UI after release-owner decision.
+- Proven items should have recorded command output, run URL, commit SHA, or review signoff.
 
-## Recommended Next Work
+## Codex Working Rules
 
-1. Add a GitHub remote, push the branch, and prove `.github/workflows/quality-gates.yml` remotely.
-2. Run installer install/uninstall in a disposable VM/sandbox and record the proof.
-3. Configure Windows signing outside Git and verify publisher identity.
-4. Keep the website as `static-external` for InternalRC, then add a separate build/lint target before PublicRC.
-5. Run OS cleanup as a separate backup-first review project.
-6. Review and approve the privacy/trace consent checklist before PublicRelease.
-
-## Context Pack Maintenance
-
-Use `scripts\generate_codex_context_pack.ps1` to regenerate a safe project-level context pack. The generator must not read `personal_os/`, eval results, traces, memory databases, env files, signing keys, build artifacts, or private OS/Obsidian content.
-
-Use `scripts\check_remote_ci_readiness.ps1` before PublicRC review to prove whether the repository has a GitHub remote and a safe workflow candidate.
-
-## Codex Usage Notes
-
-Start with this pack and `AGENTS.md`, then read only the files needed for the current request. Do not scan or summarize private OS content into Lexa docs. Keep all reports redacted and all generated artifacts out of Git.
+- Do not use git add ..
+- Do not delete files without explicit approval.
+- Do not commit user data, generated artifacts, secrets, signing keys, certificates, or private OS/Obsidian content.
+- Keep OS, Hermes, Website, Plugin, Electron, and release changes scoped to the active phase.
