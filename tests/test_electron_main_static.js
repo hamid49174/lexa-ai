@@ -38,13 +38,13 @@ assert("defines backend restart delay", src.includes("BACKEND_RESTART_DELAY_MS")
 assert("caps backend health response body", src.includes("HEALTH_CHECK_BODY_LIMIT") && src.includes("body.length > HEALTH_CHECK_BODY_LIMIT"));
 assert("uses named backend health timeout", src.includes("HEALTH_CHECK_TIMEOUT_MS") && src.includes("req.setTimeout(HEALTH_CHECK_TIMEOUT_MS"));
 assert("settles backend health checks once", src.includes("let settled = false") && src.includes("if (settled) return;"));
-assert("recognizes tokenless Lexa backends", src.includes("EXTERNAL_LEXA_BACKEND") && src.includes('data.service === "lexa-ai"'));
+assert("recognizes tokenless Lexa backends without trusting them by default", src.includes("EXTERNAL_LEXA_BACKEND") && src.includes('data.service === "lexa-ai"') && src.includes("function allowTokenlessBackendReuse"));
 assert("does not trust leaked health instance tokens", !src.includes("data.instance_token"));
 assert("sends local auth token as health header", src.includes('"X-Lexa-Local-Token": INSTANCE_TOKEN'));
 assert("injects local auth header into renderer backend requests", src.includes("function installLocalAuthRequestHeaders") && src.includes("ses.webRequest.onBeforeSendHeaders") && src.includes('"http://127.0.0.1:8000/*"') && src.includes("requestHeaders[LOCAL_AUTH_HEADER] = INSTANCE_TOKEN") && src.includes("installLocalAuthRequestHeaders();"));
 assert("installs HttpOnly local auth cookie for renderer fetches", src.includes('const LOCAL_AUTH_COOKIE = "lexa_local_auth"') && src.includes("function installLocalAuthCookie") && src.includes("httpOnly: true") && src.includes("session.defaultSession.cookies.set") && src.includes('url: "http://127.0.0.1:8000"') && src.includes("await installLocalAuthCookie();"));
-assert("reuses tokenless Lexa backend on occupied port", src.includes("without instance token") && src.includes("token === EXTERNAL_LEXA_BACKEND"));
-assert("treats tokenless Lexa health as backend-ready", src.includes("token === INSTANCE_TOKEN || token === EXTERNAL_LEXA_BACKEND"));
+assert("reuses tokenless Lexa backend only by explicit dev opt-in", src.includes("LEXA_ALLOW_TOKENLESS_BACKEND_REUSE") && src.includes("reusing by explicit dev opt-in") && src.includes("refusing to reuse"));
+assert("does not treat tokenless Lexa health as backend-ready by default", src.includes("token === INSTANCE_TOKEN || (token === EXTERNAL_LEXA_BACKEND && allowTokenlessBackendReuse())"));
 assert("captures spawned backend child", src.includes("const child = backendProcess;"));
 assert("does not restart while quitting", src.includes("if (!app.isQuitting)") && src.includes("if (app.isQuitting || backendProcess) return;"));
 assert("restarts backend after unexpected exit", src.includes("startBackend().catch") && src.includes("Restart failed"));
@@ -52,8 +52,11 @@ assert("only clears matching backend child", src.includes("if (backendProcess ==
 assert("bounds backend restart retries", src.includes("BACKEND_RESTART_MAX_ATTEMPTS") && src.includes("backendRestartAttempts >= BACKEND_RESTART_MAX_ATTEMPTS"));
 assert("uses exponential backend restart backoff", src.includes("function backendRestartDelayMs") && src.includes("2 ** exponent") && src.includes("BACKEND_RESTART_MAX_DELAY_MS"));
 assert("resets backend restart backoff after health success", src.includes("function resetBackendRestartBackoff") && src.includes("if (ready) resetBackendRestartBackoff();"));
+assert("enforces a single desktop app instance before backend startup", src.includes("const gotSingleInstanceLock = app.requestSingleInstanceLock();") && src.includes("if (!gotSingleInstanceLock)") && src.includes("app.quit();") && src.includes("if (!gotSingleInstanceLock) return;") && src.indexOf("app.requestSingleInstanceLock()") < src.indexOf("app.whenReady().then"));
+assert("focuses the existing window when a second instance starts", src.includes("function focusMainWindow()") && src.includes('app.on("second-instance"') && src.includes("mainWindow.restore()") && src.includes("mainWindow.focus();"));
 
 console.log("\nElectron tray labels:");
+assert("keeps main process source ASCII-only", !/[^\x00-\x7F]/.test(src));
 assert("uses ASCII tray tooltip", src.includes('tray.setToolTip("Lexa AI - Lokaler KI-Assistent")'));
 assert("uses ASCII tray open label", src.includes('label: "Lexa AI oeffnen"'));
 assert("does not keep mojibake tray text", !src.includes("Lexa AI \u00e2\u20ac\u201d") && !src.includes("\u00c3\u00b6ffnen"));
@@ -74,7 +77,7 @@ assert("patches stdio socket prototype for Electron cached console writers", src
 assert("wraps main process console methods safely", src.includes("function installSafeConsole()") && src.includes('console.warn = (...args) => safeCall("warn", args)') && src.includes('console.error = (...args) => safeCall("error", args)'));
 assert("keeps EPIPE fallback logs under userData, not repo audit.log", src.includes("safeConsoleFallbackWriter") && src.includes("function appendSafeMainProcessLog") && src.includes("MAIN_PROCESS_LOG_MAX_BYTES") && src.includes('app.getPath("userData")') && src.includes('"main-process.log"'));
 assert("swallows uncaught EPIPE exceptions before Electron dialog listeners", src.includes("process.emit = (eventName, ...args)") && src.includes('eventName === "uncaughtException"') && src.includes("return true") && src.includes('process.on("uncaughtException"') && src.includes("if (isBrokenPipeError(error)) return"));
-assert("prevents renderer console forwarding from using Electron default pipe writer", src.includes("function installRendererConsoleGuard") && src.includes('webContents.on("console-message"') && src.includes("event.preventDefault?.()") && src.includes("installRendererConsoleGuard(mainWindow.webContents);") && src.indexOf("installRendererConsoleGuard(mainWindow.webContents);") < src.indexOf("mainWindow.loadFile"));
+assert("prevents renderer console forwarding from using Electron default pipe writer", src.includes("function installRendererConsoleGuard") && src.includes("function normalizeRendererConsoleMessage") && src.includes('webContents.on("console-message", (event, ...legacyConsoleArgs) =>') && src.includes("details.lineNumber") && src.includes("event.preventDefault?.()") && src.includes("installRendererConsoleGuard(mainWindow.webContents);") && src.indexOf("installRendererConsoleGuard(mainWindow.webContents);") < src.indexOf("mainWindow.loadFile"));
 
 console.log("\nElectron renderer security guards:");
 assert("installs renderer security guards before loading index", src.includes("function installElectronSecurityGuards") && src.indexOf("installElectronSecurityGuards(mainWindow);") > 0 && src.indexOf("installElectronSecurityGuards(mainWindow);") < src.indexOf("mainWindow.loadFile"));
@@ -103,6 +106,13 @@ assert("local auth and i18n handlers fail closed through safe IPC wrapper", src.
 assert("window and autostart sync IPC handlers are wrapped", src.includes('safeIpcOn("window-minimize"') && src.includes('safeIpcOn("window-maximize"') && src.includes('safeIpcOn("window-close"') && src.includes('safeIpcOn("get-autostart"') && src.includes("returnValue: false"));
 assert("bridge presence handlers are not registered directly", !src.includes('ipcMain.handle("bridge:presence:request"') && !src.includes('ipcMain.handle("bridge:presence:consume"') && !src.includes('ipcMain.handle("bridge:audit"'));
 assert("bridge presence no longer uses native confirmation dialogs", !src.includes("dialog.showMessageBox") && !src.includes("Confirm Lexa action") && !src.includes("Allow once") && src.includes("trusted_renderer_auto_challenge"));
+
+console.log("\nElectron license hardening:");
+assert("recognizes server-backed pro and ultra licenses", src.includes("function _normalizeLicensePlan") && src.includes('"pro"') && src.includes('"ultra"') && src.includes("function _isPaidLicensePlan"));
+assert("paid license state requires server activation proof", src.includes("function _hasServerLicenseProof") && src.includes('validation_source === "server"') && src.includes('_state: "paid_unverified"'));
+assert("license activation is owned by main process", src.includes('safeIpcHandle("license-activate"') && src.includes("async function _activateLicenseKey") && src.includes('requestBackendJson("/license/validate"') && src.includes('method: "POST"') && src.includes("license_key: key"));
+assert("license-set cannot write paid plans directly", src.includes('safeIpcHandle("license-set"') && src.includes("Use license activation for paid plans") && src.includes("const success = _clearStoredLicense();"));
+assert("trial is created only when no stored license state exists", src.includes("if (existing) return existing;") && src.includes("Create trial only on the first launch without any stored license state") && !src.includes('existing && existing.plan !== "free"'));
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

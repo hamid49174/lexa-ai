@@ -12,13 +12,13 @@ Behavior:
 
 - finds `.exe`, `.msi`, or `.msix` artifacts
 - checks size is plausible
-- scans the artifact directory for forbidden local data and secret-like paths
+- scans the artifact directory, explicit installer path, and explicit installer directory for forbidden local data and secret-like paths
 - reports signing status as `signed`, `unsigned`, or `unknown`
 - does not install into the productive environment
 - does not delete artifacts
 - can prepare VM-only install/uninstall proof flags without executing a productive install
 - supports `-PlanOnly` for a documented VM/sandbox procedure
-- supports `-InstallerPath` to validate a specific generated artifact
+- supports `-InstallerPath` to validate a specific generated `.exe`, `.msi`, or `.msix` artifact; when `-ArtifactRoot` is omitted, the installer directory becomes the artifact root, and when both are supplied both roots are scanned
 - supports `-Target InternalRC|PublicRC|PublicRelease`
 - supports `-ExpectedPublisher` for signed installers
 - supports `-AllowUnsignedInternal` for explicit internal unsigned builds
@@ -61,4 +61,4 @@ Record these fields after a real VM proof:
 - uninstall result
 - leftover-file review result
 - signing status
-- confirmation that no user data, `.env`, memory DB, OS vault data, Hermes workspace, or logs were bundled
+- confirmation that no user data, `.env`, credentials, signing material, memory DB, OS vault data, Hermes workspace, or logs were bundled

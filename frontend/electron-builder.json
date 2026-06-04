@@ -1,7 +1,7 @@
 {
   "appId": "de.alexsprogis.lexa-ai",
   "productName": "Lexa AI",
-  "copyright": "Copyright © 2026 alexsprogis",
+  "copyright": "Copyright (c) 2026 alexsprogis",
   "directories": {
     "output": "../dist"
   },
@@ -16,7 +16,12 @@
     {
       "from": "../backend-dist/lexa-backend",
       "to": "backend-dist",
-      "filter": ["**/*"]
+      "filter": [
+        "**/*",
+        "!**/audit.log",
+        "!**/bridge-audit.log",
+        "!**/lexa_memory.db*"
+      ]
     },
     {
       "from": "../command_whitelist.json",

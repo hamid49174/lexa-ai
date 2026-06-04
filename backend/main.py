@@ -60,6 +60,7 @@ from backend.config import (
     VERSION,
     BACKEND_HOST,
     BACKEND_PORT,
+    LEXA_DATA_DIR,
     MAX_BODY_SIZE,
     MAX_HISTORY,
     CACHE_HEALTH_TTL,
@@ -303,21 +304,29 @@ from fastapi import APIRouter as _APIRouter
 
 _v1_router = _APIRouter(prefix="/v1")
 
-# Include all sub-routers into v1
-_v1_router.include_router(chat_router)
-_v1_router.include_router(memory_router)
-_v1_router.include_router(backup_router)
-_v1_router.include_router(search_router)
-_v1_router.include_router(conversations_router)
-_v1_router.include_router(companion_router)
-_v1_router.include_router(voice_router)
-_v1_router.include_router(productivity_router)
+# Keep /v1 narrow by default. The unversioned routes are the local desktop
+# control plane; mirroring them into /v1 makes accidental public deployments
+# expose PC-control, memory, backup, agent, and Personal OS surfaces.
+_enable_legacy_local_v1 = (
+    os.environ.get("LEXA_ENABLE_LOCAL_V1_ROUTERS", "").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
+if _enable_legacy_local_v1:
+    _v1_router.include_router(chat_router)
+    _v1_router.include_router(memory_router)
+    _v1_router.include_router(backup_router)
+    _v1_router.include_router(search_router)
+    _v1_router.include_router(conversations_router)
+    _v1_router.include_router(companion_router)
+    _v1_router.include_router(voice_router)
+    _v1_router.include_router(productivity_router)
 _v1_router.include_router(stripe_router)
-_v1_router.include_router(agent_router)
-_v1_router.include_router(hermes_router)
-_v1_router.include_router(os_agents_router)
+if _enable_legacy_local_v1:
+    _v1_router.include_router(agent_router)
+    _v1_router.include_router(hermes_router)
+    _v1_router.include_router(os_agents_router)
 _v1_router.include_router(health_router)
-if personal_os_router is not None:
+if _enable_legacy_local_v1 and personal_os_router is not None:
     _v1_router.include_router(personal_os_router)
 
 # Mount v1 on main app
@@ -650,8 +659,8 @@ async def diagnostics():
     except Exception as exc:
         hermes_info = {"status": "error", "health_state": "unknown", "summary": str(exc)}
 
-    # DB file size — use LEXA_DATA_DIR for packaged builds
-    _diag_data_dir = Path(os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent)))
+    # DB file size - use LEXA_DATA_DIR for packaged builds
+    _diag_data_dir = LEXA_DATA_DIR
     db_size_kb = 0
     try:
         db_path = _diag_data_dir / "lexa_memory.db"

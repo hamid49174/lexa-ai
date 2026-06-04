@@ -20,13 +20,49 @@ if (-not $CloneRoot) {
   $CloneRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("lexa-clean-clone-smoke-" + [guid]::NewGuid().ToString("N"))
 }
 
-$riskyPathRegex = '(?i)^(personal_os/|tmp/|vendor/|hermes_workspace/|evals/results/.+\.(json|md|html|jsonl)$|evals/results/traces/|dist/|backend-dist/|frontend/dist/|frontend/node_modules/|build/|\.pytest_cache/|audio_cache/|venv/|node_modules/|audit\.log$|bridge-audit\.log$|lexa_memory\.db($|-)|\.env$|.*\.env$)'
-$riskDocumentation = @("personal_os/", "tmp/", "vendor/", "hermes_workspace/", "lexa_memory.db", "audit.log", "bridge-audit.log", "evals/results/*.json")
+$riskyPathRegex = '(?i)^(?!(.*/)?\.env\.example$)(personal_os/|tmp/|vendor/|hermes_workspace/|evals/results/.+\.(json|md|html|jsonl)$|evals/results/traces/|dist/|dist-[^/]*build/|backend-dist/|frontend/dist/|frontend/node_modules/|build/|\.pytest_cache/|\.coverage$|audio_cache/|venv/|node_modules/|audit\.log$|bridge-audit\.log$|lexa_memory\.db($|-)|(.*/)?\.env($|\.|/)|.*\.env$|(.*/)?\.netrc$|(.*/)?\.(npmrc|pnpmrc|pypirc)$|(.*/)?\.yarnrc(\.yml)?$|(.*/)?\.aws/(credentials|config)$|(.*/)?\.azure/(accessTokens|azureProfile)\.json$|(.*/)?\.config/gcloud/application_default_credentials\.json$|(.*/)?\.docker/config\.json$|(.*/)?\.gcloud/application_default_credentials\.json$|(.*/)?\.kube/config$|(.*/)?(credentials|secrets)\.(json|ya?ml|toml|ini|conf)$|(.*/)?client_secret[^/]*\.json$|(.*/)?service[-_]?account[^/]*\.json$|(.*/)?\.ssh/(id_dsa|id_ecdsa|id_ed25519|id_rsa)$|(.*/)?(id_dsa|id_ecdsa|id_ed25519|id_rsa)$|(.*/)?pip\.(conf|ini)$|.*\.(pfx|p12|pem|ppk|key|pvk|cer|crt|spc|jks|keystore)$|(.*/)?(codesign|code-sign|signing|signtool)[^/]*\.(json|ps1|env|txt|xml)$|(.*/)?(windows|electron)[_-]?(signing|certificate|cert)[^/]*\.(json|ps1|env|txt|xml)$)'
+$riskDocumentation = @("personal_os/", "tmp/", "vendor/", "hermes_workspace/", "lexa_memory.db", "audit.log", "bridge-audit.log", "evals/results/*.json", ".env.local", "credentials.*", "secrets.*", "signing keys")
+$frontendNpmCiLockfiles = @("frontend\package-lock.json", "frontend\npm-shrinkwrap.json")
+$frontendAlternativeLockfiles = @("frontend\yarn.lock", "frontend\pnpm-lock.yaml")
 
 function Convert-ToRepoPath([string]$PathValue) {
   $normalized = $PathValue -replace '\\', '/'
   if ($normalized.StartsWith("./")) { $normalized = $normalized.Substring(2) }
   return $normalized.TrimStart('/')
+}
+
+function Get-SourceListMatches {
+  param(
+    [string[]]$SourceFiles,
+    [string[]]$CandidateRepoPaths
+  )
+  $sourcePaths = @{}
+  foreach ($sourceFile in $SourceFiles) {
+    $sourcePaths[(Convert-ToRepoPath $sourceFile).ToLowerInvariant()] = $true
+  }
+  return @($CandidateRepoPaths | Where-Object {
+    $sourcePaths.ContainsKey((Convert-ToRepoPath $_).ToLowerInvariant())
+  })
+}
+
+function Write-FrontendLockfileDriftWarningsFromSourceList {
+  param([string[]]$SourceFiles)
+  $frontendPackage = @(Get-SourceListMatches $SourceFiles @("frontend\package.json"))
+  $npmCiLockfiles = @(Get-SourceListMatches $SourceFiles $frontendNpmCiLockfiles)
+  $alternativeFrontendLockfiles = @(Get-SourceListMatches $SourceFiles $frontendAlternativeLockfiles)
+  if ($npmCiLockfiles.Count -gt 1) {
+    Write-Warning "multiple frontend npm ci lockfiles found in source list: $($npmCiLockfiles -join ', ')"
+  }
+  if ($npmCiLockfiles.Count -gt 0 -and $alternativeFrontendLockfiles.Count -gt 0) {
+    Write-Warning "frontend clean clone source list mixes npm ci and non-npm lockfile(s); npm ci would ignore: $($alternativeFrontendLockfiles -join ', ')"
+  }
+  if ($frontendPackage.Count -gt 0 -and $npmCiLockfiles.Count -eq 0) {
+    if ($alternativeFrontendLockfiles.Count -gt 0) {
+      Write-Warning "frontend clean clone source list uses non-npm lockfile(s) $($alternativeFrontendLockfiles -join ', '); clean smoke does not run yarn/pnpm install."
+    } else {
+      Write-Warning "frontend clean clone source list has frontend/package.json without package-lock.json or npm-shrinkwrap.json; npm install is not run by clean smoke."
+    }
+  }
 }
 
 function Resolve-PythonForVenv {
@@ -126,6 +162,10 @@ if ($risky.Count -gt 0) {
   throw "Clean clone source list contains risky paths: $($risky -join ', ')"
 }
 
+if ($DryRun -or -not $Install) {
+  Write-FrontendLockfileDriftWarningsFromSourceList $files
+}
+
 if ($DryRun) {
   Write-Host "Dry-run passed. Source file count: $($files.Count). No clean copy was written."
   exit 0
@@ -183,11 +223,24 @@ if ($Install) {
       .\venv\Scripts\python.exe -m pip install -r requirements-dev.txt
       if ($LASTEXITCODE -ne 0) { throw "requirements-dev install failed with exit code $LASTEXITCODE" }
     }
-    if (Test-Path -LiteralPath "frontend\package-lock.json") {
+    $npmCiLockfiles = @($frontendNpmCiLockfiles | Where-Object { Test-Path -LiteralPath $_ })
+    $alternativeFrontendLockfiles = @($frontendAlternativeLockfiles | Where-Object { Test-Path -LiteralPath $_ })
+    if ($npmCiLockfiles.Count -gt 0) {
+      Write-Host "frontend npm ci lockfile: $($npmCiLockfiles[0])"
+      if ($npmCiLockfiles.Count -gt 1) {
+        Write-Warning "multiple frontend npm ci lockfiles found: $($npmCiLockfiles -join ', ')"
+      }
+      if ($alternativeFrontendLockfiles.Count -gt 0) {
+        Write-Warning "frontend npm ci will ignore non-npm lockfile(s): $($alternativeFrontendLockfiles -join ', ')"
+      }
       npm.cmd ci --prefix frontend
       if ($LASTEXITCODE -ne 0) { throw "frontend npm ci failed with exit code $LASTEXITCODE" }
     } elseif (Test-Path -LiteralPath "frontend\package.json") {
-      Write-Warning "frontend/package.json exists without package-lock.json; npm install is not run by clean smoke."
+      if ($alternativeFrontendLockfiles.Count -gt 0) {
+        Write-Warning "frontend/package.json uses non-npm lockfile(s) $($alternativeFrontendLockfiles -join ', '); clean smoke does not run yarn/pnpm install."
+      } else {
+        Write-Warning "frontend/package.json exists without package-lock.json or npm-shrinkwrap.json; npm install is not run by clean smoke."
+      }
     }
   } finally {
     Pop-Location

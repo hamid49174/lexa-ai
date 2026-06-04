@@ -15,6 +15,7 @@ import socket
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
+from backend.config import LEXA_DATA_DIR
 from backend.i18n import t
 
 logger = logging.getLogger("lexa.browser")
@@ -212,10 +213,8 @@ def _guarded_page_goto(page, url: str, **kwargs):
     return response
 
 
-import os as _os
-_DATA_DIR = _os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent))
-SCREENSHOTS_DIR = Path(_DATA_DIR) / "screenshots"
-SCREENSHOTS_DIR.mkdir(exist_ok=True)
+SCREENSHOTS_DIR = LEXA_DATA_DIR / "screenshots"
+SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Lazy browser instance
 _browser = None

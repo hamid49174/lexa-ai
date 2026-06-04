@@ -131,6 +131,9 @@ const sandbox = new Function(`
   ${extractFn(chatComposerSrc, "composerCommandSearchItems")}
   ${extractFn(chatComposerSrc, "composerCommandForAlias")}
   ${extractFn(chatComposerSrc, "expandComposerSlashAlias")}
+  ${extractFn(chatMessageActionsSrc, "messageActionPromptLimit")}
+  ${extractFn(chatMessageActionsSrc, "messageActionBoundedSource")}
+  ${extractFn(chatMessageActionsSrc, "messageActionPromptWithSource")}
   ${extractFn(chatMessageActionsSrc, "workspaceDraftPromptFromText")}
   ${extractFn(chatMessageActionsSrc, "continuePromptFromText")}
   ${extractFn(chatMessageActionsSrc, "verifyAnswerPromptFromText")}
@@ -241,6 +244,9 @@ function assert(desc, ok, detail = "") {
   assert("agent run exposes busy live status", agentSource.includes('msgEl.setAttribute("aria-busy", "true")') && agentSource.includes('summaryEl.setAttribute("role", "status")') && agentSource.includes('summaryEl.setAttribute("aria-live", "polite")') && agentSource.includes('t("chat.agentStarting")') && agentSource.includes('t("chat.agentWorking")') && agentSource.includes('t("chat.agentCompleted")') && agentSource.includes('msgEl.removeAttribute("aria-busy")') && deI18n.includes('"chat.agentStarting"') && enI18n.includes('"chat.agentStarting"'));
   assert("agent steps expose list semantics", agentSource.includes('stepsContainer.setAttribute("role", "list")') && agentSource.includes('stepsContainer.setAttribute("aria-label", t("chat.agentStepsLabel"))') && agentSource.includes('stepEl.setAttribute("role", "listitem")') && agentSource.includes('stepEl.setAttribute("aria-label", readableLabel)') && deI18n.includes('"chat.agentStepsLabel"') && enI18n.includes('"chat.agentStepsLabel"'));
   assert("agent steps keep readable labels separate from hidden technical detail", src.includes("function agentStepDisplayLabel") && src.includes("function agentStepTechnicalLabel") && src.includes("function agentStepActionLabel") && src.includes('label.textContent = readableLabel') && src.includes("stepEl.dataset.technicalLabel = technicalLabel") && src.includes("stepEl.title = readableLabel") && src.includes('"chat.agentStepWithDetail"') && deI18n.includes('"chat.agentStepPersonalOs"') && enI18n.includes('"chat.agentStepPersonalOs"'));
+  assert("desktop engine steps do not show boolean params as labels", src.includes("function agentStepText") && src.includes('"window", "window_title", "text", "target"') && src.includes('name === "desktop_engine_observe"') && src.includes('"Desktop beobachten"') && src.includes('["string", "number"].includes(typeof value)') && deI18n.includes('"chat.agentStepDesktopObserve"') && enI18n.includes('"chat.agentStepDesktopStatus"'));
+  assert("hermes desktop steps have specific readable labels", src.includes('name === "screen_read_text" || name === "screen_ocr"') && src.includes('name === "ui_tree"') && src.includes('name === "ui_find"') && src.includes('name === "hermes_desktop_task"') && src.includes('action === "ui_tree"') && src.includes('action === "ui_find"') && deI18n.includes('"chat.agentStepScreenRead"') && deI18n.includes('"chat.agentStepUiTree"') && deI18n.includes('"chat.agentStepUiFind"') && deI18n.includes('"chat.agentStepHermesDesktop"') && enI18n.includes('"chat.agentStepScreenRead"') && enI18n.includes('"chat.agentStepHermesDesktop"'));
+  assert("hermes desktop step detail compacts pasted approval chains", src.includes("function compactHermesDesktopMessage") && src.includes('String(action || "") === "hermes_desktop_task"') && src.includes('agentStepParamSummary(step?.params, step?.action)') && src.includes('(?:ja|yes|ok|okay)'));
   assert("agent steps add outcome badges", src.includes("function agentStepOutcomeKind") && src.includes("function renderAgentStepOutcome") && agentSource.includes("renderAgentStepOutcome(stepEl, step)") && src.includes("chat.agentOutcome${suffix}") && deI18n.includes('"chat.agentOutcomeFound"') && enI18n.includes('"chat.agentOutcomeFound"') && deI18n.includes('"chat.agentOutcomeBlocked"') && enI18n.includes('"chat.agentOutcomeFailed"'));
   assert("agent runs add aggregate outcome summary", src.includes("function agentRunOutcomeCounts") && src.includes("function renderAgentOutcomeSummary") && agentSource.includes('outcomeSummaryEl.className = "agent-outcome-summary"') && agentSource.includes("recordAgentStepOutcome(step, agentOutcomeCounts, agentStepOutcomes)") && agentSource.includes("renderAgentOutcomeSummary(outcomeSummaryEl, agentOutcomeCounts)") && agentSource.includes("let finalSteps = Array.isArray(run.steps) ? run.steps : []") && agentSource.includes("const finalOutcomeCounts = finalSteps.length") && agentSource.includes("renderAgentOutcomeSummary(outcomeSummaryEl, finalOutcomeCounts)") && deI18n.includes('"chat.agentOutcomeSummaryLabel"') && enI18n.includes('"chat.agentOutcomeSummaryLabel"'));
   assert("agent runs add structured completion panel", src.includes("function renderAgentCompletionPanel") && src.includes("function agentOutcomeTotal") && agentSource.includes('completionEl.setAttribute("role", "group")') && agentSource.includes("renderAgentCompletionPanel(completionEl, finalOutcomeCounts") && deI18n.includes('"chat.agentCompletionReached"') && enI18n.includes('"chat.agentCompletionNext"'));
@@ -264,23 +270,33 @@ function assert(desc, ok, detail = "") {
   assert("composer slash alias expands workspace workflow", sandbox.expandComposerSlashAlias("/workspace Lexa roadmap").includes("workspace draft") && sandbox.expandComposerSlashAlias("/workspace Lexa roadmap").includes("Lexa roadmap"));
   assert("composer short alias expands workspace workflow", sandbox.expandComposerSlashAlias("/ws Lexa roadmap").includes("workspace draft") && sandbox.expandComposerSlashAlias("/ws Lexa roadmap").includes("Lexa roadmap"));
   assert("composer unique prefix alias expands workspace workflow", sandbox.expandComposerSlashAlias("/work Lexa roadmap").includes("workspace draft") && sandbox.expandComposerSlashAlias("/work Lexa roadmap").includes("Lexa roadmap"));
+  sandbox.setMaxLength(4000);
   assert("workspace handoff prompt wraps answers as artifacts", sandbox.workspaceDraftPromptFromText("Alpha answer").includes("workspace draft") && sandbox.workspaceDraftPromptFromText("Alpha answer").includes("Source answer:\nAlpha answer"));
-  assert("workspace handoff prompt clips long answers", sandbox.workspaceDraftPromptFromText("x".repeat(8100)).includes("[Source clipped for chat handoff.]"));
+  const longWorkspaceSource = `WORKSPACE-HEAD ${"x".repeat(5000)} WORKSPACE-TAIL`;
+  const clippedWorkspacePrompt = sandbox.workspaceDraftPromptFromText(longWorkspaceSource);
+  assert("workspace handoff prompt clips long answers within chat limit", clippedWorkspacePrompt.includes("[Source clipped for chat handoff.]") && clippedWorkspacePrompt.length <= 4000);
+  assert("workspace handoff clipped source preserves answer head and tail", clippedWorkspacePrompt.includes("WORKSPACE-HEAD") && clippedWorkspacePrompt.includes("WORKSPACE-TAIL"));
   assert("workspace handoff prompt skips empty source", sandbox.workspaceDraftPromptFromText(null) === "");
   assert("workspace handoff prompt preserves multiline special text", sandbox.workspaceDraftPromptFromText("Line <one>\nLine & two").includes("Source answer:\nLine <one>\nLine & two"));
   sandbox.setMaxLength(4000);
   const continuePrompt = sandbox.continuePromptFromText("Alpha answer");
   assert("continue-from-answer prompt preserves source and cursor", continuePrompt.text.includes("chat.continueFromAnswerPrefix") && continuePrompt.text.includes("chat.continueFromAnswerNextRequest") && continuePrompt.text.includes("chat.continueFromAnswerSourceLabel:\nAlpha answer") && continuePrompt.cursorStart > 0);
   sandbox.setMaxLength(1200);
-  const clippedContinuePrompt = sandbox.continuePromptFromText("x".repeat(12000));
+  const longContinueSource = `CONTINUE-HEAD ${"x".repeat(5000)} CONTINUE-TAIL`;
+  const clippedContinuePrompt = sandbox.continuePromptFromText(longContinueSource);
   assert("continue-from-answer prompt clips long source context", clippedContinuePrompt.text.includes("chat.continueFromAnswerClipMarker") && clippedContinuePrompt.text.length <= 984);
+  assert("continue-from-answer clipped source preserves answer head and tail", clippedContinuePrompt.text.includes("CONTINUE-HEAD") && clippedContinuePrompt.text.includes("CONTINUE-TAIL"));
   const emptyContinuePrompt = sandbox.continuePromptFromText(undefined);
   assert("continue-from-answer prompt skips empty source", emptyContinuePrompt.text === "" && emptyContinuePrompt.cursorStart === 0);
   assert("continue-from-answer prompt preserves multiline special text", sandbox.continuePromptFromText("Line <one>\nLine & two").text.includes("Line <one>\nLine & two"));
-  sandbox.setMaxLength(10);
+  sandbox.setMaxLength(4000);
   const verifyPrompt = sandbox.verifyAnswerPromptFromText("Alpha answer");
   assert("verify-answer prompt wraps answers as source-backed research", verifyPrompt.includes("source-backed research") && verifyPrompt.includes("checkable claims") && verifyPrompt.includes("Source answer:") && verifyPrompt.includes("Alpha answer"));
-  assert("verify-answer prompt clips long answers", sandbox.verifyAnswerPromptFromText("x".repeat(8100)).includes("chat.verifyAnswerClipMarker"));
+  sandbox.setMaxLength(1200);
+  const longVerifySource = `VERIFY-HEAD ${"x".repeat(5000)} VERIFY-TAIL`;
+  const clippedVerifyPrompt = sandbox.verifyAnswerPromptFromText(longVerifySource);
+  assert("verify-answer prompt clips long answers within chat limit", clippedVerifyPrompt.includes("chat.verifyAnswerClipMarker") && clippedVerifyPrompt.length <= 1200);
+  assert("verify-answer clipped source preserves answer head and tail", clippedVerifyPrompt.includes("VERIFY-HEAD") && clippedVerifyPrompt.includes("VERIFY-TAIL"));
   assert("verify-answer prompt skips empty source", sandbox.verifyAnswerPromptFromText(" ") === "");
   assert("verify-answer prompt preserves multiline special text", sandbox.verifyAnswerPromptFromText("Line <one>\nLine & two").includes("Source answer:\nLine <one>\nLine & two"));
   const exportedMarkdown = sandbox.messageExportMarkdownFromText("Alpha answer", { title: "Lexa Note", exportedAt: "2026-05-18T04:58:14.627Z" });
@@ -438,6 +454,8 @@ function assert(desc, ok, detail = "") {
   await sandbox.sendMessage();
   state = sandbox.state();
   assert("natural deep think prompt routes to agent before loading", state.loading === false && state.events.some((event) => event[0] === "agent"));
+  assert("natural deep think prompt recognizes abwaegung with umlaut", sandbox._needsAgentMode("abwägung der optionen und risiken fuer Lexa") === true);
+  assert("natural deep think prompt recognizes ascii abwaegung", sandbox._needsAgentMode("abwaegung der optionen und risiken fuer Lexa") === true);
 
   sandbox.reset();
   sandbox.setMaxLength(500);

@@ -10,9 +10,9 @@ Lexa keeps source code, local user data, generated artifacts, and external mount
 - `audit.log` and `bridge-audit.log`: local logs that can reveal private behavior or security events.
 - `lexa_memory.db*`: local memory database and SQLite sidecars.
 - `hermes_workspace/`: local Hermes runtime workspace and user/task data.
-- build outputs: `dist/`, `backend-dist/`, `frontend/dist/`, `build/`.
+- build outputs: `dist/`, `dist-*-build/`, `backend-dist/`, `frontend/dist/`, `build/`.
 - caches: `.pytest_cache/`, `.coverage`, `audio_cache/`, `node_modules/`, `venv/`.
-- secrets: `.env`, `*.env`, `*.key`, `*.pem`, `*.p12`, and credential files.
+- secrets: `.env`, `*.env`, package-manager, cloud, container, SSH, and machine credential files such as `.netrc`, `.npmrc`, `.pnpmrc`, `.pypirc`, `.yarnrc`, `.yarnrc.yml`, `.aws/credentials`, `.docker/config.json`, `.kube/config`, `credentials.*`, `secrets.*`, `client_secret*.json`, `service-account*.json`, `service_account*.json`, `.ssh/id_rsa`, `pip.conf`, and `pip.ini`, `*.key`, `*.pem`, `*.ppk`, `.pfx`, `.p12`, `.pvk`, `.cer`, `.crt`, `.spc`, `.jks`, `.keystore`, and credential files. Keep `.env.example` trackable with placeholders only.
 
 ## Personal OS Handling
 
@@ -33,6 +33,14 @@ Run:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run_quality_gates.ps1 -Mode Quick
 ```
+
+For a non-blocking local pre-scan while reviewing work-in-progress, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\check_risky_artifacts.ps1 -Mode Warn
+```
+
+Warnings still need review. `Mode Strict` remains the blocking mode used by quality gates and release checks.
 
 Then verify staged files:
 

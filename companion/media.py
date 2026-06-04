@@ -21,11 +21,12 @@ import urllib.parse
 from pathlib import Path
 
 import keyring
+from backend.config import LEXA_DATA_DIR
 from backend.i18n import t
 
 logger = logging.getLogger("lexa.media")
 
-_DATA_DIR = os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent))
+_DATA_DIR = LEXA_DATA_DIR
 
 # ══════════════════════════════════════════════════
 #  WINDOWS VIRTUAL KEY CODES — OS-level, layout-independent

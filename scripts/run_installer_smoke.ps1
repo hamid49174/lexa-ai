@@ -15,6 +15,7 @@ param(
 $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 
+$ArtifactRootWasProvided = [bool]$ArtifactRoot
 if (-not $ArtifactRoot) {
   $ArtifactRoot = Join-Path $RepoRoot "dist"
 }
@@ -22,7 +23,6 @@ if (-not $ArtifactRoot) {
 $forbiddenRegex = '(?i)(personal_os|hermes_workspace|evals[\\/]+results|tmp[\\/]+agent_traces|lexa_memory\.db|bridge-audit\.log|audit\.log|\.env$|\.env[\\/]|(^|[\\/])secrets?([\\/]|$)|private[_-]?key|STRIPE_SECRET|SUPABASE_SERVICE_ROLE)'
 
 Write-Host "Lexa installer smoke"
-Write-Host "ArtifactRoot: $ArtifactRoot"
 Write-Host "Install requested: $Install Uninstall requested: $Uninstall VMOnly: $VMOnly PlanOnly: $PlanOnly"
 Write-Host "Target: $Target ExpectedPublisher: $ExpectedPublisher AllowUnsignedInternal: $AllowUnsignedInternal"
 
@@ -84,9 +84,29 @@ function Write-InstallPlan {
   Write-Host "2. Copy the installer into the isolated machine: $PathValue"
   Write-Host "3. Install Lexa AI, launch once, and run startup smoke against isolated userData."
   Write-Host "4. Uninstall Lexa AI from the VM/sandbox."
-  Write-Host "5. Check no user data, .env, memory DB, OS vault data, Hermes workspace, or logs were bundled."
+  Write-Host "5. Check no user data, .env, credentials, signing material, memory DB, OS vault data, Hermes workspace, or logs were bundled."
   Write-Host "6. Destroy or revert the VM/sandbox snapshot."
   Write-Host "This script does not perform productive-machine install/uninstall."
+}
+
+function Invoke-RiskyArtifactPathCheck([string]$PathValue) {
+  if (!(Test-Path -LiteralPath $PathValue)) { return }
+  & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "check_risky_artifacts.ps1") -Root $RepoRoot -Mode Strict -ArtifactPath $PathValue
+  if ($LASTEXITCODE -ne 0) {
+    throw "Risky artifact check failed for artifact path: $PathValue"
+  }
+}
+
+$artifactScanRootKeys = @{}
+$artifactScanRoots = New-Object System.Collections.Generic.List[string]
+function Add-ArtifactScanRoot([string]$PathValue) {
+  if (-not $PathValue -or !(Test-Path -LiteralPath $PathValue)) { return }
+  $resolved = (Resolve-Path -LiteralPath $PathValue).Path
+  $key = $resolved.ToLowerInvariant()
+  if (-not $artifactScanRootKeys.ContainsKey($key)) {
+    $artifactScanRootKeys[$key] = $true
+    $artifactScanRoots.Add($resolved) | Out-Null
+  }
 }
 
 if (($Install -or $Uninstall) -and -not $VMOnly) {
@@ -94,6 +114,7 @@ if (($Install -or $Uninstall) -and -not $VMOnly) {
 }
 
 if ($PlanOnly) {
+  Write-Host "ArtifactRoot: $ArtifactRoot"
   Write-VmReadiness
   Write-InstallPlan "<installer-path>"
   Write-Warning "Plan-only mode does not prove installer install/uninstall."
@@ -105,12 +126,17 @@ if ($InstallerPath) {
     throw "InstallerPath not found: $InstallerPath"
   }
   $installer = Get-Item -LiteralPath $InstallerPath
+  if (-not $ArtifactRootWasProvided) {
+    $ArtifactRoot = $installer.DirectoryName
+  }
 } elseif (Test-Path -LiteralPath $ArtifactRoot) {
   $candidates = @(Get-ChildItem -LiteralPath $ArtifactRoot -Recurse -Force -File -Include "*.exe", "*.msi", "*.msix" -ErrorAction SilentlyContinue | Sort-Object Length -Descending)
   $installer = $candidates | Select-Object -First 1
 } else {
   $installer = $null
 }
+
+Write-Host "ArtifactRoot: $ArtifactRoot"
 
 if (-not $installer) {
   $message = "No installer artifact found. Installer smoke is not yet proven."
@@ -121,6 +147,17 @@ if (-not $installer) {
 
 if ($installer.FullName -match $forbiddenRegex) {
   throw "Installer path itself looks risky: $($installer.FullName)"
+}
+Invoke-RiskyArtifactPathCheck $installer.FullName
+
+$installerExtension = [System.IO.Path]::GetExtension($installer.FullName).ToLowerInvariant()
+if ($installerExtension -notin @(".exe", ".msi", ".msix")) {
+  throw "InstallerPath must point to a .exe, .msi, or .msix artifact: $($installer.FullName)"
+}
+
+Add-ArtifactScanRoot $ArtifactRoot
+if ($InstallerPath -and $installer.DirectoryName) {
+  Add-ArtifactScanRoot $installer.DirectoryName
 }
 
 if ($installer.Length -lt 1MB) {
@@ -142,10 +179,10 @@ if ($signingInfo.Status -eq "unsigned" -and $Target -eq "InternalRC") {
   }
 }
 
-if (Test-Path -LiteralPath $ArtifactRoot) {
+foreach ($artifactScanRoot in $artifactScanRoots) {
   $forbidden = @()
-  Get-ChildItem -LiteralPath $ArtifactRoot -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object {
-    $relative = $_.FullName.Substring((Resolve-Path -LiteralPath $ArtifactRoot).Path.Length).TrimStart('\', '/')
+  Get-ChildItem -LiteralPath $artifactScanRoot -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object {
+    $relative = $_.FullName.Substring($artifactScanRoot.Length).TrimStart('\', '/')
     if ($relative -match $forbiddenRegex -or $_.Name -match '(?i)^(\.env|audit\.log|bridge-audit\.log|lexa_memory\.db|lexa_memory\.db-|.*\.env$)') {
       $forbidden += $relative
     }
@@ -153,6 +190,7 @@ if (Test-Path -LiteralPath $ArtifactRoot) {
   if ($forbidden.Count -gt 0) {
     throw "Forbidden content found near installer artifacts: $($forbidden -join ', ')"
   }
+  Invoke-RiskyArtifactPathCheck $artifactScanRoot
 }
 
 Write-Host "Installer smoke completed."

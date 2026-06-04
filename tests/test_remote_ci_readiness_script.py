@@ -105,3 +105,37 @@ def test_workflow_with_artifact_upload_fails(tmp_path):
 
     assert result.returncode == 1
     assert "artifact upload" in result.stdout
+
+
+def test_workflow_with_machine_credential_path_fails(tmp_path):
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/example/lexa.git"],
+        cwd=tmp_path,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    write_minimal_repo(tmp_path, SAFE_WORKFLOW + "\n      - run: type config/credentials.yaml\n")
+
+    result = run_script(tmp_path)
+
+    assert result.returncode == 1
+    assert "machine credential file" in result.stdout
+
+
+def test_workflow_with_signing_material_path_fails(tmp_path):
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/example/lexa.git"],
+        cwd=tmp_path,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    write_minimal_repo(tmp_path, SAFE_WORKFLOW + "\n      - run: signtool sign /f release/windows_signing.pfx app.exe\n")
+
+    result = run_script(tmp_path)
+
+    assert result.returncode == 1
+    assert "signing material path" in result.stdout

@@ -455,11 +455,26 @@ function escapeSuggestionRegex(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function chatSuggestionNormalizedText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss");
+}
+
+function chatSuggestionSearchText(value) {
+  return chatSuggestionNormalizedText(value)
+    .replace(/[^\p{L}\p{N}_]+/gu, " ")
+    .trim();
+}
+
 function chatSuggestionHasWord(text, word) {
-  const escaped = escapeSuggestionRegex(String(word || "").toLowerCase());
+  const escaped = escapeSuggestionRegex(chatSuggestionSearchText(word)).replace(/\s+/g, "\\s+");
   if (!escaped) return false;
-  return new RegExp("(^|[^\\p{L}\\p{N}_])" + escaped + "(?=$|[^\\p{L}\\p{N}_])", "iu")
-    .test(String(text || "").toLowerCase());
+  return new RegExp("(^|\\s)" + escaped + "(?=$|\\s)", "iu")
+    .test(chatSuggestionSearchText(text));
 }
 
 function chatSuggestionHasAnyWord(text, words) {
@@ -468,10 +483,732 @@ function chatSuggestionHasAnyWord(text, words) {
 
 function generateSuggestions(responseText, userQuestion) {
   const suggestions = [];
-  const lower = responseText.toLowerCase();
+  const lower = chatSuggestionNormalizedText(responseText);
+  const questionLower = chatSuggestionNormalizedText(userQuestion);
+  const topicText = `${lower}\n${questionLower}`;
   const hasAny = (words) => chatSuggestionHasAnyWord(lower, words);
+  const hasAnyTopic = (words) => chatSuggestionHasAnyWord(topicText, words);
+  const hasLexaImprovementAction = hasAnyTopic([
+    "verbesser", "verbessere", "verbessern", "verbesserung",
+    "verbesserungen", "verbessert",
+    "improve", "improvement", "improvements", "improved",
+    "upgrade", "polish", "optimize", "optimise", "optimieren",
+    "optimierung", "ausbau", "ausbauen", "weiterentwickeln",
+    "weiterentwicklung", "weiterentwickle", "weiterentwickelt",
+  ]);
 
   // ── Topic-specific follow-ups (prioritized) ──
+  // Lexa/product improvement context
+  if (
+    hasAnyTopic(["lexa", "assistant", "assistent"]) &&
+    hasLexaImprovementAction &&
+    hasAnyTopic([
+      "verbessern", "verbesserung", "verbesserungen", "verbessert",
+      "feature", "features", "feture", "futere", "futeres",
+      "ausbau", "ausbauen",
+      "weiterentwickeln", "weiterentwicklung", "weiterentwickle",
+      "weiterentwickelt",
+      "funktion", "funktionen", "intelligenz", "intelligen", "intilegnz",
+      "antwortqualitaet", "answer quality", "memory", "gedaechtnis",
+      "erinnerung", "erinnerungen", "context", "kontext", "kontextfenster",
+      "personalization", "personalisierung", "personalisiert",
+      "conversation", "conversation flow", "konversation", "gespraech",
+      "gespraechsverlauf", "dialog", "follow up", "followup", "follow ups",
+      "followups", "folgenfrage", "folgenfragen", "intent", "intention",
+      "intent recognition", "intent erkennung", "reasoning", "schlussfolgern",
+      "planung", "priorisierung",
+      "automatisierung", "automatiersung",
+      "autoamtion", "ux", "zuverlaessigkeit", "reliability", "stability",
+      "robust", "robuster", "robustheit", "robustness", "stabil", "stabilitaet",
+      "usability", "bedienbarkeit", "performance", "accessibility", "a11y",
+      "barrierefreiheit", "zugaenglichkeit", "speed", "schnell", "schneller",
+      "geschwindigkeit", "latency", "latenz", "reaktionszeit", "response time",
+      "ladezeit", "startzeit",
+    ])
+  ) {
+    suggestions.push(t("chat.suggNextLexaImprovement"), t("chat.suggRunFocusedTests"), t("chat.suggCheckRisks"));
+  }
+  const hasSourceEvidenceTopic = hasAnyTopic([
+    "quelle", "quellen", "sources", "reference", "references", "referenz", "referenzen",
+    "citation", "citations", "literatur", "study", "studies", "studie", "studien", "paper", "papers",
+    "beleg", "belege", "evidence", "claim", "claims", "aussage", "aussagen",
+  ]);
+  const hasVerificationActionTopic = hasAnyTopic([
+    "unbelegt", "unsupported", "unverified", "verifiziere", "verifiziert", "verifizieren",
+    "validate", "validation", "validiere", "validieren", "validiert",
+    "verification", "verify", "faktencheck", "fact check",
+    "cross check", "gegencheck", "gegenpruefe", "gegenpruefen",
+    "plausibilitaet", "plausibilitaetscheck",
+    "pruefe", "pruefen", "geprueft", "ueberpruefe", "ueberpruefen",
+  ]);
+  const hasStrongSourceVerificationTopic = hasAnyTopic([
+    "source backed", "source backed brief", "source backed research",
+    "unsupported claims", "unverified claims",
+    "unbelegte claims", "ungepruefte claims",
+    "verify answer", "verify this answer", "verify the answer",
+    "verify my answer",
+    "fact check answer", "fact check this answer", "fact check my answer",
+    "fact-check answer", "fact-check this answer", "fact-check my answer",
+    "double check answer", "double check this answer",
+    "double check my answer",
+    "verify claim", "verify this claim", "check claim", "check this claim",
+    "fact check claim", "fact check this claim", "fact-check claim",
+    "fact-check this claim", "double check claim",
+    "double check this claim",
+    "verify statement", "verify this statement", "check statement",
+    "check this statement", "fact check statement",
+    "fact check this statement", "fact-check statement",
+    "fact-check this statement", "double check statement",
+    "double check this statement", "verify assertion",
+    "verify this assertion", "check assertion", "check this assertion",
+    "fact check assertion", "fact check this assertion",
+    "fact-check assertion", "fact-check this assertion",
+    "double check assertion", "double check this assertion",
+    "check answer", "check the answer", "check this answer",
+    "check my answer",
+    "antwort pruefen", "diese antwort pruefen", "die antwort pruefen",
+    "meine antwort pruefen",
+    "pruef die antwort", "pruef diese antwort", "pruef meine antwort",
+    "pruefe die antwort", "pruefe diese antwort", "pruefe meine antwort",
+    "ueberpruef die antwort", "ueberpruef diese antwort",
+    "ueberpruef meine antwort", "ueberpruefe die antwort",
+    "ueberpruefe diese antwort", "ueberpruefe meine antwort",
+    "aussage pruefen", "diese aussage pruefen", "pruef diese aussage",
+    "pruefe diese aussage", "behauptung pruefen",
+    "diese behauptung pruefen", "pruef diese behauptung",
+    "pruefe diese behauptung",
+    "faktencheck antwort", "faktencheck diese antwort",
+    "faktencheck meine antwort",
+    "faktencheck aussage", "faktencheck diese aussage",
+    "faktencheck behauptung", "faktencheck diese behauptung",
+    "antwort verifizieren", "meine antwort verifizieren",
+  ]);
+  // Source/verification context
+  if ((hasSourceEvidenceTopic && hasVerificationActionTopic) || hasStrongSourceVerificationTopic) {
+    suggestions.push(t("chat.suggVerifyAnswer"), t("chat.suggFindSources"), t("chat.suggExtractClaims"));
+  }
+  const hasDecisionIntentTopic = hasAnyTopic([
+    "decision", "decide", "choose", "choice",
+    "rank", "ranking",
+    "entscheidung", "entscheiden", "wahl", "waehle",
+    "prioritaet", "prioritaeten", "priority", "priorities",
+    "prioritize", "prioritise", "prioritization", "prioritisation",
+    "priorisieren", "priorisierung", "rangfolge",
+    "strategy", "strategie", "roadmap", "plan", "plane", "planen", "planung",
+    "abwaegung", "abwaegen", "abwaeg",
+  ]);
+  const hasDecisionStructureTopic = hasAnyTopic([
+    "option", "options", "optionen", "alternative", "alternatives", "alternativen",
+    "choice", "choices", "wahl", "auswahl",
+    "tradeoff", "tradeoffs", "trade off", "trade offs",
+    "pros", "cons", "pro", "contra",
+    "risiko", "risiken", "risk", "risks",
+    "vorteil", "vorteile", "nachteil", "nachteile",
+    "reversibilitaet", "reversible", "irreversible",
+    "recommendation", "empfehlung", "confidence", "konfidenz",
+    "offene fragen", "open questions", "naechste schritte", "next steps",
+  ]);
+  const hasStrongDecisionTopic = hasAnyTopic([
+    "decision brief", "entscheidungsbrief", "deep think", "deepthink",
+    "which option is better", "which option should i choose",
+    "which option should i pick", "which option should i take",
+    "which should i choose", "which should i pick",
+    "welche option ist besser", "welche option soll ich waehlen",
+    "welche option soll ich nehmen", "welche soll ich waehlen",
+    "welche soll ich nehmen",
+    "rank these options", "rank the options", "rank these choices",
+    "prioritize these options", "prioritise these options",
+    "score these options", "rate these options",
+    "evaluate these options", "evaluate the options",
+    "weighted decision matrix",
+    "bewerte diese optionen", "bewerte die optionen",
+    "bewertungsmatrix", "entscheidungsmatrix",
+    "scoring matrix", "scoring tabelle",
+    "priorisiere diese optionen", "priorisiere die optionen",
+    "ordne die optionen", "mach eine rangfolge",
+    "help me decide", "hilf mir entscheiden", "hilf mir bei der entscheidung",
+    "make the call", "triff die entscheidung", "triff eine entscheidung",
+    "entscheide fuer mich", "entscheid fuer mich",
+    "extended thinking", "strategy review", "strategie review", "roadmap review",
+  ]);
+  const hasDecisionAskTopic = hasAnyTopic([
+    "soll ich", "was soll ich", "should i", "which should i",
+    "welche soll ich", "welchen soll ich", "welches soll ich",
+  ]);
+  const hasDecisionBetterTopic = hasAnyTopic([
+    "was ist besser", "welche ist besser", "welcher ist besser", "welches ist besser",
+    "which is better", "which one is better", "what is better",
+    "besser fuer", "better for", "empfiehlst du", "would you recommend",
+    "what would you do", "what would you pick", "what would you choose",
+    "was wuerdest du machen", "was wuerdest du tun",
+    "was wuerdest du nehmen", "was wuerdest du waehlen",
+  ]);
+  const hasDecisionCompareTopic = hasAnyTopic([
+    "vergleiche", "vergleich", "vergleichs",
+    "gegenueberstellen", "gegenueberstellung",
+    "compare", "comparison", "compare options",
+  ]);
+  const hasDecisionTradeoffTopic = hasAnyTopic([
+    "pros and cons", "pros cons", "pro und contra",
+    "vor und nachteile", "vorteile und nachteile",
+    "tradeoff", "tradeoffs", "trade off", "trade offs",
+    "risks and benefits", "risiken und vorteile",
+  ]);
+  const hasDecisionTradeoffContextTopic = hasAnyTopic([
+    "of", "for", "between", "von", "fuer", "zwischen", "ueber", "about",
+  ]);
+  const hasDecisionScoringTopic = hasAnyTopic([
+    "criteria", "criterion", "kriterium", "kriterien",
+    "score", "scores", "scoring",
+    "bewerte", "bewerten", "bewertung", "bewertungsmatrix",
+    "entscheidungsmatrix", "matrix",
+    "weighted", "gewichtet", "gewichtung", "punkte", "punktezahl",
+  ]);
+  const hasDecisionPlanningTopic = hasAnyTopic([
+    "roadmap", "fahrplan", "umsetzungsplan", "execution plan",
+    "action plan", "rollout plan", "release plan", "plan of attack",
+    "projektplan", "project plan", "plan", "plane", "planen",
+  ]);
+  const hasDecisionPlanningStructureTopic = hasAnyTopic([
+    "meilenstein", "meilensteine", "milestone", "milestones",
+    "phase", "phases", "phasen", "timeline", "zeitplan",
+    "quartal", "quarter", "schritt", "schritte", "step", "steps",
+    "owner", "owners", "abhaengigkeit", "abhaengigkeiten",
+    "dependency", "dependencies",
+  ]);
+  const hasDecisionConstraintTopic = hasAnyTopic([
+    "constraint", "constraints", "einschraenkung", "einschraenkungen",
+    "bedingung", "bedingungen", "deadline", "frist", "termin",
+    "budget", "timebox", "zeitlimit", "limit", "limited", "begrenzt",
+    "resource", "resources", "ressource", "ressourcen",
+    "kapazitaet", "kapazitaeten", "stunden", "hours",
+    "tage", "days", "wochen", "weeks",
+  ]);
+  const hasDecisionRiskTopic = hasAnyTopic([
+    "risk assessment", "risk analysis", "risk register", "risk plan",
+    "mitigation plan", "rollback plan", "contingency plan",
+    "failure mode", "failure modes", "abort criteria",
+    "go no go", "go/no-go", "ship risk", "release risk",
+    "risikoanalyse", "risikoplan", "risikobewertung", "risikoregister",
+    "mitigationsplan", "notfallplan", "abbruchkriterien",
+  ]);
+  const hasDirectDecisionRiskTopic = hasAnyTopic([
+    "risk register", "risk plan", "mitigation plan", "rollback plan",
+    "contingency plan", "abort criteria", "go no go", "go/no-go",
+    "risikoplan", "risikoregister", "mitigationsplan", "notfallplan",
+    "abbruchkriterien",
+  ]);
+  const hasDecisionRiskContextTopic = hasAnyTopic([
+    "for", "fuer", "von", "before", "vor", "release", "ship", "launch",
+    "lexa", "create", "make", "run", "erstelle", "mach", "pruefe",
+    "check", "bewerte",
+  ]);
+  const hasRiskPlanningTopic = hasDirectDecisionRiskTopic || (hasDecisionRiskTopic && hasDecisionRiskContextTopic);
+  const hasSecurityPrivacyTopic = hasAnyTopic([
+    "threat model", "threat modeling", "security review", "security audit",
+    "privacy review", "privacy audit", "privacy impact assessment",
+    "permission review", "permissions review", "least privilege",
+    "data loss", "data-loss", "data loss risk", "data exfiltration",
+    "exfiltration", "secret leak", "secret leakage", "prompt injection",
+    "datenschutz review", "datenschutz audit", "bedrohungsmodell",
+    "berechtigungsreview", "berechtigungspruefung", "berechtigungen pruefen",
+    "datenverlust", "datenabfluss",
+  ]);
+  const hasSecurityPrivacyContextTopic = hasAnyTopic([
+    "for", "fuer", "von", "before", "vor", "lexa", "memory",
+    "tool", "tools", "hermes", "agent", "release", "launch",
+    "run", "create", "make", "erstelle",
+    "mach", "pruefe", "check", "bewerte",
+  ]);
+  const hasSecurityPrivacyReviewTopic = hasSecurityPrivacyTopic && hasSecurityPrivacyContextTopic;
+  const hasAccessibilityTopic = hasAnyTopic([
+    "accessibility", "a11y", "accessibility review", "accessibility audit",
+    "barrierefreiheit", "barrierefrei", "zugaenglichkeit",
+    "screen reader", "screenreader", "sr label", "aria",
+    "keyboard navigation", "keyboard access",
+    "tastaturbedienung", "tastaturnavigation",
+    "focus order", "focus trap", "fokusreihenfolge", "fokusfalle",
+    "contrast", "kontrast", "reduced motion", "motion sensitivity",
+  ]);
+  const hasAccessibilityContextTopic = hasAnyTopic([
+    "for", "fuer", "von", "before", "vor", "lexa", "app", "chat",
+    "ui", "ux", "frontend", "settings", "modal", "button", "buttons",
+    "page", "run", "create", "make", "pruefe", "check",
+    "bewerte",
+  ]);
+  const hasAccessibilityReviewTopic = hasAccessibilityTopic && hasAccessibilityContextTopic;
+  const hasPerformanceTopic = hasAnyTopic([
+    "performance review", "performance audit", "performance budget",
+    "latency budget", "latency review", "startup time",
+    "startup performance", "load time", "loading time", "response time",
+    "throughput", "profiling", "profile performance",
+    "bottleneck", "bottlenecks", "memory footprint", "cpu usage",
+    "bundle size", "render performance", "streaming latency",
+    "perf review", "perf audit", "latenz review", "latenzbudget",
+    "startzeit", "ladezeit", "reaktionszeit",
+    "flaschenhals", "flaschenhaelse",
+  ]);
+  const hasPerformanceContextTopic = hasAnyTopic([
+    "for", "fuer", "von", "before", "vor", "lexa", "app", "chat",
+    "streaming", "frontend", "backend", "startup", "release", "launch",
+    "run", "create", "make", "measure", "benchmark", "profile",
+    "optimize", "optimise", "improve", "erstelle", "mach", "miss",
+    "messe", "benchmarke", "optimiere", "verbessere", "pruefe",
+    "check", "bewerte",
+  ]);
+  const hasPerformanceReviewTopic = hasPerformanceTopic && hasPerformanceContextTopic;
+  const hasTestingTopic = hasAnyTopic([
+    "test plan", "testing plan", "qa checklist", "qa plan",
+    "quality checklist", "acceptance criteria", "acceptance test",
+    "regression test plan", "regression tests", "smoke test plan",
+    "smoke tests", "test matrix", "testmatrix",
+    "test coverage review", "eval plan", "evaluation plan",
+    "abnahmekriterien", "abnahmetest", "testplan", "qa checkliste",
+    "qualitaetscheckliste", "regressionstestplan", "smoketest",
+  ]);
+  const hasTestingContextTopic = hasAnyTopic([
+    "for", "fuer", "von", "before", "vor", "lexa", "app", "chat",
+    "agent", "release", "launch", "feature", "workflow", "streaming",
+    "memory", "create", "make", "write", "run", "build", "review",
+    "erstelle", "mach", "schreibe", "pruefe", "baue",
+  ]);
+  const hasTestingReviewTopic = hasTestingTopic && hasTestingContextTopic;
+  const hasMemoryContextTopic = hasAnyTopic([
+    "memory review", "memory audit", "memory hygiene",
+    "memory cleanup", "memory clean up", "memory pruning",
+    "context pack", "context brief", "context review", "context audit",
+    "context window review", "stable memory", "draft memory",
+    "save this memory", "save to memory", "remember this",
+    "what should lexa remember", "what should you remember",
+    "personalization review", "personalisation review", "profile review",
+    "gedaechtnis review", "gedaechtnis audit", "gedaechtnis hygiene",
+    "gedaechtnis bereinigen", "gedaechtnis pruefen",
+    "kontextpaket", "kontext brief", "kontext review",
+    "kontextfenster review", "was soll lexa speichern",
+    "was sollst du speichern", "merk dir", "speicher das",
+    "speichere das", "personalisierung review", "profil review",
+  ]);
+  const hasMemoryContextContextTopic = hasAnyTopic([
+    "lexa", "assistant", "personal os", "conversation", "chat",
+    "profile", "user", "task", "tasks", "project", "decision",
+    "decisions", "facts", "assumptions", "preference", "preferences",
+    "privacy", "consent", "write", "writes", "build", "create",
+    "make", "save", "remember", "prune", "delete", "correct",
+    "konversation", "gespraech", "profil", "nutzer", "aufgabe",
+    "aufgaben", "projekt", "entscheidung", "entscheidungen", "fakten",
+    "annahmen", "praeferenz", "praeferenzen", "datenschutz",
+    "einwilligung", "schreibe", "baue", "erstelle", "mach",
+    "speicher", "speichere", "merk", "bereinige", "loesche",
+    "loeschen", "korrigiere",
+  ]);
+  const hasMemoryContextReviewTopic = hasMemoryContextTopic && hasMemoryContextContextTopic;
+  const hasAgentToolTopic = hasAnyTopic([
+    "agent run", "agent task", "agent workflow", "agent execution",
+    "agent plan", "agent handoff", "tool workflow", "tool plan",
+    "tool execution", "tool execution plan", "tool run",
+    "tool use plan", "toolchain", "workspace handoff",
+    "handoff plan", "desktop action", "local action",
+    "os agent runtime", "background task", "hermes worker",
+    "multi step agent", "multistep agent", "run tools", "use tools",
+    "agent lauf", "agent aufgabe", "agent ausfuehrung",
+    "agent uebergabe", "werkzeug workflow", "werkzeug plan",
+    "tool ausfuehrung", "werkzeug ausfuehrung", "tool lauf",
+    "workspace uebergabe", "arbeitsuebergabe", "desktop aktion",
+    "lokale aktion", "hintergrundaufgabe",
+  ]);
+  const hasAgentToolContextTopic = hasAnyTopic([
+    "lexa", "assistant", "workspace", "repository", "repo",
+    "project", "file", "files", "desktop", "browser", "os",
+    "personal os", "hermes", "automation", "release", "chat",
+    "memory", "permissions", "approval", "rollback", "verification",
+    "verify", "safe", "dry run", "read only", "read-only",
+    "background", "create", "build", "start", "execute", "projekt",
+    "datei", "dateien", "automatisierung", "freigabe",
+    "berechtigungen", "verifikation", "verifiziere", "sicher",
+    "nur lesend", "lesend", "hintergrund", "erstelle", "baue",
+    "starte", "fuehre aus",
+  ]);
+  const hasAgentToolReviewTopic = hasAgentToolTopic && hasAgentToolContextTopic;
+  const hasShipCheckTopic = hasAnyTopic([
+    "ship check", "production ship check", "release check",
+    "release readiness", "readiness check", "launch readiness",
+    "launch blocker", "launch blockers", "publish check",
+    "pre publish check", "pre release checklist", "release checklist",
+    "release quality", "ship readiness", "go live check",
+    "go-live check", "deployment readiness", "deployment check",
+    "production readiness", "produktreife", "release pruefung",
+    "release pruefen", "publish pruefung", "vor publish",
+    "vor release", "go live pruefung", "deployment pruefung",
+  ]);
+  const hasShipCheckContextTopic = hasAnyTopic([
+    "lexa", "assistant", "app", "product", "production",
+    "user facing", "user-facing", "ux", "accessibility",
+    "performance", "reliability", "security", "privacy",
+    "data loss", "docs", "onboarding", "tests", "migration",
+    "rollback", "publish", "deploy", "go live", "go-live",
+    "before", "for", "produkt", "produktion", "nutzerseitig",
+    "barrierefreiheit", "zuverlaessigkeit", "datenschutz",
+    "datenverlust", "dokumentation", "veroeffentlichen",
+    "deployen", "vor", "fuer",
+  ]);
+  const hasShipCheckReviewTopic = hasShipCheckTopic && hasShipCheckContextTopic;
+  const hasDataSafetyTopic = hasAnyTopic([
+    "delete files", "delete data", "delete memory", "delete memories",
+    "delete old memories", "cleanup old memories",
+    "clean up old memories", "cleanup downloads", "clean up downloads",
+    "overwrite file", "overwrite files", "reset database",
+    "reset settings", "wipe data", "purge data", "drop table",
+    "truncate table", "restore backup", "migrate database",
+    "apply migration", "migration apply", "rebuild index",
+    "mass delete", "bulk delete", "destructive action",
+    "dangerous change", "data loss risk", "dateien loeschen",
+    "daten loeschen", "memory loeschen", "erinnerungen loeschen",
+    "alte erinnerungen loeschen", "erinnerungen aufraeumen",
+    "downloads aufraeumen", "datei ueberschreiben",
+    "dateien ueberschreiben", "datenbank zuruecksetzen",
+    "einstellungen zuruecksetzen", "backup wiederherstellen",
+    "migration anwenden", "datenbank migrieren", "index neu aufbauen",
+    "massenloeschung", "destruktive aktion", "gefaehrliche aenderung",
+    "datenverlust risiko",
+  ]);
+  const hasDataSafetyContextTopic = hasAnyTopic([
+    "lexa", "assistant", "app", "workspace", "project", "repo",
+    "database", "sqlite", "memory", "memories", "settings",
+    "downloads", "files", "folder", "folders", "backup",
+    "migration", "index", "local", "dry run", "read only",
+    "read-only", "restore", "rollback", "confirm", "confirmation",
+    "projekt", "datenbank", "erinnerung", "erinnerungen",
+    "einstellungen", "datei", "dateien", "ordner", "lokal",
+    "nur lesend", "wiederherstellen", "bestaetigen", "bestaetigung",
+  ]);
+  const hasDataSafetyReviewTopic = hasDataSafetyTopic && hasDataSafetyContextTopic;
+  const hasDebugTriageTopic = hasAnyTopic([
+    "bug triage", "incident triage", "debug plan", "debugging plan",
+    "debug this", "debug lexa", "debug the error", "debug error",
+    "root cause analysis", "root-cause analysis", "root cause", "rca",
+    "crash report", "crash investigation", "error investigation",
+    "error log analysis", "log analysis", "analyze logs", "analyse logs",
+    "failing test", "failing tests", "test failure",
+    "regression investigation", "production incident", "outage",
+    "broken workflow", "bug report", "reproduce bug", "repro steps",
+    "triage fehler", "fehler triage", "stoerung analysieren",
+    "stoerung triage", "absturzbericht", "absturz analysieren",
+    "fehler analysieren", "logs analysieren", "log analyse",
+    "ursachenanalyse", "root cause analyse", "fehlgeschlagener test",
+    "fehlgeschlagene tests", "regression untersuchen",
+    "bug reproduzieren", "repro schritte",
+  ]);
+  const hasDebugTriageContextTopic = hasAnyTopic([
+    "lexa", "assistant", "app", "chat", "frontend", "backend",
+    "agent", "tool", "memory", "release", "startup", "streaming",
+    "workflow", "user", "production", "local", "logs", "log",
+    "stack trace", "traceback", "error", "crash", "failure",
+    "failing", "reproduce", "repro", "fix", "verify", "rollback",
+    "projekt", "lokal", "benutzer", "fehler", "absturz",
+    "fehlermeldung", "stacktrace", "reproduzieren", "beheben",
+    "verifizieren",
+  ]);
+  const hasDebugTriageReviewTopic = hasDebugTriageTopic && hasDebugTriageContextTopic;
+  const hasStatusHandoffTopic = hasAnyTopic([
+    "status update", "progress update", "project status", "work status",
+    "implementation summary", "change summary", "verification summary",
+    "handoff summary", "handoff note", "handoff brief", "handoff",
+    "where are we", "what changed", "what was changed",
+    "what have we done", "what did we accomplish", "what is done",
+    "what remains", "recap progress", "summarize progress",
+    "summarize the work", "statusbericht", "fortschrittsbericht",
+    "projektstatus", "arbeitsstand", "zwischenstand", "uebergabe",
+    "uebergabe summary", "uebergabe notiz", "wie weit sind wir",
+    "wo stehen wir", "was hast du erreicht", "was haben wir erreicht",
+    "was wurde geaendert", "was wurde umgesetzt", "was ist erledigt",
+    "was ist offen", "fortschritt zusammenfassen",
+    "arbeit zusammenfassen",
+  ]);
+  const hasStatusHandoffContextTopic = hasAnyTopic([
+    "lexa", "assistant", "project", "workspace", "repo", "repository",
+    "implementation", "changes", "tests", "verified", "verification",
+    "next", "risk", "risks", "done", "open", "remaining", "we",
+    "wir", "projekt", "arbeitsstand", "aenderungen", "umsetzung",
+    "verifiziert", "naechste", "risiko", "risiken", "erledigt",
+    "offen", "rest",
+  ]);
+  const hasStatusHandoffReviewTopic = hasStatusHandoffTopic && hasStatusHandoffContextTopic;
+  const hasClarificationTopic = hasAnyTopic([
+    "ask clarifying questions", "ask clarification questions",
+    "clarifying questions", "clarification questions",
+    "clarify requirements", "clarify the requirements",
+    "clarify scope", "missing context", "missing information",
+    "missing info", "state assumptions", "list assumptions",
+    "call out assumptions", "assumption check", "ambiguity check",
+    "ambiguous requirements", "if unclear", "when unclear",
+    "before proceeding", "blocker questions", "ask only if needed",
+    "frage nach wenn unklar", "rueckfragen stellen",
+    "rueckfrage stellen", "klaerungsfragen", "klaerungsfrage",
+    "anforderungen klaeren", "umfang klaeren", "fehlender kontext",
+    "fehlende informationen", "fehlende infos", "annahmen nennen",
+    "annahmen auflisten", "annahmen pruefen", "unklarheiten",
+    "unklare anforderungen", "falls unklar", "wenn unklar",
+    "bevor du fortfaehrst", "blockierende fragen",
+  ]);
+  const hasClarificationContextTopic = hasAnyTopic([
+    "lexa", "assistant", "task", "project", "feature",
+    "implementation", "plan", "decision", "requirements", "scope",
+    "user", "workflow", "answer", "before", "proceed", "build",
+    "create", "write", "do", "aufgabe", "projekt", "umsetzung",
+    "entscheidung", "anforderungen", "umfang", "nutzer",
+    "antwort", "bevor", "fortfahren", "bauen", "erstellen",
+    "schreiben", "machen",
+  ]);
+  const hasClarificationReviewTopic = hasClarificationTopic && hasClarificationContextTopic;
+  const hasFeatureSpecTopic = hasAnyTopic([
+    "feature spec", "feature specification", "product spec",
+    "product specification", "technical spec", "technical specification",
+    "requirements spec", "requirements document", "product requirements",
+    "prd", "write a spec", "draft a spec", "create a spec",
+    "write requirements", "draft requirements", "define requirements",
+    "write user stories", "draft user stories", "create user stories",
+    "edge cases", "non goals", "non-goals", "out of scope",
+    "success metrics", "feature spek", "produkt spec",
+    "produkt spezifikation", "technische spezifikation",
+    "anforderungsdokument", "anforderungen schreiben",
+    "anforderungen definieren", "user stories schreiben",
+    "user stories erstellen",
+    "randfaelle", "nicht ziele", "nicht-ziele",
+    "ausserhalb scope", "erfolgsmetriken",
+  ]);
+  const hasFeatureSpecContextTopic = hasAnyTopic([
+    "lexa", "assistant", "app", "product", "feature", "workflow",
+    "user", "ux", "ui", "agent", "memory", "chat", "release",
+    "engineering", "implementation", "build", "create", "draft",
+    "write", "define", "produkt", "funktion", "nutzer",
+    "entwicklung", "umsetzung", "bauen", "erstellen", "entwerfen",
+    "schreiben", "definieren",
+  ]);
+  const hasFeatureSpecReviewTopic = hasFeatureSpecTopic && hasFeatureSpecContextTopic;
+  const hasEvalBenchmarkTopic = hasAnyTopic([
+    "assistant eval", "assistant evaluation", "answer quality eval",
+    "answer quality evaluation", "response quality eval",
+    "response quality evaluation", "quality rubric", "evaluation rubric",
+    "scoring rubric", "rubric for lexa", "rubric for assistant",
+    "benchmark lexa", "benchmark assistant", "benchmark assistants",
+    "benchmark answers", "benchmark responses",
+    "compare assistant answers", "compare model answers",
+    "compare models against", "compare against gpt",
+    "compare against claude", "compare against gemini",
+    "gpt comparison", "claude comparison", "gemini comparison",
+    "golden set for lexa", "eval dataset", "evaluation dataset",
+    "regression eval", "hallucination eval",
+    "antwortqualitaet bewerten", "antwortqualitaet evaluation",
+    "antwortqualitaet benchmark", "antworten bewerten",
+    "antworten benchmarken", "bewertungsrubrik fuer lexa",
+    "rubrik fuer lexa", "lexa benchmark", "assistant benchmark",
+    "modelle gegen", "gegen gpt vergleichen",
+    "gegen claude vergleichen", "gegen gemini vergleichen",
+    "golden set fuer lexa", "eval datensatz",
+    "halluzinationen bewerten",
+  ]);
+  const hasEvalBenchmarkContextTopic = hasAnyTopic([
+    "lexa", "assistant", "chat", "answer", "answers", "response",
+    "responses", "quality", "model", "models", "gpt", "claude",
+    "gemini", "benchmark", "rubric", "eval", "evaluation",
+    "score", "scores", "test", "tests", "antwort", "antworten",
+    "antwortqualitaet", "modell", "modelle", "rubrik", "bewertung",
+    "punkte", "testen",
+  ]);
+  const hasEvalBenchmarkReviewTopic = hasEvalBenchmarkTopic && hasEvalBenchmarkContextTopic;
+  const hasSummaryExtractionTopic = hasAnyTopic([
+    "summarize meeting", "summarize transcript", "summarize call",
+    "summarize notes", "summarize email thread",
+    "summarize discussion", "create meeting summary",
+    "write meeting summary", "meeting notes summary",
+    "transcript summary", "call summary", "discussion summary",
+    "extract action items", "extract decisions", "extract todos",
+    "extract tasks", "extract follow ups", "extract follow-ups",
+    "turn notes into action items",
+    "turn transcript into action items", "create meeting minutes",
+    "write meeting minutes", "make meeting minutes",
+    "meeting minutes from notes", "meeting minutes from transcript",
+    "notes to tasks", "transcript to tasks", "meeting recap",
+    "call recap", "meeting brief", "transcript brief",
+    "meeting zusammenfassen", "transkript zusammenfassen",
+    "notizen zusammenfassen", "call zusammenfassen",
+    "meeting summary erstellen", "meeting protokoll erstellen",
+    "protokoll aus notizen", "protokoll aus transkript",
+    "action items extrahieren", "entscheidungen extrahieren",
+    "todos extrahieren", "aufgaben extrahieren",
+    "follow ups extrahieren", "notizen in aufgaben",
+    "transkript in aufgaben",
+  ]);
+  const hasSummaryExtractionContextTopic = hasAnyTopic([
+    "meeting", "transcript", "call", "notes", "email", "thread",
+    "discussion", "minutes", "action items", "decisions", "todos",
+    "tasks", "owner", "owners", "deadline", "deadlines",
+    "follow ups", "follow-ups", "speaker", "speakers",
+    "transkript", "notizen", "diskussion", "protokoll",
+    "entscheidungen", "aufgaben", "sprecher",
+  ]);
+  const hasSummaryExtractionReviewTopic = hasSummaryExtractionTopic && hasSummaryExtractionContextTopic;
+  const hasNumericAnalysisTopic = hasAnyTopic([
+    "calculate", "compute", "estimate", "work out", "how much",
+    "how many", "what is the total", "what is the cost",
+    "what is the price", "what is the percentage",
+    "percent change", "percentage change", "growth rate",
+    "conversion rate", "cost estimate", "cost breakdown",
+    "cost comparison", "price estimate", "roi",
+    "return on investment", "break even", "break-even",
+    "average of", "sum of", "total cost", "monthly cost",
+    "annual cost", "unit economics",
+    "berechne", "berechnen", "rechne", "rechnen",
+    "kalkuliere", "kalkulieren", "schaetze", "schaetzen",
+    "wieviel", "wie viel", "wie viele", "gesamt",
+    "gesamtpreis", "gesamtkosten", "prozentuale aenderung",
+    "prozent berechnen", "wachstumsrate", "kosten schaetzen",
+    "kosten berechnen", "kostenvergleich", "durchschnitt von",
+    "summe von",
+  ]);
+  const hasNumericAnalysisContextTopic = hasAnyTopic([
+    "cost", "costs", "price", "prices", "budget", "revenue",
+    "profit", "margin", "discount", "tax", "interest", "users",
+    "requests", "tokens", "hours", "minutes", "days", "weeks",
+    "months", "years", "percent", "percentage", "rate", "ratio",
+    "growth", "conversion", "metric", "metrics", "latency",
+    "cost per", "per month", "per year",
+    "kosten", "preis", "preise", "umsatz", "gewinn", "marge",
+    "rabatt", "steuer", "zinsen", "nutzer", "nutzern", "anfragen",
+    "stunden", "minuten", "tage", "wochen", "monate", "jahre",
+    "prozent", "prozentual", "prozentuale", "verhaeltnis", "wachstum", "metrik", "metriken",
+    "latenz", "pro monat", "pro jahr",
+  ]);
+  const hasNumericOperatorTopic = /\d\s*(?:[%+\-*/x=]|percent|prozent)\s*\d/u.test(topicText);
+  const hasNumericUnitTopic = /\d.*\b(?:eur|usd|euro|dollar|tokens?|users?|requests?|hours?|minutes?|days?|weeks?|months?|years?|stunden?|minuten?|tage?|wochen?|monate?|jahre?|kosten|preis|umsatz|budget|revenue|costs?|prices?|rate|ratio|growth|prozent(?:ual\w*)?|percent|nutzern?)\b/u.test(topicText);
+  const hasNumericAnalysisReviewTopic = hasNumericAnalysisTopic && (
+    hasNumericAnalysisContextTopic || hasNumericOperatorTopic || hasNumericUnitTopic
+  );
+  const hasCommunicationDraftTopic = hasAnyTopic([
+    "draft email", "draft an email", "draft customer email",
+    "draft a customer email", "write email", "write an email",
+    "compose email", "compose an email", "reply to email",
+    "reply to this email", "respond to email", "draft reply",
+    "write reply", "compose reply", "draft response",
+    "write response", "draft message", "write message",
+    "compose message", "draft announcement", "write announcement",
+    "draft slack message", "write slack message", "draft teams message",
+    "write teams message", "customer reply", "customer response",
+    "customer email reply", "email reply", "email response",
+    "outreach email", "follow up email", "follow-up email",
+    "polish this email", "rewrite this email",
+    "email schreiben", "mail schreiben", "schreibe eine email",
+    "schreib eine email", "schreibe eine mail", "schreib eine mail",
+    "antwort schreiben", "antwort formulieren",
+    "formuliere eine antwort", "kundenantwort",
+    "nachricht schreiben", "nachricht formulieren",
+    "ankuendigung schreiben", "schreibe eine ankuendigung",
+    "schreib eine ankuendigung", "absage formulieren",
+    "follow up schreiben", "follow-up schreiben",
+  ]);
+  const hasCommunicationDraftContextTopic = hasAnyTopic([
+    "email", "mail", "message", "reply", "response", "announcement",
+    "slack", "teams", "customer", "client", "recipient", "audience",
+    "subject", "tone", "cta", "call to action", "follow up",
+    "follow-up", "nachricht", "antwort", "ankuendigung", "kunde",
+    "kunden", "empfaenger", "zielgruppe", "betreff", "ton",
+    "naechster schritt",
+  ]);
+  const hasCommunicationDraftReviewTopic = hasCommunicationDraftTopic && hasCommunicationDraftContextTopic;
+  const hasLearningExplanationTopic = hasAnyTopic([
+    "teach me", "teach", "explain step by step", "explain like i am",
+    "explain like i'm", "explain like im", "explain for beginners",
+    "explain with examples", "walk me through", "help me understand",
+    "learning path", "beginner explanation", "for beginners",
+    "step by step", "common mistakes", "quiz me", "practice exercise",
+    "tutorial for", "bring mir bei", "erklaer mir schritt fuer schritt",
+    "erklaere mir schritt fuer schritt", "erklaer es schritt fuer schritt",
+    "erklaere es schritt fuer schritt", "erklaer es fuer anfaenger",
+    "erklaere es fuer anfaenger", "fuer anfaenger", "mit beispielen",
+    "ich verstehe nicht", "hilf mir verstehen", "lernpfad",
+    "haeufige fehler", "uebung", "mini quiz",
+  ]);
+  const hasLearningExplanationContextTopic = hasAnyTopic([
+    "concept", "topic", "architecture", "system", "code", "python",
+    "javascript", "typescript", "async", "api", "database", "memory",
+    "agent", "tool", "workflow", "math", "metric", "lexa",
+    "assistant", "feature", "produkt", "konzept", "thema",
+    "architektur", "datenbank", "gedaechtnis", "werkzeug",
+    "mathe", "metrik", "assistent", "funktion",
+  ]);
+  const hasLearningExplanationReviewTopic = hasLearningExplanationTopic && hasLearningExplanationContextTopic;
+  const hasDecisionComparisonTopic = hasAnyTopic([
+    "oder", "or", "vs", "versus", "statt", "instead",
+    "zuerst", "first", "priorisieren", "prioritaet", "priority",
+  ]);
+  // Decision/planning context
+  if (
+    hasStrongDecisionTopic ||
+    (hasDecisionIntentTopic && hasDecisionStructureTopic) ||
+    (hasDecisionAskTopic && hasDecisionComparisonTopic) ||
+    (hasDecisionBetterTopic && hasDecisionComparisonTopic) ||
+    (hasDecisionCompareTopic && (hasDecisionComparisonTopic || hasDecisionStructureTopic)) ||
+    (hasDecisionTradeoffTopic && (hasDecisionComparisonTopic || hasDecisionTradeoffContextTopic)) ||
+    (hasDecisionScoringTopic && (hasDecisionStructureTopic || hasDecisionComparisonTopic)) ||
+    (hasDecisionPlanningTopic && hasDecisionPlanningStructureTopic) ||
+    (hasDecisionConstraintTopic && (hasDecisionPlanningTopic || hasDecisionIntentTopic)) ||
+    hasRiskPlanningTopic ||
+    hasSecurityPrivacyReviewTopic ||
+    hasAccessibilityReviewTopic ||
+    hasPerformanceReviewTopic ||
+    hasTestingReviewTopic ||
+    hasMemoryContextReviewTopic ||
+    hasAgentToolReviewTopic ||
+    hasShipCheckReviewTopic ||
+    hasDataSafetyReviewTopic ||
+    hasDebugTriageReviewTopic ||
+    hasStatusHandoffReviewTopic ||
+    hasClarificationReviewTopic ||
+    hasFeatureSpecReviewTopic ||
+    hasEvalBenchmarkReviewTopic ||
+    hasSummaryExtractionReviewTopic ||
+    hasNumericAnalysisReviewTopic ||
+    hasCommunicationDraftReviewTopic ||
+    hasLearningExplanationReviewTopic
+  ) {
+    if (hasLearningExplanationReviewTopic) {
+      suggestions.unshift(t("chat.suggSimplify"), t("chat.suggShowExample"), t("chat.suggQuizMe"));
+    } else if (hasCommunicationDraftReviewTopic) {
+      suggestions.unshift(t("chat.suggAdjustTone"), t("chat.suggAddCta"), t("chat.suggMakeConcise"));
+    } else if (hasNumericAnalysisReviewTopic) {
+      suggestions.unshift(t("chat.suggCheckMath"), t("chat.suggShowFormula"), t("chat.suggListAssumptions"));
+    } else if (hasSummaryExtractionReviewTopic) {
+      suggestions.unshift(t("chat.suggExtractActionItems"), t("chat.suggListDecisions"), t("chat.suggMakeBrief"));
+    } else if (hasEvalBenchmarkReviewTopic) {
+      suggestions.unshift(t("chat.suggDefineRubric"), t("chat.suggRunEval"), t("chat.suggCompareBaseline"));
+    } else if (hasFeatureSpecReviewTopic) {
+      suggestions.unshift(t("chat.suggDefineAcceptanceCriteria"), t("chat.suggListEdgeCases"), t("chat.suggDefineMvp"));
+    } else if (hasClarificationReviewTopic) {
+      suggestions.unshift(t("chat.suggShowAssumptions"), t("chat.suggListMissingContext"), t("chat.suggAskClarifyingQuestions"));
+    } else if (hasStatusHandoffReviewTopic) {
+      suggestions.unshift(t("chat.suggShowVerifiedChanges"), t("chat.suggShowNextSteps"), t("chat.suggShowOpenRisks"));
+    } else if (hasDebugTriageReviewTopic) {
+      suggestions.unshift(t("chat.suggStartTriage"), t("chat.suggFindLogs"), t("chat.suggVerifyFix"));
+    } else if (hasDataSafetyReviewTopic) {
+      suggestions.unshift(t("chat.suggDryRunFirst"), t("chat.suggCheckBackup"), t("chat.suggConfirmChanges"));
+    } else if (hasShipCheckReviewTopic) {
+      suggestions.unshift(t("chat.suggShipChecklist"), t("chat.suggRunSmokeTests"), t("chat.suggCheckRollback"));
+    } else if (hasMemoryContextReviewTopic) {
+      suggestions.unshift(t("chat.suggReviewMemory"), t("chat.suggBuildContextPack"), t("chat.suggListOpenQuestions"));
+    } else if (hasAgentToolReviewTopic) {
+      suggestions.unshift(t("chat.suggPlanToolRun"), t("chat.suggCheckPermissions"), t("chat.suggVerifyResult"));
+    } else if (hasTestingReviewTopic) {
+      suggestions.unshift(t("chat.suggRunFocusedTests"), t("chat.suggCheckRisks"), t("chat.suggListOpenQuestions"));
+    } else if (hasPerformanceReviewTopic) {
+      suggestions.unshift(t("chat.suggMeasurePerformance"), t("chat.suggRunFocusedTests"), t("chat.suggCheckRisks"));
+    } else if (hasAccessibilityReviewTopic) {
+      suggestions.unshift(t("chat.suggCheckAccessibility"), t("chat.suggRunFocusedTests"), t("chat.suggListOpenQuestions"));
+    } else if (hasRiskPlanningTopic || hasSecurityPrivacyReviewTopic) {
+      suggestions.unshift(t("chat.suggCheckRisks"), t("chat.suggMakeRecommendation"), t("chat.suggListOpenQuestions"));
+    } else {
+      suggestions.unshift(t("chat.suggCompareOptions"), t("chat.suggMakeRecommendation"), t("chat.suggListOpenQuestions"));
+    }
+  }
   // Music context
   if (hasAny(["spotify", "musik", "song", "playlist"])) {
     suggestions.push(t("chat.suggNextSong"), t("chat.suggQuieter"), t("chat.suggPause"));

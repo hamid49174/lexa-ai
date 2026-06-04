@@ -1,11 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+
 
 a = Analysis(
-    ['C:\\Users\\admin\\OneDrive\\Desktop\\lexa\\lexa-ai\\backend\\pyinstaller_entry.py'],
+    [str(ROOT / 'backend' / 'pyinstaller_entry.py')],
     pathex=[],
     binaries=[],
-    datas=[('C:\\Users\\admin\\OneDrive\\Desktop\\lexa\\lexa-ai\\command_whitelist.json', '.')],
+    datas=[(str(ROOT / 'command_whitelist.json'), '.')],
     hiddenimports=['uvicorn.logging', 'uvicorn.loops', 'uvicorn.loops.auto', 'uvicorn.protocols', 'uvicorn.protocols.http', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.websockets', 'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan', 'uvicorn.lifespan.on', 'uvicorn.lifespan.off', 'backend.main', 'backend.ai_engine', 'backend.memory', 'backend.productivity', 'backend.security', 'backend.action_parser', 'backend.router_companion', 'backend.router_voice', 'backend.router_productivity', 'companion.engine', 'companion.browser', 'companion.file_tools', 'companion.media', 'companion.communication', 'companion.system_tools', 'companion.dev_tools', 'voice.tts', 'voice.stt'],
     hookspath=[],
     hooksconfig={},

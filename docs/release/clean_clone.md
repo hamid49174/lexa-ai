@@ -12,7 +12,7 @@ Safe default behavior:
 
 - creates a source-only copy in a temp directory
 - copies only Git-visible source files plus current untracked source files
-- refuses risky paths such as `personal_os/`, `tmp/`, `vendor/`, `hermes_workspace/`, `lexa_memory.db*`, `audit.log`, `bridge-audit.log`, `evals/results/`, and build outputs
+- refuses risky paths such as `personal_os/`, `tmp/`, `vendor/`, `hermes_workspace/`, `lexa_memory.db*`, `audit.log`, `bridge-audit.log`, `evals/results/`, build outputs, env/package/cloud/SSH credentials, `credentials.*`, `secrets.*`, service-account/client-secret files, and signing keys/certificates
 - does not delete files
 - does not stage or commit anything
 

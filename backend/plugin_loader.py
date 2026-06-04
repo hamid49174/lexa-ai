@@ -23,6 +23,7 @@ import os
 import re
 from pathlib import Path
 
+from backend.config import LEXA_DATA_DIR, LEXA_DATA_DIR_SOURCE, PROJECT_ROOT
 from backend.i18n import t
 from backend.security import audit_log
 
@@ -56,13 +57,12 @@ _FORBIDDEN_REGEX_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("compile(", re.compile(r"(?<![\w.])compile\s*\(")),
 ]
 
-# In packaged builds, use LEXA_DATA_DIR/plugins so users can still add plugins.
+# In packaged/explicit data-dir builds, keep plugins with the app data.
 # In dev, use project-root/plugins as before.
-_DATA_DIR = os.environ.get("LEXA_DATA_DIR", "")
-if _DATA_DIR:
-    PLUGINS_DIR = Path(_DATA_DIR) / "plugins"
+if LEXA_DATA_DIR_SOURCE in {"env", "packaged_default", "user_data_default"}:
+    PLUGINS_DIR = LEXA_DATA_DIR / "plugins"
 else:
-    PLUGINS_DIR = Path(__file__).resolve().parent.parent / "plugins"
+    PLUGINS_DIR = PROJECT_ROOT / "plugins"
 
 
 def _legacy_loader_enabled() -> bool:

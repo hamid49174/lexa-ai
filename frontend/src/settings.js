@@ -1238,6 +1238,14 @@ async function loadLicenseStatus() {
       keyEl.textContent = lic.key || "\u2014";
       expiresEl.textContent = settingsFormatDate(lic.expires);
       _hideTrialBar(trialBar);
+    } else if (state === "paid_unverified") {
+      const planNames = { pro: "Lexa Pro", ultra: "Lexa Ultra", premium: "Lexa Premium", paid: "Lexa Pro" };
+      planEl.textContent = planNames[lic.plan] || lic.plan;
+      statusEl.textContent = t("settings.licenseNeedsReactivation");
+      statusEl.className = "setting-status offline";
+      keyEl.textContent = lic.key || "\u2014";
+      expiresEl.textContent = lic.expires ? settingsFormatDate(lic.expires) : "\u2014";
+      _hideTrialBar(trialBar);
     } else {
       // Free / unknown
       planEl.textContent = t("settings.licenseFree");
@@ -1290,25 +1298,19 @@ async function activateLicense() {
   if (!result || !result.key) return;
 
   const key = result.key.trim().toUpperCase();
-  if (!key.startsWith("LEXA-") || key.length < 20) {
+  if (!/^LEXA-[A-F0-9]{5}-[A-F0-9]{5}-[A-F0-9]{5}-[A-F0-9]{5}$/.test(key)) {
     showToast(t("license.invalidFormat"), "error");
     return;
   }
 
   showToast(t("license.checking"), "info");
   try {
-    const validation = await window.lexa.licenseValidate(key);
-    if (validation.valid) {
-      await window.lexa.licenseSet({
-        key: key,
-        plan: validation.plan || "pro",
-        status: validation.status || "active",
-        expires: validation.expires || null,
-      });
-      showToast(t("license.activated", {plan: (validation.plan || "pro").toUpperCase()}), "success");
+    const activation = await window.lexa.licenseActivate(key);
+    if (activation.valid && activation.success !== false) {
+      showToast(t("license.activated", {plan: (activation.plan || "pro").toUpperCase()}), "success");
       loadLicenseStatus();
     } else {
-      showToast(validation.error || t("license.invalid"), "error");
+      showToast(activation.error || t("license.invalid"), "error");
     }
   } catch (e) {
     showToast(t("license.validationError", {error: e.message}), "error");

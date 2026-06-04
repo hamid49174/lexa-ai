@@ -17,6 +17,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 from backend.config import (
+    LEXA_DATA_DIR,
     RATE_LIMIT_AUDIT_READ,
     RATE_LIMIT_CHAT,
     RATE_LIMIT_DEFAULT,
@@ -33,8 +34,7 @@ logger = logging.getLogger("lexa.security")
 PROJECT_ROOT = Path(__file__).parent.parent
 WHITELIST_PATH = PROJECT_ROOT / "command_whitelist.json"
 
-_DATA_DIR = os.environ.get("LEXA_DATA_DIR", str(PROJECT_ROOT))
-AUDIT_LOG_PATH = Path(_DATA_DIR) / "audit.log"
+AUDIT_LOG_PATH = LEXA_DATA_DIR / "audit.log"
 
 # Rate Limiting — per endpoint type, thread-safe with lock
 _rate_limit_lock = threading.Lock()
@@ -86,6 +86,8 @@ _READ_ONLY_ACTIONS: frozenset[str] = frozenset({
     "clipboard_read",
     "ui_tree",
     "ui_find",
+    "desktop_engine_status",
+    "desktop_engine_observe",
     "hermes_desktop_task",
     "desktop_position",
     "desktop_wait",

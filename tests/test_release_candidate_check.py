@@ -18,6 +18,7 @@ def test_release_candidate_script_orchestrates_required_gates():
         "run_os_quality_gates.ps1",
         "run_hermes_smoke.ps1",
         "run_website_smoke.ps1",
+        "run_paid_license_smoke.ps1",
         "run_packaging_smoke.ps1",
         "run_installer_smoke.ps1",
         "check_performance_budgets.ps1",
@@ -30,7 +31,16 @@ def test_release_candidate_script_orchestrates_required_gates():
 def test_release_candidate_script_does_not_deploy_or_delete():
     src = (REPO_ROOT / "scripts" / "run_release_candidate_check.ps1").read_text(encoding="utf-8").lower()
 
-    forbidden = ["upload-artifact", "action-gh-release", "publish", "deploy", "remove-item", "git add ."]
+    forbidden = [
+        "upload-artifact",
+        "action-gh-release",
+        "npm publish",
+        "electron-builder --publish",
+        "gh release",
+        "deploy",
+        "remove-item",
+        "git add .",
+    ]
     for item in forbidden:
         assert item not in src
 
@@ -59,8 +69,10 @@ def test_release_candidate_script_reports_decision_and_warnings():
     assert "Installer install/uninstall" in src
     assert "Installer signing status is" in src
     assert "Get-InstallerSigningStatus" in src
-    assert "Website release target is still static/external" in src
-    assert "Website CDN/CSP/SRI review is not proven" in src
+    assert "Public Supabase/Stripe config placeholders remain unresolved outside Git" in src
+    assert "Stripe.js allowlist/CSP policy needs release-owner approval" in src
+    assert "Paid activation smoke with real Supabase/Stripe config is not proven" in src
+    assert "run_paid_license_smoke.ps1" in src
     assert "Public artifact policy is not proven on remote CI" in src
     assert "privacy_trace_consent_checklist.md" in src
     assert "checklist exists but is not finalized or approved" in src
@@ -109,3 +121,23 @@ def test_privacy_trace_consent_checklist_exists_and_is_not_approval():
     assert "trace opt-in/opt-out" in text
     assert "does not collect user data" in text
     assert "sk-" not in text
+
+
+def test_installer_build_script_documents_backend_bundle_order():
+    script = (REPO_ROOT / "scripts" / "build_installer.ps1").read_text(encoding="utf-8")
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    package = (REPO_ROOT / "frontend" / "package.json").read_text(encoding="utf-8")
+    guard = (REPO_ROOT / "frontend" / "scripts" / "ensure-backend-bundle.cjs").read_text(encoding="utf-8")
+
+    assert "build_backend.py" in script
+    assert "backend-dist\\lexa-backend" in script
+    assert "npm.cmd run build" in script
+    assert "prebuild" in package
+    assert "ensure-backend-bundle.cjs" in package
+    assert "sync-vendor.cjs --check" in package
+    assert "backend-dist" in guard
+    assert "lexa-backend.exe" in guard
+    assert "process.exit(1)" in guard
+    assert "scripts\\build_installer.ps1" in readme
+    assert "backend-dist\\lexa-backend\\lexa-backend.exe" in readme
+    assert "npm run build" in readme and "Backend-Bundle" in readme

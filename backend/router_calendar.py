@@ -14,6 +14,12 @@ logger = logging.getLogger("lexa.router.calendar")
 router = APIRouter(prefix="/calendar", tags=["calendar"])
 
 
+def _rate_limited() -> JSONResponse | None:
+    if check_rate_limit("execute"):
+        return None
+    return JSONResponse({"error": "Zu viele Kalender-Anfragen. Bitte kurz warten."}, status_code=429)
+
+
 @router.get("/status")
 async def calendar_status():
     """Check if Google Calendar is connected."""
@@ -28,7 +34,9 @@ async def calendar_status():
 @router.post("/connect")
 async def calendar_connect():
     """Trigger OAuth2 flow to connect Google Calendar."""
-    check_rate_limit("execute")
+    limited = _rate_limited()
+    if limited is not None:
+        return limited
     audit_log("calendar_connect", "requested")
     try:
         # This will open a browser window for OAuth2 consent
@@ -49,7 +57,9 @@ async def calendar_connect():
 @router.get("/today")
 async def calendar_today():
     """Get today's calendar events."""
-    check_rate_limit("execute")
+    limited = _rate_limited()
+    if limited is not None:
+        return limited
     try:
         result = await asyncio.to_thread(calendar_int.calendar_today)
         if not result.get("success"):
@@ -63,7 +73,9 @@ async def calendar_today():
 @router.get("/week")
 async def calendar_week():
     """Get this week's calendar events."""
-    check_rate_limit("execute")
+    limited = _rate_limited()
+    if limited is not None:
+        return limited
     try:
         result = await asyncio.to_thread(calendar_int.calendar_week)
         if not result.get("success"):

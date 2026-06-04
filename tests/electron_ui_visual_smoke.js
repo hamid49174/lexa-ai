@@ -4,7 +4,7 @@
  */
 
 const path = require("path");
-require("./electron_smoke_safe_io");
+const { normalizeElectronConsoleMessage } = require("./electron_smoke_safe_io");
 
 if (!process.versions.electron) {
   const { spawnSync } = require("child_process");
@@ -17,7 +17,11 @@ if (!process.versions.electron) {
     env,
     stdio: "inherit",
   });
-  process.exit(result.status ?? (result.signal ? 1 : 0));
+  if (result.error) {
+    console.error(`[Electron smoke] Failed to launch Electron at ${electronPath}: ${result.error.message || result.error}`);
+    process.exit(1);
+  }
+  process.exit(result.status ?? 1);
 }
 
 const { app, BrowserWindow, ipcMain } = require("electron");
@@ -144,7 +148,8 @@ async function main() {
     },
   });
 
-  win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+  win.webContents.on("console-message", (event, ...legacyConsoleArgs) => {
+    const { level, message, line, sourceId } = normalizeElectronConsoleMessage(event, ...legacyConsoleArgs);
     const text = String(message || "");
     const looksFatal = /\b(LEXA ERROR|Unhandled|TypeError|ReferenceError|SyntaxError|RangeError)\b/i.test(text);
     if (level >= 3 || looksFatal) {
@@ -1329,7 +1334,7 @@ async function main() {
       const calls = window.lexaSmoke?.calls("conversationDelete")?.length || 0;
       const toastText = [...document.querySelectorAll("#toast-container .toast .toast-text")]
         .map((el) => el.textContent || "")
-        .find((text) => text.includes("delete") || text.includes("Löschen")) || "";
+        .find((text) => /delete|l\u00f6schen|loeschen/i.test(text)) || "";
       window.lexaSmoke?.clear("conversationDelete");
       btn.remove();
       return { calls, callsAfterSecond, busyAfterFirst, restored, toastText };
@@ -1361,8 +1366,8 @@ async function main() {
       const deletedRowGone = !document.querySelector("#conversation-list [data-conv-id='" + deletedId + "']");
       const toastTexts = [...document.querySelectorAll("#toast-container .toast .toast-text")].map((el) => el.textContent || "");
       const refreshWarning = toastTexts.some((text) => text.includes("Sidebar refresh failed") || text.includes("Seitenleiste"));
-      const deletedToast = toastTexts.some((text) => text.includes("Chat deleted") || text.includes("Chat gelöscht"));
-      const noDeleteError = !toastTexts.some((text) => text.includes("Failed to delete") || text.includes("Fehler beim Löschen"));
+      const deletedToast = toastTexts.some((text) => /Chat (deleted|gel\u00f6scht|geloescht)/i.test(text));
+      const noDeleteError = !toastTexts.some((text) => /Failed to delete|Fehler beim L\u00f6schen|Fehler beim Loeschen/i.test(text));
       window.lexaSmoke?.clear("conversations");
       LexaState.set("currentConversationId", oldConv);
       LexaState.set("conversationsList", oldList);
@@ -2222,15 +2227,15 @@ async function main() {
     !/personal_os_query/.test(result.agentStepLabels?.technical || "") ||
     !/08_Lexa/.test(result.agentStepLabels?.technical || "") ||
     !/gefunden|found/i.test(result.agentStepLabels?.foundOutcome || "") ||
-    !/geaendert|geändert|aktualisiert|changed|updated/i.test(result.agentStepLabels?.changedOutcome || "") ||
+    !/geaendert|geÃ¤ndert|aktualisiert|changed|updated/i.test(result.agentStepLabels?.changedOutcome || "") ||
     !/freigabe|approval|blockiert|blocked/i.test(result.agentStepLabels?.blockedOutcome || "") ||
-    !/pruefung|pr.f|prÃ¼fung|review|fehler|failed/i.test(result.agentStepLabels?.failedOutcome || "") ||
+    !/pruefung|pr.f|prÃƒÂ¼fung|review|fehler|failed/i.test(result.agentStepLabels?.failedOutcome || "") ||
     result.agentStepLabels?.runSummary?.hidden ||
     result.agentStepLabels?.runSummary?.chipCount !== 4 ||
     !/gefunden|found/i.test(result.agentStepLabels?.runSummary?.text || "") ||
-    !/geaendert|geändert|aktualisiert|changed|updated/i.test(result.agentStepLabels?.runSummary?.text || "") ||
+    !/geaendert|geÃ¤ndert|aktualisiert|changed|updated/i.test(result.agentStepLabels?.runSummary?.text || "") ||
     !/freigabe|approval|blockiert|blocked/i.test(result.agentStepLabels?.runSummary?.text || "") ||
-    !/pruefung|pr.f|prÃ¼fung|review|fehler|failed/i.test(result.agentStepLabels?.runSummary?.aria || "") ||
+    !/pruefung|pr.f|prÃƒÂ¼fung|review|fehler|failed/i.test(result.agentStepLabels?.runSummary?.aria || "") ||
     result.agentStepLabels?.completion?.hidden ||
     result.agentStepLabels?.completion?.itemCount !== 3 ||
     !/review|pruef|pr.f/i.test(result.agentStepLabels?.completion?.state || "") ||
@@ -2238,7 +2243,7 @@ async function main() {
     !/needs you|braucht dich|open|offen/i.test(result.agentStepLabels?.completion?.text || "") ||
     !/continue|weiterarbeiten|fortsetzen/i.test(result.agentStepLabels?.completion?.buttonText || "") ||
     !/^\/agent /.test(result.agentStepLabels?.completion?.promptText || "") ||
-    !/review|pruef|prÃ¼f|freigabe|approval|offenen/i.test(result.agentStepLabels?.completion?.promptText || "") ||
+    !/review|pruef|prÃƒÂ¼f|freigabe|approval|offenen/i.test(result.agentStepLabels?.completion?.promptText || "") ||
     !(result.agentStepLabels?.completion?.promptCursor > 0) ||
     result.agentStepLabels?.completion?.clickedDraft !== result.agentStepLabels?.completion?.promptText ||
     result.agentStepLabels?.completion?.storedDraft !== result.agentStepLabels?.completion?.promptText ||
@@ -2258,7 +2263,7 @@ async function main() {
     !result.agentStepLabels?.persistedMeta?.hasAgentClass ||
     result.agentStepLabels?.persistedMeta?.completionCount !== 1 ||
     result.agentStepLabels?.persistedMeta?.outcomeCount < 2 ||
-    !/persisted summary|found|gefunden|review|pruefung|pr.f|prÃ¼fung|fehler/i.test(result.agentStepLabels?.persistedMeta?.text || "") ||
+    !/persisted summary|found|gefunden|review|pruefung|pr.f|prÃƒÂ¼fung|fehler/i.test(result.agentStepLabels?.persistedMeta?.text || "") ||
     result.agentStepLabels?.attention?.rendered !== 1 ||
     result.agentStepLabels?.attention?.itemCount !== 1 ||
     result.agentStepLabels?.attention?.attention?.failed !== 1 ||
@@ -2304,7 +2309,7 @@ async function main() {
     /Blocked Agent Run|Needs confirmation/i.test(result.agentStepLabels?.attention?.text || "") ||
     !/tasks waiting|aufgaben warten|open task|offene aufgabe|offene aufgaben|review|pruef|pr.f|approval|freigabe/i.test(result.agentStepLabels?.attention?.filterText || "") ||
     /Blocked Agent Run|Needs confirmation/i.test(result.agentStepLabels?.attention?.filterText || "") ||
-    !/next step|next action|naechster schritt|nächster schritt|naechste aktion|nächste aktion/i.test(result.agentStepLabels?.completion?.text || "")
+    !/next step|next action|naechster schritt|n.chster schritt|naechste aktion|n.chste aktion/i.test(result.agentStepLabels?.completion?.text || "")
   ) {
     failures.push(`agent step labels are not readable and traceable: ${JSON.stringify(result.agentStepLabels)}`);
   }

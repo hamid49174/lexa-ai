@@ -240,7 +240,7 @@ def _register_file_tools() -> list[dict]:
             _param("path", "string", "Zielpfad der neuen Datei", required=True),
             _param("content", "string", "Text- oder Code-Inhalt der Datei", required=True),
             _param("create_dirs", "boolean", "Fehlende Zielordner automatisch erstellen (Standard: true)"),
-        ]),
+        ], confirmation_required=True),
         _tool("file_move", "Verschiebt eine Datei oder einen Ordner von Quelle nach Ziel", [
             _param("source", "string", "Quellpfad (Datei oder Ordner)", required=True),
             _param("destination", "string", "Zielpfad oder Zielordner", required=True),
@@ -547,6 +547,13 @@ def _register_productivity_tools() -> list[dict]:
 def _register_pc_control_tools() -> list[dict]:
     """PC-Kontrolle erweitert: Fenster, Desktop-Input, Autostart, Dienste, Netzwerk."""
     return [
+        _tool("desktop_engine_status", "Zeigt den Hermes Desktop-Engine-Status: aktive lokale Provider (UIA/OCR) und optionale externe Agent-Provider wie Touchpoint, SikuliX oder UFO. Read-only.", []),
+        _tool("desktop_engine_observe", "Read-only Desktop-Beobachtung fuer Hermes: kombiniert echte Windows-Controls mit optionalem Bildschirmtext ueber die Provider-Schicht. Nutze dies als erste Orientierung fuer echte PC-Agent-Aufgaben.", [
+            _param("window", "string", "Optionaler Fenstertitel oder Teil davon"),
+            _param("include_text", "boolean", "Auch sichtbaren Text lesen, Standard true"),
+            _param("max_depth", "integer", "UIA-Tiefe 1-5, Standard 3"),
+            _param("max_controls", "integer", "Max. Controls im Ergebnis, Standard 80"),
+        ]),
         _tool("ui_tree", "Liest echte Windows-UI-Controls im aktiven oder benannten Fenster via UI Automation: Buttons, Textfelder, Listen, Tabs und ihre Rechtecke. Nutze dies vor visueller PC-Steuerung, wenn Hermes wissen muss, was wirklich klickbar ist.", [
             _param("window", "string", "Optionaler Fenstertitel oder Teil davon"),
             _param("max_depth", "integer", "UIA-Tiefe 1-5, Standard 3"),
@@ -566,18 +573,21 @@ def _register_pc_control_tools() -> list[dict]:
             _param("button", "string", "Maustaste", enum=["left", "right", "middle"]),
             _param("fallback_ocr", "boolean", "Wenn UIA keinen Treffer findet, OCR-Fallback versuchen (Standard true)"),
         ], confirmation_required=True),
-        _tool("hermes_desktop_task", "Hermes-Pro Desktop-Controller: verarbeitet mehrere Hermes-Desktop-Schritte in einem Prompt. Fuehrt nur read-only Beobachtung/Suche aus und bereitet Klicks, Tippen oder Hotkeys als Lexa-Freigabe vor.", [
+        _tool("hermes_desktop_task", "Hermes-Pro Desktop-Controller: verarbeitet mehrere Hermes-Desktop-Schritte in einem Prompt. Fuehrt nur read-only Beobachtung/Suche/Warten aus und bereitet Klicks, Scrollen, Tippen oder Hotkeys als Lexa-Freigabe vor.", [
             _param("message", "string", "Originaler Hermes-Desktop-Auftrag, auch mit mehreren Zeilen oder /hermes-Prefixen", required=True),
             _param("max_steps", "integer", "Maximale Desktop-Teilschritte, Standard 8"),
         ]),
         _tool("hermes_desktop_commit", "Fuehrt genau eine vorbereitete Hermes-Desktop-Aktion nach Lexa-Freigabe aus und beobachtet danach den Desktop erneut. Nur fuer Pending-Confirmations nutzen.", [
-            _param("kind", "string", "Aktionstyp", enum=["click", "type", "hotkey"], required=True),
+            _param("kind", "string", "Aktionstyp", enum=["click", "type", "hotkey", "scroll"], required=True),
             _param("text", "string", "UI-Control-Name fuer click, z.B. Pause oder darauf"),
             _param("control_type", "string", "Optionaler UIA-Typ z.B. Button"),
             _param("window", "string", "Optionaler Fenstertitel oder Teil davon"),
+            _param("occurrence", "integer", "Welcher Treffer bei kind=click geklickt wird, Standard 1"),
             _param("button", "string", "Maustaste", enum=["left", "right", "middle"]),
             _param("typing_text", "string", "Text fuer kind=type"),
+            _param("typing_interval_ms", "integer", "Pause pro Zeichen fuer kind=type, Standard 8 ms"),
             _param("keys", "string", "Tastenkombination fuer kind=hotkey, z.B. ctrl+l"),
+            _param("scroll_clicks", "integer", "Scroll-Schritte fuer kind=scroll, negativ nach unten, positiv nach oben"),
             _param("verify", "boolean", "Nach der Aktion erneut beobachten, Standard true"),
         ], confirmation_required=True),
         _tool("desktop_position", "Liest die aktuelle Mausposition und Bildschirmgroesse. Nutze dies vor Desktop-Automation, um Koordinaten sicher einzuordnen."),
@@ -647,10 +657,10 @@ def _register_pc_control_tools() -> list[dict]:
         _tool("service_stop", "Stoppt einen Windows-Dienst (mit Admin-Erkennung und klarer Fehlermeldung)", [
             _param("name", "string", "Dienstname", required=True),
         ], confirmation_required=True),
-        _tool("env_list", "Listet alle Umgebungsvariablen auf"),
+        _tool("env_list", "Listet Namen von Umgebungsvariablen ohne Werte auf", [], confirmation_required=True),
         _tool("env_get", "Liest den Wert einer bestimmten Umgebungsvariable", [
             _param("name", "string", "Name der Umgebungsvariable", required=True),
-        ]),
+        ], confirmation_required=True),
         _tool("env_set", "Setzt eine Umgebungsvariable", [
             _param("name", "string", "Name der Umgebungsvariable", required=True),
             _param("value", "string", "Neuer Wert", required=True),
@@ -1092,7 +1102,7 @@ _CATEGORY_TOOL_PREFIXES: dict[str, list[str]] = {
     "os_agent": ["os_agent_"],
     "produktivitaet": ["todo_", "pomodoro_", "habit_", "time_tracking_", "focus_mode_"],
     "pc_kontrolle": ["window_move", "window_resize", "window_min", "window_max",
-                     "window_layout", "ui_", "desktop_", "autostart_", "service_", "env_",
+                     "window_layout", "ui_", "desktop_", "desktop_engine_", "autostart_", "service_", "env_",
                      "system_uptime", "installed_apps", "ping", "dns_",
                      "port_", "network_", "public_ip", "traceroute", "flush_dns"],
     "entwickler": ["git_", "docker_", "http_request", "log_analyze",
@@ -1227,6 +1237,8 @@ def get_tools_for_context(user_message: str, max_tools: int = 45) -> list[dict]:
                 "file_write",
                 "window_list",
                 "window_focus",
+                "desktop_engine_status",
+                "desktop_engine_observe",
                 "hermes_desktop_task",
                 "ui_tree",
                 "ui_find",

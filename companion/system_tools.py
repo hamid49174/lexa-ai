@@ -15,6 +15,18 @@ from backend.i18n import t
 logger = logging.getLogger("lexa.system_tools")
 
 
+_SENSITIVE_ENV_NAME_RE = re.compile(
+    r"(secret|token|password|passwd|pwd|credential|private|bearer|session|"
+    r"api[_-]?key|access[_-]?key|auth|stripe|supabase|openai|anthropic|"
+    r"gemini|groq|deepgram|cartesia|elevenlabs)",
+    re.IGNORECASE,
+)
+
+
+def _is_sensitive_env_name(name: str) -> bool:
+    return bool(_SENSITIVE_ENV_NAME_RE.search(str(name or "")))
+
+
 def _sanitize_ps_arg(s: str, max_len: int = 200) -> str:
     """Escape a string for safe embedding inside a PowerShell double-quoted string."""
     if not s:
@@ -483,21 +495,34 @@ def service_stop_cmd(name: str = "") -> str:
 # ══════════════════════════════════════════════════════
 
 def env_list() -> dict:
-    """Alle Umgebungsvariablen auflisten."""
-    env_vars = {}
-    for key, value in sorted(os.environ.items()):
-        env_vars[key] = value
-    return env_vars
+    """List environment variable names without exposing values."""
+    variables = [
+        {"name": key, "sensitive": _is_sensitive_env_name(key)}
+        for key in sorted(os.environ)
+    ]
+    return {
+        "variables": variables,
+        "count": len(variables),
+        "values_redacted": True,
+    }
 
 
 def env_get(name: str = "") -> dict:
     """Einzelne Umgebungsvariable lesen."""
-    if not name:
+    clean_name = str(name or "").strip()
+    if not clean_name:
         return {"error": t("env.nameRequired")}
-    value = os.environ.get(name)
+    if _is_sensitive_env_name(clean_name):
+        return {
+            "name": clean_name,
+            "value": None,
+            "redacted": True,
+            "error": "Sensitive environment variables are not exposed by Lexa tools.",
+        }
+    value = os.environ.get(clean_name)
     if value is not None:
-        return {"name": name, "value": value}
-    return {"name": name, "value": None, "note": t("service.notSet")}
+        return {"name": clean_name, "value": value}
+    return {"name": clean_name, "value": None, "note": t("service.notSet")}
 
 
 def env_set(name: str = "", value: str = "") -> str:

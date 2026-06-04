@@ -1,6 +1,34 @@
+import json
+
+
 def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def test_obsidian_context_root_uses_mcp_config_when_project_link_is_unavailable(monkeypatch, tmp_path):
+    from backend import obsidian_context
+
+    os_root = tmp_path / "Office" / "Desktop" / "OS"
+    os_root.mkdir(parents=True)
+    _write(os_root / "OS_MANIFEST.md", "# Manifest\n")
+    (tmp_path / "mcp_servers.json").write_text(
+        json.dumps({
+            "servers": {
+                "personal_os": {
+                    "env": {
+                        "PERSONAL_OS_ROOT": str(os_root),
+                    },
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(obsidian_context, "PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("LEXA_PERSONAL_OS_ROOT", raising=False)
+    monkeypatch.delenv("PERSONAL_OS_ROOT", raising=False)
+
+    assert obsidian_context.resolve_personal_os_root() == os_root
 
 
 def test_obsidian_context_builds_bounded_vault_packet(monkeypatch, tmp_path):

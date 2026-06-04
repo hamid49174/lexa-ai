@@ -10,13 +10,13 @@ Features:
 
 import json
 import logging
-import os
 import sqlite3
 import threading
 from collections import Counter
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Optional
+
+from backend.config import LEXA_DATA_DIR
 
 logger = logging.getLogger("lexa.smart_memory")
 
@@ -24,8 +24,7 @@ _tables_ready: bool = False
 _tables_lock = threading.Lock()
 _thread_local = threading.local()
 
-_DATA_DIR = os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent))
-DB_PATH = Path(_DATA_DIR) / "lexa_memory.db"
+DB_PATH = LEXA_DATA_DIR / "lexa_memory.db"
 
 
 # ══════════════════════════════════════════════════

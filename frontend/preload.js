@@ -68,8 +68,9 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("onSwitchView", "low", "read", "ipc:switch-view", { batch_allowed: true }),
   bridgePolicy("onUpdateAvailable", "low", "read", "ipc:update-available", { batch_allowed: true }),
   bridgePolicy("licenseGet", "medium", "secret", "ipc:license-get"),
+  bridgePolicy("licenseActivate", "high", "secret", "ipc:license-activate"),
   bridgePolicy("licenseSet", "high", "secret", "ipc:license-set"),
-  bridgePolicy("licenseValidate", "high", "secret", "/license/validate/{key}"),
+  bridgePolicy("licenseValidate", "high", "secret", "/license/validate"),
 
   bridgePolicy("chat", "medium", "write", "/chat"),
   bridgePolicy("chatFile", "medium", "write", "/chat/file"),
@@ -1043,6 +1044,7 @@ if (isLexaSmokeMockAllowed()) {
     setAutostart: () => {},
     setProfile: async () => ok(),
     licenseGet: async () => ({ valid: true }),
+    licenseActivate: async () => ok({ valid: true, success: true }),
     licenseSet: async () => ok(),
     licenseValidate: async () => ok({ valid: true }),
     backupListDb: async () => ({ backups: [] }),
@@ -2206,7 +2208,7 @@ const lexaBridge = {
   backupRestore: async (data) => {
     const res = await fetchWithTimeout(`${API}/backup/restore`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Lexa-Restore-Intent": "confirmed" },
       body: JSON.stringify(data),
     });
     return res.json();
@@ -2224,7 +2226,7 @@ const lexaBridge = {
   backupRestoreDb: async (path) => {
     const r = await fetchWithTimeout(`${API}/backup/restore-db`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Lexa-Restore-Intent': 'confirmed' },
       body: JSON.stringify({ path })
     });
     return r.json();
@@ -2249,10 +2251,15 @@ const lexaBridge = {
 
   // License Key Management (Phase 39)
   licenseGet: () => ipcRenderer.invoke("license-get"),
+  licenseActivate: (key) => ipcRenderer.invoke("license-activate", key),
   licenseSet: (data) => ipcRenderer.invoke("license-set", data),
   licenseValidate: async (key) => {
     try {
-      const res = await fetchWithTimeout(`${API}/license/validate/${encodeURIComponent(key)}`);
+      const res = await fetchWithTimeout(`${API}/license/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ license_key: key }),
+      });
       return res.json();
     } catch (e) {
       console.warn("[Preload] licenseValidate failed:", e.message || e);

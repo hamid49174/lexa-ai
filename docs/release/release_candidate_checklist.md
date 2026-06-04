@@ -63,6 +63,7 @@ Use this checklist before calling any build a Lexa release candidate. Do not dep
 - [ ] No Supabase/Stripe/private secrets are committed.
 - [ ] `tmp_*.js` scratch/migration files are reviewed before deployment.
 - [ ] External scripts/CDNs are reviewed for CSP/vendor strategy.
+- [ ] Auth/Dashboard CSP is present and website lint/smoke rejects inline scripts/styles, JS inline-style mutations, inline event handlers, `unsafe-inline`, and dynamic HTML sinks.
 - [ ] No deployment occurred.
 
 ## 8. Packaging Gates
@@ -102,9 +103,9 @@ Use this checklist before calling any build a Lexa release candidate. Do not dep
 - [ ] PublicRC
 - [ ] PublicRelease
 
-InternalRC can proceed with reviewed warnings for unsigned installer, VM install/uninstall not yet proven, remote CI not yet proven, external dirty OS, and static website gaps.
+InternalRC can proceed with reviewed warnings for unsigned installer, VM install/uninstall not yet proven, remote CI not yet proven, external dirty OS, and unresolved public website config/CSP approval.
 
-PublicRC additionally requires remote CI proof, signed installer, VM install/uninstall proof, reviewed OS cleanup risk, and a clear website release target.
+PublicRC additionally requires remote CI proof, signed installer, VM install/uninstall proof, reviewed OS cleanup risk, ignored `config.runtime.js` public website values, and approved Stripe.js/CSP policy.
 
 PublicRelease additionally requires release signing, installer proof, website deployment workflow, trace/privacy consent review, and no open high/critical risks.
 
@@ -146,7 +147,7 @@ PublicRelease additionally requires release signing, installer proof, website de
 - [ ] Installer smoke supports `-Target`, `-ExpectedPublisher`, and `-AllowUnsignedInternal`.
 - [ ] Unsigned installer is warn-only for InternalRC and blocking for PublicRC/PublicRelease.
 - [ ] VM install/uninstall remains plan-only unless a disposable VM/sandbox is explicitly approved.
-- [ ] Website release target remains `static-external` until a separate package/build/lint target is approved.
+- [ ] Website release target remains `static-external`; package/lint proof exists, but public config and Stripe.js/CSP approval are still required.
 - [ ] OS cleanup remains separate and backup-first.
 - [ ] Codex context pack can be regenerated from safe repository metadata without reading private OS/Obsidian content.
 
@@ -165,7 +166,7 @@ PublicRelease additionally requires release signing, installer proof, website de
 - [ ] Remote CI is either proven with a GitHub Actions run URL and commit SHA, or explicitly marked external because no GitHub remote exists.
 - [ ] VM installer install/uninstall is either proven in a disposable VM/Sandbox, or explicitly marked not yet proven.
 - [ ] Signing checklist is complete without committing certificates, keys, passphrases, or signing secrets.
-- [ ] Website remains `static-external` for InternalRC, with PublicRC blocked until a build/lint or equivalent static-release target is approved.
+- [ ] Website remains `static-external` for InternalRC, with PublicRC blocked until public config values and Stripe.js/CSP approval are recorded.
 - [ ] OS cleanup remains a separate backup-first review project; no OS data is deleted or staged from Lexa.
 - [ ] `docs/release/privacy_trace_consent_checklist.md` exists.
 - [ ] PublicRelease remains blocked until privacy/trace consent is reviewed and approved.
@@ -176,8 +177,9 @@ PublicRelease additionally requires release signing, installer proof, website de
 - [ ] GitHub Actions run URL and commit SHA are recorded before PublicRC.
 - [ ] VM/Sandbox installer install/uninstall proof is recorded before PublicRC.
 - [ ] Installer signing certificate, secure storage, and expected publisher are decided before PublicRC.
-- [ ] Website release target is approved before PublicRC.
-- [ ] Website CDN/CSP/SRI review is completed before PublicRC.
+- [ ] Website public Supabase/Stripe config values are supplied in ignored `config.runtime.js` before PublicRC.
+- [ ] Website Stripe.js/CSP policy is approved before PublicRC.
+- [ ] `scripts\run_paid_license_smoke.ps1` passes with `LEXA_LICENSE_SMOKE_KEY` and real Supabase/Stripe backend config before PublicRC.
 - [ ] OS cleanup review is completed or explicitly accepted before PublicRC.
 - [ ] Public artifact policy is proven on remote CI before PublicRC.
 - [ ] Privacy/trace consent decisions are reviewed before PublicRelease.
@@ -189,5 +191,5 @@ Decision notes:
 - Warnings are acceptable only when documented with owner, reason, and follow-up.
 - Baseline updates are allowed only from a fully green eval run and must never accept secret leaks or high/critical failures.
 - `Ready` means every release-blocking gate is green and no unresolved release-review warning remains.
-- `Needs Review` means all blocking gates are green, but unsigned installer, missing VM install/uninstall, remote-CI-not-proven, website build gaps, or external OS dirtiness still require owner signoff.
+- `Needs Review` means all blocking gates are green, but unsigned installer, missing VM install/uninstall, remote-CI-not-proven, website public config/CSP approval, or external OS dirtiness still require owner signoff.
 - `Blocked` means at least one release-blocking gate failed.

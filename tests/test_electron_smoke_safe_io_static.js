@@ -44,13 +44,20 @@ assert(
     && helperSrc.includes('eventName === "uncaughtException"')
     && helperSrc.includes("return true")
 );
+assert(
+  "safe IO helper normalizes modern Electron console-message events",
+  helperSrc.includes("function normalizeElectronConsoleMessage")
+    && helperSrc.includes("details.lineNumber")
+    && helperSrc.includes("levelMap")
+);
 assert("electron smoke files are discovered", smokeFiles.length >= 10, String(smokeFiles.length));
 
 const missingSafeIo = [];
 const lateSafeIo = [];
+const missingLaunchFailureGuard = [];
 for (const name of smokeFiles) {
   const src = fs.readFileSync(path.join(testsDir, name), "utf8");
-  const safeIndex = src.indexOf('require("./electron_smoke_safe_io");');
+  const safeIndex = src.indexOf('require("./electron_smoke_safe_io")');
   const spawnIndex = src.indexOf("if (!process.versions.electron)");
   const electronIndex = src.indexOf('require("electron")');
   if (safeIndex < 0) missingSafeIo.push(name);
@@ -61,10 +68,22 @@ for (const name of smokeFiles) {
   ) {
     lateSafeIo.push(name);
   }
+  if (
+    spawnIndex >= 0
+    && (
+      !src.includes("if (result.error)")
+      || !src.includes("Failed to launch Electron")
+      || src.includes("result.status ?? (result.signal ? 1 : 0)")
+      || src.includes('webContents.on("console-message", (_event, level, message')
+    )
+  ) {
+    missingLaunchFailureGuard.push(name);
+  }
 }
 
 assert("all Electron smoke tests load safe IO helper", missingSafeIo.length === 0, missingSafeIo.join(", "));
 assert("safe IO loads before Electron spawn/import paths", lateSafeIo.length === 0, lateSafeIo.join(", "));
+assert("Electron smoke launch failures are not treated as passes", missingLaunchFailureGuard.length === 0, missingLaunchFailureGuard.join(", "));
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);

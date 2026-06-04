@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from backend.config import LEXA_DATA_DIR
+
 logger = logging.getLogger("lexa.app_discovery")
 
 # ══════════════════════════════════════════════════
@@ -159,8 +161,7 @@ _cache_timestamp: float = 0.0
 _CACHE_TTL = 300  # 5 minutes
 
 # Optional: persist cache to disk for faster cold starts
-_CACHE_FILE = Path(os.environ.get("LEXA_DATA_DIR",
-                                  str(Path(__file__).resolve().parent.parent))) / "app_cache.json"
+_CACHE_FILE = LEXA_DATA_DIR / "app_cache.json"
 
 
 # ══════════════════════════════════════════════════

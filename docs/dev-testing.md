@@ -75,7 +75,7 @@ Supporting release-readiness scripts:
 
 - `scripts\check_dependency_repro.ps1`: reports Python/Node versions and lockfile coverage without changing dependencies.
 - `scripts\run_clean_clone_smoke.ps1`: creates a source-only clean copy or dry-run proof without user data.
-- `scripts\check_risky_artifacts.ps1`: blocks staged local data, build artifacts, result artifacts, and optional secret-pattern scan paths.
+- `scripts\check_risky_artifacts.ps1`: blocks staged local data, build artifacts, result artifacts, and optional secret-pattern scan paths. Use `-Mode Warn` for an advisory local pre-scan; use `-Mode Strict` for quality gates and release checks.
 - `scripts\run_packaging_smoke.ps1`: checks Electron packaging config and scans build artifacts. Use `-Build` only for an explicit isolated local package build.
 - `scripts\run_installer_smoke.ps1`: checks generated installer artifacts without installing into the productive machine.
 - `scripts\run_installer_smoke.ps1 -PlanOnly`: prints the VM/sandbox install-uninstall proof plan.
@@ -83,7 +83,7 @@ Supporting release-readiness scripts:
 - `scripts\generate_codex_context_pack.ps1 -Check`: regenerates the safe project context pack from allowlisted metadata only.
 - `scripts\check_remote_ci_readiness.ps1`: reports whether remote GitHub CI is ready or still not proven.
 - `scripts\run_os_quality_gates.ps1`: runs OS SDK/MCP/Raw-Inbox checks when the OS mount is available.
-- `scripts\run_hermes_smoke.ps1`: runs Hermes adapter tests and staged-path safety checks.
+- `scripts\run_hermes_smoke.ps1`: runs Hermes adapter tests, staged-path safety checks, and a Warn-mode risky-artifact scan for local `hermes_workspace/`.
 - `scripts\run_website_smoke.ps1`: checks the external website folder without deployment.
 - `scripts\check_performance_budgets.ps1`: measures warn-only eval suite timing.
 
@@ -110,9 +110,10 @@ Do not commit local or user-owned artifacts:
 - `bridge-audit.log`
 - `lexa_memory.db*`
 - `hermes_workspace/`
-- build outputs such as `dist/`, `backend-dist/`, `frontend/dist/`, and `build/`
+- build outputs such as `dist/`, `dist-*-build/`, `backend-dist/`, `frontend/dist/`, and `build/`
+- secrets such as `.env`, `*.env`, package-manager, cloud, container, SSH, and machine credential files like `.netrc`, `.npmrc`, `.pnpmrc`, `.pypirc`, `.yarnrc`, `.yarnrc.yml`, `.aws/credentials`, `.docker/config.json`, `.kube/config`, `credentials.*`, `secrets.*`, `client_secret*.json`, `service-account*.json`, `service_account*.json`, `.ssh/id_rsa`, `pip.conf`, and `pip.ini`, signing keys, certificates, PuTTY keys, and keystores. `.env.example` is the only env-style file meant to stay trackable, and it must contain placeholders only.
 
-The quality-gate script warns when these paths are present and fails if risky paths are staged. It never deletes files.
+The quality-gate script warns when these paths are present and fails if risky paths are staged. It never deletes files. For local review before staging, `powershell -ExecutionPolicy Bypass -File scripts\check_risky_artifacts.ps1 -Mode Warn` reports risky paths and secret-like scan findings as warnings and prints `completed with warnings` when any are found.
 
 ## Notes
 

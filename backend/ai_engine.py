@@ -933,7 +933,92 @@ _QUALITY_MODE_TOP_TIER_MARKERS = (
 
 _QUALITY_MODE_COMPLEX_MARKERS = (
     "verbesser",
+    "verbessere",
+    "verbessern",
+    "verbesserung",
+    "verbesserungen",
+    "verbessert",
     "upgrade",
+    "feature",
+    "features",
+    "feture",
+    "futere",
+    "futeres",
+    "ausbau",
+    "ausbauen",
+    "weiterentwickeln",
+    "weiterentwicklung",
+    "weiterentwickle",
+    "weiterentwickelt",
+    "funktion",
+    "funktionen",
+    "funktionalitaet",
+    "intelligenz",
+    "intelligen",
+    "intilegnz",
+    "antwortqualitaet",
+    "antwort qualitaet",
+    "answer quality",
+    "memory",
+    "gedaechtnis",
+    "erinnerung",
+    "erinnerungen",
+    "context",
+    "kontext",
+    "kontextfenster",
+    "personalization",
+    "personalisierung",
+    "personalisiert",
+    "conversation",
+    "conversation flow",
+    "konversation",
+    "gespraech",
+    "gespraechsverlauf",
+    "dialog",
+    "follow up",
+    "followup",
+    "follow ups",
+    "followups",
+    "folgenfrage",
+    "folgenfragen",
+    "intent",
+    "intention",
+    "intent recognition",
+    "intent erkennung",
+    "reasoning",
+    "schlussfolgern",
+    "planung",
+    "priorisierung",
+    "automatisierung",
+    "automatiersung",
+    "autoamtion",
+    "reliability",
+    "stability",
+    "robust",
+    "robuster",
+    "robustheit",
+    "robustness",
+    "stabil",
+    "stabilitaet",
+    "ux",
+    "user experience",
+    "usability",
+    "bedienbarkeit",
+    "accessibility",
+    "a11y",
+    "barrierefreiheit",
+    "zugaenglichkeit",
+    "performance",
+    "speed",
+    "schnell",
+    "schneller",
+    "geschwindigkeit",
+    "latency",
+    "latenz",
+    "reaktionszeit",
+    "response time",
+    "ladezeit",
+    "startzeit",
     "professionell",
     "produkt",
     "release",
@@ -959,9 +1044,2004 @@ _QUALITY_MODE_COMPLEX_MARKERS = (
     "production",
     "best practice",
     "test",
+    "tests",
+    "testing",
+    "fokustest",
+    "fokustests",
+    "guardrail",
+    "guardrails",
     "refactor",
     "qualitaet",
     "quality",
+)
+
+_QUALITY_MODE_LEXA_PRODUCT_MARKERS = (
+    "chat",
+    "intelligenz",
+    "intelligen",
+    "intilegnz",
+    "antwortqualitaet",
+    "antwort qualitaet",
+    "answer quality",
+    "memory",
+    "gedaechtnis",
+    "erinnerung",
+    "erinnerungen",
+    "context",
+    "kontext",
+    "kontextfenster",
+    "personalization",
+    "personalisierung",
+    "personalisiert",
+    "conversation",
+    "conversation flow",
+    "konversation",
+    "gespraech",
+    "gespraechsverlauf",
+    "dialog",
+    "follow up",
+    "followup",
+    "follow ups",
+    "followups",
+    "folgenfrage",
+    "folgenfragen",
+    "intent",
+    "intention",
+    "intent recognition",
+    "intent erkennung",
+    "reasoning",
+    "schlussfolgern",
+    "planung",
+    "priorisierung",
+    "feature",
+    "features",
+    "feture",
+    "futere",
+    "futeres",
+    "funktion",
+    "funktionen",
+    "funktionalitaet",
+    "ux",
+    "user experience",
+    "automatisierung",
+    "automatiersung",
+    "autoamtion",
+    "test",
+    "tests",
+    "testing",
+    "fokustest",
+    "fokustests",
+    "guardrail",
+    "guardrails",
+    "zuverlaessigkeit",
+    "reliability",
+    "stability",
+    "robust",
+    "robuster",
+    "robustheit",
+    "robustness",
+    "stabil",
+    "stabilitaet",
+    "usability",
+    "bedienbarkeit",
+    "performance",
+    "speed",
+    "schnell",
+    "schneller",
+    "geschwindigkeit",
+    "latency",
+    "latenz",
+    "reaktionszeit",
+    "response time",
+    "ladezeit",
+    "startzeit",
+    "accessibility",
+    "a11y",
+    "barrierefreiheit",
+    "zugaenglichkeit",
+)
+
+_QUALITY_MODE_PRODUCT_ACTION_MARKERS = (
+    "verbesser",
+    "verbessere",
+    "verbessern",
+    "verbesserung",
+    "verbesserungen",
+    "verbessert",
+    "upgrade",
+    "polish",
+    "optimieren",
+    "optimierung",
+    "optimize",
+    "optimise",
+    "ausbau",
+    "ausbauen",
+    "weiterentwickeln",
+    "weiterentwicklung",
+    "weiterentwickle",
+    "weiterentwickelt",
+)
+
+_QUALITY_MODE_SOURCE_MARKERS = (
+    "quelle",
+    "quellen",
+    "source",
+    "sources",
+    "reference",
+    "references",
+    "referenz",
+    "referenzen",
+    "citation",
+    "citations",
+    "beleg",
+    "belege",
+    "evidence",
+    "literatur",
+    "study",
+    "studies",
+    "studie",
+    "studien",
+    "paper",
+    "papers",
+    "research",
+    "recherche",
+)
+
+_QUALITY_MODE_VERIFICATION_MARKERS = (
+    "claim",
+    "claims",
+    "aussage",
+    "aussagen",
+    "unbelegt",
+    "unsupported",
+    "unverified",
+    "verify",
+    "verification",
+    "validate",
+    "validation",
+    "validiere",
+    "validieren",
+    "validiert",
+    "verifizier",
+    "verifiziere",
+    "verifizieren",
+    "verifiziert",
+    "faktencheck",
+    "fact check",
+    "fact-check",
+    "cross check",
+    "cross-check",
+    "gegencheck",
+    "gegenpruef",
+    "gegenpruefe",
+    "gegenpruefen",
+    "plausibilitaet",
+    "plausibilitaetscheck",
+    "source backed",
+    "source-backed",
+    "research brief",
+    "pruef",
+    "pruefe",
+    "pruefen",
+    "geprueft",
+    "ueberpruef",
+    "ueberpruefe",
+    "ueberpruefen",
+)
+
+_QUALITY_MODE_DIRECT_ANSWER_VERIFICATION_MARKERS = (
+    "verify answer",
+    "verify this answer",
+    "verify the answer",
+    "verify my answer",
+    "fact check answer",
+    "fact check this answer",
+    "fact check my answer",
+    "fact-check answer",
+    "fact-check this answer",
+    "fact-check my answer",
+    "double check answer",
+    "double check this answer",
+    "double check my answer",
+    "verify claim",
+    "verify this claim",
+    "check claim",
+    "check this claim",
+    "fact check claim",
+    "fact check this claim",
+    "fact-check claim",
+    "fact-check this claim",
+    "double check claim",
+    "double check this claim",
+    "verify statement",
+    "verify this statement",
+    "check statement",
+    "check this statement",
+    "fact check statement",
+    "fact check this statement",
+    "fact-check statement",
+    "fact-check this statement",
+    "double check statement",
+    "double check this statement",
+    "verify assertion",
+    "verify this assertion",
+    "check assertion",
+    "check this assertion",
+    "fact check assertion",
+    "fact check this assertion",
+    "fact-check assertion",
+    "fact-check this assertion",
+    "double check assertion",
+    "double check this assertion",
+    "check answer",
+    "check the answer",
+    "check this answer",
+    "check my answer",
+    "antwort pruefen",
+    "diese antwort pruefen",
+    "die antwort pruefen",
+    "meine antwort pruefen",
+    "pruef die antwort",
+    "pruef diese antwort",
+    "pruef meine antwort",
+    "pruefe die antwort",
+    "pruefe diese antwort",
+    "pruefe meine antwort",
+    "ueberpruef die antwort",
+    "ueberpruef diese antwort",
+    "ueberpruef meine antwort",
+    "ueberpruefe die antwort",
+    "ueberpruefe diese antwort",
+    "ueberpruefe meine antwort",
+    "aussage pruefen",
+    "diese aussage pruefen",
+    "pruef diese aussage",
+    "pruefe diese aussage",
+    "behauptung pruefen",
+    "diese behauptung pruefen",
+    "pruef diese behauptung",
+    "pruefe diese behauptung",
+    "faktencheck antwort",
+    "faktencheck diese antwort",
+    "faktencheck meine antwort",
+    "faktencheck aussage",
+    "faktencheck diese aussage",
+    "faktencheck behauptung",
+    "faktencheck diese behauptung",
+    "antwort verifizieren",
+    "meine antwort verifizieren",
+)
+
+_QUALITY_MODE_DECISION_INTENT_MARKERS = (
+    "decision",
+    "decide",
+    "choose",
+    "choice",
+    "rank",
+    "ranking",
+    "entscheidung",
+    "entscheiden",
+    "wahl",
+    "waehle",
+    "prioritaet",
+    "prioritaeten",
+    "priority",
+    "priorities",
+    "prioritize",
+    "prioritise",
+    "prioritization",
+    "prioritisation",
+    "priorisieren",
+    "priorisierung",
+    "rangfolge",
+    "strategy",
+    "strategie",
+    "roadmap",
+    "plan",
+    "plane",
+    "planen",
+    "planung",
+    "abwaegung",
+    "abwaegen",
+    "abwaeg",
+)
+
+_QUALITY_MODE_DECISION_STRUCTURE_MARKERS = (
+    "option",
+    "options",
+    "optionen",
+    "alternative",
+    "alternatives",
+    "alternativen",
+    "choice",
+    "choices",
+    "wahl",
+    "auswahl",
+    "tradeoff",
+    "tradeoffs",
+    "trade off",
+    "trade offs",
+    "pros",
+    "cons",
+    "pro",
+    "contra",
+    "risiko",
+    "risiken",
+    "risk",
+    "risks",
+    "vorteil",
+    "vorteile",
+    "nachteil",
+    "nachteile",
+    "reversibilitaet",
+    "reversible",
+    "irreversible",
+    "recommendation",
+    "empfehlung",
+    "confidence",
+    "konfidenz",
+    "offene fragen",
+    "open questions",
+    "naechste schritte",
+    "next steps",
+)
+
+_QUALITY_MODE_DIRECT_DECISION_MARKERS = (
+    "decision brief",
+    "entscheidungsbrief",
+    "which option is better",
+    "which option should i choose",
+    "which option should i pick",
+    "which option should i take",
+    "which should i choose",
+    "which should i pick",
+    "welche option ist besser",
+    "welche option soll ich waehlen",
+    "welche option soll ich nehmen",
+    "welche soll ich waehlen",
+    "welche soll ich nehmen",
+    "rank these options",
+    "rank the options",
+    "rank these choices",
+    "prioritize these options",
+    "prioritise these options",
+    "score these options",
+    "rate these options",
+    "evaluate these options",
+    "evaluate the options",
+    "weighted decision matrix",
+    "bewerte diese optionen",
+    "bewerte die optionen",
+    "bewertungsmatrix",
+    "entscheidungsmatrix",
+    "scoring matrix",
+    "scoring tabelle",
+    "priorisiere diese optionen",
+    "priorisiere die optionen",
+    "ordne die optionen",
+    "mach eine rangfolge",
+    "help me decide",
+    "hilf mir entscheiden",
+    "hilf mir bei der entscheidung",
+    "make the call",
+    "triff die entscheidung",
+    "triff eine entscheidung",
+    "entscheide fuer mich",
+    "entscheid fuer mich",
+    "deep think",
+    "deepthink",
+    "extended thinking",
+    "strategy review",
+    "strategie review",
+    "roadmap review",
+)
+
+_QUALITY_MODE_DECISION_ASK_MARKERS = (
+    "soll ich",
+    "was soll ich",
+    "should i",
+    "which should i",
+    "welche soll ich",
+    "welchen soll ich",
+    "welches soll ich",
+)
+
+_QUALITY_MODE_DECISION_BETTER_MARKERS = (
+    "was ist besser",
+    "welche ist besser",
+    "welcher ist besser",
+    "welches ist besser",
+    "which is better",
+    "which one is better",
+    "what is better",
+    "besser fuer",
+    "better for",
+    "empfiehlst du",
+    "would you recommend",
+    "what would you do",
+    "what would you pick",
+    "what would you choose",
+    "was wuerdest du machen",
+    "was wuerdest du tun",
+    "was wuerdest du nehmen",
+    "was wuerdest du waehlen",
+)
+
+_QUALITY_MODE_DECISION_COMPARE_MARKERS = (
+    "vergleiche",
+    "vergleich",
+    "vergleichs",
+    "gegenueberstellen",
+    "gegenueberstellung",
+    "compare",
+    "comparison",
+    "compare options",
+)
+
+_QUALITY_MODE_DECISION_TRADEOFF_MARKERS = (
+    "pros and cons",
+    "pros cons",
+    "pro und contra",
+    "vor und nachteile",
+    "vorteile und nachteile",
+    "tradeoff",
+    "tradeoffs",
+    "trade off",
+    "trade offs",
+    "risks and benefits",
+    "risiken und vorteile",
+)
+
+_QUALITY_MODE_DECISION_TRADEOFF_CONTEXT_MARKERS = (
+    "of",
+    "for",
+    "between",
+    "von",
+    "fuer",
+    "zwischen",
+    "ueber",
+    "about",
+)
+
+_QUALITY_MODE_DECISION_SCORING_MARKERS = (
+    "criteria",
+    "criterion",
+    "kriterium",
+    "kriterien",
+    "score",
+    "scores",
+    "scoring",
+    "bewerte",
+    "bewerten",
+    "bewertung",
+    "bewertungsmatrix",
+    "entscheidungsmatrix",
+    "matrix",
+    "weighted",
+    "gewichtet",
+    "gewichtung",
+    "punkte",
+    "punktezahl",
+)
+
+_QUALITY_MODE_DECISION_PLANNING_MARKERS = (
+    "roadmap",
+    "fahrplan",
+    "umsetzungsplan",
+    "execution plan",
+    "action plan",
+    "rollout plan",
+    "release plan",
+    "plan of attack",
+    "projektplan",
+    "project plan",
+    "plan",
+    "plane",
+    "planen",
+)
+
+_QUALITY_MODE_DECISION_PLANNING_STRUCTURE_MARKERS = (
+    "meilenstein",
+    "meilensteine",
+    "milestone",
+    "milestones",
+    "phase",
+    "phases",
+    "phasen",
+    "timeline",
+    "zeitplan",
+    "quartal",
+    "quarter",
+    "schritt",
+    "schritte",
+    "step",
+    "steps",
+    "owner",
+    "owners",
+    "abhaengigkeit",
+    "abhaengigkeiten",
+    "dependency",
+    "dependencies",
+)
+
+_QUALITY_MODE_DECISION_CONSTRAINT_MARKERS = (
+    "constraint",
+    "constraints",
+    "einschraenkung",
+    "einschraenkungen",
+    "bedingung",
+    "bedingungen",
+    "deadline",
+    "frist",
+    "termin",
+    "budget",
+    "timebox",
+    "zeitlimit",
+    "limit",
+    "limited",
+    "begrenzt",
+    "resource",
+    "resources",
+    "ressource",
+    "ressourcen",
+    "kapazitaet",
+    "kapazitaeten",
+    "stunden",
+    "hours",
+    "tage",
+    "days",
+    "wochen",
+    "weeks",
+)
+
+_QUALITY_MODE_DECISION_RISK_MARKERS = (
+    "risk assessment",
+    "risk analysis",
+    "risk register",
+    "risk plan",
+    "mitigation plan",
+    "rollback plan",
+    "contingency plan",
+    "failure mode",
+    "failure modes",
+    "abort criteria",
+    "go no go",
+    "go/no-go",
+    "ship risk",
+    "release risk",
+    "risikoanalyse",
+    "risikoplan",
+    "risikobewertung",
+    "risikoregister",
+    "mitigationsplan",
+    "notfallplan",
+    "abbruchkriterien",
+)
+
+_QUALITY_MODE_DIRECT_RISK_MARKERS = (
+    "risk register",
+    "risk plan",
+    "mitigation plan",
+    "rollback plan",
+    "contingency plan",
+    "abort criteria",
+    "go no go",
+    "go/no-go",
+    "risikoplan",
+    "risikoregister",
+    "mitigationsplan",
+    "notfallplan",
+    "abbruchkriterien",
+)
+
+_QUALITY_MODE_DECISION_RISK_CONTEXT_MARKERS = (
+    "for",
+    "fuer",
+    "von",
+    "before",
+    "vor",
+    "release",
+    "ship",
+    "launch",
+    "lexa",
+    "create",
+    "make",
+    "run",
+    "erstelle",
+    "mach",
+    "pruefe",
+    "check",
+    "bewerte",
+)
+
+_QUALITY_MODE_SECURITY_PRIVACY_MARKERS = (
+    "threat model",
+    "threat modeling",
+    "security review",
+    "security audit",
+    "privacy review",
+    "privacy audit",
+    "privacy impact assessment",
+    "permission review",
+    "permissions review",
+    "least privilege",
+    "data loss",
+    "data-loss",
+    "data loss risk",
+    "data exfiltration",
+    "exfiltration",
+    "secret leak",
+    "secret leakage",
+    "prompt injection",
+    "datenschutz review",
+    "datenschutz audit",
+    "bedrohungsmodell",
+    "berechtigungsreview",
+    "berechtigungspruefung",
+    "berechtigungen pruefen",
+    "datenverlust",
+    "datenabfluss",
+)
+
+_QUALITY_MODE_SECURITY_PRIVACY_CONTEXT_MARKERS = (
+    "for",
+    "fuer",
+    "von",
+    "before",
+    "vor",
+    "lexa",
+    "memory",
+    "tool",
+    "tools",
+    "hermes",
+    "agent",
+    "release",
+    "launch",
+    "run",
+    "create",
+    "make",
+    "erstelle",
+    "mach",
+    "pruefe",
+    "check",
+    "bewerte",
+)
+
+_QUALITY_MODE_ACCESSIBILITY_MARKERS = (
+    "accessibility",
+    "a11y",
+    "accessibility review",
+    "accessibility audit",
+    "barrierefreiheit",
+    "barrierefrei",
+    "zugaenglichkeit",
+    "screen reader",
+    "screenreader",
+    "sr label",
+    "aria",
+    "keyboard navigation",
+    "keyboard access",
+    "tastaturbedienung",
+    "tastaturnavigation",
+    "focus order",
+    "focus trap",
+    "fokusreihenfolge",
+    "fokusfalle",
+    "contrast",
+    "kontrast",
+    "reduced motion",
+    "motion sensitivity",
+)
+
+_QUALITY_MODE_ACCESSIBILITY_CONTEXT_MARKERS = (
+    "for",
+    "fuer",
+    "von",
+    "before",
+    "vor",
+    "lexa",
+    "app",
+    "chat",
+    "ui",
+    "ux",
+    "frontend",
+    "settings",
+    "modal",
+    "button",
+    "buttons",
+    "page",
+    "run",
+    "create",
+    "make",
+    "pruefe",
+    "check",
+    "bewerte",
+)
+
+_QUALITY_MODE_PERFORMANCE_MARKERS = (
+    "performance review",
+    "performance audit",
+    "performance budget",
+    "latency budget",
+    "latency review",
+    "startup time",
+    "startup performance",
+    "load time",
+    "loading time",
+    "response time",
+    "throughput",
+    "profiling",
+    "profile performance",
+    "bottleneck",
+    "bottlenecks",
+    "memory footprint",
+    "cpu usage",
+    "bundle size",
+    "render performance",
+    "streaming latency",
+    "perf review",
+    "perf audit",
+    "latenz review",
+    "latenzbudget",
+    "startzeit",
+    "ladezeit",
+    "reaktionszeit",
+    "flaschenhals",
+    "flaschenhaelse",
+)
+
+_QUALITY_MODE_PERFORMANCE_CONTEXT_MARKERS = (
+    "for",
+    "fuer",
+    "von",
+    "before",
+    "vor",
+    "lexa",
+    "app",
+    "chat",
+    "streaming",
+    "frontend",
+    "backend",
+    "startup",
+    "release",
+    "launch",
+    "run",
+    "create",
+    "make",
+    "measure",
+    "benchmark",
+    "profile",
+    "optimize",
+    "optimise",
+    "improve",
+    "erstelle",
+    "mach",
+    "miss",
+    "messe",
+    "benchmarke",
+    "optimiere",
+    "verbessere",
+    "pruefe",
+    "check",
+    "bewerte",
+)
+
+_QUALITY_MODE_TESTING_MARKERS = (
+    "test plan",
+    "testing plan",
+    "qa checklist",
+    "qa plan",
+    "quality checklist",
+    "acceptance criteria",
+    "acceptance test",
+    "regression test plan",
+    "regression tests",
+    "smoke test plan",
+    "smoke tests",
+    "test matrix",
+    "testmatrix",
+    "test coverage review",
+    "eval plan",
+    "evaluation plan",
+    "abnahmekriterien",
+    "abnahmetest",
+    "testplan",
+    "qa checkliste",
+    "qualitaetscheckliste",
+    "regressionstestplan",
+    "smoketest",
+)
+
+_QUALITY_MODE_TESTING_CONTEXT_MARKERS = (
+    "for",
+    "fuer",
+    "von",
+    "before",
+    "vor",
+    "lexa",
+    "app",
+    "chat",
+    "agent",
+    "release",
+    "launch",
+    "feature",
+    "workflow",
+    "streaming",
+    "memory",
+    "create",
+    "make",
+    "write",
+    "run",
+    "build",
+    "review",
+    "erstelle",
+    "mach",
+    "schreibe",
+    "pruefe",
+    "baue",
+)
+
+_QUALITY_MODE_MEMORY_CONTEXT_MARKERS = (
+    "memory review",
+    "memory audit",
+    "memory hygiene",
+    "memory cleanup",
+    "memory clean up",
+    "memory pruning",
+    "context pack",
+    "context brief",
+    "context review",
+    "context audit",
+    "context window review",
+    "stable memory",
+    "draft memory",
+    "save this memory",
+    "save to memory",
+    "remember this",
+    "what should lexa remember",
+    "what should you remember",
+    "personalization review",
+    "personalisation review",
+    "profile review",
+    "gedaechtnis review",
+    "gedaechtnis audit",
+    "gedaechtnis hygiene",
+    "gedaechtnis bereinigen",
+    "gedaechtnis pruefen",
+    "kontextpaket",
+    "kontext brief",
+    "kontext review",
+    "kontextfenster review",
+    "was soll lexa speichern",
+    "was sollst du speichern",
+    "merk dir",
+    "speicher das",
+    "speichere das",
+    "personalisierung review",
+    "profil review",
+)
+
+_QUALITY_MODE_MEMORY_CONTEXT_CONTEXT_MARKERS = (
+    "lexa",
+    "assistant",
+    "personal os",
+    "conversation",
+    "chat",
+    "profile",
+    "user",
+    "task",
+    "tasks",
+    "project",
+    "decision",
+    "decisions",
+    "facts",
+    "assumptions",
+    "preference",
+    "preferences",
+    "privacy",
+    "consent",
+    "write",
+    "writes",
+    "build",
+    "create",
+    "make",
+    "save",
+    "remember",
+    "prune",
+    "delete",
+    "correct",
+    "konversation",
+    "gespraech",
+    "profil",
+    "nutzer",
+    "aufgabe",
+    "aufgaben",
+    "projekt",
+    "entscheidung",
+    "entscheidungen",
+    "fakten",
+    "annahmen",
+    "praeferenz",
+    "praeferenzen",
+    "datenschutz",
+    "einwilligung",
+    "schreibe",
+    "baue",
+    "erstelle",
+    "mach",
+    "speicher",
+    "speichere",
+    "merk",
+    "bereinige",
+    "loesche",
+    "loeschen",
+    "korrigiere",
+)
+
+_QUALITY_MODE_AGENT_TOOL_MARKERS = (
+    "agent run",
+    "agent task",
+    "agent workflow",
+    "agent execution",
+    "agent plan",
+    "agent handoff",
+    "tool workflow",
+    "tool plan",
+    "tool execution",
+    "tool execution plan",
+    "tool run",
+    "tool use plan",
+    "toolchain",
+    "workspace handoff",
+    "handoff plan",
+    "desktop action",
+    "local action",
+    "os agent runtime",
+    "background task",
+    "hermes worker",
+    "multi step agent",
+    "multistep agent",
+    "run tools",
+    "use tools",
+    "agent lauf",
+    "agent aufgabe",
+    "agent ausfuehrung",
+    "agent plan",
+    "agent uebergabe",
+    "werkzeug workflow",
+    "werkzeug plan",
+    "tool ausfuehrung",
+    "werkzeug ausfuehrung",
+    "tool lauf",
+    "workspace uebergabe",
+    "arbeitsuebergabe",
+    "desktop aktion",
+    "lokale aktion",
+    "hintergrundaufgabe",
+)
+
+_QUALITY_MODE_AGENT_TOOL_CONTEXT_MARKERS = (
+    "lexa",
+    "assistant",
+    "workspace",
+    "repository",
+    "repo",
+    "project",
+    "file",
+    "files",
+    "desktop",
+    "browser",
+    "os",
+    "personal os",
+    "hermes",
+    "automation",
+    "release",
+    "chat",
+    "memory",
+    "permissions",
+    "approval",
+    "rollback",
+    "verification",
+    "verify",
+    "safe",
+    "dry run",
+    "read only",
+    "read-only",
+    "background",
+    "create",
+    "build",
+    "start",
+    "execute",
+    "projekt",
+    "datei",
+    "dateien",
+    "desktop",
+    "browser",
+    "automatisierung",
+    "freigabe",
+    "berechtigungen",
+    "verifikation",
+    "verifiziere",
+    "sicher",
+    "nur lesend",
+    "lesend",
+    "hintergrund",
+    "erstelle",
+    "baue",
+    "starte",
+    "fuehre aus",
+)
+
+_QUALITY_MODE_SHIP_CHECK_MARKERS = (
+    "ship check",
+    "production ship check",
+    "release check",
+    "release readiness",
+    "readiness check",
+    "launch readiness",
+    "launch blocker",
+    "launch blockers",
+    "publish check",
+    "pre publish check",
+    "pre release checklist",
+    "release checklist",
+    "release quality",
+    "ship readiness",
+    "go live check",
+    "go-live check",
+    "deployment readiness",
+    "deployment check",
+    "production readiness",
+    "produktreife",
+    "release pruefung",
+    "release pruefen",
+    "publish pruefung",
+    "vor publish",
+    "vor release",
+    "go live pruefung",
+    "deployment pruefung",
+)
+
+_QUALITY_MODE_SHIP_CHECK_CONTEXT_MARKERS = (
+    "lexa",
+    "assistant",
+    "app",
+    "product",
+    "production",
+    "user facing",
+    "user-facing",
+    "ux",
+    "accessibility",
+    "performance",
+    "reliability",
+    "security",
+    "privacy",
+    "data loss",
+    "docs",
+    "onboarding",
+    "tests",
+    "migration",
+    "rollback",
+    "publish",
+    "deploy",
+    "go live",
+    "go-live",
+    "before",
+    "for",
+    "produkt",
+    "produktion",
+    "nutzerseitig",
+    "barrierefreiheit",
+    "zuverlaessigkeit",
+    "datenschutz",
+    "datenverlust",
+    "dokumentation",
+    "tests",
+    "migration",
+    "rollback",
+    "veroeffentlichen",
+    "deployen",
+    "vor",
+    "fuer",
+)
+
+_QUALITY_MODE_DATA_SAFETY_MARKERS = (
+    "delete files",
+    "delete data",
+    "delete memory",
+    "delete memories",
+    "delete old memories",
+    "cleanup old memories",
+    "clean up old memories",
+    "cleanup downloads",
+    "clean up downloads",
+    "overwrite file",
+    "overwrite files",
+    "reset database",
+    "reset settings",
+    "wipe data",
+    "purge data",
+    "drop table",
+    "truncate table",
+    "restore backup",
+    "migrate database",
+    "apply migration",
+    "migration apply",
+    "rebuild index",
+    "mass delete",
+    "bulk delete",
+    "destructive action",
+    "dangerous change",
+    "data loss risk",
+    "dateien loeschen",
+    "daten loeschen",
+    "memory loeschen",
+    "erinnerungen loeschen",
+    "alte erinnerungen loeschen",
+    "erinnerungen aufraeumen",
+    "downloads aufraeumen",
+    "datei ueberschreiben",
+    "dateien ueberschreiben",
+    "datenbank zuruecksetzen",
+    "einstellungen zuruecksetzen",
+    "daten loeschen",
+    "backup wiederherstellen",
+    "migration anwenden",
+    "datenbank migrieren",
+    "index neu aufbauen",
+    "massenloeschung",
+    "destruktive aktion",
+    "gefaehrliche aenderung",
+    "datenverlust risiko",
+)
+
+_QUALITY_MODE_DATA_SAFETY_CONTEXT_MARKERS = (
+    "lexa",
+    "assistant",
+    "app",
+    "workspace",
+    "project",
+    "repo",
+    "database",
+    "sqlite",
+    "memory",
+    "memories",
+    "settings",
+    "downloads",
+    "files",
+    "folder",
+    "folders",
+    "backup",
+    "migration",
+    "index",
+    "local",
+    "dry run",
+    "read only",
+    "read-only",
+    "restore",
+    "rollback",
+    "confirm",
+    "confirmation",
+    "projekt",
+    "datenbank",
+    "erinnerung",
+    "erinnerungen",
+    "einstellungen",
+    "datei",
+    "dateien",
+    "ordner",
+    "backup",
+    "migration",
+    "lokal",
+    "nur lesend",
+    "wiederherstellen",
+    "rollback",
+    "bestaetigen",
+    "bestaetigung",
+)
+
+_QUALITY_MODE_DEBUG_TRIAGE_MARKERS = (
+    "bug triage",
+    "incident triage",
+    "debug plan",
+    "debugging plan",
+    "debug this",
+    "debug lexa",
+    "debug the error",
+    "debug error",
+    "root cause analysis",
+    "root-cause analysis",
+    "root cause",
+    "rca",
+    "crash report",
+    "crash investigation",
+    "error investigation",
+    "error log analysis",
+    "log analysis",
+    "analyze logs",
+    "analyse logs",
+    "failing test",
+    "failing tests",
+    "test failure",
+    "regression investigation",
+    "production incident",
+    "outage",
+    "broken workflow",
+    "bug report",
+    "reproduce bug",
+    "repro steps",
+    "triage fehler",
+    "fehler triage",
+    "incident triage",
+    "stoerung analysieren",
+    "stoerung triage",
+    "absturzbericht",
+    "absturz analysieren",
+    "fehler analysieren",
+    "logs analysieren",
+    "log analyse",
+    "ursachenanalyse",
+    "root cause analyse",
+    "fehlgeschlagener test",
+    "fehlgeschlagene tests",
+    "regression untersuchen",
+    "bug report",
+    "bug reproduzieren",
+    "repro schritte",
+)
+
+_QUALITY_MODE_DEBUG_TRIAGE_CONTEXT_MARKERS = (
+    "lexa",
+    "assistant",
+    "app",
+    "chat",
+    "frontend",
+    "backend",
+    "agent",
+    "tool",
+    "memory",
+    "release",
+    "startup",
+    "streaming",
+    "workflow",
+    "user",
+    "production",
+    "local",
+    "logs",
+    "log",
+    "stack trace",
+    "traceback",
+    "error",
+    "crash",
+    "failure",
+    "failing",
+    "reproduce",
+    "repro",
+    "fix",
+    "verify",
+    "rollback",
+    "projekt",
+    "lokal",
+    "benutzer",
+    "fehler",
+    "absturz",
+    "fehlermeldung",
+    "stacktrace",
+    "traceback",
+    "reproduzieren",
+    "repro",
+    "beheben",
+    "fix",
+    "verifizieren",
+    "rollback",
+)
+
+_QUALITY_MODE_STATUS_HANDOFF_MARKERS = (
+    "status update",
+    "progress update",
+    "project status",
+    "work status",
+    "implementation summary",
+    "change summary",
+    "verification summary",
+    "handoff summary",
+    "handoff note",
+    "handoff brief",
+    "handoff",
+    "where are we",
+    "what changed",
+    "what was changed",
+    "what have we done",
+    "what did we accomplish",
+    "what is done",
+    "what remains",
+    "recap progress",
+    "summarize progress",
+    "summarize the work",
+    "statusbericht",
+    "fortschrittsbericht",
+    "projektstatus",
+    "arbeitsstand",
+    "zwischenstand",
+    "uebergabe",
+    "uebergabe summary",
+    "uebergabe notiz",
+    "wie weit sind wir",
+    "wo stehen wir",
+    "was hast du erreicht",
+    "was haben wir erreicht",
+    "was wurde geaendert",
+    "was wurde umgesetzt",
+    "was ist erledigt",
+    "was ist offen",
+    "fortschritt zusammenfassen",
+    "arbeit zusammenfassen",
+)
+
+_QUALITY_MODE_STATUS_HANDOFF_CONTEXT_MARKERS = (
+    "lexa",
+    "assistant",
+    "project",
+    "workspace",
+    "repo",
+    "repository",
+    "implementation",
+    "changes",
+    "tests",
+    "verified",
+    "verification",
+    "next",
+    "risk",
+    "risks",
+    "done",
+    "open",
+    "remaining",
+    "we",
+    "wir",
+    "projekt",
+    "arbeitsstand",
+    "aenderungen",
+    "umsetzung",
+    "tests",
+    "verifiziert",
+    "naechste",
+    "risiko",
+    "risiken",
+    "erledigt",
+    "offen",
+    "rest",
+)
+
+_QUALITY_MODE_CLARIFICATION_MARKERS = (
+    "ask clarifying questions",
+    "ask clarification questions",
+    "clarifying questions",
+    "clarification questions",
+    "clarify requirements",
+    "clarify the requirements",
+    "clarify scope",
+    "missing context",
+    "missing information",
+    "missing info",
+    "state assumptions",
+    "list assumptions",
+    "call out assumptions",
+    "assumption check",
+    "ambiguity check",
+    "ambiguous requirements",
+    "if unclear",
+    "when unclear",
+    "before proceeding",
+    "blocker questions",
+    "ask only if needed",
+    "frage nach wenn unklar",
+    "rueckfragen stellen",
+    "rueckfrage stellen",
+    "klaerungsfragen",
+    "klaerungsfrage",
+    "anforderungen klaeren",
+    "umfang klaeren",
+    "fehlender kontext",
+    "fehlende informationen",
+    "fehlende infos",
+    "annahmen nennen",
+    "annahmen auflisten",
+    "annahmen pruefen",
+    "unklarheiten",
+    "unklare anforderungen",
+    "falls unklar",
+    "wenn unklar",
+    "bevor du fortfaehrst",
+    "blockierende fragen",
+)
+
+_QUALITY_MODE_CLARIFICATION_CONTEXT_MARKERS = (
+    "lexa",
+    "assistant",
+    "task",
+    "project",
+    "feature",
+    "implementation",
+    "plan",
+    "decision",
+    "requirements",
+    "scope",
+    "user",
+    "workflow",
+    "answer",
+    "before",
+    "proceed",
+    "build",
+    "create",
+    "write",
+    "do",
+    "aufgabe",
+    "projekt",
+    "feature",
+    "umsetzung",
+    "plan",
+    "entscheidung",
+    "anforderungen",
+    "umfang",
+    "nutzer",
+    "workflow",
+    "antwort",
+    "bevor",
+    "fortfahren",
+    "bauen",
+    "erstellen",
+    "schreiben",
+    "machen",
+)
+
+_QUALITY_MODE_FEATURE_SPEC_MARKERS = (
+    "feature spec",
+    "feature specification",
+    "product spec",
+    "product specification",
+    "technical spec",
+    "technical specification",
+    "requirements spec",
+    "requirements document",
+    "product requirements",
+    "prd",
+    "write a spec",
+    "draft a spec",
+    "create a spec",
+    "write requirements",
+    "draft requirements",
+    "define requirements",
+    "write user stories",
+    "draft user stories",
+    "create user stories",
+    "edge cases",
+    "non goals",
+    "non-goals",
+    "out of scope",
+    "success metrics",
+    "feature spek",
+    "produkt spec",
+    "produkt spezifikation",
+    "technische spezifikation",
+    "anforderungsdokument",
+    "anforderungen schreiben",
+    "anforderungen definieren",
+    "user stories schreiben",
+    "user stories erstellen",
+    "edge cases",
+    "randfaelle",
+    "nicht ziele",
+    "nicht-ziele",
+    "ausserhalb scope",
+    "erfolgsmetriken",
+)
+
+_QUALITY_MODE_FEATURE_SPEC_CONTEXT_MARKERS = (
+    "lexa",
+    "assistant",
+    "app",
+    "product",
+    "feature",
+    "workflow",
+    "user",
+    "ux",
+    "ui",
+    "agent",
+    "memory",
+    "chat",
+    "release",
+    "engineering",
+    "implementation",
+    "build",
+    "create",
+    "draft",
+    "write",
+    "define",
+    "produkt",
+    "funktion",
+    "feature",
+    "workflow",
+    "nutzer",
+    "agent",
+    "memory",
+    "chat",
+    "release",
+    "entwicklung",
+    "umsetzung",
+    "bauen",
+    "erstellen",
+    "entwerfen",
+    "schreiben",
+    "definieren",
+)
+
+_QUALITY_MODE_EVAL_BENCHMARK_MARKERS = (
+    "assistant eval",
+    "assistant evaluation",
+    "answer quality eval",
+    "answer quality evaluation",
+    "response quality eval",
+    "response quality evaluation",
+    "quality rubric",
+    "evaluation rubric",
+    "scoring rubric",
+    "rubric for lexa",
+    "rubric for assistant",
+    "benchmark lexa",
+    "benchmark assistant",
+    "benchmark assistants",
+    "benchmark answers",
+    "benchmark responses",
+    "compare assistant answers",
+    "compare model answers",
+    "compare models against",
+    "compare against gpt",
+    "compare against claude",
+    "compare against gemini",
+    "gpt comparison",
+    "claude comparison",
+    "gemini comparison",
+    "golden set for lexa",
+    "eval dataset",
+    "evaluation dataset",
+    "regression eval",
+    "hallucination eval",
+    "antwortqualitaet bewerten",
+    "antwortqualitaet evaluation",
+    "antwortqualitaet benchmark",
+    "antworten bewerten",
+    "antworten benchmarken",
+    "bewertungsrubrik fuer lexa",
+    "rubrik fuer lexa",
+    "lexa benchmark",
+    "assistant benchmark",
+    "modelle gegen",
+    "gegen gpt vergleichen",
+    "gegen claude vergleichen",
+    "gegen gemini vergleichen",
+    "golden set fuer lexa",
+    "eval datensatz",
+    "halluzinationen bewerten",
+)
+
+_QUALITY_MODE_EVAL_BENCHMARK_CONTEXT_MARKERS = (
+    "lexa",
+    "assistant",
+    "chat",
+    "answer",
+    "answers",
+    "response",
+    "responses",
+    "quality",
+    "model",
+    "models",
+    "gpt",
+    "claude",
+    "gemini",
+    "benchmark",
+    "rubric",
+    "eval",
+    "evaluation",
+    "score",
+    "scores",
+    "test",
+    "tests",
+    "assistant",
+    "antwort",
+    "antworten",
+    "antwortqualitaet",
+    "modell",
+    "modelle",
+    "benchmark",
+    "rubrik",
+    "bewertung",
+    "punkte",
+    "testen",
+)
+
+_QUALITY_MODE_SUMMARY_EXTRACTION_MARKERS = (
+    "summarize meeting",
+    "summarize transcript",
+    "summarize call",
+    "summarize notes",
+    "summarize email thread",
+    "summarize discussion",
+    "create meeting summary",
+    "write meeting summary",
+    "meeting notes summary",
+    "transcript summary",
+    "call summary",
+    "discussion summary",
+    "extract action items",
+    "extract decisions",
+    "extract todos",
+    "extract tasks",
+    "extract follow ups",
+    "extract follow-ups",
+    "turn notes into action items",
+    "turn transcript into action items",
+    "create meeting minutes",
+    "write meeting minutes",
+    "make meeting minutes",
+    "meeting minutes from notes",
+    "meeting minutes from transcript",
+    "notes to tasks",
+    "transcript to tasks",
+    "meeting recap",
+    "call recap",
+    "meeting brief",
+    "transcript brief",
+    "meeting zusammenfassen",
+    "transkript zusammenfassen",
+    "notizen zusammenfassen",
+    "call zusammenfassen",
+    "meeting summary erstellen",
+    "meeting protokoll erstellen",
+    "protokoll aus notizen",
+    "protokoll aus transkript",
+    "action items extrahieren",
+    "entscheidungen extrahieren",
+    "todos extrahieren",
+    "aufgaben extrahieren",
+    "follow ups extrahieren",
+    "notizen in aufgaben",
+    "transkript in aufgaben",
+    "meeting recap",
+    "meeting brief",
+)
+
+_QUALITY_MODE_SUMMARY_EXTRACTION_CONTEXT_MARKERS = (
+    "meeting",
+    "transcript",
+    "call",
+    "notes",
+    "email",
+    "thread",
+    "discussion",
+    "minutes",
+    "action items",
+    "decisions",
+    "todos",
+    "tasks",
+    "owner",
+    "owners",
+    "deadline",
+    "deadlines",
+    "follow ups",
+    "follow-ups",
+    "speaker",
+    "speakers",
+    "meeting",
+    "transkript",
+    "call",
+    "notizen",
+    "email",
+    "diskussion",
+    "protokoll",
+    "action items",
+    "entscheidungen",
+    "todos",
+    "aufgaben",
+    "owner",
+    "deadline",
+    "sprecher",
+)
+
+_QUALITY_MODE_NUMERIC_ANALYSIS_MARKERS = (
+    "calculate",
+    "compute",
+    "estimate",
+    "work out",
+    "how much",
+    "how many",
+    "what is the total",
+    "what is the cost",
+    "what is the price",
+    "what is the percentage",
+    "percent change",
+    "percentage change",
+    "growth rate",
+    "conversion rate",
+    "cost estimate",
+    "cost breakdown",
+    "cost comparison",
+    "price estimate",
+    "roi",
+    "return on investment",
+    "break even",
+    "break-even",
+    "average of",
+    "sum of",
+    "total cost",
+    "monthly cost",
+    "annual cost",
+    "unit economics",
+    "berechne",
+    "berechnen",
+    "rechne",
+    "rechnen",
+    "kalkuliere",
+    "kalkulieren",
+    "schaetze",
+    "schaetzen",
+    "wieviel",
+    "wie viel",
+    "wie viele",
+    "gesamt",
+    "gesamtpreis",
+    "gesamtkosten",
+    "prozentuale aenderung",
+    "prozent berechnen",
+    "wachstumsrate",
+    "kosten schaetzen",
+    "kosten berechnen",
+    "kostenvergleich",
+    "durchschnitt von",
+    "summe von",
+)
+
+_QUALITY_MODE_NUMERIC_ANALYSIS_CONTEXT_MARKERS = (
+    "cost",
+    "costs",
+    "price",
+    "prices",
+    "budget",
+    "revenue",
+    "profit",
+    "margin",
+    "discount",
+    "tax",
+    "interest",
+    "users",
+    "requests",
+    "tokens",
+    "hours",
+    "minutes",
+    "days",
+    "weeks",
+    "months",
+    "years",
+    "percent",
+    "percentage",
+    "rate",
+    "ratio",
+    "growth",
+    "conversion",
+    "metric",
+    "metrics",
+    "latency",
+    "cost per",
+    "per month",
+    "per year",
+    "kosten",
+    "preis",
+    "preise",
+    "budget",
+    "umsatz",
+    "gewinn",
+    "marge",
+    "rabatt",
+    "steuer",
+    "zinsen",
+    "nutzer",
+    "nutzern",
+    "anfragen",
+    "tokens",
+    "stunden",
+    "minuten",
+    "tage",
+    "wochen",
+    "monate",
+    "jahre",
+    "prozent",
+    "prozentual",
+    "prozentuale",
+    "rate",
+    "verhaeltnis",
+    "wachstum",
+    "metrik",
+    "metriken",
+    "latenz",
+    "pro monat",
+    "pro jahr",
+)
+
+_QUALITY_MODE_COMMUNICATION_DRAFT_MARKERS = (
+    "draft email",
+    "draft an email",
+    "draft customer email",
+    "draft a customer email",
+    "write email",
+    "write an email",
+    "compose email",
+    "compose an email",
+    "reply to email",
+    "reply to this email",
+    "respond to email",
+    "draft reply",
+    "write reply",
+    "compose reply",
+    "draft response",
+    "write response",
+    "draft message",
+    "write message",
+    "compose message",
+    "draft announcement",
+    "write announcement",
+    "draft slack message",
+    "write slack message",
+    "draft teams message",
+    "write teams message",
+    "customer reply",
+    "customer response",
+    "customer email reply",
+    "email reply",
+    "email response",
+    "outreach email",
+    "follow up email",
+    "follow-up email",
+    "polish this email",
+    "rewrite this email",
+    "email schreiben",
+    "mail schreiben",
+    "schreibe eine email",
+    "schreib eine email",
+    "schreibe eine mail",
+    "schreib eine mail",
+    "antwort schreiben",
+    "antwort formulieren",
+    "formuliere eine antwort",
+    "kundenantwort",
+    "nachricht schreiben",
+    "nachricht formulieren",
+    "ankuendigung schreiben",
+    "schreibe eine ankuendigung",
+    "schreib eine ankuendigung",
+    "absage formulieren",
+    "follow up schreiben",
+    "follow-up schreiben",
+)
+
+_QUALITY_MODE_COMMUNICATION_DRAFT_CONTEXT_MARKERS = (
+    "email",
+    "mail",
+    "message",
+    "reply",
+    "response",
+    "announcement",
+    "slack",
+    "teams",
+    "customer",
+    "client",
+    "recipient",
+    "audience",
+    "subject",
+    "tone",
+    "cta",
+    "call to action",
+    "follow up",
+    "follow-up",
+    "email",
+    "mail",
+    "nachricht",
+    "antwort",
+    "ankuendigung",
+    "kunde",
+    "kunden",
+    "empfaenger",
+    "zielgruppe",
+    "betreff",
+    "ton",
+    "call to action",
+    "naechster schritt",
+)
+
+_QUALITY_MODE_LEARNING_EXPLANATION_MARKERS = (
+    "teach me",
+    "teach",
+    "explain step by step",
+    "explain like i am",
+    "explain like i'm",
+    "explain like im",
+    "explain for beginners",
+    "explain with examples",
+    "walk me through",
+    "help me understand",
+    "learning path",
+    "beginner explanation",
+    "for beginners",
+    "step by step",
+    "common mistakes",
+    "quiz me",
+    "practice exercise",
+    "tutorial for",
+    "bring mir bei",
+    "erklaer mir schritt fuer schritt",
+    "erklaere mir schritt fuer schritt",
+    "erklaer es schritt fuer schritt",
+    "erklaere es schritt fuer schritt",
+    "erklaer es fuer anfaenger",
+    "erklaere es fuer anfaenger",
+    "fuer anfaenger",
+    "mit beispielen",
+    "ich verstehe nicht",
+    "hilf mir verstehen",
+    "lernpfad",
+    "haeufige fehler",
+    "uebung",
+    "mini quiz",
+)
+
+_QUALITY_MODE_LEARNING_EXPLANATION_CONTEXT_MARKERS = (
+    "concept",
+    "topic",
+    "architecture",
+    "system",
+    "code",
+    "python",
+    "javascript",
+    "typescript",
+    "async",
+    "api",
+    "database",
+    "memory",
+    "agent",
+    "tool",
+    "workflow",
+    "math",
+    "metric",
+    "lexa",
+    "assistant",
+    "feature",
+    "produkt",
+    "konzept",
+    "thema",
+    "architektur",
+    "system",
+    "code",
+    "datenbank",
+    "gedaechtnis",
+    "agent",
+    "werkzeug",
+    "workflow",
+    "mathe",
+    "metrik",
+    "assistent",
+    "funktion",
+)
+
+_QUALITY_MODE_DECISION_COMPARISON_MARKERS = (
+    "oder",
+    "or",
+    "vs",
+    "versus",
+    "statt",
+    "instead",
+    "zuerst",
+    "first",
+    "priorisieren",
+    "prioritaet",
+    "priority",
 )
 
 _SENIOR_CODE_MARKERS = (
@@ -993,6 +3073,16 @@ def _quality_text_normalized(text: str) -> str:
     for source, target in replacements.items():
         value = value.replace(source, target)
     return re.sub(r"\s+", " ", value).strip()
+
+
+def _quality_marker_text(text: str) -> str:
+    """Normalize quality-marker matching without changing code/tool parsing."""
+    return re.sub(r"[^\w]+", " ", _quality_text_normalized(text)).strip()
+
+
+def _quality_has_any_marker(text: str, markers: tuple[str, ...]) -> bool:
+    padded_text = f" {text} "
+    return any(f" {_quality_marker_text(marker)} " in padded_text for marker in markers)
 
 
 _CODE_GENERATION_VERB_RE = re.compile(
@@ -1107,13 +3197,211 @@ def _detect_quality_mode(user_message: Optional[str], conversation_history: Opti
     if code_quality_mode:
         return code_quality_mode
 
+    marker_text = _quality_marker_text(text)
+    complex_requested = _quality_has_any_marker(marker_text, _QUALITY_MODE_COMPLEX_MARKERS)
+    lexa_named = _quality_has_any_marker(marker_text, ("lexa", "assistant"))
+    product_action_requested = _quality_has_any_marker(marker_text, _QUALITY_MODE_PRODUCT_ACTION_MARKERS)
     score = 0
-    if any(marker in text for marker in _QUALITY_MODE_TOP_TIER_MARKERS):
+    if _quality_has_any_marker(marker_text, _QUALITY_MODE_TOP_TIER_MARKERS):
         score += 2
-    if any(marker in text for marker in _QUALITY_MODE_COMPLEX_MARKERS):
+    if complex_requested:
         score += 1
-    if "ziel" in text and ("lexa" in text or "app" in text or "assistant" in text):
+    if (
+        _quality_has_any_marker(marker_text, ("ziel",)) and
+        _quality_has_any_marker(marker_text, ("lexa", "app", "assistant"))
+    ):
         score += 1
+    lexa_product_requested = (
+        lexa_named and
+        product_action_requested and
+        (complex_requested or _quality_has_any_marker(marker_text, _QUALITY_MODE_LEXA_PRODUCT_MARKERS))
+    )
+    if lexa_product_requested:
+        score += 1
+    source_verification_requested = (
+        (
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_SOURCE_MARKERS) and
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_VERIFICATION_MARKERS)
+        ) or
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_DIRECT_ANSWER_VERIFICATION_MARKERS)
+    )
+    if source_verification_requested:
+        score += 2
+    security_privacy_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_SECURITY_PRIVACY_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_SECURITY_PRIVACY_CONTEXT_MARKERS)
+    )
+    if security_privacy_requested:
+        score += 2
+    accessibility_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_ACCESSIBILITY_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_ACCESSIBILITY_CONTEXT_MARKERS)
+    )
+    if accessibility_requested:
+        score += 2
+    performance_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_PERFORMANCE_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_PERFORMANCE_CONTEXT_MARKERS)
+    )
+    if performance_requested:
+        score += 2
+    testing_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_TESTING_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_TESTING_CONTEXT_MARKERS)
+    )
+    if testing_requested:
+        score += 2
+    memory_context_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_MEMORY_CONTEXT_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_MEMORY_CONTEXT_CONTEXT_MARKERS)
+    )
+    if memory_context_requested:
+        score += 2
+    agent_tool_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_AGENT_TOOL_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_AGENT_TOOL_CONTEXT_MARKERS)
+    )
+    if agent_tool_requested:
+        score += 2
+    ship_check_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_SHIP_CHECK_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_SHIP_CHECK_CONTEXT_MARKERS)
+    )
+    if ship_check_requested:
+        score += 2
+    data_safety_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_DATA_SAFETY_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_DATA_SAFETY_CONTEXT_MARKERS)
+    )
+    if data_safety_requested:
+        score += 2
+    debug_triage_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_DEBUG_TRIAGE_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_DEBUG_TRIAGE_CONTEXT_MARKERS)
+    )
+    if debug_triage_requested:
+        score += 2
+    status_handoff_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_STATUS_HANDOFF_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_STATUS_HANDOFF_CONTEXT_MARKERS)
+    )
+    if status_handoff_requested:
+        score += 2
+    clarification_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_CLARIFICATION_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_CLARIFICATION_CONTEXT_MARKERS)
+    )
+    if clarification_requested:
+        score += 2
+    feature_spec_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_FEATURE_SPEC_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_FEATURE_SPEC_CONTEXT_MARKERS)
+    )
+    if feature_spec_requested:
+        score += 2
+    eval_benchmark_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_EVAL_BENCHMARK_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_EVAL_BENCHMARK_CONTEXT_MARKERS)
+    )
+    if eval_benchmark_requested:
+        score += 2
+    summary_extraction_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_SUMMARY_EXTRACTION_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_SUMMARY_EXTRACTION_CONTEXT_MARKERS)
+    )
+    if summary_extraction_requested:
+        score += 2
+    numeric_context_signal = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_NUMERIC_ANALYSIS_CONTEXT_MARKERS) or
+        bool(re.search(r"\d\s*(?:[%+\-*/x=]|percent|prozent)\s*\d", text)) or
+        (
+            bool(re.search(r"\d", text)) and
+            bool(re.search(
+                r"\b(?:eur|usd|euro|dollar|tokens?|users?|requests?|hours?|minutes?|days?|weeks?|"
+                r"months?|years?|stunden?|minuten?|tage?|wochen?|monate?|jahre?|kosten|preis|"
+                r"umsatz|budget|revenue|costs?|prices?|rate|ratio|growth|prozent(?:ual\w*)?|"
+                r"percent|nutzern?)\b",
+                text,
+            ))
+        )
+    )
+    numeric_analysis_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_NUMERIC_ANALYSIS_MARKERS) and
+        numeric_context_signal
+    )
+    if numeric_analysis_requested:
+        score += 2
+    communication_draft_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_COMMUNICATION_DRAFT_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_COMMUNICATION_DRAFT_CONTEXT_MARKERS)
+    )
+    if communication_draft_requested:
+        score += 2
+    learning_explanation_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_LEARNING_EXPLANATION_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_LEARNING_EXPLANATION_CONTEXT_MARKERS)
+    )
+    if learning_explanation_requested:
+        score += 2
+    planning_structure_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_PLANNING_MARKERS) and
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_PLANNING_STRUCTURE_MARKERS)
+    )
+    constrained_planning_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_CONSTRAINT_MARKERS) and
+        (
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_PLANNING_MARKERS) or
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_INTENT_MARKERS)
+        )
+    )
+    risk_planning_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_DIRECT_RISK_MARKERS) or
+        (
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_RISK_MARKERS) and
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_RISK_CONTEXT_MARKERS)
+        )
+    )
+    decision_planning_requested = (
+        _quality_has_any_marker(marker_text, _QUALITY_MODE_DIRECT_DECISION_MARKERS) or
+        (
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_INTENT_MARKERS) and
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_STRUCTURE_MARKERS)
+        ) or
+        (
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_ASK_MARKERS) and
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_COMPARISON_MARKERS)
+        ) or
+        (
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_BETTER_MARKERS) and
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_COMPARISON_MARKERS)
+        ) or
+        (
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_COMPARE_MARKERS) and
+            (
+                _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_COMPARISON_MARKERS) or
+                _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_STRUCTURE_MARKERS)
+            )
+        ) or
+        (
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_TRADEOFF_MARKERS) and
+            (
+                _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_COMPARISON_MARKERS) or
+                _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_TRADEOFF_CONTEXT_MARKERS)
+            )
+        ) or
+        (
+            _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_SCORING_MARKERS) and
+            (
+                _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_STRUCTURE_MARKERS) or
+                _quality_has_any_marker(marker_text, _QUALITY_MODE_DECISION_COMPARISON_MARKERS)
+            )
+        ) or
+        planning_structure_requested or
+        constrained_planning_requested or
+        risk_planning_requested
+    )
+    if decision_planning_requested:
+        score += 2
     if len(text) > 160 or text.count("?") >= 2:
         score += 1
     if conversation_history and len(conversation_history) >= 8:
@@ -1122,12 +3410,166 @@ def _detect_quality_mode(user_message: Optional[str], conversation_history: Opti
     if score < 2:
         return ""
 
+    source_quality_hint = (
+        " Bei Quellen-/Faktencheck-Aufgaben extrahiere checkbare Claims, verknuepfe "
+        "sie mit konkreten Quellen oder Belegen, und markiere ungepruefte Aussagen klar."
+        if source_verification_requested else ""
+    )
+    security_privacy_hint = (
+        " Bei Security-/Privacy-Aufgaben erstelle eine knappe Threat-/Privacy-Review: "
+        "Assets/Daten, Trust Boundaries, Permissions, Data-loss-/Exfiltration-Risiken, "
+        "Missbrauchsfaelle, Mitigations, offene Fragen und konkrete Verifikationsschritte."
+        if security_privacy_requested else ""
+    )
+    accessibility_hint = (
+        " Bei Accessibility-/UX-Aufgaben erstelle eine knappe Accessibility-Review: "
+        "Tastaturfluss, Fokusreihenfolge, Screenreader-/ARIA-Labels, Kontrast, "
+        "Reduced Motion, Fehler-/Loading-Zustaende, mobile Responsiveness, offene "
+        "Barrieren und konkrete Verifikationstests."
+        if accessibility_requested else ""
+    )
+    performance_hint = (
+        " Bei Performance-Aufgaben erstelle eine knappe Performance-Review: "
+        "Baseline/Metrik, Zielwert oder Performance-Budget, Bottleneck-Hypothesen, "
+        "Messmethode, kleinste sichere Optimierung, Regressionstest und Rollout-Risiko."
+        if performance_requested else ""
+    )
+    testing_hint = (
+        " Bei Test-/QA-Aufgaben erstelle eine knappe Teststrategie: Scope, "
+        "Akzeptanzkriterien, Testmatrix, kritische Regressionen, Smoke-Checks, "
+        "manuelle Randfaelle, Automationskandidaten, Verifikationsbefehle und Rest-Risiko."
+        if testing_requested else ""
+    )
+    memory_context_hint = (
+        " Bei Memory-/Kontext-Aufgaben trenne stabile Fakten, Praeferenzen, Aufgaben, "
+        "Entscheidungen, Ideen und unsichere Annahmen. Markiere Privacy-/Consent-Risiken, "
+        "schlage Draft- statt Stable-Memory-Writes vor und nenne Loesch-/Korrekturpunkte "
+        "sowie Verifikationsfragen."
+        if memory_context_requested else ""
+    )
+    agent_tool_hint = (
+        " Bei Agent-/Tool-Aufgaben erstelle eine knappe Tool-Execution-Review: Ziel, "
+        "erlaubte Tools/Kontext, benoetigte Berechtigungen, Read-only-/Dry-run-Schritt, "
+        "geplante Aktionen, Risiken, Stop-/Approval-Kriterien, Verifikationssignal "
+        "und Rollback/Recovery."
+        if agent_tool_requested else ""
+    )
+    ship_check_hint = (
+        " Bei Release-/Ship-Check-Aufgaben erstelle eine knappe Ship-Readiness-Review: "
+        "User-facing UX, Accessibility, Performance, Reliability, Privacy/Security, "
+        "Datenverlust-Risiken, Docs/Onboarding, Tests, Migration/Rollback, Launch-Blocker, "
+        "Must-fix vor Publish, Nice-to-have, Verifikationsbefehle und klare Go/No-go-Empfehlung."
+        if ship_check_requested else ""
+    )
+    data_safety_hint = (
+        " Bei datenveraendernden oder destruktiven Aktionen erstelle eine knappe Data-Safety-Review: "
+        "betroffene Daten, Reversibilitaet, Backup/Snapshot, Dry-run-/Read-only-Vorcheck, "
+        "explizite Bestaetigungspunkte, kleinster sicherer Schritt, Restore/Rollback und Nachpruefung."
+        if data_safety_requested else ""
+    )
+    debug_triage_hint = (
+        " Bei Bug-/Incident-/Debugging-Aufgaben erstelle eine knappe Triage: Symptom, "
+        "Impact, Repro-Schritte, erwartetes vs. tatsaechliches Verhalten, zuletzt geaendert, "
+        "relevante Logs/Stacktraces, Hypothesen nach Wahrscheinlichkeit, kleinste sichere "
+        "Fix-Route, Regressionstest und Verifikationssignal."
+        if debug_triage_requested else ""
+    )
+    status_handoff_hint = (
+        " Bei Status-/Handoff-Aufgaben liefere eine knappe Arbeitsuebergabe: erledigt, "
+        "geaendert, verifiziert, offen, Risiken/Blocker, naechster sinnvoller Schritt "
+        "und relevante Dateien oder Tests. Trenne gesicherte Fakten von Annahmen."
+        if status_handoff_requested else ""
+    )
+    clarification_hint = (
+        " Bei unklaren Anforderungen trenne Annahmen von Fakten, nenne fehlenden Kontext, "
+        "waehle sichere Defaults fuer reversible Schritte und stelle maximal drei konkrete "
+        "Rueckfragen nur, wenn die Antwort sonst riskant oder blockierend waere."
+        if clarification_requested else ""
+    )
+    feature_spec_hint = (
+        " Bei Feature-/Requirements-Spezifikationen liefere eine knappe Spec: Problem/Ziel, "
+        "Zielnutzer, Use Cases oder User Stories, Scope und Nicht-Ziele, Akzeptanzkriterien, "
+        "Edge Cases, UX-/Daten-/Security-Hinweise, Erfolgsmessung, offene Fragen und kleinster MVP."
+        if feature_spec_requested else ""
+    )
+    eval_benchmark_hint = (
+        " Bei Eval-/Benchmark-Aufgaben definiere eine messbare Rubric: Testset/Golden Set, "
+        "Kriterien mit Gewichtung, Bewertungsbeispiele, Baseline/Vergleichsmodelle, "
+        "Fehlertypen wie Halluzinationen oder Auslassungen, Auswertung und Regression-Gate."
+        if eval_benchmark_requested else ""
+    )
+    summary_extraction_hint = (
+        " Bei Meeting-/Notizen-/Transcript-Zusammenfassungen extrahiere TL;DR, "
+        "Entscheidungen, Action Items mit Owner/Deadline, offene Fragen, Risiken, "
+        "Follow-ups und markiere unklare Sprecher oder fehlende Daten."
+        if summary_extraction_requested else ""
+    )
+    numeric_analysis_hint = (
+        " Bei Rechen-/Zahlenanalyse-Aufgaben nenne Annahmen, Einheiten/Waehrung, "
+        "Formel/Rechenschritte, Zwischenergebnisse, Rundung, Plausibilitaetscheck "
+        "und fehlende oder unsichere Eingaben."
+        if numeric_analysis_requested else ""
+    )
+    communication_draft_hint = (
+        " Bei Kommunikations-/Antwortentwurfs-Aufgaben klaere Ziel, Empfaenger/Audience, "
+        "Ton, Kernbotschaft, Betreff/Opening, CTA/naechster Schritt, Laenge, sensible "
+        "Infos und liefere bei Bedarf eine knappe Tonvariante."
+        if communication_draft_requested else ""
+    )
+    learning_explanation_hint = (
+        " Bei Lern-/Erklaer-Aufgaben starte mit dem angenommenen Wissensstand, "
+        "erklaere vom mentalen Modell zum konkreten Beispiel, nenne haeufige "
+        "Fehlannahmen, gib eine kleine Uebung oder Checkfrage und biete den naechsten "
+        "Lernschritt an."
+        if learning_explanation_requested else ""
+    )
+    lexa_product_hint = (
+        " Bei Lexa-/Assistant-Produktverbesserungen priorisiere kleine sichere "
+        "High-Impact-Schritte, schuetze bestehende User-Aenderungen, vermeide grosse "
+        "riskante Refactors, und verifiziere fokussiert mit passenden Tests oder Guardrails."
+        if lexa_product_requested else ""
+    )
+    decision_quality_hint = (
+        " Bei Entscheidungs-/Planungsaufgaben liefere einen kompakten Decision Brief: "
+        "Ziel/Entscheidung, Fakten, Annahmen, Optionen, Tradeoffs/Risiken, "
+        "Reversibilitaet, Empfehlung mit Confidence, offene Fragen und naechste Schritte. "
+        "Wenn Bewertung, Kriterien, Gewichtung, Scoring oder Matrix verlangt sind: "
+        "nutze eine knappe Kriterien-/Score-Tabelle und erklaere die Gewichtung kurz. "
+        "Bei Roadmaps/Umsetzungsplaenen gliedere nach Phasen/Meilensteinen, Ownern, "
+        "Abhaengigkeiten, Risiken, Review-Punkten und dem kleinsten naechsten Schritt. "
+        "Bei Deadline/Budget/Ressourcen-Constraints nenne harte Grenzen, Annahmen, "
+        "Scope-Kuerzungen, Risiko-Puffer und eine realistische Minimalversion. "
+        "Bei Risiko-/Rollback-/Mitigation-Aufgaben liste Failure Modes, Impact/Likelihood, "
+        "Early-Warning-Signale, Mitigations, Owner, Rollback-/Abort-Kriterien und Verifikation. "
+        "Gib nur eine kurze Begruendung statt verborgener Chain-of-Thought."
+        if decision_planning_requested else ""
+    )
     return (
         "Anspruch: Top-tier Assistant Quality. Handle proaktiv, waehle den "
         "kleinsten sinnvollen naechsten Schritt, nutze vorhandenen Kontext und "
         "Evidenz, trenne bei Bedarf Fakten/Annahmen/Entscheidungen/Risiken/"
         "naechste Schritte, und belege am Ende kurz was getan oder geprueft wurde. "
         "Frage nur, wenn eine Entscheidung riskant oder blockierend ist."
+        f"{source_quality_hint}"
+        f"{security_privacy_hint}"
+        f"{accessibility_hint}"
+        f"{performance_hint}"
+        f"{testing_hint}"
+        f"{memory_context_hint}"
+        f"{agent_tool_hint}"
+        f"{ship_check_hint}"
+        f"{data_safety_hint}"
+        f"{debug_triage_hint}"
+        f"{status_handoff_hint}"
+        f"{clarification_hint}"
+        f"{feature_spec_hint}"
+        f"{eval_benchmark_hint}"
+        f"{summary_extraction_hint}"
+        f"{numeric_analysis_hint}"
+        f"{communication_draft_hint}"
+        f"{learning_explanation_hint}"
+        f"{decision_quality_hint}"
+        f"{lexa_product_hint}"
     )
 
 

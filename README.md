@@ -182,14 +182,23 @@ This endpoint is intentionally separate from normal `/chat`: it does not use cha
 
 ## Building from Source
 
-Lexa nutzt `electron-builder` zum Erstellen des Windows-Installers:
+Lexa nutzt PyInstaller fuer das Backend-Bundle und `electron-builder` fuer den Windows-Installer:
 
-```bash
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1
+```
+
+Das erzeugt zuerst `backend-dist\lexa-backend\lexa-backend.exe` und danach einen NSIS-Installer unter `dist\`.
+Die Electron-Konfiguration liegt in `frontend\electron-builder.json`.
+`npm run build` im Frontend prueft vor `electron-builder`, dass dieses Backend-Bundle vorhanden ist.
+
+Einzelne Schritte:
+
+```powershell
+venv\Scripts\python.exe build_backend.py
 cd frontend
 npm run build
 ```
-
-Das erzeugt einen NSIS-Installer unter `frontend/dist/`. Die Konfiguration liegt in `electron-builder.json`.
 
 ---
 
@@ -250,6 +259,12 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clean_clone_smoke.ps1
 powershell -ExecutionPolicy Bypass -File scripts\run_clean_clone_smoke.ps1 -Install -RunQuickGate -KeepTemp
 powershell -ExecutionPolicy Bypass -File scripts\run_packaging_smoke.ps1 -Build
 powershell -ExecutionPolicy Bypass -File scripts\run_installer_smoke.ps1 -ArtifactRoot <artifact-dir>
+```
+
+Paid license proof is also scripted. Set `LEXA_LICENSE_SMOKE_KEY`, optional `LEXA_LICENSE_SMOKE_API_URL`, and optional `LEXA_LICENSE_SMOKE_EXPECTED_PLAN` outside Git, then run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_paid_license_smoke.ps1
 ```
 
 `StrictRC` distinguishes `Ready` from `Needs Review` when remote CI, signing, or disposable-VM install/uninstall proof is still missing. See `docs/release/release_candidate_checklist.md` and the `docs/release/` runbooks.

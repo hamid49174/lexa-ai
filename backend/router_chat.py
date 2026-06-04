@@ -55,15 +55,49 @@ _CONFIRMATION_WORDS = frozenset({
     "go", "do it", "los", "ausführen", "machen", "jap", "jep", "yep",
     "jawohl", "genau", "stimmt", "richtig", "bitte", "gerne",
 })
+_PENDING_CANCEL_WORDS = frozenset({
+    "nein", "no", "nee", "nope", "abbrechen", "abbruch", "cancel",
+    "stop", "stopp", "verwerfen", "nicht ausfuehren",
+})
+
+
+_CONFIRMATION_WORDS = frozenset(_CONFIRMATION_WORDS | {
+    "bestatige", "bestaetige", "bestatigen", "bestaetigen", "bestatige es", "bestaetige es",
+    "ausfuhren", "ausfuehren",
+})
+_PENDING_CANCEL_WORDS = frozenset(_PENDING_CANCEL_WORDS | {"nicht ausfuhren", "nicht ausfuehren"})
+
+
+def _normalize_pending_confirmation_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(text or "").casefold())
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.replace("ß", "ss")
+    normalized = re.sub(r"\s+", " ", normalized).strip().rstrip("!.?")
+    return normalized.strip()
 
 
 def _is_confirmation_message(text: str) -> bool:
     """Check if the user message is a short confirmation of a pending action."""
-    normalized = text.strip().lower().rstrip("!.?")
+    normalized = _normalize_pending_confirmation_text(text)
     # Only treat as confirmation if it's short (1-4 words) and matches patterns
     if len(normalized.split()) > 4:
         return False
     return normalized in _CONFIRMATION_WORDS
+
+
+def _is_pending_cancel_message(text: str) -> bool:
+    normalized = _normalize_pending_confirmation_text(text)
+    if len(normalized.split()) > 4:
+        return False
+    return normalized in _PENDING_CANCEL_WORDS
+
+
+def _pending_confirmation_wait_reply(pending: dict) -> str:
+    action_name = str(pending.get("action") or "Aktion")
+    return (
+        f"Freigabe offen fuer {action_name}. Ich habe nichts ausgefuehrt. "
+        "Antworte kurz mit 'Ja' zum Ausfuehren oder 'Abbrechen' zum Verwerfen."
+    )
 
 
 def _normalize_hermes_worker_text(text: str) -> str:
@@ -132,7 +166,8 @@ def _format_confirmed_action_reply(action_name: str, result: dict) -> str:
                 if summary:
                     verification = data.get("verification") if isinstance(data.get("verification"), dict) else {}
                     if verification.get("checked") and verification.get("summary"):
-                        return f"{summary} Danach geprueft: {verification.get('summary')}"
+                        suffix = " Verifikation fehlgeschlagen." if _hermes_verification_failed(result) else ""
+                        return f"{summary} Danach geprueft: {verification.get('summary')}{suffix}"
                     return str(summary)
             if action_name in {"desktop_click", "desktop_click_text", "ui_click"}:
                 target = _short_action_label(data.get("matched_text") or data.get("target"))
@@ -149,13 +184,64 @@ def _format_confirmed_action_reply(action_name: str, result: dict) -> str:
     return f"Ich konnte {action_name} nicht ausfuehren: {error}"
 
 
+def _hermes_verification_failed(result: dict) -> bool:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    verification = data.get("verification") if isinstance(data.get("verification"), dict) else {}
+    if verification.get("passed") is False:
+        return True
+    return str(verification.get("status") or "").strip().lower() == "failed"
+
+
 async def _execute_pending_confirmation(pending: dict, source: str) -> str:
     action_name = str(pending.get("action") or "")
     action = {"action": action_name, "params": pending.get("params") or {}}
     from backend.action_executor import execute_action
 
     result = await asyncio.to_thread(execute_action, action, source=source, confirmed=True)
-    return _format_confirmed_action_reply(action_name, result)
+    reply = _format_confirmed_action_reply(action_name, result)
+    if result.get("success"):
+        if action_name == "hermes_desktop_commit" and _hermes_verification_failed(result):
+            return f"{reply}\nWeitere Desktop-Schritte gestoppt: Die letzte Aktion hat die Pruefung nicht bestanden."
+        reply = await _continue_hermes_desktop_queue(pending, reply, source)
+    elif action_name == "hermes_desktop_commit":
+        set_pending_confirmation(pending)
+        reply = f"{reply}\nFreigabe bleibt offen: Du kannst nach dem Korrigieren erneut mit 'Ja' fortsetzen."
+    return reply
+
+
+async def _continue_hermes_desktop_queue(pending: dict, reply: str, source: str) -> str:
+    if str(pending.get("action") or "") != "hermes_desktop_commit":
+        return reply
+    queue = pending.get("queue") if isinstance(pending.get("queue"), dict) else {}
+    if queue.get("type") != "hermes_desktop_instructions":
+        return reply
+    instructions = [
+        str(item).strip()
+        for item in (queue.get("instructions") or [])
+        if str(item or "").strip()
+    ]
+    if not instructions:
+        return reply
+    try:
+        from companion import hermes_desktop
+
+        queued_message = "\n".join(instructions)
+        initial_context = queue.get("context") if isinstance(queue.get("context"), dict) else None
+        data = await asyncio.to_thread(
+            hermes_desktop.hermes_desktop_task,
+            queued_message,
+            initial_context=initial_context,
+        )
+    except Exception as exc:
+        logger.warning("Hermes queue continuation failed from %s: %s", source, exc)
+        return f"{reply}\nNaechster Hermes-Schritt konnte nicht vorbereitet werden: {str(exc)[:180]}"
+
+    summary = str(data.get("summary") or "").strip()
+    if not summary:
+        return reply
+    if data.get("needs_confirmation"):
+        return f"{reply}\nNaechste Freigabe vorbereitet: {summary}"
+    return f"{reply}\nNaechster Hermes-Schritt erledigt: {summary}"
 
 
 async def _maybe_execute_inline_confirmation(message: str, reply: str, source: str) -> str:
@@ -805,6 +891,16 @@ async def chat_endpoint(req: ChatRequest):
         async with _history_lock:
             update_history(conversation_history, sanitized, reply, MAX_HISTORY)
         return ChatResponse(reply=reply, action=None, requires_confirmation=False)
+    if pending:
+        if _is_pending_cancel_message(sanitized):
+            action_name = pending.get("action", "")
+            clear_pending_confirmation()
+            reply = f"Freigabe fuer {action_name} verworfen. Ich habe nichts ausgefuehrt."
+        else:
+            reply = _pending_confirmation_wait_reply(pending)
+        async with _history_lock:
+            update_history(conversation_history, sanitized, reply, MAX_HISTORY)
+        return ChatResponse(reply=reply, action=None, requires_confirmation=False)
 
     system_reply = await try_lexa_system_answer(sanitized)
     if system_reply:
@@ -1087,6 +1183,25 @@ async def chat_stream_endpoint(req: ChatRequest):
 
         return StreamingResponse(
             confirm_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    if pending:
+        if _is_pending_cancel_message(sanitized):
+            action_name = pending.get("action", "")
+            clear_pending_confirmation()
+            reply = f"Freigabe fuer {action_name} verworfen. Ich habe nichts ausgefuehrt."
+        else:
+            reply = _pending_confirmation_wait_reply(pending)
+        async with _history_lock:
+            update_history(conversation_history, sanitized, reply, MAX_HISTORY)
+
+        async def pending_wait_stream():
+            yield f"data: {json.dumps({'c': reply})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'action': None, 'rc': False})}\n\n"
+
+        return StreamingResponse(
+            pending_wait_stream(),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )

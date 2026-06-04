@@ -13,6 +13,8 @@ import logging
 import keyring
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from backend.config import LEXA_DATA_DIR
 from backend.i18n import t
 
 logger = logging.getLogger("lexa.comm")
@@ -485,9 +487,7 @@ def telegram_send(message: str) -> str:
 
 def _get_telegram_offset_path() -> Path:
     """Path to store the last Telegram update_id for proper offset tracking."""
-    import os as _os
-    data_dir = _os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent))
-    return Path(data_dir) / ".telegram_offset"
+    return LEXA_DATA_DIR / ".telegram_offset"
 
 
 def _load_telegram_offset() -> int | None:

@@ -21,6 +21,7 @@ from pathlib import Path
 import psutil
 import pyperclip
 
+from backend.config import LEXA_DATA_DIR, PROJECT_ROOT
 from backend.security import is_command_allowed, audit_log, validate_url
 from backend.i18n import t
 from backend.plugin_loader import discover_plugins, list_plugins
@@ -31,6 +32,7 @@ from companion import file_tools
 from companion import media
 from companion import communication as comm
 from companion import desktop_control
+from companion import desktop_engine
 from companion import hermes_desktop
 from companion import ui_automation
 
@@ -63,8 +65,7 @@ from companion import ocr
 
 logger = logging.getLogger("lexa.companion")
 
-_DATA_DIR = os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent))
-PROJECT_ROOT = Path(__file__).parent.parent
+_DATA_DIR = LEXA_DATA_DIR
 
 # ── Global timer results (queryable by frontend) ──
 _timer_results = []  # list of {"message": str, "fired_at": float, "acknowledged": bool}
@@ -93,6 +94,8 @@ class CompanionEngine:
             "ui_tree": ui_automation.ui_tree,
             "ui_find": ui_automation.ui_find,
             "ui_click": ui_automation.ui_click,
+            "desktop_engine_status": desktop_engine.provider_status,
+            "desktop_engine_observe": desktop_engine.observe,
             "hermes_desktop_task": hermes_desktop.hermes_desktop_task,
             "hermes_desktop_commit": hermes_desktop.hermes_desktop_commit,
             "desktop_position": desktop_control.desktop_position,
@@ -961,11 +964,15 @@ class CompanionEngine:
 
     def screen_read_text(self, window: str = "") -> dict:
         """Text vom Bildschirm lesen via lokalem OCR (schnell, offline)."""
-        return ocr.ocr_screenshot(window_title=window or None)
+        from companion import desktop_engine
+
+        return desktop_engine.read_screen_text(window=window)
 
     def screen_ocr(self, window: str = "") -> dict:
         """Alias fuer screen_read_text — OCR vom Bildschirm."""
-        return ocr.ocr_screenshot(window_title=window or None)
+        from companion import desktop_engine
+
+        return desktop_engine.read_screen_text(window=window)
 
     # ── Timer query helpers (module-level accessible) ──
 

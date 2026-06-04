@@ -28,6 +28,7 @@ MAX_FIND_RESULTS = 20
 MAX_UI_TARGET_CHARS = 80
 MAX_CLICKABLE_NAME_CHARS = 140
 LAST_UI_CONTEXT_TTL_SECONDS = 180.0
+SENTINEL_RECT_COORD_LIMIT = 30000
 
 _ACTIONABLE_CONTROL_TYPES = {
     "Button",
@@ -137,7 +138,19 @@ def _rect_to_dict(rect: Any) -> dict[str, int]:
     }
 
 
+def _rect_has_area(rect: dict[str, int]) -> bool:
+    return rect["right"] > rect["left"] and rect["bottom"] > rect["top"]
+
+
+def _rect_is_plausible_screen_rect(rect: dict[str, int]) -> bool:
+    if not _rect_has_area(rect):
+        return False
+    return all(abs(int(rect[key])) < SENTINEL_RECT_COORD_LIMIT for key in ("left", "top", "right", "bottom"))
+
+
 def _rect_center(rect: dict[str, int]) -> tuple[int, int]:
+    if not _rect_is_plausible_screen_rect(rect):
+        raise ValueError(f"UI control rectangle is not a clickable screen position: {rect}")
     x = int(round((rect["left"] + rect["right"]) / 2))
     y = int(round((rect["top"] + rect["bottom"]) / 2))
     return x, y
@@ -169,6 +182,7 @@ def _control_to_dict(control: Any, *, window_title: str = "", depth: int = 0, sc
         "enabled": bool(_safe_call(control, "is_enabled", False)),
         "visible": bool(_safe_call(control, "is_visible", False)),
         "rect": rect,
+        "rect_valid": _rect_is_plausible_screen_rect(rect),
     }
     if score is not None:
         payload["score"] = round(float(score), 3)
@@ -177,6 +191,30 @@ def _control_to_dict(control: Any, *, window_title: str = "", depth: int = 0, sc
 
 def _normalize(value: str) -> str:
     return desktop_control._normalize_visible_text(value)
+
+
+def _window_query_aliases(query: str) -> set[str]:
+    normalized = _normalize(query)
+    aliases = {normalized} if normalized else set()
+    tokens = set(normalized.split())
+    if "notepad" in tokens:
+        aliases.add("editor")
+    if normalized == "editor":
+        aliases.add("notepad")
+    return {alias for alias in aliases if alias}
+
+
+def _window_title_matches_query(title: str, query: str) -> bool:
+    normalized_title = _normalize(title)
+    normalized_query = _normalize(query)
+    if not normalized_title or not normalized_query:
+        return False
+    if normalized_query in normalized_title or normalized_title in normalized_query:
+        return True
+    for alias in _window_query_aliases(normalized_query):
+        if alias in normalized_title:
+            return True
+    return False
 
 
 def _is_excluded_window_title(title: str) -> bool:
@@ -190,7 +228,7 @@ def _is_excluded_window_title(title: str) -> bool:
 
 def _window_has_real_rect(window: Any) -> bool:
     rect = _rect_to_dict(_safe_call(window, "rectangle", None))
-    return rect["right"] > rect["left"] and rect["bottom"] > rect["top"]
+    return _rect_is_plausible_screen_rect(rect)
 
 
 def _is_default_excluded_window(window: Any) -> bool:
@@ -289,10 +327,10 @@ def _candidate_windows(window: str = "", *, all_visible: bool = True, prefer_rec
     if query or all_visible or (not candidates and not query):
         try:
             for top in desktop.windows(visible_only=True):
-                title = _normalize(_window_title(top))
-                if not query or query in title or title in query:
-                    if allow_excluded or not _is_default_excluded_window(top):
-                        candidates.append(top)
+                title = _window_title(top)
+                matches_query = _window_title_matches_query(title, query) if query else True
+                if matches_query and (allow_excluded or not _is_default_excluded_window(top)):
+                    candidates.append(top)
         except Exception as exc:
             logger.debug("Could not enumerate UIA windows: %s", exc)
 
@@ -359,7 +397,7 @@ def _score_control(control: Any, query: str, control_type: str = "") -> float:
         score += 4.0
 
     rect = _rect_to_dict(_safe_call(control, "rectangle", None))
-    if rect["right"] <= rect["left"] or rect["bottom"] <= rect["top"]:
+    if not _rect_is_plausible_screen_rect(rect):
         score -= 20.0
 
     return max(0.0, score)
@@ -438,6 +476,19 @@ def ui_tree(window: str = "", max_depth: int = 3, max_controls: int = 80) -> dic
     limit = max(1, min(MAX_TREE_CONTROLS, int(max_controls or 80)))
     windows_payload: list[dict] = []
     total_controls = 0
+    selection: dict[str, Any] = {}
+    if not str(window or "").strip():
+        try:
+            foreground = _require_desktop().window(handle=_foreground_hwnd()).wrapper_object()
+            foreground_title = _window_title(foreground)
+            if _is_default_excluded_window(foreground):
+                selection = {
+                    "foreground_excluded": True,
+                    "foreground_title": foreground_title,
+                    "reason": "lexa_self_control_guard" if _is_excluded_window_title(foreground_title) else "non_app_window",
+                }
+        except Exception as exc:
+            logger.debug("Could not inspect foreground window for selection metadata: %s", exc)
 
     for top in _candidate_windows(window, all_visible=True):
         title = _window_title(top)
@@ -464,6 +515,7 @@ def ui_tree(window: str = "", max_depth: int = 3, max_controls: int = 80) -> dic
         "window_count": len(windows_payload),
         "control_count": total_controls,
         "engine": "pywinauto-uia",
+        "selection": selection,
     }
 
 
@@ -473,6 +525,28 @@ def ui_find(text: str = "", control_type: str = "", window: str = "", max_result
     return {
         "matches": [_public_control_result(item) for item in matches],
         "count": len(matches),
+        "engine": "pywinauto-uia",
+    }
+
+
+def ui_focus(window: str = "") -> dict:
+    """Focus a visible UI Automation window by title."""
+    query = str(window or "").strip()
+    if not query:
+        raise ValueError("window is required")
+    candidates = _candidate_windows(query, all_visible=True)
+    if not candidates:
+        raise ValueError(f"window not found: {window}")
+    target = candidates[0]
+    title = _window_title(target)
+    try:
+        target.set_focus()
+    except Exception as exc:
+        raise RuntimeError(f"window focus failed: {title or window}: {exc}") from exc
+    _remember_window_title(title)
+    return {
+        "focused": True,
+        "window_title": title,
         "engine": "pywinauto-uia",
     }
 
@@ -506,6 +580,12 @@ def ui_click(
     match = matches[min(index, len(matches) - 1)]
     _remember_target_control(match)
     rect = match["rect"]
+    if not _rect_is_plausible_screen_rect(rect):
+        if fallback_ocr:
+            result = desktop_control.desktop_click_text(text=target_text, button=button, occurrence=occurrence, window=window)
+            result["method"] = "ocr-fallback-invalid-uia-rect"
+            return result
+        raise ValueError(f"UI control has no clickable screen rectangle: {target_text}")
     x, y = _rect_center(rect)
     click_result = desktop_control.desktop_click(x=x, y=y, button=button, clicks=1)
     return {

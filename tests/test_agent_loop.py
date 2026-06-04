@@ -92,6 +92,109 @@ def test_agent_chat_endpoint_runs_hermes_system_status_without_llm(monkeypatch):
     assert "Speicherplatz ist knapp" in result["reply"]
 
 
+def test_agent_chat_endpoint_blocks_non_confirmation_while_pending(monkeypatch):
+    import backend.agent_loop as agent_loop
+    import backend.router_agent as router_agent
+    from backend.shared import clear_pending_confirmation, get_pending_confirmation, set_pending_confirmation
+
+    async def forbidden_run_agent(*_args, **_kwargs):
+        raise AssertionError("non-confirmation must not enter Hermes agent loop while pending action is open")
+        yield {}
+
+    pending = {
+        "action": "hermes_desktop_commit",
+        "params": {"kind": "hotkey", "keys": "ctrl+a", "window": "Notepad", "verify": True},
+    }
+
+    clear_pending_confirmation()
+    set_pending_confirmation(pending)
+    monkeypatch.setattr(router_agent, "check_rate_limit", lambda _bucket: True)
+    monkeypatch.setattr(router_agent, "update_history", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(agent_loop, "run_agent", forbidden_run_agent)
+
+    try:
+        result = _run(router_agent.agent_chat_endpoint(router_agent.AgentRequest(
+            message="Verify OK 2",
+            worker="hermes",
+        )))
+
+        assert result["status"] == "ok"
+        assert result["steps"] == []
+        assert "Freigabe offen fuer hermes_desktop_commit" in result["reply"]
+        assert "Ich habe nichts ausgefuehrt" in result["reply"]
+        assert get_pending_confirmation() == pending
+    finally:
+        clear_pending_confirmation()
+
+
+def test_agent_chat_endpoint_blocks_umlaut_confirmation_while_pending(monkeypatch):
+    import backend.agent_loop as agent_loop
+    import backend.router_agent as router_agent
+    from backend.shared import clear_pending_confirmation, get_pending_confirmation, set_pending_confirmation
+
+    async def forbidden_run_agent(*_args, **_kwargs):
+        raise AssertionError("pending confirmation must stay out of the Hermes agent loop")
+        yield {}
+
+    pending = {
+        "action": "hermes_desktop_commit",
+        "params": {"kind": "hotkey", "keys": "ctrl+a", "window": "Notepad", "verify": True},
+    }
+
+    clear_pending_confirmation()
+    set_pending_confirmation(pending)
+    monkeypatch.setattr(router_agent, "check_rate_limit", lambda _bucket: True)
+    monkeypatch.setattr(router_agent, "update_history", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(agent_loop, "run_agent", forbidden_run_agent)
+
+    try:
+        result = _run(router_agent.agent_chat_endpoint(router_agent.AgentRequest(
+            message="ausführen",
+            worker="hermes",
+        )))
+
+        assert result["status"] == "ok"
+        assert result["steps"] == []
+        assert "Freigabe offen fuer hermes_desktop_commit" in result["reply"]
+        assert "Bitte bestaetige im normalen Chat" in result["reply"]
+        assert get_pending_confirmation() == pending
+    finally:
+        clear_pending_confirmation()
+
+
+def test_agent_chat_endpoint_cancels_umlaut_pending_confirmation(monkeypatch):
+    import backend.agent_loop as agent_loop
+    import backend.router_agent as router_agent
+    from backend.shared import clear_pending_confirmation, get_pending_confirmation, set_pending_confirmation
+
+    async def forbidden_run_agent(*_args, **_kwargs):
+        raise AssertionError("pending cancel must stay out of the Hermes agent loop")
+        yield {}
+
+    clear_pending_confirmation()
+    set_pending_confirmation({
+        "action": "hermes_desktop_commit",
+        "params": {"kind": "hotkey", "keys": "ctrl+a", "window": "Notepad", "verify": True},
+    })
+    monkeypatch.setattr(router_agent, "check_rate_limit", lambda _bucket: True)
+    monkeypatch.setattr(router_agent, "update_history", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(agent_loop, "run_agent", forbidden_run_agent)
+
+    try:
+        result = _run(router_agent.agent_chat_endpoint(router_agent.AgentRequest(
+            message="nicht ausführen",
+            worker="hermes",
+        )))
+
+        assert result["status"] == "ok"
+        assert result["steps"] == []
+        assert "Freigabe fuer hermes_desktop_commit verworfen" in result["reply"]
+        assert "Ich habe nichts ausgefuehrt" in result["reply"]
+        assert get_pending_confirmation() is None
+    finally:
+        clear_pending_confirmation()
+
+
 def test_run_agent_reflects_before_continuing_batched_tool_calls(monkeypatch):
     import backend.ai_engine as ai_engine
     import backend.agent_loop as agent_loop
@@ -653,6 +756,82 @@ class TestHermesWorkerMode(unittest.TestCase):
         self.assertEqual(captured["params"], {"max_depth": 3, "max_controls": 80})
         self.assertEqual(step_done[0]["step"]["action"], "ui_tree")
 
+    def test_hermes_ui_tree_passes_explicit_window_hint_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "windows": [{
+                        "title": "*Test - Notepad",
+                        "controls": [{"name": "Datei", "control_type": "MenuItem"}],
+                    }],
+                    "window_count": 1,
+                    "control_count": 1,
+                    "engine": "pywinauto-uia",
+                },
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent("/hermes was siehst du im Fenster Notepad?", [], worker="hermes"):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("ui_tree should not need LLM")):
+            events = _run(collect())
+
+        step_done = [event for event in events if event.get("type") == "step_done"]
+        self.assertEqual(captured["tool"], "ui_tree")
+        self.assertEqual(captured["params"], {"max_depth": 3, "max_controls": 80, "window": "Notepad"})
+        self.assertEqual(step_done[0]["step"]["action"], "ui_tree")
+
+    def test_hermes_ui_tree_summary_explains_lexa_self_guard(self):
+        import backend.agent_loop as agent_loop
+
+        summary = agent_loop._format_ui_tree_user_summary({
+            "windows": [{
+                "title": "Freunde - Discord",
+                "controls": [],
+            }],
+            "window_count": 1,
+            "control_count": 0,
+            "engine": "pywinauto-uia",
+            "selection": {
+                "foreground_excluded": True,
+                "foreground_title": "Lexa",
+                "reason": "lexa_self_control_guard",
+            },
+        })
+
+        self.assertIn("Lexa", summary)
+        self.assertIn("Schutz ignoriert", summary)
+        self.assertIn("Freunde - Discord", summary)
+        self.assertIn("Ich habe nichts veraendert", summary)
+
+    def test_hermes_ui_find_summary_omits_invalid_sentinel_coordinates(self):
+        import backend.agent_loop as agent_loop
+
+        summary = agent_loop._format_ui_find_user_summary({
+            "matches": [{
+                "name": "Datei",
+                "control_type": "MenuItem",
+                "window_title": "Notepad",
+                "rect": {"left": -32000, "top": -32000, "right": -31928, "bottom": -31884},
+                "rect_valid": False,
+            }],
+            "count": 1,
+            "engine": "pywinauto-uia",
+        })
+
+        self.assertIn("Gefunden", summary)
+        self.assertIn("Datei", summary)
+        self.assertNotIn("bei X=", summary)
+
     def test_hermes_ui_find_button_forces_real_uia_step_without_llm(self):
         captured = {}
 
@@ -662,14 +841,10 @@ class TestHermesWorkerMode(unittest.TestCase):
             return {
                 "success": True,
                 "data": {
-                    "matches": [{
-                        "name": "Pause",
-                        "control_type": "Button",
-                        "window_title": "Spotify",
-                        "rect": {"left": 100, "top": 50, "right": 180, "bottom": 90},
-                    }],
-                    "count": 1,
-                    "engine": "pywinauto-uia",
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": 'Gefunden: "Pause" (Button) im Fenster "Spotify" bei X=140, Y=70. Ich habe nichts veraendert.',
+                    "steps": [],
+                    "needs_confirmation": False,
                 },
             }
 
@@ -684,16 +859,256 @@ class TestHermesWorkerMode(unittest.TestCase):
             return events
 
         with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
-             patch("backend.ai_engine.chat", side_effect=AssertionError("ui_find should not need LLM")):
+             patch("backend.ai_engine.chat", side_effect=AssertionError("find should not need LLM")):
             events = _run(collect())
 
         step_done = [event for event in events if event.get("type") == "step_done"]
         thinking = [event for event in events if event.get("type") == "thinking"]
-        self.assertEqual(captured["tool"], "ui_find")
-        self.assertEqual(captured["params"], {"text": "pause", "control_type": "Button"})
-        self.assertEqual(step_done[0]["step"]["action"], "ui_find")
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes finde den Button pause im aktuellen Fenster, aendere nichts.")
+        self.assertEqual(step_done[0]["step"]["action"], "hermes_desktop_task")
         self.assertIn("Gefunden", thinking[0]["message"])
         self.assertIn("X=140, Y=70", thinking[0]["message"])
+
+    def test_hermes_screen_text_passes_explicit_window_hint_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {"success": True, "data": {"text": "Lexa Hermes echter Test", "method": "uia_text"}}
+
+        async def collect():
+            events = []
+            async for event in run_agent("/hermes lies den Bildschirmtext im Fenster Notepad.", [], worker="hermes"):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("screen_read_text should not need LLM")):
+            events = _run(collect())
+
+        step_done = [event for event in events if event.get("type") == "step_done"]
+        thinking = [event for event in events if event.get("type") == "thinking"]
+        self.assertEqual(captured["tool"], "screen_read_text")
+        self.assertEqual(captured["params"], {"window": "Notepad"})
+        self.assertEqual(step_done[0]["step"]["action"], "screen_read_text")
+        self.assertIn("Bildschirmtext per UIA gelesen", thinking[0]["message"])
+        self.assertIn("Lexa Hermes echter Test", thinking[0]["message"])
+
+    def test_hermes_screen_text_accepts_plain_text_phrase_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {"success": True, "data": {"text": "Lexa Plain Text Read", "method": "uia_text"}}
+
+        async def collect():
+            events = []
+            async for event in run_agent("/hermes lies den Text im Fenster Notepad.", [], worker="hermes"):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("screen_read_text should not need LLM")):
+            events = _run(collect())
+
+        step_done = [event for event in events if event.get("type") == "step_done"]
+        thinking = [event for event in events if event.get("type") == "thinking"]
+        self.assertEqual(captured["tool"], "screen_read_text")
+        self.assertEqual(captured["params"], {"window": "Notepad"})
+        self.assertEqual(step_done[0]["step"]["action"], "screen_read_text")
+        self.assertIn("Lexa Plain Text Read", thinking[0]["message"])
+
+    def test_hermes_screen_text_accepts_polite_plain_text_phrase_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {"success": True, "data": {"text": "Lexa Polite Text Read", "method": "uia_text"}}
+
+        async def collect():
+            events = []
+            async for event in run_agent("/hermes lies bitte den Text im Fenster Notepad.", [], worker="hermes"):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("screen_read_text should not need LLM")):
+            events = _run(collect())
+
+        step_done = [event for event in events if event.get("type") == "step_done"]
+        thinking = [event for event in events if event.get("type") == "thinking"]
+        self.assertEqual(captured["tool"], "screen_read_text")
+        self.assertEqual(captured["params"], {"window": "Notepad"})
+        self.assertEqual(step_done[0]["step"]["action"], "screen_read_text")
+        self.assertIn("Lexa Polite Text Read", thinking[0]["message"])
+
+    def test_hermes_screen_text_accepts_show_text_phrase_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {"success": True, "data": {"text": "Lexa Show Text Read", "method": "uia_text"}}
+
+        async def collect():
+            events = []
+            async for event in run_agent("/hermes zeige mir den Text im Fenster Notepad.", [], worker="hermes"):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("screen_read_text should not need LLM")):
+            events = _run(collect())
+
+        step_done = [event for event in events if event.get("type") == "step_done"]
+        thinking = [event for event in events if event.get("type") == "thinking"]
+        self.assertEqual(captured["tool"], "screen_read_text")
+        self.assertEqual(captured["params"], {"window": "Notepad"})
+        self.assertEqual(step_done[0]["step"]["action"], "screen_read_text")
+        self.assertIn("Lexa Show Text Read", thinking[0]["message"])
+
+    def test_hermes_screen_text_accepts_read_aloud_from_app_phrase_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {"success": True, "data": {"text": "Lexa Read Aloud Text", "method": "uia_text"}}
+
+        async def collect():
+            events = []
+            async for event in run_agent("/hermes lies mir den Text aus Notepad vor.", [], worker="hermes"):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("screen_read_text should not need LLM")):
+            events = _run(collect())
+
+        step_done = [event for event in events if event.get("type") == "step_done"]
+        thinking = [event for event in events if event.get("type") == "thinking"]
+        self.assertEqual(captured["tool"], "screen_read_text")
+        self.assertEqual(captured["params"], {"window": "Notepad"})
+        self.assertEqual(step_done[0]["step"]["action"], "screen_read_text")
+        self.assertIn("Lexa Read Aloud Text", thinking[0]["message"])
+
+    def test_hermes_screen_text_accepts_was_steht_phrase_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {"success": True, "data": {"text": "Lexa Was Steht Read", "method": "uia_text"}}
+
+        async def collect():
+            events = []
+            async for event in run_agent("/hermes was steht im Fenster Notepad?", [], worker="hermes"):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("screen_read_text should not need LLM")):
+            events = _run(collect())
+
+        step_done = [event for event in events if event.get("type") == "step_done"]
+        thinking = [event for event in events if event.get("type") == "thinking"]
+        self.assertEqual(captured["tool"], "screen_read_text")
+        self.assertEqual(captured["params"], {"window": "Notepad"})
+        self.assertEqual(step_done[0]["step"]["action"], "screen_read_text")
+        self.assertIn("Lexa Was Steht Read", thinking[0]["message"])
+
+    def test_hermes_desktop_engine_status_forces_real_tool_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-engine",
+                    "providers": [
+                        {"id": "uia", "active": True, "available": True},
+                        {"id": "ocr", "active": True, "available": True},
+                        {"id": "touchpoint", "active": False, "available": False, "optional": True},
+                    ],
+                    "safety": {"mutating_actions_require_confirmation": True},
+                },
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent("/hermes zeig mir den Desktop-Engine-Status.", [], worker="hermes"):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("desktop_engine_status should not need LLM")):
+            events = _run(collect())
+
+        step_done = [event for event in events if event.get("type") == "step_done"]
+        thinking = [event for event in events if event.get("type") == "thinking"]
+        done = [event for event in events if event.get("type") == "done"]
+        self.assertEqual(captured["tool"], "desktop_engine_status")
+        self.assertEqual(captured["params"], {})
+        self.assertEqual(step_done[0]["step"]["action"], "desktop_engine_status")
+        self.assertIn("Desktop-Engine bereit", thinking[0]["message"])
+        self.assertIn("UIA", thinking[0]["message"])
+        self.assertEqual(done[0]["run"]["steps"][0]["action"], "desktop_engine_status")
+
+    def test_hermes_desktop_engine_observe_forces_real_tool_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-engine",
+                    "success": True,
+                    "window": "Notepad",
+                    "summary": {
+                        "window_titles": ["*Test - Notepad"],
+                        "control_count": 3,
+                        "text_preview": "Lexa Hermes echter Test",
+                        "providers_tried": ["ocr", "uia_text"],
+                    },
+                    "errors": {},
+                },
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes beobachte das Fenster Notepad mit Desktop Engine und aendere nichts.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("desktop_engine_observe should not need LLM")):
+            events = _run(collect())
+
+        step_done = [event for event in events if event.get("type") == "step_done"]
+        thinking = [event for event in events if event.get("type") == "thinking"]
+        self.assertEqual(captured["tool"], "desktop_engine_observe")
+        self.assertEqual(captured["params"], {
+            "include_text": True,
+            "max_depth": 3,
+            "max_controls": 80,
+            "window": "Notepad",
+        })
+        self.assertEqual(step_done[0]["step"]["action"], "desktop_engine_observe")
+        self.assertIn("*Test - Notepad", thinking[0]["message"])
+        self.assertIn("3 Controls", thinking[0]["message"])
+        self.assertIn("Ich habe nichts veraendert", thinking[0]["message"])
 
     def test_hermes_click_text_pauses_for_real_confirmation_without_llm(self):
         from backend.shared import clear_pending_confirmation, get_pending_confirmation
@@ -724,6 +1139,969 @@ class TestHermesWorkerMode(unittest.TestCase):
             self.assertEqual(pending["params"], {"text": "bearbeiten"})
         finally:
             clear_pending_confirmation()
+
+    def test_hermes_windowed_click_routes_to_desktop_controller(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": 'Freigabe vorbereitet: Ich wuerde "Datei" im Fenster "Notepad" klicken.',
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes klicke Datei in Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("windowed click should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes klicke Datei in Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_strg_hotkey_routes_to_desktop_controller_without_ui_click(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde Hotkey ctrl+a im Fenster Notepad druecken.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes drücke Strg+A im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes drücke Strg+A im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_select_all_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+a im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes markiere alles im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("select-all hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes markiere alles im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_save_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+s im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes speichere im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("save hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes speichere im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_save_as_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+shift+s im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes speichern unter im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("save-as hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes speichern unter im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_undo_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+        message = "/hermes mach r\u00fcckg\u00e4ngig im Fenster Notepad."
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+z im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                message,
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("undo hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], message)
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_paste_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+v im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes fuege ein im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("paste hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes fuege ein im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_print_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+p im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes drucke im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("print hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes drucke im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_open_file_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+o im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes oeffne Datei im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("open file hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes oeffne Datei im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_new_file_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+n im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes neue Datei im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("new file hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes neue Datei im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_new_folder_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+shift+n im Fenster \"Explorer\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes neuer Ordner im Fenster Explorer.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("new folder hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes neuer Ordner im Fenster Explorer.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_new_tab_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+t im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes oeffne neuen Tab im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("new tab hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes oeffne neuen Tab im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_next_tab_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+tab im Fenster \"Browser\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes wechsle zum n\u00e4chsten Tab im Fenster Browser.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("next tab hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes wechsle zum n\u00e4chsten Tab im Fenster Browser.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_previous_tab_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+shift+tab im Fenster \"Browser\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes Tab zur\u00fcck im Fenster Browser.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("previous tab hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes Tab zur\u00fcck im Fenster Browser.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_close_file_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+w im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes schlie\u00dfe Datei im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("close file hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes schlie\u00dfe Datei im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_open_search_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+f im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes oeffne Suche im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("open search hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes oeffne Suche im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_address_bar_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+l im Fenster \"Browser\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes fokussiere Adressleiste im Fenster Browser.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("address bar hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes fokussiere Adressleiste im Fenster Browser.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_refresh_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+r im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes aktualisiere die Seite im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("refresh hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes aktualisiere die Seite im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_browser_back_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination alt+left im Fenster \"Browser\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes gehe zur\u00fcck im Fenster Browser.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("browser back hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes gehe zur\u00fcck im Fenster Browser.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_browser_forward_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination alt+right im Fenster \"Browser\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes gehe vorw\u00e4rts im Fenster Browser.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("browser forward hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes gehe vorw\u00e4rts im Fenster Browser.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_zoom_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+plus im Fenster \"Browser\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes zoome rein im Fenster Browser.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("zoom hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes zoome rein im Fenster Browser.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_fullscreen_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination f11 im Fenster \"Browser\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes schalte Vollbild im Fenster Browser um.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("fullscreen hotkey should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes schalte Vollbild im Fenster Browser um.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_replace_text_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+a im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                '/hermes ersetze den Text im Fenster Notepad durch "Hermes Replace OK".',
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("replace text should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], '/hermes ersetze den Text im Fenster Notepad durch "Hermes Replace OK".')
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_clear_text_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+a im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes loesche den Text im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("clear text should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes loesche den Text im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_copy_all_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+a im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes kopiere alles im Fenster Notepad.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("copy all should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes kopiere alles im Fenster Notepad.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
+
+    def test_hermes_cut_all_phrase_routes_to_desktop_controller_without_llm(self):
+        captured = {}
+
+        async def fake_execute(action_name, params, **kwargs):
+            captured["tool"] = action_name
+            captured["params"] = params
+            return {
+                "success": True,
+                "data": {
+                    "engine": "lexa-hermes-desktop-controller",
+                    "summary": "Freigabe vorbereitet: Ich wuerde die Tastenkombination ctrl+a im Fenster \"Notepad\" ausfuehren.",
+                    "steps": [],
+                    "needs_confirmation": True,
+                },
+                "needs_confirmation": True,
+                "error": "Bestaetigung noetig",
+            }
+
+        async def collect():
+            events = []
+            async for event in run_agent(
+                "/hermes schneide alles im Fenster Notepad aus.",
+                [],
+                worker="hermes",
+            ):
+                events.append(event)
+            return events
+
+        with patch("backend.agent_loop._execute_tool", side_effect=fake_execute), \
+             patch("backend.ai_engine.chat", side_effect=AssertionError("cut all should not need LLM")):
+            events = _run(collect())
+
+        blocked = [event for event in events if event.get("type") == "step_blocked"]
+        self.assertEqual(captured["tool"], "hermes_desktop_task")
+        self.assertEqual(captured["params"]["message"], "/hermes schneide alles im Fenster Notepad aus.")
+        self.assertEqual(blocked[0]["step"]["action"], "hermes_desktop_task")
 
     def test_hermes_click_inline_confirmation_keeps_deictic_target(self):
         import backend.agent_loop as agent_loop

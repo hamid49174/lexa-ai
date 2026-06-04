@@ -3,13 +3,14 @@
 This module keeps Hermes optional and contained:
 - Hermes can live inside the Lexa repo under vendor/hermes-agent.
 - Hermes tasks run from a Lexa-owned workspace.
-- Personal OS is exposed through the project-local personal_os junction.
+- Personal OS is exposed through the project-local personal_os junction or MCP config.
 - Stable OS memory is guarded by prompt contract; changes must go through drafts.
 """
 from __future__ import annotations
 
 import os
 import re
+import json
 import importlib.util
 import shlex
 import shutil
@@ -30,7 +31,41 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 HERMES_WORKSPACE_ROOT = Path(os.environ.get("LEXA_HERMES_WORKSPACE", PROJECT_ROOT / "hermes_workspace"))
 HERMES_HOME_ROOT = Path(os.environ.get("LEXA_HERMES_HOME", HERMES_WORKSPACE_ROOT / ".hermes"))
 HERMES_VENDOR_ROOT = Path(os.environ.get("LEXA_HERMES_VENDOR", PROJECT_ROOT / "vendor" / "hermes-agent"))
-PERSONAL_OS_ROOT = Path(os.environ.get("LEXA_PERSONAL_OS_ROOT", PROJECT_ROOT / "personal_os"))
+
+
+def _has_personal_os_manifest(path: Path) -> bool:
+    return (path / "OS_MANIFEST.md").exists()
+
+
+def _mcp_personal_os_root_candidate() -> Path | None:
+    config_path = PROJECT_ROOT / "mcp_servers.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    personal_os = (config.get("servers") or {}).get("personal_os") or {}
+    env = personal_os.get("env") or {}
+    for key in ("PERSONAL_OS_ROOT", "PERSONAL_OS_SDK_ROOT"):
+        value = str(env.get(key) or "").strip()
+        if not value:
+            continue
+        path = Path(value)
+        if _has_personal_os_manifest(path):
+            return path
+    return None
+
+
+def _resolve_personal_os_root() -> Path:
+    explicit = os.environ.get("LEXA_PERSONAL_OS_ROOT") or os.environ.get("PERSONAL_OS_ROOT")
+    if explicit:
+        return Path(explicit)
+    project_link = PROJECT_ROOT / "personal_os"
+    if _has_personal_os_manifest(project_link):
+        return project_link
+    return _mcp_personal_os_root_candidate() or project_link
+
+
+PERSONAL_OS_ROOT = _resolve_personal_os_root()
 
 _MAX_STDOUT_CHARS = 12000
 _MAX_STDERR_CHARS = 4000
@@ -116,6 +151,10 @@ def _display_command(command: list[str] | None) -> str | None:
 
 def _cmd_quote(value: str) -> str:
     return '"' + str(value).replace('"', '""') + '"'
+
+
+def _normalize_cmd_script(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
 def _clip(text: str | None, max_chars: int) -> str:
@@ -247,12 +286,14 @@ def get_hermes_gateway_log_summary(max_lines: int = 160) -> dict[str, Any]:
         item for item, raw in zip(parsed, lines)
         if item.get("level") in {"ERROR", "CRITICAL", "WARNING", "WARN"} or _LOG_ISSUE_RE.search(raw)
     ][-5:]
+    issue_count = len(issue_items)
     latest = parsed[-5:]
-    health_state = "attention" if error_count or warning_count else "ok"
-    if error_count or warning_count:
+    health_state = "attention" if error_count or warning_count or issue_count else "ok"
+    if error_count or warning_count or issue_count:
         summary = (
             f"{len(lines)} Logzeilen gelesen; {error_count} Fehler, {warning_count} Warnungen, "
-            f"{inbound_count} Telegram-Eingaenge, {response_count} Antworten."
+            f"{issue_count} Auffaelligkeiten, {inbound_count} Telegram-Eingaenge, "
+            f"{response_count} Antworten."
         )
     else:
         summary = (
@@ -277,7 +318,7 @@ def get_hermes_gateway_log_summary(max_lines: int = 160) -> dict[str, Any]:
             "responses_sent": send_count,
             "memory_heartbeats": memory_count,
             "connect_events": connect_count,
-            "issues": len(issue_items),
+            "issues": issue_count,
         },
         "issues": issue_items,
         "latest": latest,
@@ -721,19 +762,25 @@ def get_hermes_gateway_autostart_status() -> dict[str, Any]:
     script_exists = bool(startup_path and startup_path.exists())
     windows_supported = os.name == "nt" and startup_path is not None
     can_enable = bool(windows_supported and command and telegram.get("can_start_gateway"))
+    script_current = bool(command and startup_path and _gateway_autostart_script_is_current(startup_path, command))
+    stale_script = bool(script_exists and not script_current)
 
     return {
         "status": "ok",
         "supported": windows_supported,
-        "enabled": script_exists,
-        "configured": script_exists,
+        "enabled": script_current,
+        "configured": script_current,
+        "script_exists": script_exists,
+        "script_current": script_current,
+        "stale": stale_script,
         "can_enable": can_enable,
         "startup_path": str(startup_path) if startup_path else None,
         "gateway_command": _display_command(command + ["gateway", "run", "--replace"] if command else None),
         "log_path": str(_hermes_gateway_log_path()),
         "telegram_configured": bool(telegram.get("configured")),
         "missing": telegram.get("missing", []),
-        "nextAction": "" if can_enable or script_exists else (
+        "nextAction": "Refresh Hermes gateway autostart so it points at the current Lexa workspace."
+        if stale_script else "" if can_enable or script_current else (
             "Configure Hermes command and Telegram before enabling Windows-login gateway autostart."
             if windows_supported else
             "Windows Startup folder is not available in this runtime."
@@ -741,12 +788,10 @@ def get_hermes_gateway_autostart_status() -> dict[str, Any]:
     }
 
 
-def _build_gateway_autostart_script(command: list[str]) -> str:
-    HERMES_HOME_ROOT.mkdir(parents=True, exist_ok=True)
-    _hermes_gateway_log_path().parent.mkdir(parents=True, exist_ok=True)
+def _gateway_autostart_script_body(command: list[str]) -> str:
     argv = command + ["gateway", "run", "--replace"]
     quoted_argv = " ".join(_cmd_quote(part) for part in argv)
-    return "\r\n".join([
+    return "\n".join([
         "@echo off",
         "setlocal",
         f"set \"HERMES_HOME={HERMES_HOME_ROOT}\"",
@@ -759,6 +804,23 @@ def _build_gateway_autostart_script(command: list[str]) -> str:
         "endlocal",
         "",
     ])
+
+
+def _gateway_autostart_script_is_current(startup_path: Path, command: list[str]) -> bool:
+    if not startup_path.exists():
+        return False
+    try:
+        current = startup_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    expected = _gateway_autostart_script_body(command)
+    return _normalize_cmd_script(current) == _normalize_cmd_script(expected)
+
+
+def _build_gateway_autostart_script(command: list[str]) -> str:
+    HERMES_HOME_ROOT.mkdir(parents=True, exist_ok=True)
+    _hermes_gateway_log_path().parent.mkdir(parents=True, exist_ok=True)
+    return _gateway_autostart_script_body(command)
 
 
 def set_hermes_gateway_autostart(enabled: bool = True) -> dict[str, Any]:

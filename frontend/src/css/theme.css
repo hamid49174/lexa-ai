@@ -55,8 +55,8 @@
   --radius-xs: 4px;
 
   /* Type */
-  --font: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+  --font: 'Segoe UI Variable', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Cascadia Mono', 'Consolas', 'Courier New', monospace;
 
   /* Shadows */
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);

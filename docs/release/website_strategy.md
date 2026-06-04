@@ -2,9 +2,20 @@
 
 Current website path:
 
-`C:\Users\admin\OneDrive\Desktop\lexa\lexa-website`
+`C:\Users\admin\OneDrive - Office\lexa\lexa-website`
 
-Observed Phase 4B state:
+Current state after website hardening:
+
+- website remains outside the Lexa Git repository
+- a website-local `package.json` now exists with `lint`, `build`, and `vendor:supabase`
+- Supabase browser JS is vendored locally as `vendor/supabase.js`
+- Stripe.js remains loaded from `https://js.stripe.com/v3/` by design for Stripe Checkout
+- Landing-page Spline resources are explicit allowlist entries (`unpkg.com/@splinetool/runtime` and `prod.spline.design`) and are reported by smoke for CSP/vendor review
+- `auth.html` and `dashboard.html` define a static CSP meta policy; the website validator and repo smoke require the Supabase connect policy, Stripe.js/frame allowlist, `style-src 'self'`, no inline script/style/event handlers in deployable HTML, no JS inline-style mutations, no dynamic HTML sinks in `auth.js`/`dashboard.js`, and safe i18n rendering
+- `scripts\run_website_smoke.ps1` runs the website lint script, allowlists Stripe.js as the only external runtime script, and separately allowlists/reports Spline preload/module resources
+- PublicRC/PublicRelease remain blocked until real public Supabase/Stripe config values are supplied outside Git via `config.runtime.js` and the Stripe.js/CSP policy is release-owner approved
+
+Earlier Phase 4B state:
 
 - not a Git repository
 - no `package.json`
@@ -53,7 +64,7 @@ The safest next implementation is a dedicated website phase that either creates 
 
 Release blockers:
 
-- committed `.env` or secret keys
+- committed `.env`, credential files, signing material, or secret keys
 - Stripe secret key or Supabase service-role key in website files
 - deployment without reviewed configuration
 
@@ -118,3 +129,21 @@ PublicRC options:
 4. Integrate the website into a monorepo later.
 
 Phase 5B recommendation: do not add package/build files from Lexa release hardening. Choose Option 1 for InternalRC and decide Option 2 or 3 before PublicRC. No deployment, redesign, secret change, or repository migration happens in this phase.
+
+## Phase 5C Website Hardening Update
+
+Implemented locally:
+
+- Added a minimal website-local package setup without framework migration.
+- Added static validation at `lexa-website\scripts\validate-static.mjs`.
+- Added reproducible Supabase vendoring at `lexa-website\scripts\vendor-supabase.mjs`.
+- Replaced Supabase CDN script tags in `auth.html` and `dashboard.html` with `vendor/supabase.js`.
+- Kept Stripe.js external and explicitly allowlisted because Stripe Checkout should load Stripe.js from Stripe.
+- Added CSP meta tags for Auth/Dashboard and static validation that rejects missing CSP directives, inline scripts, inline event handlers, inline styles, JS inline-style mutations, `unsafe-inline`, or dynamic HTML sinks on account pages.
+- Replaced direct translation `innerHTML` rendering with a safe i18n allowlist for `span.text-gradient`, `strong`, and local legal links.
+
+Remaining PublicRC blockers:
+
+- `config.js` remains a safe placeholder baseline.
+- Real Supabase URL, Supabase anon key, Stripe publishable key, and Stripe price IDs must be supplied by the release/deployment owner in ignored `config.runtime.js`.
+- Stripe.js external-script and CSP policy is encoded locally, but still needs release-owner approval before PublicRC.

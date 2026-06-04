@@ -1,6 +1,6 @@
 # OS Cleanup Inventory
 
-This is a category-level inventory for the external Personal OS repository at `C:\Users\admin\OneDrive\Desktop\OS`. It deliberately does not copy private OS/Obsidian content into the Lexa repository.
+This is a category-level inventory for the external Personal OS repository at `C:\Users\admin\OneDrive - Office\Desktop\OS`. It deliberately does not copy private OS/Obsidian content into the Lexa repository.
 
 ## Phase 4E Snapshot
 

@@ -49,7 +49,11 @@ def test_settings_backup_restore_loads_selected_json_file(monkeypatch, tmp_path)
 
     monkeypatch.setattr(router_backup.memory, "restore_database", fake_restore)
 
-    response = client.post("/backup/restore-db", json={"path": str(backup_file)})
+    response = client.post(
+        "/backup/restore-db",
+        headers={"X-Lexa-Restore-Intent": "confirmed"},
+        json={"path": str(backup_file)},
+    )
 
     assert response.status_code == 200
     assert response.json()["success"] is True
@@ -66,7 +70,24 @@ def test_settings_backup_restore_rejects_paths_outside_backup_dir(monkeypatch, t
     restored = []
     monkeypatch.setattr(router_backup.memory, "restore_database", lambda data: restored.append(data))
 
-    response = client.post("/backup/restore-db", json={"path": str(outside)})
+    response = client.post(
+        "/backup/restore-db",
+        headers={"X-Lexa-Restore-Intent": "confirmed"},
+        json={"path": str(outside)},
+    )
+
+    assert response.status_code == 403
+    assert restored == []
+
+
+def test_settings_backup_restore_requires_explicit_restore_intent(monkeypatch, tmp_path):
+    client, router_backup = _client(monkeypatch, tmp_path)
+    backup_file = tmp_path / "lexa-backup-unit.json"
+    backup_file.write_text("{}", encoding="utf-8")
+    restored = []
+    monkeypatch.setattr(router_backup.memory, "restore_database", lambda data: restored.append(data))
+
+    response = client.post("/backup/restore-db", json={"path": str(backup_file)})
 
     assert response.status_code == 403
     assert restored == []

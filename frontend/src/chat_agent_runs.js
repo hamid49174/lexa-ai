@@ -584,9 +584,27 @@ function clipAgentStepText(value, limit = 64) {
   return text.length > limit ? `${text.slice(0, Math.max(0, limit - 1))}...` : text;
 }
 
-function agentStepParamSummary(params) {
+function compactHermesDesktopMessage(value) {
+  const actionStart = "(?:/?hermes|klick|kilck|klcik|click|tippe|tipp|schreibe|schreib|finde|find|suche|such|zeige|pruefe|prufe|lies|lese|was|drueck|druecke|druck|drucke|drücke|drück|hotkey|scroll|scrolle|warte|wait)";
+  let text = String(value || "").replace(/\r\n/g, "\n").replace(/\s+/g, " ").trim();
+  text = text.replace(/^\s*\/?hermes[:,\s-]*/i, "");
+  text = text.replace(new RegExp(`\\b(?:ja|yes|ok|okay)\\b[,\\s-]+(?=${actionStart}\\b)`, "gi"), "");
+  const splitRe = new RegExp(`\\s*(?:[.;!?]\\s+(?=(?:${actionStart}|ja|yes|ok|okay)\\b)|\\bund\\s+dann\\s+|\\bdanach\\s+|\\bthen\\s+)`, "i");
+  const first = String(text.split(splitRe)[0] || text).replace(/^\s*\/?hermes[:,\s-]*/i, "").trim();
+  return clipAgentStepText(first || value, 54);
+}
+
+function agentStepText(key, fallback) {
+  const translated = t(key);
+  return translated && translated !== key ? translated : fallback;
+}
+
+function agentStepParamSummary(params, action = "") {
   if (!params || typeof params !== "object") return "";
-  const preferredKeys = ["url", "query", "title", "message", "prompt", "path", "file_path", "dir_path", "name", "command"];
+  if (String(action || "") === "hermes_desktop_task" && params.message) {
+    return compactHermesDesktopMessage(params.message);
+  }
+  const preferredKeys = ["window", "window_title", "text", "target", "url", "query", "title", "message", "prompt", "path", "file_path", "dir_path", "name", "command"];
   for (const key of preferredKeys) {
     const value = params[key];
     if (value === undefined || value === null || value === "") continue;
@@ -607,7 +625,7 @@ function agentStepParamSummary(params) {
     }
     return clipAgentStepText(value, 54);
   }
-  const first = Object.values(params).find((value) => ["string", "number", "boolean"].includes(typeof value));
+  const first = Object.values(params).find((value) => ["string", "number"].includes(typeof value));
   return first === undefined ? "" : clipAgentStepText(first, 54);
 }
 
@@ -617,6 +635,12 @@ function agentStepActionLabel(action) {
   const commandKey = `cmd.desc.${name}`;
   const commandLabel = t(commandKey);
   if (commandLabel && commandLabel !== commandKey) return commandLabel;
+  if (name === "desktop_engine_status") return agentStepText("chat.agentStepDesktopStatus", "Desktop-Engine prüfen");
+  if (name === "desktop_engine_observe") return agentStepText("chat.agentStepDesktopObserve", "Desktop beobachten");
+  if (name === "screen_read_text" || name === "screen_ocr") return agentStepText("chat.agentStepScreenRead", "Bildschirmtext lesen");
+  if (name === "ui_tree") return agentStepText("chat.agentStepUiTree", "Fenster analysieren");
+  if (name === "ui_find") return agentStepText("chat.agentStepUiFind", "UI-Element suchen");
+  if (name === "hermes_desktop_task") return agentStepText("chat.agentStepHermesDesktop", "Desktop-Aktion vorbereiten");
   if (name.startsWith("personal_os_")) return t("chat.agentStepPersonalOs");
   if (name.startsWith("web_") || name.startsWith("browser_")) return t("chat.agentStepWeb");
   if (name.startsWith("file_") || name.includes("_file") || name.includes("pdf")) return t("chat.agentStepFile");
@@ -629,7 +653,7 @@ function agentStepActionLabel(action) {
 
 function agentStepDisplayLabel(step) {
   const label = agentStepActionLabel(step?.action);
-  const detail = agentStepParamSummary(step?.params);
+  const detail = agentStepParamSummary(step?.params, step?.action);
   return detail ? t("chat.agentStepWithDetail", { label, detail }) : label;
 }
 
@@ -657,6 +681,10 @@ function agentStepOutcomeKind(step) {
     action.endsWith("_read") ||
     action.endsWith("_search") ||
     action.includes("_status") ||
+    action.includes("_observe") ||
+    action === "screen_ocr" ||
+    action === "ui_tree" ||
+    action === "ui_find" ||
     action.includes("_info") ||
     action.includes("_graph") ||
     action.includes("_view") ||

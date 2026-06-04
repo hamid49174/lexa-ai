@@ -101,6 +101,8 @@ _KEY_MAP = {
     "meta": 0x5B,
     "cmd": 0x5B,
     "menu": 0x5D,
+    "plus": 0xBB,
+    "minus": 0xBD,
 }
 for _idx in range(1, 13):
     _KEY_MAP[f"f{_idx}"] = 0x6F + _idx
@@ -108,6 +110,46 @@ for _char in "abcdefghijklmnopqrstuvwxyz":
     _KEY_MAP[_char] = ord(_char.upper())
 for _digit in "0123456789":
     _KEY_MAP[_digit] = ord(_digit)
+
+_HOTKEY_KEY_ALIASES = {
+    "strg": "ctrl",
+    "control": "ctrl",
+    "steuerung": "ctrl",
+    "umschalt": "shift",
+    "links": "left",
+    "rechts": "right",
+    "oben": "up",
+    "unten": "down",
+    "pfeillinks": "left",
+    "pfeilrechts": "right",
+    "pfeiloben": "up",
+    "pfeilunten": "down",
+    "pfeilhoch": "up",
+    "pfeilrunter": "down",
+    "arrowleft": "left",
+    "arrowright": "right",
+    "arrowup": "up",
+    "arrowdown": "down",
+    "bildauf": "pageup",
+    "bildhoch": "pageup",
+    "bildab": "pagedown",
+    "bildrunter": "pagedown",
+    "pos1": "home",
+    "anfang": "home",
+    "ende": "end",
+    "einfg": "insert",
+    "einfuegen": "insert",
+    "eingabe": "enter",
+    "eingabetaste": "enter",
+    "entf": "delete",
+    "loeschen": "delete",
+    "loschen": "delete",
+    "ruecktaste": "backspace",
+    "rucktaste": "backspace",
+    "leer": "space",
+    "leertaste": "space",
+}
+_HOTKEY_CONNECTOR_TOKENS = {"und", "plus", "mit"}
 
 
 def _screen_size() -> tuple[int, int]:
@@ -187,18 +229,45 @@ def _mouse_event(flags: int, data: int = 0) -> None:
 
 def _parse_hotkey_keys(keys: str | list[str]) -> list[str]:
     if isinstance(keys, str):
-        raw = keys.replace(",", "+").split("+")
+        explicit_separator = "+" in keys or "," in keys
+        raw = _split_hotkey_string(keys)
     elif isinstance(keys, list):
+        explicit_separator = False
         raw = keys
     else:
         raise ValueError("keys must be a string like 'ctrl+l' or a list")
-    parsed = [str(key).strip().lower() for key in raw if str(key).strip()]
+    parsed = []
+    for key in raw:
+        normalized = _normalize_hotkey_key(key)
+        if not str(key).strip() or not normalized:
+            continue
+        if normalized in _HOTKEY_CONNECTOR_TOKENS and not (explicit_separator and normalized in _KEY_MAP):
+            continue
+        parsed.append(normalized)
     if not parsed or len(parsed) > MAX_HOTKEY_KEYS:
         raise ValueError(f"hotkeys need 1-{MAX_HOTKEY_KEYS} keys")
     unknown = [key for key in parsed if key not in _KEY_MAP]
     if unknown:
         raise ValueError(f"unknown key(s): {', '.join(unknown)}")
     return parsed
+
+
+def _split_hotkey_string(keys: str) -> list[str]:
+    text = str(keys or "").strip()
+    if not text:
+        return []
+    if "+" in text or "," in text:
+        return re.split(r"[+,]", text)
+    if _normalize_hotkey_key(text) in _KEY_MAP:
+        return [text]
+    return text.split()
+
+
+def _normalize_hotkey_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or "").casefold())
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = re.sub(r"[^a-z0-9]+", "", normalized)
+    return _HOTKEY_KEY_ALIASES.get(normalized, normalized)
 
 
 def _normalize_visible_text(value: str) -> str:

@@ -85,7 +85,11 @@ if (!(Test-Path -LiteralPath $WorkflowPath -PathType Leaf)) {
     @{ Name = "package publishing"; Pattern = '(?i)(npm\s+publish|electron-builder[^\r\n]*--publish)' },
     @{ Name = "cloud deployment"; Pattern = '(?i)(firebase\s+deploy|vercel\s+--prod|netlify\s+deploy|az\s+webapp\s+deploy)' },
     @{ Name = "user data path"; Pattern = '(?i)(personal_os|lexa_memory\.db|hermes_workspace|evals/results|tmp/agent_traces|bridge-audit\.log|audit\.log)' },
-    @{ Name = "env file path"; Pattern = '(?i)(^|[\\/\s])\.env([\\/\s:]|$)' }
+    @{ Name = "env file path"; Pattern = '(?i)(^|[\\/\s])\.env([\\/\s:]|$)' },
+    @{ Name = "package-manager credential path"; Pattern = '(?i)(^|[\\/\s])\.(netrc|npmrc|pnpmrc|pypirc|yarnrc(\.yml)?)([\\/\s:]|$)|(^|[\\/\s])pip\.(conf|ini)([\\/\s:]|$)' },
+    @{ Name = "cloud credential path"; Pattern = '(?i)(\.aws[\\/](credentials|config)|\.azure[\\/](accessTokens|azureProfile)\.json|\.config[\\/]gcloud[\\/]application_default_credentials\.json|\.docker[\\/]config\.json|\.gcloud[\\/]application_default_credentials\.json|\.kube[\\/]config)' },
+    @{ Name = "machine credential file"; Pattern = '(?i)(^|[\\/\s])(credentials|secrets)\.(json|ya?ml|toml|ini|conf)([\\/\s:]|$)|(^|[\\/\s])client_secret[^\\/\s]*\.json([\\/\s:]|$)|(^|[\\/\s])service[-_]?account[^\\/\s]*\.json([\\/\s:]|$)' },
+    @{ Name = "signing material path"; Pattern = '(?i)\.(pfx|p12|pem|ppk|key|pvk|cer|crt|spc|jks|keystore)([\\/\s:]|$)' }
   )
   foreach ($entry in $unsafePatterns) {
     if ($workflowText -match $entry.Pattern) {

@@ -202,6 +202,8 @@ class TestToolContextSelection:
         tools = get_tools_for_context("Hermes klick auf den Button und tippe Hallo, aber aendere sonst nichts")
         names = [t["function"]["name"] for t in tools]
         assert "window_focus" in names
+        assert "desktop_engine_status" in names
+        assert "desktop_engine_observe" in names
         assert "ui_tree" in names
         assert "ui_find" in names
         assert "ui_click" in names
@@ -297,6 +299,72 @@ class TestQualityMode:
         assert "[QUALITAETSMODUS]" in system
         assert "Fakten/Annahmen/Entscheidungen" in system
 
+    def test_detect_quality_mode_for_plain_lexa_improvement_goal(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Ziel: Lexa verbessern.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+        assert "High-Impact-Schritte" in system
+        assert "User-Aenderungen" in system
+        assert "fokussiert mit passenden Tests" in system
+
+    def test_detect_quality_mode_for_lexa_tests_and_guardrails(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Lexa Tests und Guardrails verbessern.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+
+    def test_detect_quality_mode_for_lexa_reliability_improvement(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Lexa reliability, stability und Robustheit verbessern.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+
+    def test_detect_quality_mode_for_lexa_accessibility_improvement(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Lexa Barrierefreiheit, Bedienbarkeit und a11y verbessern.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+
+    def test_detect_quality_mode_for_lexa_performance_improvement(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Lexa speed, latency, Ladezeit und Reaktionszeit verbessern.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+
+    def test_detect_quality_mode_for_lexa_memory_context_improvement(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Lexa Memory, Kontext und Personalisierung verbessern.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+
+    def test_detect_quality_mode_for_lexa_conversation_intelligence(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Lexa conversation flow, follow-up questions und Intent-Erkennung verbessern.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+
     def test_detect_quality_mode_normalizes_real_umlauts(self):
         from backend.ai_engine import _build_messages
 
@@ -304,6 +372,1152 @@ class TestQualityMode:
         system = messages[0]["content"]
 
         assert "[QUALITAETSMODUS]" in system
+
+    def test_detect_quality_mode_for_lexa_chat_intelligence_features(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Verbessere Lexa Chat-Intelligenz, Features und allgemeine Funktionen.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+
+    def test_detect_quality_mode_for_typo_heavy_lexa_feature_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("will lexa intilegnz futeres autoamtion verbessern")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+
+    def test_detect_quality_mode_for_lexa_development_wording(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Ziel: Lexa weiterentwickeln.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+        assert "High-Impact-Schritte" in system
+
+    def test_detect_quality_mode_for_lexa_expand_wording(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Ziel: Lexa ausbauen.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+        assert "High-Impact-Schritte" in system
+
+    def test_detect_quality_mode_for_source_backed_fact_check(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Create a source-backed fact-check brief with claims and citations.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+        assert "checkbare Claims" in system
+        assert "ungepruefte Aussagen" in system
+
+    def test_detect_quality_mode_matches_separator_variants(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Lexa answer-quality and user-experience polish.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+
+    def test_build_messages_keeps_simple_assistant_quality_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("what is assistant quality?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_detect_quality_mode_ignores_markers_inside_words(self):
+        from backend.ai_engine import _build_messages
+
+        applet_messages = _build_messages("Ziel: applet quality kurz erklaeren.")
+        resource_messages = _build_messages("List resources that mention claim verification.")
+
+        assert "[QUALITAETSMODUS]" not in applet_messages[0]["content"]
+        assert "[QUALITAETSMODUS]" not in resource_messages[0]["content"]
+
+    def test_detect_quality_mode_for_source_claim_verification(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Bitte pruefe die Quellen und markiere unbelegte Claims.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Fakten/Annahmen/Entscheidungen" in system
+
+    def test_detect_quality_mode_for_direct_answer_verification(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Verify this answer.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "checkbare Claims" in system
+        assert "ungepruefte Aussagen" in system
+
+    def test_detect_quality_mode_for_direct_claim_verification(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Check this claim.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "checkbare Claims" in system
+        assert "ungepruefte Aussagen" in system
+
+    def test_detect_quality_mode_for_direct_statement_verification(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Verify this statement.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "checkbare Claims" in system
+        assert "ungepruefte Aussagen" in system
+
+    def test_detect_quality_mode_for_double_check_statement(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Double-check this statement.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "checkbare Claims" in system
+        assert "ungepruefte Aussagen" in system
+
+    def test_detect_quality_mode_for_personal_answer_verification(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Verify my answer.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "checkbare Claims" in system
+        assert "ungepruefte Aussagen" in system
+
+    def test_detect_quality_mode_for_german_factcheck_answer_verification(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Faktencheck meine Antwort.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "checkbare Claims" in system
+        assert "ungepruefte Aussagen" in system
+
+    def test_detect_quality_mode_for_german_direct_answer_verification(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Prüf die Antwort.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "checkbare Claims" in system
+        assert "ungepruefte Aussagen" in system
+
+    def test_detect_quality_mode_for_inflected_source_verification(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Bitte verifiziere die Quellen und Belege.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+
+    def test_detect_quality_mode_for_validation_and_cross_check(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Validate the sources and cross-check the evidence.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+
+    def test_detect_quality_mode_for_research_reference_validation(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Bitte validiere die Studien, Papers und Referenzen.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Top-tier Assistant Quality" in system
+
+    def test_detect_quality_mode_for_decision_brief_planning(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Erstelle einen Entscheidungsbrief mit Optionen und Risiken fuer Lexa.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Tradeoffs/Risiken" in system
+        assert "Confidence" in system
+        assert "Chain-of-Thought" in system
+
+    def test_detect_quality_mode_for_strategy_tradeoff_question(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages(
+            "Soll ich fuer Lexa Performance oder Memory zuerst priorisieren? "
+            "Vergleiche Optionen, Risiken und naechste Schritte."
+        )
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Reversibilitaet" in system
+        assert "offene Fragen" in system
+
+    def test_detect_quality_mode_for_natural_should_i_comparison(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Soll ich Lexa Performance oder Memory zuerst verbessern?")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Confidence" in system
+
+    def test_detect_quality_mode_for_natural_which_is_better_comparison(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Was ist besser fuer Lexa: Performance oder Memory?")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Reversibilitaet" in system
+
+    def test_detect_quality_mode_for_option_choice_followup(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Welche Option ist besser?")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+
+    def test_detect_quality_mode_for_help_me_decide_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Hilf mir entscheiden.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Confidence" in system
+
+    def test_detect_quality_mode_for_make_the_call_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Make the call.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+
+    def test_detect_quality_mode_for_which_option_should_i_pick(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Which option should I pick?")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "offene Fragen" in system
+
+    def test_detect_quality_mode_for_rank_options_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Rank these options: Performance, Memory, UX.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Tradeoffs/Risiken" in system
+
+    def test_detect_quality_mode_for_prioritize_choices_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Prioritize these choices: speed, memory, UX.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+
+    def test_detect_quality_mode_for_pros_and_cons_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Give me pros and cons of improving Lexa memory.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Tradeoffs/Risiken" in system
+
+    def test_detect_quality_mode_for_tradeoffs_between_options(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Tradeoffs between Lexa Performance and Memory.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+
+    def test_detect_quality_mode_for_decision_matrix_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Create a decision matrix for options: Performance, Memory, UX.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Optionen" in system
+        assert "Kriterien-/Score-Tabelle" in system
+        assert "Gewichtung" in system
+
+    def test_detect_quality_mode_for_criteria_scoring_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Bewerte die Optionen nach Kriterien: Performance, Memory, UX.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Confidence" in system
+        assert "Kriterien-/Score-Tabelle" in system
+
+    def test_detect_quality_mode_for_roadmap_milestones_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Erstelle eine Roadmap fuer Lexa mit Meilensteinen und Timeline.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "naechste Schritte" in system
+        assert "Phasen/Meilensteinen" in system
+        assert "Review-Punkten" in system
+
+    def test_detect_quality_mode_for_execution_plan_phases_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Create an execution plan with phases and owners for Lexa memory.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "offene Fragen" in system
+        assert "Ownern" in system
+        assert "Abhaengigkeiten" in system
+
+    def test_detect_quality_mode_for_deadline_budget_plan(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Plane Lexa Memory mit Deadline Freitag und 2 Stunden Budget.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Deadline/Budget/Ressourcen-Constraints" in system
+        assert "realistische Minimalversion" in system
+
+    def test_detect_quality_mode_for_limited_rollout_plan(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Create a rollout plan for Lexa voice with limited resources.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Scope-Kuerzungen" in system
+
+    def test_detect_quality_mode_for_release_risk_assessment(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Create a risk assessment for Lexa release.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Failure Modes" in system
+        assert "Rollback-/Abort-Kriterien" in system
+
+    def test_detect_quality_mode_for_rollback_plan(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Rollback plan for Lexa voice launch.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Early-Warning-Signale" in system
+
+    def test_detect_quality_mode_for_threat_model_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Create a threat model for Lexa memory tools.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Threat-/Privacy-Review" in system
+        assert "Trust Boundaries" in system
+        assert "Exfiltration-Risiken" in system
+
+    def test_detect_quality_mode_for_privacy_review_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Privacy review for Lexa agent permissions.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Permissions" in system
+        assert "Verifikationsschritte" in system
+
+    def test_detect_quality_mode_for_accessibility_review_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Accessibility review for Lexa chat keyboard navigation and screen reader labels.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Accessibility-Review" in system
+        assert "Tastaturfluss" in system
+        assert "Screenreader-/ARIA-Labels" in system
+
+    def test_detect_quality_mode_for_contrast_audit_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Check contrast and focus order for Lexa settings UI.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Kontrast" in system
+        assert "Fokusreihenfolge" in system
+        assert "Verifikationstests" in system
+
+    def test_detect_quality_mode_for_performance_review_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Performance review for Lexa chat latency and startup time.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Performance-Review" in system
+        assert "Baseline/Metrik" in system
+        assert "Performance-Budget" in system
+
+    def test_detect_quality_mode_for_latency_budget_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Create a latency budget for Lexa streaming.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Bottleneck-Hypothesen" in system
+        assert "Regressionstest" in system
+
+    def test_detect_quality_mode_for_test_plan_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Create a test plan for Lexa release with acceptance criteria.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Teststrategie" in system
+        assert "Akzeptanzkriterien" in system
+        assert "Testmatrix" in system
+
+    def test_detect_quality_mode_for_regression_test_plan_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Regression test plan for Lexa streaming workflow.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "kritische Regressionen" in system
+        assert "Verifikationsbefehle" in system
+
+    def test_detect_quality_mode_for_memory_review_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Memory review for Lexa chat: what should stay stable vs draft?")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Memory-/Kontext-Aufgaben" in system
+        assert "stabile Fakten" in system
+        assert "Draft- statt Stable-Memory-Writes" in system
+        assert "Privacy-/Consent-Risiken" in system
+
+    def test_detect_quality_mode_for_context_pack_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Build a context pack for Lexa project decisions and tasks.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Memory-/Kontext-Aufgaben" in system
+        assert "Verifikationsfragen" in system
+
+    def test_detect_quality_mode_for_tool_execution_plan_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages(
+            "Create a tool execution plan for Lexa workspace automation with permissions and rollback."
+        )
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Tool-Execution-Review" in system
+        assert "erlaubte Tools/Kontext" in system
+        assert "Stop-/Approval-Kriterien" in system
+        assert "Rollback/Recovery" in system
+
+    def test_detect_quality_mode_for_agent_run_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Plan an agent run for Lexa repository cleanup and verification.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Agent-/Tool-Aufgaben" in system
+        assert "Verifikationssignal" in system
+
+    def test_detect_quality_mode_for_ship_check_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages(
+            "Run a production Ship Check for Lexa before publish with launch blockers."
+        )
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Ship-Readiness-Review" in system
+        assert "Must-fix vor Publish" in system
+        assert "Go/No-go-Empfehlung" in system
+
+    def test_detect_quality_mode_for_release_readiness_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Check Lexa release readiness: tests, rollback, docs, security.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Launch-Blocker" in system
+        assert "Verifikationsbefehle" in system
+
+    def test_detect_quality_mode_for_destructive_memory_cleanup_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Delete old memories for Lexa after backup and dry run.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Data-Safety-Review" in system
+        assert "Backup/Snapshot" in system
+        assert "Dry-run-/Read-only-Vorcheck" in system
+        assert "Restore/Rollback" in system
+
+    def test_detect_quality_mode_for_backup_restore_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Restore backup for Lexa database after migration.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "datenveraendernden oder destruktiven Aktionen" in system
+        assert "Nachpruefung" in system
+
+    def test_detect_quality_mode_for_debug_triage_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Debug Lexa startup error: collect logs, reproduce, find root cause.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Bug-/Incident-/Debugging-Aufgaben" in system
+        assert "Repro-Schritte" in system
+        assert "Hypothesen nach Wahrscheinlichkeit" in system
+        assert "Regressionstest" in system
+
+    def test_detect_quality_mode_for_incident_triage_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Incident triage for Lexa chat outage with logs and rollback.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Impact" in system
+        assert "Verifikationssignal" in system
+
+    def test_detect_quality_mode_for_status_handoff_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Wie weit sind wir mit Lexa? Zeig erledigt, verifiziert und offen.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Status-/Handoff-Aufgaben" in system
+        assert "erledigt" in system
+        assert "verifiziert" in system
+        assert "Risiken/Blocker" in system
+
+    def test_detect_quality_mode_for_handoff_summary_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Create a handoff summary for Lexa project changes, tests, next steps, and risks.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Arbeitsuebergabe" in system
+        assert "gesicherte Fakten" in system
+
+    def test_detect_quality_mode_for_clarification_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Before building this Lexa feature, ask clarifying questions and state assumptions.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "unklaren Anforderungen" in system
+        assert "Annahmen von Fakten" in system
+        assert "maximal drei konkrete Rueckfragen" in system
+
+    def test_detect_quality_mode_for_missing_context_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("List missing context for this Lexa implementation plan before proceeding.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "fehlenden Kontext" in system
+        assert "sichere Defaults" in system
+
+    def test_detect_quality_mode_for_feature_spec_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Draft a feature spec for Lexa voice memory with user stories and edge cases.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Feature-/Requirements-Spezifikationen" in system
+        assert "Akzeptanzkriterien" in system
+        assert "kleinster MVP" in system
+
+    def test_detect_quality_mode_for_prd_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Create a PRD for Lexa agent handoff with success metrics and non-goals.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Zielnutzer" in system
+        assert "Nicht-Ziele" in system
+        assert "Erfolgsmessung" in system
+
+    def test_detect_quality_mode_for_eval_rubric_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Create an answer quality eval rubric for Lexa vs GPT, Claude, and Gemini.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Eval-/Benchmark-Aufgaben" in system
+        assert "Testset/Golden Set" in system
+        assert "Kriterien mit Gewichtung" in system
+
+    def test_detect_quality_mode_for_assistant_benchmark_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Benchmark Lexa assistant answers with a golden set and hallucination eval.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Baseline/Vergleichsmodelle" in system
+        assert "Regression-Gate" in system
+
+    def test_detect_quality_mode_for_meeting_summary_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages(
+            "Summarize meeting notes for Lexa: extract action items, owners, deadlines, and decisions."
+        )
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Meeting-/Notizen-/Transcript-Zusammenfassungen" in system
+        assert "Action Items mit Owner/Deadline" in system
+        assert "unklare Sprecher" in system
+
+    def test_detect_quality_mode_for_transcript_action_items_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Turn transcript into action items for Lexa planning with open questions.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "offene Fragen" in system
+        assert "Follow-ups" in system
+
+    def test_detect_quality_mode_for_monthly_cost_calculation(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages(
+            "Calculate monthly cost: 120000 tokens per day at 0.15 USD per 1M tokens."
+        )
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Rechen-/Zahlenanalyse-Aufgaben" in system
+        assert "Einheiten/Waehrung" in system
+        assert "Formel/Rechenschritte" in system
+        assert "Plausibilitaetscheck" in system
+
+    def test_detect_quality_mode_for_percentage_change_calculation(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Berechne prozentuale Aenderung von 80 auf 92 Nutzern.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Zwischenergebnisse" in system
+        assert "Rundung" in system
+        assert "unsichere Eingaben" in system
+
+    def test_detect_quality_mode_for_customer_email_reply_draft(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages(
+            "Draft a customer email reply about the Lexa refund delay with a warm tone and clear CTA."
+        )
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Kommunikations-/Antwortentwurfs-Aufgaben" in system
+        assert "Empfaenger/Audience" in system
+        assert "CTA/naechster Schritt" in system
+        assert "Tonvariante" in system
+
+    def test_detect_quality_mode_for_german_announcement_draft(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages(
+            "Schreibe eine Ankuendigung an das Lexa Team mit Betreff, kurzem Ton und naechstem Schritt."
+        )
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Kernbotschaft" in system
+        assert "Betreff/Opening" in system
+        assert "Laenge" in system
+
+    def test_detect_quality_mode_for_step_by_step_learning_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages(
+            "Teach me Lexa architecture step by step with examples and a quick check."
+        )
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Lern-/Erklaer-Aufgaben" in system
+        assert "Wissensstand" in system
+        assert "mentalen Modell" in system
+        assert "Checkfrage" in system
+
+    def test_detect_quality_mode_for_beginner_explanation_request(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages(
+            "Explain async API workflows for beginners with examples and common mistakes."
+        )
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "konkreten Beispiel" in system
+        assert "Fehlannahmen" in system
+        assert "naechsten Lernschritt" in system
+
+    def test_detect_quality_mode_for_plain_compare_vs_question(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Vergleiche Lexa Performance vs Memory.")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+        assert "Tradeoffs/Risiken" in system
+
+    def test_detect_quality_mode_for_what_would_you_do_comparison(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Was wuerdest du machen: Performance oder Memory?")
+        system = messages[0]["content"]
+
+        assert "[QUALITAETSMODUS]" in system
+        assert "Decision Brief" in system
+
+    def test_build_messages_keeps_simple_source_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("was ist eine quelle")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_simple_factcheck_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Was ist ein Faktencheck?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_simple_decision_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Was ist eine Entscheidung?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_simple_roadmap_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Was ist eine Roadmap?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_simple_should_i_question_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Soll ich Wasser trinken?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_vague_better_question_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Was ist besser?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_simple_comparison_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Was bedeutet Vergleich?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_plain_source_comparison_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Vergleiche die Quellen.")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_vague_what_would_you_do_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Was wuerdest du machen?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_simple_ranking_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is ranking?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_pros_cons_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What does pros and cons mean?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_decision_matrix_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a decision matrix?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_execution_plan_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is an execution plan?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_deadline_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("Was ist eine Deadline?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_budget_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a budget?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_risk_assessment_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a risk assessment?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_threat_model_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a threat model?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_privacy_review_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a privacy review?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_accessibility_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is accessibility?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_screen_reader_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a screen reader?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_latency_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is latency?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_profiling_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is profiling?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_test_plan_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a test plan?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_acceptance_criteria_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What are acceptance criteria?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_memory_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is memory?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_context_pack_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a context pack?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_agent_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is an agent?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_tool_workflow_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a tool workflow?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_release_readiness_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is release readiness?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_ship_check_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a ship check?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_backup_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a backup?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_data_loss_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is data loss risk?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_debugging_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is debugging?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_root_cause_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is root cause analysis?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_status_update_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a status update?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_handoff_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a handoff?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_clarification_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a clarifying question?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_assumption_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is an assumption?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_prd_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a PRD?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_user_story_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a user story?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_rubric_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a rubric?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_eval_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is an eval?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_meeting_minutes_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What are meeting minutes?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_action_items_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What are action items?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_percentage_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a percentage?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_roi_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is ROI?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_cta_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a CTA?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_email_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is an email?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_tutorial_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is a tutorial?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
+
+    def test_build_messages_keeps_example_definition_light(self):
+        from backend.ai_engine import _build_messages
+
+        messages = _build_messages("What is an example?")
+
+        assert "[QUALITAETSMODUS]" not in messages[0]["content"]
 
     def test_build_messages_skips_quality_mode_for_simple_greeting(self):
         from backend.ai_engine import _build_messages

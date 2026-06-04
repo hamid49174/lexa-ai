@@ -71,6 +71,55 @@ function Add-RcExternalPrerequisite {
   Add-UniqueListItem $Script:RcExternalPrerequisites $Message
 }
 
+function Invoke-PaidLicenseSmokeForTarget {
+  $hasSmokeKey = -not [string]::IsNullOrWhiteSpace($env:LEXA_LICENSE_SMOKE_KEY)
+  if ($hasSmokeKey) {
+    Invoke-RcStep "Paid License Smoke" { powershell -ExecutionPolicy Bypass -File "scripts\run_paid_license_smoke.ps1" }
+    $Script:RcFacts["paid_license_smoke"] = $true
+    return
+  }
+
+  $Script:RcFacts["paid_license_smoke"] = $false
+  if ($Target -eq "InternalRC") {
+    Add-RcWarning "[License] Paid activation smoke is not proven because LEXA_LICENSE_SMOKE_KEY is not set."
+  }
+  Add-RcNextAction "Set LEXA_LICENSE_SMOKE_KEY, LEXA_LICENSE_SMOKE_API_URL, and optional LEXA_LICENSE_SMOKE_EXPECTED_PLAN outside Git; run scripts\run_paid_license_smoke.ps1 before PublicRC."
+  Add-RcExternalPrerequisite "Real Supabase/Stripe subscription and a valid paid Lexa license key."
+}
+
+function Test-WebsitePublicConfigResolved {
+  $websiteRootInfo = Resolve-Path -LiteralPath (Join-Path $RepoRoot "..\lexa-website") -ErrorAction SilentlyContinue
+  if (-not $websiteRootInfo) { return $false }
+
+  $runtimeConfig = Join-Path $websiteRootInfo.Path "config.runtime.js"
+  if (!(Test-Path -LiteralPath $runtimeConfig)) { return $false }
+
+  $runtimeText = Get-Content -LiteralPath $runtimeConfig -Raw
+  if ($runtimeText -notmatch 'window\.LEXA_CONFIG') { return $false }
+  if ($runtimeText -match 'YOUR_PROJECT|YOUR_ANON_KEY|YOUR_KEY|YOUR_PORTAL_ID|price_(PRO|ULTRA)_[A-Z_]*ID|pk_(live|test)_YOUR') {
+    return $false
+  }
+  $requiredConfig = @(
+    @{ Key = "SUPABASE_URL"; Pattern = '^https://[a-z0-9-]+\.supabase\.co/?$' },
+    @{ Key = "SUPABASE_ANON_KEY"; Pattern = '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' },
+    @{ Key = "STRIPE_PUBLISHABLE_KEY"; Pattern = '^pk_(live|test)_[A-Za-z0-9_=-]{10,}$' },
+    @{ Key = "APP_URL"; Pattern = '^https://[^/\s]+' },
+    @{ Key = "API_URL"; Pattern = '^https://[^/\s]+' },
+    @{ Key = "pro_monthly"; Pattern = '^price_[A-Za-z0-9_]{8,}$' },
+    @{ Key = "pro_yearly"; Pattern = '^price_[A-Za-z0-9_]{8,}$' },
+    @{ Key = "ultra_monthly"; Pattern = '^price_[A-Za-z0-9_]{8,}$' },
+    @{ Key = "ultra_yearly"; Pattern = '^price_[A-Za-z0-9_]{8,}$' }
+  )
+  foreach ($item in $requiredConfig) {
+    $escapedKey = [regex]::Escape($item.Key)
+    $match = [regex]::Match($runtimeText, "$escapedKey\s*:\s*['""]([^'""]+)['""]")
+    if (-not $match.Success -or $match.Groups[1].Value.Trim() -notmatch $item.Pattern) {
+      return $false
+    }
+  }
+  return $true
+}
+
 function Add-TargetFinding {
   param(
     [string]$Message,
@@ -215,6 +264,8 @@ if ($Mode -notin @("Packaging", "Installer")) {
   } $AllowMissingOS
   Invoke-RcStep "Hermes Smoke" { powershell -ExecutionPolicy Bypass -File "scripts\run_hermes_smoke.ps1" }
   Invoke-RcStep "Website Smoke" { powershell -ExecutionPolicy Bypass -File "scripts\run_website_smoke.ps1" } $AllowMissingWebsite
+  $Script:RcFacts["website_public_config"] = Test-WebsitePublicConfigResolved
+  Invoke-PaidLicenseSmokeForTarget
 }
 
 Invoke-RcStep "Packaging Smoke" {
@@ -250,15 +301,22 @@ if ($installerSigningStatus -ne "signed") {
   Add-RcExternalPrerequisite "Windows code signing certificate and protected secret store."
 }
 if ($Target -in @("PublicRC", "PublicRelease")) {
-  Add-RcBlocker "[Website] Website release target is still static/external without package-based build/lint proof."
-  Add-RcBlocker "[Website] Website CDN/CSP/SRI review is not proven for the static-external target."
+  if (-not $Script:RcFacts.ContainsKey("website_public_config") -or -not $Script:RcFacts["website_public_config"]) {
+    Add-RcBlocker "[Website] Public Supabase/Stripe config placeholders remain unresolved outside Git."
+    Add-RcNextAction "Set public Supabase URL, Supabase anon key, Stripe client key, and allowed Stripe price IDs outside Git."
+  }
+  Add-RcBlocker "[Website] Stripe.js allowlist/CSP policy needs release-owner approval for PublicRC/PublicRelease."
+  if (-not $Script:RcFacts.ContainsKey("paid_license_smoke") -or -not $Script:RcFacts["paid_license_smoke"]) {
+    Add-RcBlocker "[License] Paid activation smoke with real Supabase/Stripe config is not proven by scripts\run_paid_license_smoke.ps1."
+  }
   Add-RcBlocker "[OS] OS cleanup remains unreviewed in a separate dirty OS repository."
   Add-RcBlocker "[Release] Public artifact policy is not proven on remote CI."
-  Add-RcNextAction "Approve a website release target with package-based build/lint or equivalent static-release validation."
-  Add-RcNextAction "Review website CDN/CSP/SRI policy before PublicRC."
+  Add-RcNextAction "Approve the website Stripe.js external-script/CSP policy before PublicRC; Supabase is vendored and linted locally."
+  Add-RcNextAction "Run scripts\run_paid_license_smoke.ps1 against real Supabase/Stripe config and record the entitlement-policy decision."
   Add-RcNextAction "Run the OS cleanup review as a separate backup-first OS project."
   Add-RcNextAction "Prove risky artifact and result-path policy on GitHub Actions before PublicRC."
-  Add-RcExternalPrerequisite "Website release target decision."
+  Add-RcExternalPrerequisite "Public website configuration values and release-owner CSP approval."
+  Add-RcExternalPrerequisite "Real Supabase/Stripe environment for paid activation proof."
   Add-RcExternalPrerequisite "Human review of the external OS dirty state."
   Add-RcExternalPrerequisite "Remote CI proof for public artifact policy."
 }

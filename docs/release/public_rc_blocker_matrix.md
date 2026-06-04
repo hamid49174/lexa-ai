@@ -7,14 +7,14 @@ Phase 4F turned the remaining PublicRC work into explicit blockers, warnings, ow
 | PRC-001 | CI | not proven | warning | blocking | blocking | Remote CI proves the clean repository works outside the local workstation. | No GitHub remote or Actions run is recorded. | Create GitHub repo or remote, push branch, run `.github/workflows/quality-gates.yml`, record run URL and SHA. | user | yes | yes |
 | PRC-002 | Installer | not proven | warning | blocking | blocking | Installer install/uninstall must be proven outside the productive machine. | Disposable VM or Windows Sandbox execution evidence. | Run `scripts\run_installer_smoke.ps1 -InstallerPath <installer> -Install -Uninstall -VMOnly` inside an approved VM flow. | user | yes | yes |
 | PRC-003 | Signing | blocked | warning | blocking | blocking | Unsigned installers create trust and SmartScreen problems. | Code signing certificate and secure signing process. | Obtain certificate, configure signing outside Git, rerun packaging and installer smoke. | user / external | yes | yes |
-| PRC-004 | Website | external | warning | blocking | blocking | Website release needs a reproducible validation target. | Website has no package-based build/lint or equivalent static-release proof. | Keep current static-external target for InternalRC; approve separate website release target before PublicRC. | user | yes | partly |
+| PRC-004 | Website | partly proven | warning | blocking | blocking | Website release needs reproducible validation and real public runtime config. | Package-based static lint and ignored runtime-config path exist, but real public Supabase/Stripe values are not supplied. | Create `config.runtime.js` from `config.runtime.example.js` outside Git and rerun website smoke for the public target. | user | yes | partly |
 | PRC-005 | OS | external | warning | blocking | blocking | Dirty external OS state can hide user data, generated drafts, or unreviewed changes. | Human-reviewed cleanup decision in the OS repo. | Run backup-first OS cleanup review as a separate project with OS gates before and after. | user | yes | yes |
-| PRC-006 | Website | external | warning | blocking | blocking | The website is static-external and not packaged with Lexa release flow. | Explicit release target and ownership. | Choose separate repo, minimal website package, or equivalent static validation in a dedicated website phase. | user | yes | partly |
+| PRC-006 | Website | policy encoded, approval required | warning | blocking | blocking | The website still needs an approved public script/CSP policy. | Auth/Dashboard CSP is encoded and linted, Supabase is vendored, and Stripe.js is intentionally external; release-owner approval for the CSP/external-script policy is not recorded. | Approve the Stripe.js allowlist/CSP policy before PublicRC. | user/security | yes | partly |
 | PRC-007 | Privacy | not proven | warning | warning | blocking | Public releases need explicit policy for traces, reports, and consent. | Checklist exists, but public privacy/trace consent is not reviewed or approved. | Review `docs/release/privacy_trace_consent_checklist.md` and record release-owner approval. | user | yes | yes |
 | PRC-008 | Signing | blocked | warning | blocking | blocking | Signing secrets must never enter Git or build artifacts. | Secret-store or protected CI signing design. | Keep keys out of repo, use secure store/GitHub Secrets only after remote CI exists. | user / external | yes | yes |
 | PRC-009 | CI | not proven | warning | blocking | blocking | Remote runners may not have OS/Hermes/Website local paths. | Remote skip/warn behavior must be observed in Actions. | Run remote CI and confirm local-only gates skip or warn honestly. | user | yes | yes |
 | PRC-010 | Release | not proven | warning | blocking | blocking | Artifact policy must hold on the actual remote runner. | Remote proof that risky artifact scan blocks result/build/userdata paths. | Run remote CI with `scripts\check_risky_artifacts.ps1` and record outcome. | user | yes | yes |
-| PRC-011 | License integrity | decision required | warning | blocking | blocking | Local license files can be edited by the client and are not a cryptographic entitlement proof. | Server-backed signed license or explicit business acceptance of local-only enforcement limits. | Decide license entitlement model before PublicRC and record whether local checks are only defense-in-depth. | user / product | yes | partly |
+| PRC-011 | License integrity | smoke ready | warning | blocking | blocking | Paid entitlement must be represented honestly and not rely on renderer-written local plan data. | Desktop activation now validates through the backend and blocks direct paid writes; `scripts\run_paid_license_smoke.ps1` exists, but a real paid license proof and release-owner entitlement policy still need approval. | Apply real Supabase/Stripe config, set `LEXA_LICENSE_SMOKE_KEY` outside Git, run `scripts\run_paid_license_smoke.ps1`, and record whether local checks are defense-in-depth only. | user / product | yes | partly |
 
 ## Phase 5B Action Classification
 
@@ -23,14 +23,14 @@ Phase 4F turned the remaining PublicRC work into explicit blockers, warnings, ow
 | Remote GitHub Actions proof | External infrastructure needed | Not proven because this repository has no GitHub remote configured. | User creates/chooses GitHub repo, sets remote, pushes branch, runs Actions, records run URL and SHA. |
 | VM installer install/uninstall proof | User/external execution needed | Not proven by this workspace. Installer smoke can print readiness and plan; it does not install into the productive machine. | Run `scripts\run_installer_smoke.ps1 -InstallerPath <installer> -Install -Uninstall -VMOnly` only inside an approved disposable VM or Windows Sandbox. |
 | Windows installer signing | External certificate decision needed | Prepared, not solved. No certificate, key, passphrase, or signing secret is present or allowed in Git. | Choose certificate/provider, store secrets outside Git, configure signing, rebuild, verify publisher. |
-| Website release target | User decision needed | Website remains `static-external`; no `package.json` is added from Lexa release hardening. | Choose static release process, minimal website package, separate website repo, or later monorepo work. |
+| Website release target | Partly solved locally | Website remains `static-external`, but a minimal website-local package/lint target, Supabase vendor bundle, and ignored runtime-config path now exist. | Supply `config.runtime.js` outside Git and decide whether a separate website repo/CI is needed before PublicRC. |
 | OS cleanup review | User review needed | Not started. Lexa only records category-level inventory; OS remains external and dirty. | Run a separate backup-first OS cleanup project with OS gates before and after. |
 | Privacy/trace consent | User/legal/product decision needed | Checklist exists, not approved. | Review consent, retention, opt-in/opt-out, export/delete, provider-use, and public documentation decisions. |
-| Website CDN/SRI/CSP | User/security review needed | Website smoke warns; no PublicRC-grade CSP/vendor/SRI review is proven. | Review external CDN/scripts and decide pinning/CSP/vendor policy in the website release target. |
+| Website CDN/SRI/CSP | User/security review needed | Supabase is vendored locally; Auth/Dashboard CSP is linted; Stripe.js is the only allowlisted external runtime script. | Approve Stripe.js/CSP policy and record the decision for PublicRC. |
 | Public artifact policy | External CI proof needed | Local risky-artifact checks pass; remote runner behavior is not proven. | Prove risky artifact policy in GitHub Actions without publishing build/eval/trace artifacts. |
 | Remote CI artifact policy | External CI proof needed | Workflow is designed to avoid result/build artifact uploads, but no remote run exists. | Run GitHub Actions and confirm no release artifacts, eval results, traces, logs, or userdata are uploaded. |
 | PublicRelease legal/privacy docs | User/legal/product decision needed | Privacy checklist exists, not release-owner approved. | Complete and approve public privacy/release notes before PublicRelease. |
-| License integrity model | User/product/security decision needed | Local license storage exists, but PublicRC-grade entitlement/integrity is not proven. | Choose server-backed signed license validation or explicitly accept local-only license checks as non-security enforcement. |
+| License integrity model | User/product/security decision needed | Desktop paid activation is server-backed, renderer direct paid writes are blocked, and a paid-license smoke script now validates the backend response without printing the key. | Run `scripts\run_paid_license_smoke.ps1` with real Supabase/Stripe config and record the entitlement policy before PublicRC. |
 
 ## Current Tier Decision
 
@@ -67,7 +67,7 @@ No external proof was created by this local snapshot. PRC-001, PRC-002, PRC-003,
 - Remote CI remains external because `git remote -v` has no configured GitHub remote in this workspace.
 - VM installer install/uninstall remains external because this repository cannot prove an isolated Windows VM run by itself.
 - Signing remains external because no certificate, key, passphrase, or signing secret is present or allowed in Git.
-- Website remains `static-external` for InternalRC. PublicRC remains blocked until a separate website release target exists.
+- Website remains `static-external` for InternalRC. PublicRC remains blocked until ignored `config.runtime.js` public values and Stripe.js/CSP approval are recorded.
 - OS cleanup remains external and backup-first. No OS cleanup starts from Lexa release hardening.
 - Privacy/trace consent now has a checklist, but PublicRelease remains blocked until the release owner approves it.
 
@@ -76,10 +76,10 @@ No external proof was created by this local snapshot. PRC-001, PRC-002, PRC-003,
 - Remote CI remains an external/user blocker: no GitHub remote is configured, so no remote Actions run can be triggered from this workspace without upload/push approval.
 - VM installer proof remains not proven: the script can report VM/Sandbox readiness and print the proof plan, but no real install/uninstall was executed.
 - Signing remains blocked by external certificate and secret-store decisions. InternalRC can warn; PublicRC/PublicRelease require a signed installer.
-- Website remains `static-external` and PublicRC-blocking until the user approves a website release target.
+- Website remains `static-external` with local package/lint proof; PublicRC remains blocked until ignored `config.runtime.js` values and Stripe.js/CSP approval are recorded.
 - OS cleanup remains a separate backup-first review project; Lexa does not stage, delete, archive, or commit OS data.
 - Privacy/trace consent is now concrete enough for review, but not approved for PublicRelease.
-- License integrity remains a product/security decision: local tamper checks alone must not be represented as strong license enforcement.
+- License integrity is smoke-ready: desktop paid activation is server-backed, renderer direct paid writes are blocked, and PublicRC now needs the paid-license smoke plus an explicit entitlement policy.
 
 ## Non-Code Prerequisites
 
@@ -89,5 +89,5 @@ Some blockers cannot be solved by patching this repository alone:
 - VM installer proof requires a disposable Windows VM or Sandbox.
 - Signing requires certificate procurement and secure secret handling.
 - OS cleanup requires human review of private external data.
-- Website release target requires a product/release ownership decision.
-- License integrity requires a product/security decision if PublicRC includes paid entitlement enforcement.
+- Website public config and Stripe.js/CSP policy require product/release ownership decisions.
+- License integrity requires real paid-license smoke proof and a product/security decision if PublicRC includes paid entitlement enforcement.

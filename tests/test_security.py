@@ -320,7 +320,6 @@ class TestIsCommandAllowed:
         """Commands in the always_allowed list return 'allowed'."""
         from backend.security import is_command_allowed
         assert is_command_allowed("app_open") == "allowed"
-        assert is_command_allowed("file_write") == "allowed"
         assert is_command_allowed("note_create") == "allowed"
         assert is_command_allowed("todo_list") == "allowed"
         assert is_command_allowed("personal_os_diagnostics") == "allowed"
@@ -330,6 +329,8 @@ class TestIsCommandAllowed:
         assert is_command_allowed("personal_os_review_draft") == "allowed"
         assert is_command_allowed("desktop_position") == "allowed"
         assert is_command_allowed("desktop_wait") == "allowed"
+        assert is_command_allowed("desktop_engine_status") == "allowed"
+        assert is_command_allowed("desktop_engine_observe") == "allowed"
         assert is_command_allowed("ui_tree") == "allowed"
         assert is_command_allowed("ui_find") == "allowed"
 
@@ -338,6 +339,8 @@ class TestIsCommandAllowed:
         from backend.security import is_command_allowed
         assert is_command_allowed("shutdown") == "confirmation_required"
         assert is_command_allowed("email_send") == "confirmation_required"
+        assert is_command_allowed("file_write") == "confirmation_required"
+        assert is_command_allowed("env_get") == "confirmation_required"
         assert is_command_allowed("todo_delete") == "confirmation_required"
         assert is_command_allowed("desktop_click") == "confirmation_required"
         assert is_command_allowed("desktop_click_text") == "confirmation_required"
@@ -348,6 +351,7 @@ class TestIsCommandAllowed:
         """Commands in the always_blocked list return 'blocked'."""
         from backend.security import is_command_allowed
         assert is_command_allowed("format_disk") == "blocked"
+        assert is_command_allowed("env_list") == "blocked"
         assert is_command_allowed("keylogger") == "blocked"
         assert is_command_allowed("crypto_mine") == "blocked"
 
@@ -431,6 +435,36 @@ class TestValidateParams:
         result = validate_params("memory_add", {"content": "x", "source": "user"})
 
         assert result["source"] == "user"
+
+
+class TestEnvironmentTools:
+    def test_env_list_redacts_values(self, monkeypatch):
+        from companion import system_tools
+
+        monkeypatch.setenv("UNIT_PUBLIC_NAME", "visible")
+        monkeypatch.setenv("UNIT_SECRET_TOKEN", "secret-value")
+
+        result = system_tools.env_list()
+
+        assert result["values_redacted"] is True
+        assert "secret-value" not in str(result)
+        names = {item["name"]: item for item in result["variables"]}
+        assert names["UNIT_PUBLIC_NAME"]["sensitive"] is False
+        assert names["UNIT_SECRET_TOKEN"]["sensitive"] is True
+
+    def test_env_get_blocks_sensitive_values(self, monkeypatch):
+        from companion import system_tools
+
+        monkeypatch.setenv("UNIT_SECRET_TOKEN", "secret-value")
+        monkeypatch.setenv("UNIT_PUBLIC_NAME", "visible")
+
+        secret = system_tools.env_get("UNIT_SECRET_TOKEN")
+        public = system_tools.env_get("UNIT_PUBLIC_NAME")
+
+        assert secret["redacted"] is True
+        assert secret["value"] is None
+        assert "secret-value" not in str(secret)
+        assert public["value"] == "visible"
 
 
 # ---------------------------------------------------------------------------

@@ -105,14 +105,14 @@ $recentLines
 - Remote GitHub Actions run is not yet proven when no GitHub remote is configured.
 - Installer install/uninstall in a disposable VM or sandbox is not yet proven.
 - Installer is unsigned.
-- Website is currently a static external target without package-based build/lint proof.
+- Website is currently a static external target with local package/lint proof, but public config and Stripe.js/CSP approval remain unresolved.
 - External OS cleanup remains a separate reviewed project.
 - Public release privacy/trace consent checklist exists only as a release review artifact until approved.
 
 ## Agent/User/External Split
 
 - Agent-solvable: keep scripts, docs, redaction, artifact scans, local CI modes, and RC output honest.
-- User decisions: GitHub remote, website target, OS cleanup approval, privacy/trace consent, signing provider.
+- User decisions: GitHub remote, website public config/CSP approval, OS cleanup approval, privacy/trace consent, signing provider.
 - External infrastructure: GitHub Actions run, disposable VM/Sandbox proof, certificate/secret store.
 - Later work: website packaging/repo structure and public privacy UI after release-owner decision.
 - Proven items should have recorded command output, run URL, commit SHA, or review signoff.

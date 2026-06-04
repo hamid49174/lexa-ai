@@ -50,6 +50,7 @@ class FakeControl:
         self._enabled = enabled
         self._visible = visible
         self._children = children or []
+        self.focused = False
 
     def window_text(self):
         return self._name
@@ -68,6 +69,9 @@ class FakeControl:
 
     def descendants(self, depth=3):
         return list(self._children)
+
+    def set_focus(self):
+        self.focused = True
 
 
 class FakeWindowSpec:
@@ -173,6 +177,40 @@ def test_ui_click_can_fall_back_to_ocr(monkeypatch):
     assert result["target"] == "Mikrofon"
 
 
+def test_ui_find_marks_sentinel_rectangle_invalid(monkeypatch):
+    _install_fake_desktop(monkeypatch, [
+        FakeControl("Datei", "MenuItem", FakeRect(-32000, -32000, -31928, -31884)),
+    ])
+
+    result = ui_automation.ui_find("Datei")
+
+    assert result["count"] == 1
+    assert result["matches"][0]["name"] == "Datei"
+    assert result["matches"][0]["rect_valid"] is False
+
+
+def test_ui_click_falls_back_to_ocr_for_sentinel_rectangle(monkeypatch):
+    _install_fake_desktop(monkeypatch, [
+        FakeControl("Datei", "MenuItem", FakeRect(-32000, -32000, -31928, -31884)),
+    ])
+    fallback = {}
+
+    def fake_desktop_click(**_kwargs):
+        raise AssertionError("invalid UIA coordinates must not be clicked")
+
+    def fake_click_text(text="", button="left", occurrence=1, window=""):
+        fallback.update({"text": text, "button": button, "occurrence": occurrence, "window": window})
+        return {"clicked": True, "target": text, "matched_text": text, "x": 12, "y": 34}
+
+    monkeypatch.setattr("companion.desktop_control.desktop_click", fake_desktop_click)
+    monkeypatch.setattr("companion.desktop_control.desktop_click_text", fake_click_text)
+
+    result = ui_automation.ui_click("Datei", fallback_ocr=True, window="Spotify")
+
+    assert result["method"] == "ocr-fallback-invalid-uia-rect"
+    assert fallback == {"text": "Datei", "button": "left", "occurrence": 1, "window": "Spotify"}
+
+
 def test_ui_find_ignores_lexa_and_taskbar_by_default(monkeypatch):
     taskbar = FakeControl(
         "Taskleiste",
@@ -205,6 +243,50 @@ def test_ui_find_ignores_lexa_and_taskbar_by_default(monkeypatch):
     assert result["matches"][0]["name"] == "Pause"
 
 
+def test_ui_focus_does_not_match_blank_window_title_for_explicit_query(monkeypatch):
+    blank = FakeControl(
+        "",
+        "Window",
+        FakeRect(0, 0, 1000, 700),
+        handle=456,
+        children=[FakeControl("Blank child", "Button")],
+    )
+    notepad = FakeControl(
+        "*smoke.txt - Notepad",
+        "Window",
+        FakeRect(100, 100, 900, 700),
+        handle=789,
+        children=[FakeControl("Text editor", "Edit")],
+    )
+    monkeypatch.setattr(ui_automation, "_require_desktop", lambda: FakeDesktop([blank, notepad]))
+    monkeypatch.setattr(ui_automation, "_foreground_hwnd", lambda: 456)
+
+    result = ui_automation.ui_focus("Notepad")
+
+    assert result["focused"] is True
+    assert result["window_title"] == "*smoke.txt - Notepad"
+    assert notepad.focused is True
+    assert blank.focused is False
+
+
+def test_ui_focus_matches_german_editor_title_for_notepad_query(monkeypatch):
+    editor = FakeControl(
+        "Unbenannt - Editor",
+        "Window",
+        FakeRect(100, 100, 900, 700),
+        handle=789,
+        children=[FakeControl("Text editor", "Edit")],
+    )
+    monkeypatch.setattr(ui_automation, "_require_desktop", lambda: FakeDesktop([editor]))
+    monkeypatch.setattr(ui_automation, "_foreground_hwnd", lambda: 789)
+
+    result = ui_automation.ui_focus("Notepad")
+
+    assert result["focused"] is True
+    assert result["window_title"] == "Unbenannt - Editor"
+    assert editor.focused is True
+
+
 def test_ui_tree_falls_back_from_lexa_to_real_app_window(monkeypatch):
     lexa = FakeControl(
         "Lexa",
@@ -228,6 +310,9 @@ def test_ui_tree_falls_back_from_lexa_to_real_app_window(monkeypatch):
     assert result["window_count"] == 1
     assert result["windows"][0]["title"] == "Spotify"
     assert result["windows"][0]["controls"][0]["name"] == "Spotify"
+    assert result["selection"]["foreground_excluded"] is True
+    assert result["selection"]["foreground_title"] == "Lexa"
+    assert result["selection"]["reason"] == "lexa_self_control_guard"
 
 
 def test_ui_click_deictic_target_uses_recent_found_control(monkeypatch):

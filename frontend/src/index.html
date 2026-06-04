@@ -4,13 +4,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- CSP: Allow pinned CDN dependencies for Three.js and SimplexNoise. -->
+  <!-- CSP: desktop assets are bundled locally for offline/local-first runtime. -->
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; connect-src 'self' http://127.0.0.1:8000 ws://127.0.0.1:8000; style-src 'self' https://fonts.googleapis.com; img-src 'self' data: blob: http: https:; font-src https://fonts.gstatic.com; media-src blob:; object-src 'none'; base-uri 'self';">
+    content="default-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:8000 ws://127.0.0.1:8000; style-src 'self'; img-src 'self' data: blob: http: https:; font-src 'self'; media-src blob:; object-src 'none'; base-uri 'self';">
   <title>Lexa AI</title>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-    rel="stylesheet">
   <!-- CSS Modules (split from monolithic styles.css) -->
   <link rel="stylesheet" href="./css/theme.css">
   <link rel="stylesheet" href="./css/layout.css">
@@ -39,12 +36,8 @@
   <link rel="stylesheet" href="./css/premium_animations.css">
 
   <!-- 3D Visualization Dependencies -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
-    integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu"
-    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"
-    integrity="sha384-jjHgEv1aKR4CNMJrTCxr7j6K3HOexCFlAqN92iFyiRIoR/GsQUs2rjFGIVpswZAL"
-    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="./vendor/three.min.js"></script>
+  <script src="./vendor/simplex-noise.js"></script>
   <script src="./storage.js"></script>
   <script src="./i18n/i18n.js"></script>
   <script src="./app_ambient.js" defer></script>
@@ -495,15 +488,10 @@
                 <div class="tool-label" data-i18n="system.uptime">Uptime</div>
                 <div class="tool-desc" data-i18n="system.systemUptime">System-Betriebszeit</div>
               </div>
-              <div class="tool-card" data-action="quickAction" data-cmd="env_get" data-prompt="Variablenname:" data-param="name">
+              <div class="tool-card" data-action="quickAction" data-cmd="env_get" data-prompt="Variablenname:" data-param="name" data-confirm="true">
                 <div class="tool-icon">&#128196;</div>
                 <div class="tool-label" data-i18n="system.envRead">ENV lesen</div>
-                <div class="tool-desc" data-i18n="system.readEnvVar">Umgebungsvariable lesen</div>
-              </div>
-              <div class="tool-card" data-action="runTool" data-cmd="env_list">
-                <div class="tool-icon">&#128203;</div>
-                <div class="tool-label" data-i18n="system.envList">ENV-Liste</div>
-                <div class="tool-desc" data-i18n="system.allEnvVars">Alle Umgebungsvariablen</div>
+                <div class="tool-desc" data-i18n="system.readEnvVar">Umgebungsvariable bestaetigt lesen</div>
               </div>
               <div class="tool-card" data-action="runTool" data-cmd="flush_dns" data-confirm="true">
                 <div class="tool-icon">&#128259;</div>

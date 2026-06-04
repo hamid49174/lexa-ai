@@ -2,7 +2,7 @@
 
 The Personal OS is mounted from:
 
-`C:\Users\admin\OneDrive\Desktop\OS`
+`C:\Users\admin\OneDrive - Office\Desktop\OS`
 
 Lexa sees it through `personal_os/`, which is a local external mount/junction. It must not be staged or committed as Lexa source.
 

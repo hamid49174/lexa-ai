@@ -6,7 +6,7 @@
  */
 
 const path = require("path");
-require("./electron_smoke_safe_io");
+const { normalizeElectronConsoleMessage } = require("./electron_smoke_safe_io");
 
 if (!process.versions.electron) {
   const { spawnSync } = require("child_process");
@@ -20,7 +20,11 @@ if (!process.versions.electron) {
     env,
     stdio: "inherit",
   });
-  process.exit(result.status ?? (result.signal ? 1 : 0));
+  if (result.error) {
+    console.error(`[Electron smoke] Failed to launch Electron at ${electronPath}: ${result.error.message || result.error}`);
+    process.exit(1);
+  }
+  process.exit(result.status ?? 1);
 }
 
 const { app, BrowserWindow, ipcMain } = require("electron");
@@ -134,7 +138,8 @@ async function main() {
       sandbox: true,
     },
   });
-  win.webContents.on("console-message", (_event, level, message) => {
+  win.webContents.on("console-message", (event, ...legacyConsoleArgs) => {
+    const { level, message } = normalizeElectronConsoleMessage(event, ...legacyConsoleArgs);
     const text = String(message || "");
     if (level >= 3 || /\b(Uncaught|TypeError|ReferenceError|replyWithError|EPIPE)\b/i.test(text)) {
       rendererErrors.push(text.slice(0, 300));

@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+from backend.config import LEXA_DATA_DIR
 from backend.i18n import t
 
 logger = logging.getLogger("lexa.files")
@@ -37,6 +38,49 @@ _FILE_WRITE_BLOCKED_PATH_PARTS = (
     "windows\\system",
     "program files\\windows defender",
 )
+
+
+def _is_relative_to_path(child: Path, parent: Path) -> bool:
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _trusted_temp_roots() -> list[Path]:
+    roots: list[Path] = []
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    if local_appdata:
+        roots.append(Path(local_appdata) / "Temp")
+    roots.append(Path.home() / "AppData" / "Local" / "Temp")
+
+    windows_root = os.environ.get("WINDIR") or os.environ.get("SystemRoot")
+    if windows_root:
+        roots.append(Path(windows_root) / "Temp")
+
+    trusted: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        try:
+            resolved = root.resolve()
+        except OSError:
+            continue
+        if resolved not in seen:
+            trusted.append(resolved)
+            seen.add(resolved)
+    return trusted
+
+
+def _is_trusted_temp_root(path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    for root in _trusted_temp_roots():
+        if resolved == root or _is_relative_to_path(resolved, root):
+            return True
+    return False
 
 
 def _validate_scan_path(path: str) -> str | None:
@@ -362,8 +406,13 @@ def clean_temp() -> dict:
     freed_bytes = 0
     skipped = 0
     failed = 0
+    skipped_unsafe_roots = 0
 
     for temp_dir in temp_dirs:
+        if not _is_trusted_temp_root(temp_dir):
+            skipped_unsafe_roots += 1
+            logger.warning("Skipping untrusted temp root: %s", temp_dir)
+            continue
         if not temp_dir.exists():
             continue
         try:
@@ -374,6 +423,17 @@ def clean_temp() -> dict:
 
         for item in items:
             try:
+                if item.is_symlink():
+                    skipped += 1
+                    continue
+                try:
+                    item_resolved = item.resolve()
+                except OSError:
+                    failed += 1
+                    continue
+                if not _is_relative_to_path(item_resolved, temp_dir):
+                    skipped += 1
+                    continue
                 if item.is_file():
                     size = item.stat().st_size
                     item.unlink()
@@ -385,7 +445,7 @@ def clean_temp() -> dict:
                     try:
                         dir_size = sum(
                             f.stat().st_size for f in item.rglob("*")
-                            if f.is_file()
+                            if f.is_file() and not f.is_symlink() and _is_relative_to_path(f.resolve(), item_resolved)
                         )
                     except (PermissionError, OSError):
                         pass
@@ -411,6 +471,7 @@ def clean_temp() -> dict:
         "freed_mb": round(freed_bytes / 1024 / 1024, 1),
         "skipped_locked": skipped,
         "failed": failed,
+        "skipped_unsafe_roots": skipped_unsafe_roots,
     }
 
 
@@ -539,8 +600,7 @@ def archive_list(archive_path: str = "") -> list[dict]:
 #  BACKUP SYSTEM (Phase 20)
 # ══════════════════════════════════════════════════
 
-_DATA_DIR = os.environ.get("LEXA_DATA_DIR", str(Path(__file__).parent.parent))
-BACKUP_CONFIG_PATH = Path(_DATA_DIR) / "backup_config.json"
+BACKUP_CONFIG_PATH = LEXA_DATA_DIR / "backup_config.json"
 
 
 def backup_create(source: str = "", destination: str = "", name: str = "") -> str:

@@ -1,7 +1,47 @@
-"""Lexa AI — Central Configuration
+"""Lexa AI - Central Configuration
 All magic numbers and configurable values in one place.
 """
 import os
+import sys
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _default_packaged_data_dir() -> Path:
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
+        if base:
+            return Path(base) / "lexa-ai"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "lexa-ai"
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "lexa-ai"
+
+
+def _resolve_data_dir_with_source() -> tuple[Path, str]:
+    raw = os.environ.get("LEXA_DATA_DIR")
+    if raw:
+        return Path(raw).expanduser(), "env"
+    if getattr(sys, "frozen", False):
+        return _default_packaged_data_dir(), "packaged_default"
+    return _default_packaged_data_dir(), "user_data_default"
+
+
+def resolve_data_dir() -> Path:
+    data_dir, _source = _resolve_data_dir_with_source()
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return data_dir
+
+
+LEXA_DATA_DIR, LEXA_DATA_DIR_SOURCE = _resolve_data_dir_with_source()
+try:
+    LEXA_DATA_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    pass
 
 
 def _env_int(name: str, default: int, *, minimum: int | None = None, maximum: int | None = None) -> int:

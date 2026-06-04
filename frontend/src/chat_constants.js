@@ -33,8 +33,8 @@ const _AGENT_PATTERNS = [
   /\b(baue|erstelle|entwirf|design|create|build|design)\b.*\b(lexa\s*)?(skill|skills|gem|gems|custom\s*assistant|custom\s*gpt|assistentenprofil|spezialist)\b/i,
   /\b(skill|skills|gem|gems|custom\s*assistant|custom\s*gpt|assistentenprofil|spezialist)\b.*\b(draft|entwurf|markdown|template|vorlage|instructions|anleitung)\b/i,
   /\b(deep\s*think|deepthink|extended\s*thinking|denk\s*tief|tiefer\s*denken|durchdenk|durchdenke|entscheidungsbrief)\b/i,
-  /\b(decision|entscheidung|entscheiden|decide|abw[aÃ¤]g|abwaeg)\b.*\b(options?|optionen|alternativen|tradeoffs?|risiken?|risks?|pros?|cons?|pro|contra)\b/i,
-  /\b(options?|optionen|alternativen|tradeoffs?|risiken?|risks?|pros?|cons?|pro|contra)\b.*\b(decision|entscheidung|entscheiden|decide|abw[aÃ¤]g|abwaeg)\b/i,
+  /\b(decision|entscheidung|entscheiden|decide|abw(?:ae|a)g\w*)\b.*\b(options?|optionen|alternativen|tradeoffs?|risiken?|risks?|pros?|cons?|pro|contra)\b/i,
+  /\b(options?|optionen|alternativen|tradeoffs?|risiken?|risks?|pros?|cons?|pro|contra)\b.*\b(decision|entscheidung|entscheiden|decide|abw(?:ae|a)g\w*)\b/i,
   /\b(ship|shipping|release|launch|publish|veroeffentlich|veroeffentlichen|produktreif|production[-\s]?ready)\b.*\b(check|audit|qa|test|tests|regression|readiness|freigabe|blocker)\b/i,
   /\b(check|audit|qa|test|tests|regression|readiness|freigabe|blocker)\b.*\b(ship|shipping|release|launch|publish|veroeffentlich|veroeffentlichen|produktreif|production[-\s]?ready)\b/i,
   // Backup + cleanup combos

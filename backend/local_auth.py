@@ -11,6 +11,7 @@ LOCAL_AUTH_COOKIE = "lexa_local_auth"
 _PUBLIC_PATHS = {"/health"}
 _DEV_DOC_PATHS = {"/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"}
 _DEV_ENVS = {"dev", "development", "local", "test", "testing"}
+_FALSE_VALUES = {"0", "false", "no", "off"}
 
 
 def get_local_auth_token() -> str:
@@ -18,7 +19,10 @@ def get_local_auth_token() -> str:
 
 
 def is_local_auth_required() -> bool:
-    return bool(get_local_auth_token())
+    raw = (os.environ.get("LEXA_LOCAL_AUTH_REQUIRED") or "").strip().lower()
+    if raw in _FALSE_VALUES:
+        return False
+    return True
 
 
 def is_dev_mode() -> bool:
@@ -35,7 +39,7 @@ def is_public_path(path: str) -> bool:
 def request_has_valid_local_token(request: Request) -> bool:
     expected = get_local_auth_token()
     if not expected:
-        return True
+        return False
     supplied_header = (request.headers.get(LOCAL_AUTH_HEADER) or "").strip()
     supplied_cookie = (request.cookies.get(LOCAL_AUTH_COOKIE) or "").strip()
     return (

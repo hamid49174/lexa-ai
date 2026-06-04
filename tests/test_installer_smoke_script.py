@@ -42,6 +42,74 @@ def test_installer_smoke_blocks_forbidden_content_near_installer(tmp_path):
     assert "Forbidden content" in result.stdout
 
 
+def test_installer_smoke_blocks_generic_credential_artifacts(tmp_path):
+    installer = tmp_path / "Lexa-Setup.exe"
+    installer.write_bytes(b"0" * (2 * 1024 * 1024))
+    (tmp_path / "secrets.json").write_text("{}", encoding="utf-8")
+
+    result = run_script("-ArtifactRoot", str(tmp_path), "-InstallerPath", str(installer))
+
+    assert result.returncode != 0
+    assert "Risky artifact check failed" in result.stdout
+    assert "secrets.json" in result.stdout
+
+
+def test_installer_path_without_artifact_root_scans_parent_directory(tmp_path):
+    installer = tmp_path / "Lexa-Setup.exe"
+    installer.write_bytes(b"0" * (2 * 1024 * 1024))
+    (tmp_path / "secrets.json").write_text("{}", encoding="utf-8")
+
+    result = run_script("-InstallerPath", str(installer), "-AllowUnsignedInternal")
+
+    assert result.returncode != 0
+    assert f"ArtifactRoot: {tmp_path}" in result.stdout
+    assert "Risky artifact check failed" in result.stdout
+    assert "secrets.json" in result.stdout
+
+
+def test_installer_path_scans_parent_even_when_artifact_root_differs(tmp_path):
+    artifact_root = tmp_path / "declared-artifacts"
+    installer_root = tmp_path / "actual-installer"
+    artifact_root.mkdir()
+    installer_root.mkdir()
+    installer = installer_root / "Lexa-Setup.exe"
+    installer.write_bytes(b"0" * (2 * 1024 * 1024))
+    (installer_root / "secrets.json").write_text("{}", encoding="utf-8")
+
+    result = run_script(
+        "-ArtifactRoot",
+        str(artifact_root),
+        "-InstallerPath",
+        str(installer),
+        "-AllowUnsignedInternal",
+    )
+
+    assert result.returncode != 0
+    assert "Risky artifact check failed" in result.stdout
+    assert "secrets.json" in result.stdout
+
+
+def test_installer_smoke_blocks_non_installer_path(tmp_path):
+    fake_installer = tmp_path / "Lexa-Setup.txt"
+    fake_installer.write_bytes(b"0" * (2 * 1024 * 1024))
+
+    result = run_script("-InstallerPath", str(fake_installer), "-AllowUnsignedInternal")
+
+    assert result.returncode != 0
+    assert "InstallerPath must point to a .exe, .msi, or .msix artifact" in result.stdout
+
+
+def test_installer_smoke_blocks_single_file_signing_material(tmp_path):
+    fake_installer = tmp_path / "windows-signing.pfx"
+    fake_installer.write_bytes(b"0" * (2 * 1024 * 1024))
+
+    result = run_script("-InstallerPath", str(fake_installer), "-AllowUnsignedInternal")
+
+    assert result.returncode != 0
+    assert "Risky artifact check failed" in result.stdout
+    assert "windows-signing.pfx" in result.stdout
+
+
 def test_installer_smoke_does_not_delete_artifacts(tmp_path):
     installer = tmp_path / "Lexa-Setup.exe"
     installer.write_bytes(b"0" * (2 * 1024 * 1024))
@@ -84,6 +152,7 @@ def test_installer_plan_only_prints_vm_plan():
     assert result.returncode == 0, result.stdout
     assert "Installer VM install/uninstall plan" in result.stdout
     assert "Plan-only mode" in result.stdout
+    assert "credentials, signing material" in result.stdout
     assert "Windows Sandbox available:" in result.stdout
     assert "Hyper-V available:" in result.stdout
     assert "VM test marker LEXA_INSTALLER_VM_TEST:" in result.stdout

@@ -6,13 +6,13 @@ Supports reading, creating, deleting, and searching calendar events.
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+
+from backend.config import LEXA_DATA_DIR
 
 logger = logging.getLogger("lexa.calendar")
 
-_DATA_DIR = os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent))
-_CREDENTIALS_FILE = os.path.join(_DATA_DIR, "google_calendar_credentials.json")
-_CLIENT_SECRET_FILE = os.path.join(_DATA_DIR, "google_client_secret.json")
+_CREDENTIALS_FILE = str(LEXA_DATA_DIR / "google_calendar_credentials.json")
+_CLIENT_SECRET_FILE = str(LEXA_DATA_DIR / "google_client_secret.json")
 
 # OAuth2 scopes — read + write
 _SCOPES_READ = ["https://www.googleapis.com/auth/calendar.readonly"]

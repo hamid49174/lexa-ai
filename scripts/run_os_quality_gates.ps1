@@ -6,13 +6,112 @@ param(
 $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 
-if (-not $OSRoot) {
-  $junction = Join-Path $RepoRoot "personal_os"
-  if (Test-Path -LiteralPath $junction) { $OSRoot = (Resolve-Path -LiteralPath $junction).Path }
+$ExpectedOsSubdirs = @(
+  "00_System\SDK\os-sdk",
+  "11_Integrations\MCP\os-mcp-server",
+  "07_Automations\Workflows\raw-inbox-worker"
+)
+
+function Test-ExistingDirectory {
+  param([string]$Path)
+  if (-not $Path) { return $false }
+  try {
+    return (Test-Path -LiteralPath $Path -PathType Container)
+  } catch {
+    return $false
+  }
+}
+
+function Add-OSRootCandidate {
+  param(
+    [System.Collections.Generic.List[string]]$Candidates,
+    [string]$Path
+  )
+  if (-not $Path) { return }
+  if (-not $Candidates.Contains($Path)) {
+    [void]$Candidates.Add($Path)
+  }
+}
+
+function Get-OSRootCandidates {
+  param([string]$RepoRoot)
+  $candidates = [System.Collections.Generic.List[string]]::new()
+
+  Add-OSRootCandidate $candidates $env:PERSONAL_OS_ROOT
+  Add-OSRootCandidate $candidates $env:PERSONAL_OS_SDK_ROOT
+  if ($env:PERSONAL_OS_SDK_ROOT -and ((Split-Path -Leaf $env:PERSONAL_OS_SDK_ROOT) -eq "os-sdk")) {
+    $sdkParent = Split-Path -Parent $env:PERSONAL_OS_SDK_ROOT
+    $systemParent = if ($sdkParent) { Split-Path -Parent $sdkParent } else { "" }
+    $rootFromSdk = if ($systemParent) { Split-Path -Parent $systemParent } else { "" }
+    Add-OSRootCandidate $candidates $rootFromSdk
+  }
+
+  Add-OSRootCandidate $candidates (Join-Path $RepoRoot "personal_os")
+
+  $repoParent = Split-Path -Parent $RepoRoot
+  if ($repoParent) {
+    Add-OSRootCandidate $candidates (Join-Path $repoParent "OS")
+    $repoGrandParent = Split-Path -Parent $repoParent
+    if ($repoGrandParent) {
+      Add-OSRootCandidate $candidates (Join-Path $repoGrandParent "OS")
+      Add-OSRootCandidate $candidates (Join-Path $repoGrandParent "Desktop\OS")
+    }
+  }
+
+  $userHome = [Environment]::GetFolderPath("UserProfile")
+  Add-OSRootCandidate $candidates (Join-Path $userHome "OneDrive - Office\Desktop\OS")
+  Add-OSRootCandidate $candidates (Join-Path $userHome "OneDrive\Desktop\OS")
+  Add-OSRootCandidate $candidates (Join-Path $userHome "Desktop\OS")
+
+  return $candidates
+}
+
+function Resolve-ExistingDirectory {
+  param([string]$Path)
+  if (-not (Test-ExistingDirectory $Path)) { return "" }
+  try {
+    return (Resolve-Path -LiteralPath $Path).Path
+  } catch {
+    return ""
+  }
+}
+
+function Get-OSRootScore {
+  param([string]$Path)
+  if (-not (Test-ExistingDirectory $Path)) { return 0 }
+  $score = 0
+  foreach ($subdir in $ExpectedOsSubdirs) {
+    if (Test-ExistingDirectory (Join-Path $Path $subdir)) {
+      $score += 1
+    }
+  }
+  return $score
+}
+
+function Select-OSRootCandidate {
+  param([string[]]$Candidates)
+  $bestPath = ""
+  $bestScore = 0
+  foreach ($candidate in $Candidates) {
+    $resolved = Resolve-ExistingDirectory $candidate
+    if (-not $resolved) { continue }
+    $score = Get-OSRootScore $resolved
+    if ($score -gt $bestScore) {
+      $bestPath = $resolved
+      $bestScore = $score
+    }
+  }
+  return $bestPath
+}
+
+if ($OSRoot) {
+  $OSRoot = Resolve-ExistingDirectory $OSRoot
+} else {
+  $OSRoot = Select-OSRootCandidate (Get-OSRootCandidates $RepoRoot)
 }
 
 if (-not $OSRoot -or !(Test-Path -LiteralPath $OSRoot)) {
-  $message = "OS root not found. Set -OSRoot or mount personal_os."
+  $message = "OS root not found. Set -OSRoot, PERSONAL_OS_ROOT, PERSONAL_OS_SDK_ROOT, or mount personal_os."
   if ($AllowMissing) { Write-Warning $message; exit 0 }
   throw $message
 }

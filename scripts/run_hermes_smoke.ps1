@@ -21,6 +21,12 @@ $hermesWorkspace = Join-Path $RepoRoot "hermes_workspace"
 if (Test-Path -LiteralPath (Join-Path $hermesWorkspace ".env")) {
   Write-Warning "hermes_workspace/.env exists locally. It must remain ignored and unstaged."
 }
+if (Test-Path -LiteralPath $hermesWorkspace) {
+  & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "check_risky_artifacts.ps1") -Root $hermesWorkspace -Mode Warn -ArtifactPath $hermesWorkspace
+  if ($LASTEXITCODE -ne 0) {
+    throw "Hermes workspace risky artifact check failed with exit code $LASTEXITCODE"
+  }
+}
 
 $staged = @(git -C $RepoRoot diff --cached --name-only -- hermes_workspace vendor/hermes-agent 2>$null)
 if ($staged.Count -gt 0) {

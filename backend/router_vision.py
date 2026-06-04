@@ -71,6 +71,12 @@ def _error(message: str, status_code: int = 500) -> JSONResponse:
     )
 
 
+def _rate_limited() -> JSONResponse | None:
+    if check_rate_limit("vision"):
+        return None
+    return _error("Zu viele Vision-Anfragen. Bitte kurz warten.", 429)
+
+
 # ══════════════════════════════════════════════════
 #  ENDPOINTS
 # ══════════════════════════════════════════════════
@@ -81,7 +87,9 @@ async def take_screenshot(req: ScreenshotRequest = ScreenshotRequest()):
 
     Optional: Fenster-spezifischer Screenshot via `window` Parameter.
     """
-    check_rate_limit("vision")
+    limited = _rate_limited()
+    if limited is not None:
+        return limited
     try:
         from backend.vision import capture_screenshot, capture_active_window
 
@@ -113,7 +121,9 @@ async def analyze_screenshot_endpoint(req: AnalyzeRequest):
     Wenn auto_capture=true (Standard), wird zuerst ein Screenshot gemacht.
     Body: {"prompt": "Was siehst du?", "auto_capture": true}
     """
-    check_rate_limit("vision")
+    limited = _rate_limited()
+    if limited is not None:
+        return limited
     try:
         from backend.vision import analyze_screenshot
 
@@ -150,7 +160,9 @@ async def analyze_uploaded_file(
     Unterstuetzte Formate: PNG, JPEG, WEBP, GIF, BMP
     Max. Dateigroesse: 10MB
     """
-    check_rate_limit("vision")
+    limited = _rate_limited()
+    if limited is not None:
+        return limited
 
     # Validierung: Dateityp
     allowed_types = {"image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"}
@@ -193,7 +205,9 @@ async def describe_screen_endpoint(req: DescribeRequest = DescribeRequest()):
     Macht Screenshot und beschreibt alle sichtbaren Elemente,
     Programme, Texte und den allgemeinen Desktop-Zustand.
     """
-    check_rate_limit("vision")
+    limited = _rate_limited()
+    if limited is not None:
+        return limited
     try:
         from backend.vision import describe_screen
 
@@ -218,7 +232,9 @@ async def find_on_screen_endpoint(req: FindRequest):
     Body: {"description": "der rote Button", "window": "optional"}
     Gibt eine Beschreibung zurueck wo das Element zu finden ist.
     """
-    check_rate_limit("vision")
+    limited = _rate_limited()
+    if limited is not None:
+        return limited
     try:
         from backend.vision import find_on_screen
 
@@ -247,7 +263,9 @@ async def read_screen_text_endpoint(req: ReadTextRequest = ReadTextRequest()):
     Extrahiert und strukturiert den gesamten sichtbaren Text,
     gruppiert nach Bildschirm-Bereichen.
     """
-    check_rate_limit("vision")
+    limited = _rate_limited()
+    if limited is not None:
+        return limited
     try:
         from backend.vision import read_screen_text
 
@@ -272,7 +290,9 @@ async def ocr_screen_endpoint(req: ReadTextRequest = ReadTextRequest()):
     Nutzt rapidocr-onnxruntime (primaer) oder pytesseract (Fallback).
     Braucht keine Cloud-API — laeuft komplett lokal.
     """
-    check_rate_limit("vision")
+    limited = _rate_limited()
+    if limited is not None:
+        return limited
     try:
         from companion.ocr import ocr_screenshot
 

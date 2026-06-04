@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import json
 from pathlib import Path
 from typing import Any
 
@@ -116,6 +117,27 @@ _WORD_RE = re.compile(r"[a-z0-9][a-z0-9_-]{1,}", re.IGNORECASE)
 _FRONTMATTER_RE = re.compile(r"(?:\A|\n)---\s*\n(.*?)\n---\s*", re.DOTALL)
 
 
+def _mcp_personal_os_root_candidate() -> Path | None:
+    config_path = PROJECT_ROOT / "mcp_servers.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    personal_os = (config.get("servers") or {}).get("personal_os") or {}
+    env = personal_os.get("env") or {}
+    for key in ("PERSONAL_OS_ROOT", "PERSONAL_OS_SDK_ROOT"):
+        raw = str(env.get(key) or "").strip()
+        if not raw:
+            continue
+        path = Path(raw)
+        try:
+            if (path / "OS_MANIFEST.md").exists():
+                return path
+        except OSError:
+            continue
+    return None
+
+
 def _clip(text: object, limit: int) -> str:
     value = str(text or "")
     if len(value) <= limit:
@@ -133,6 +155,10 @@ def resolve_personal_os_root() -> Path:
         raw = os.environ.get(key, "").strip()
         if raw:
             candidates.append(Path(raw))
+
+    configured = _mcp_personal_os_root_candidate()
+    if configured:
+        candidates.append(configured)
 
     candidates.extend([
         PROJECT_ROOT / "personal_os",

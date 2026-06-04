@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
+from backend.config import LEXA_DATA_DIR, LEXA_DATA_DIR_SOURCE
 from backend.security import audit_log, is_dangerous_network_ip
 
 logger = logging.getLogger("lexa.plugin_manager")
@@ -454,6 +455,8 @@ def _audit_plugin_action(
 
 def _get_user_plugin_dir() -> Path:
     """Gibt das User-Plugin-Verzeichnis zurueck (~/.lexa/plugins/)."""
+    if LEXA_DATA_DIR_SOURCE in {"env", "packaged_default", "user_data_default"}:
+        return LEXA_DATA_DIR / "plugins"
     if os.name == "nt":
         base = os.environ.get("APPDATA", os.path.expanduser("~"))
         return Path(base) / "lexa" / "plugins"

@@ -20,6 +20,11 @@ logger = logging.getLogger("lexa.router_workflows")
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
 
+def _require_workflow_rate_limit() -> None:
+    if not check_rate_limit("workflows"):
+        raise HTTPException(status_code=429, detail="Zu viele Workflow-Anfragen. Bitte kurz warten.")
+
+
 # ══════════════════════════════════════════════════
 #  COLLECTION ENDPOINTS (keine {workflow_id})
 # ══════════════════════════════════════════════════
@@ -39,7 +44,7 @@ async def list_workflows():
 @router.post("")
 async def create_workflow(request: Request):
     """Neuen Workflow erstellen."""
-    check_rate_limit("execute")
+    _require_workflow_rate_limit()
     data = await parse_json_body(request)
 
     if not data.get("name"):
@@ -84,7 +89,7 @@ async def emit_event(request: Request):
     """Event einspeisen — loest registrierte Event-Workflows aus.
     Body: {"event": "system_start", "data": {...}}
     """
-    check_rate_limit("execute")
+    _require_workflow_rate_limit()
     body = await parse_json_body(request)
 
     event_name = body.get("event", "")
@@ -124,7 +129,7 @@ async def get_workflow(workflow_id: str):
 @router.put("/{workflow_id}")
 async def update_workflow(workflow_id: str, request: Request):
     """Workflow aktualisieren."""
-    check_rate_limit("execute")
+    _require_workflow_rate_limit()
     data = await parse_json_body(request)
 
     engine = get_workflow_engine()
@@ -140,7 +145,7 @@ async def update_workflow(workflow_id: str, request: Request):
 @router.delete("/{workflow_id}")
 async def delete_workflow(workflow_id: str):
     """Workflow loeschen."""
-    check_rate_limit("execute")
+    _require_workflow_rate_limit()
     engine = get_workflow_engine()
     result = await asyncio.to_thread(engine.delete_workflow, workflow_id)
 
@@ -154,7 +159,7 @@ async def delete_workflow(workflow_id: str):
 @router.post("/{workflow_id}/run")
 async def run_workflow(workflow_id: str):
     """Workflow manuell ausfuehren."""
-    check_rate_limit("execute")
+    _require_workflow_rate_limit()
     engine = get_workflow_engine()
 
     # Pruefen ob Workflow existiert

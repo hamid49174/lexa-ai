@@ -291,6 +291,16 @@ function appendSafeMainProcessLog(method, args, error) {
 
 safeConsoleFallbackWriter = appendSafeMainProcessLog;
 
+function normalizeRendererConsoleMessage(event, legacyLevel, legacyMessage, legacyLine, legacySourceId) {
+  const details = event && typeof event === "object" ? event : {};
+  return {
+    level: legacyLevel ?? details.level ?? "info",
+    message: legacyMessage ?? details.message ?? "",
+    line: legacyLine ?? details.lineNumber ?? 0,
+    sourceId: legacySourceId ?? details.sourceId ?? "",
+  };
+}
+
 function installRendererConsoleGuard(webContents) {
   if (!webContents || webContents.__lexaConsoleGuardInstalled) return;
   Object.defineProperty(webContents, "__lexaConsoleGuardInstalled", {
@@ -298,7 +308,8 @@ function installRendererConsoleGuard(webContents) {
     enumerable: false,
     configurable: false,
   });
-  webContents.on("console-message", (event, level, message, line, sourceId) => {
+  webContents.on("console-message", (event, ...legacyConsoleArgs) => {
+    const { level, message, line, sourceId } = normalizeRendererConsoleMessage(event, ...legacyConsoleArgs);
     event.preventDefault?.();
     if (process.stdout?.__lexaBrokenPipe || process.stderr?.__lexaBrokenPipe) return;
     const prefix = `[Renderer:${level}]`;
@@ -307,7 +318,7 @@ function installRendererConsoleGuard(webContents) {
   });
 }
 
-// ── BACKEND PROCESS MANAGEMENT ──────────────────
+// BACKEND PROCESS MANAGEMENT
 let backendProcess = null;
 const BACKEND_RESTART_DELAY_MS = 1500;
 const BACKEND_RESTART_MAX_DELAY_MS = 30000;
@@ -318,6 +329,7 @@ const HEALTH_CHECK_BODY_LIMIT = 64 * 1024;
 const HEALTH_CHECK_TIMEOUT_MS = 2000;
 const LOCAL_AUTH_HEADER = "X-Lexa-Local-Token";
 const LOCAL_AUTH_COOKIE = "lexa_local_auth";
+const TRUE_ENV_VALUES = new Set(["1", "true", "yes", "on"]);
 const INSTANCE_TOKEN = crypto.randomBytes(16).toString("hex");
 let backendRestartAttempts = 0;
 
@@ -405,10 +417,14 @@ function _healthCheck() {
   });
 }
 
+function allowTokenlessBackendReuse() {
+  return !app.isPackaged && TRUE_ENV_VALUES.has(String(process.env.LEXA_ALLOW_TOKENLESS_BACKEND_REUSE || "").trim().toLowerCase());
+}
+
 async function _waitForBackend(maxRetries = 30) {
   for (let i = 0; i < maxRetries; i++) {
     const token = await _healthCheck();
-    if (token === INSTANCE_TOKEN || token === EXTERNAL_LEXA_BACKEND) return true;
+    if (token === INSTANCE_TOKEN || (token === EXTERNAL_LEXA_BACKEND && allowTokenlessBackendReuse())) return true;
     await new Promise((r) => setTimeout(r, 500));
   }
   return false;
@@ -447,7 +463,11 @@ async function startBackend() {
       return;
     }
     if (token === EXTERNAL_LEXA_BACKEND) {
-      console.warn("[Backend] Port 8000 occupied by Lexa backend without instance token - reusing (dev mode)");
+      if (allowTokenlessBackendReuse()) {
+        console.warn("[Backend] Port 8000 occupied by Lexa backend without instance token - reusing by explicit dev opt-in");
+        return;
+      }
+      console.warn("[Backend] Port 8000 occupied by Lexa backend without instance token - refusing to reuse");
       return;
     }
     if (token === AUTH_MISMATCH_LEXA_BACKEND) {
@@ -498,6 +518,24 @@ let mainWindow;
 let tray = null;
 let frontendWatcher = null;
 let frontendReloadTimer = null;
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
+
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+if (gotSingleInstanceLock) {
+  app.on("second-instance", () => {
+    focusMainWindow();
+  });
+}
 
 function setupFrontendAutoReload() {
   if (app.isPackaged) return;
@@ -546,11 +584,11 @@ function isTrustedRendererUrl(rawUrl) {
 
 const RENDERER_CSP_HEADER = [
   "default-src 'self'",
-  "script-src 'self' https://cdnjs.cloudflare.com",
+  "script-src 'self'",
   "connect-src 'self' http://127.0.0.1:8000 ws://127.0.0.1:8000",
-  "style-src 'self' https://fonts.googleapis.com",
+  "style-src 'self'",
   "img-src 'self' data: blob: http: https:",
-  "font-src https://fonts.gstatic.com",
+  "font-src 'self'",
   "media-src blob:",
   "object-src 'none'",
   "base-uri 'self'",
@@ -579,6 +617,7 @@ function openExternalUrl(rawUrl) {
 const BRIDGE_PRESENCE_TTL_MS = 60 * 1000;
 const BRIDGE_PRESENCE_METHODS = new Set([
   "setAutostart",
+  "licenseActivate",
   "licenseSet",
   "licenseValidate",
   "execute",
@@ -886,7 +925,7 @@ function createWindow() {
   });
 }
 
-// ── SYSTEM TRAY ──────────────────────────────────
+// SYSTEM TRAY
 function createTray() {
   // Create a simple 16x16 icon programmatically (orange dot)
   const iconPath = path.join(__dirname, "src", "icon.png");
@@ -906,22 +945,21 @@ function createTray() {
     {
       label: "Lexa AI oeffnen",
       click: () => {
-        mainWindow?.show();
-        mainWindow?.focus();
+        focusMainWindow();
       },
     },
     { type: "separator" },
     {
       label: "System Info",
       click: () => {
-        mainWindow?.show();
+        focusMainWindow();
         mainWindow?.webContents.send("switch-view", "system");
       },
     },
     {
       label: "Befehle",
       click: () => {
-        mainWindow?.show();
+        focusMainWindow();
         mainWindow?.webContents.send("switch-view", "commands");
       },
     },
@@ -951,13 +989,12 @@ function createTray() {
     if (mainWindow?.isVisible()) {
       mainWindow.hide();
     } else {
-      mainWindow?.show();
-      mainWindow?.focus();
+      focusMainWindow();
     }
   });
 }
 
-// ── WINDOW CONTROLS ──────────────────────────────
+// WINDOW CONTROLS
 safeIpcOn("window-minimize", () => mainWindow?.minimize());
 safeIpcOn("window-maximize", () => {
   if (mainWindow?.isMaximized()) {
@@ -968,9 +1005,13 @@ safeIpcOn("window-maximize", () => {
 });
 safeIpcOn("window-close", () => mainWindow?.hide());
 
-// ── LICENSE & TRIAL SYSTEM ───────────────────────
+// LICENSE & TRIAL SYSTEM
 const TRIAL_DAYS = 14;
 const GRACE_DAYS = 3;
+const LICENSE_KEY_PATTERN = /^LEXA-[A-F0-9]{5}-[A-F0-9]{5}-[A-F0-9]{5}-[A-F0-9]{5}$/;
+const ACTIVE_LICENSE_STATUSES = new Set(["active", "trialing"]);
+const BACKEND_JSON_BODY_LIMIT = 64 * 1024;
+const LICENSE_ACTIVATION_TIMEOUT_MS = 10000;
 
 function _licensePath() {
   return path.join(app.getPath("userData"), "license.json");
@@ -994,10 +1035,116 @@ function _writeLicense(data) {
   }
 }
 
+function _normalizeLicensePlan(plan) {
+  const normalized = String(plan || "").trim().toLowerCase();
+  if (normalized === "premium" || normalized === "paid") return "pro";
+  if (["free", "trial", "pro", "ultra"].includes(normalized)) return normalized;
+  return "free";
+}
+
+function _normalizeLicenseStatus(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (["active", "trialing", "inactive", "canceled", "past_due", "expired"].includes(normalized)) return normalized;
+  return "inactive";
+}
+
+function _isPaidLicensePlan(plan) {
+  return ["pro", "ultra"].includes(_normalizeLicensePlan(plan));
+}
+
+function _hasServerLicenseProof(lic) {
+  return lic?.validation_source === "server" && typeof lic?.validated_at === "string" && lic.validated_at.length > 0;
+}
+
+function _clearStoredLicense() {
+  return _writeLicense({ key: "", plan: "free", status: "inactive", expires: null });
+}
+
+function requestBackendJson(pathname, options = {}) {
+  return new Promise((resolve, reject) => {
+    const body = options.body ? JSON.stringify(options.body) : null;
+    const headers = { [LOCAL_AUTH_HEADER]: INSTANCE_TOKEN };
+    if (body) {
+      headers["Content-Type"] = "application/json";
+      headers["Content-Length"] = Buffer.byteLength(body);
+    }
+    const req = http.request({
+      hostname: "127.0.0.1",
+      port: 8000,
+      path: pathname,
+      method: options.method || "GET",
+      headers,
+      timeout: LICENSE_ACTIVATION_TIMEOUT_MS,
+    }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+        if (body.length > BACKEND_JSON_BODY_LIMIT) {
+          req.destroy(new Error("Backend response too large"));
+        }
+      });
+      res.on("end", () => {
+        try {
+          const data = body ? JSON.parse(body) : {};
+          if (res.statusCode >= 400) {
+            reject(new Error(data.error || `Backend returned ${res.statusCode}`));
+            return;
+          }
+          resolve(data);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => req.destroy(new Error("Backend timeout")));
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+async function _activateLicenseKey(rawKey) {
+  const key = String(rawKey || "").trim().toUpperCase();
+  if (!LICENSE_KEY_PATTERN.test(key)) {
+    return { success: false, valid: false, error: "Invalid license key format" };
+  }
+
+  const validation = await requestBackendJson("/license/validate", {
+    method: "POST",
+    body: { license_key: key },
+  });
+  if (!validation?.valid) {
+    return { success: false, valid: false, error: validation?.error || "License key invalid" };
+  }
+
+  const plan = _normalizeLicensePlan(validation.plan);
+  const status = _normalizeLicenseStatus(validation.status || "active");
+  if (!_isPaidLicensePlan(plan) || !ACTIVE_LICENSE_STATUSES.has(status)) {
+    return { success: false, valid: false, error: "License is not active" };
+  }
+
+  const stored = {
+    key,
+    plan,
+    status,
+    expires: validation.expires || null,
+    validation_source: "server",
+    validated_at: new Date().toISOString(),
+  };
+  if (!_writeLicense(stored)) {
+    return { success: false, valid: false, error: "Write failed" };
+  }
+  return { success: true, valid: true, ...stored };
+}
+
 function _initTrialIfNeeded() {
   const existing = _readLicense();
-  if (existing && existing.plan !== "free") return existing;
-  // Create trial on first launch
+  if (existing) return existing;
+
+  // Create trial only on the first launch without any stored license state.
+  // A stored free/inactive state means the trial was already consumed or a paid
+  // license was removed, so it must not silently mint a fresh trial.
   const now = new Date();
   const expires = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
   const trial = {
@@ -1009,57 +1156,74 @@ function _initTrialIfNeeded() {
     created_at: now.toISOString(),
   };
   _writeLicense(trial);
-  console.log(`[Main] Trial created — expires ${expires.toISOString()}`);
+  console.log(`[Main] Trial created - expires ${expires.toISOString()}`);
   return trial;
 }
 
 function _getLicenseWithState() {
   const lic = _readLicense() || { key: "", plan: "free", status: "inactive", expires: null };
   const now = Date.now();
+  const plan = _normalizeLicensePlan(lic.plan);
+  const status = _normalizeLicenseStatus(lic.status);
 
-  // Paid license — check expiry
-  if (lic.plan === "paid" || lic.plan === "premium") {
+  // Paid license - check expiry
+  if (_isPaidLicensePlan(plan)) {
+    if (!_hasServerLicenseProof(lic)) {
+      return { ...lic, plan, status, _state: "paid_unverified", _days_left: 0 };
+    }
+    if (!ACTIVE_LICENSE_STATUSES.has(status)) {
+      return { ...lic, plan, status, _state: "paid_expired", _days_left: 0 };
+    }
     if (lic.expires) {
       const exp = new Date(lic.expires).getTime();
       if (now > exp) {
-        return { ...lic, _state: "paid_expired", _days_left: 0 };
+        return { ...lic, plan, status, _state: "paid_expired", _days_left: 0 };
       }
       const daysLeft = Math.ceil((exp - now) / (24 * 60 * 60 * 1000));
-      return { ...lic, _state: "paid_active", _days_left: daysLeft };
+      return { ...lic, plan, status, _state: "paid_active", _days_left: daysLeft };
     }
-    return { ...lic, _state: "paid_active", _days_left: -1 }; // perpetual
+    return { ...lic, plan, status, _state: "paid_active", _days_left: -1 }; // perpetual
   }
 
-  // Trial license — compute state
-  if (lic.plan === "trial" && lic.expires) {
+  // Trial license - compute state
+  if (plan === "trial" && lic.expires) {
     const exp = new Date(lic.expires).getTime();
     const graceEnd = exp + GRACE_DAYS * 24 * 60 * 60 * 1000;
 
     if (now <= exp) {
       const daysLeft = Math.ceil((exp - now) / (24 * 60 * 60 * 1000));
-      return { ...lic, _state: "trial_active", _days_left: daysLeft };
+      return { ...lic, plan, status, _state: "trial_active", _days_left: daysLeft };
     }
     if (now <= graceEnd) {
       const graceDaysLeft = Math.ceil((graceEnd - now) / (24 * 60 * 60 * 1000));
-      return { ...lic, _state: "trial_grace", _days_left: graceDaysLeft };
+      return { ...lic, plan, status, _state: "trial_grace", _days_left: graceDaysLeft };
     }
-    return { ...lic, _state: "trial_expired", _days_left: 0 };
+    return { ...lic, plan, status, _state: "trial_expired", _days_left: 0 };
   }
 
   // Free / unknown
-  return { ...lic, _state: "free", _days_left: 0 };
+  return { ...lic, plan, status, _state: "free", _days_left: 0 };
 }
 
 safeIpcHandle("license-get", () => {
   return _getLicenseWithState();
 });
 
+safeIpcHandle("license-activate", async (_event, key) => {
+  return _activateLicenseKey(key);
+});
+
 safeIpcHandle("license-set", (_event, data) => {
-  const success = _writeLicense(data);
+  const plan = _normalizeLicensePlan(data?.plan);
+  const key = String(data?.key || "");
+  if (key || plan !== "free") {
+    return { success: false, error: "Use license activation for paid plans" };
+  }
+  const success = _clearStoredLicense();
   return success ? { success: true } : { success: false, error: "Write failed" };
 });
 
-// ── I18N FILE LOADING (Electron IPC — bypasses file:// fetch issues) ──
+// I18N FILE LOADING (Electron IPC - bypasses file:// fetch issues)
 safeIpcHandle("i18n-load", (_event, lang) => {
   const allowed = ["de", "en"];
   if (!allowed.includes(lang)) return null;
@@ -1073,7 +1237,7 @@ safeIpcHandle("i18n-load", (_event, lang) => {
   }
 });
 
-// ── NOTIFICATIONS ────────────────────────────────
+// NOTIFICATIONS
 safeIpcHandle("local-auth-token", () => INSTANCE_TOKEN, { failureValue: "" });
 
 safeIpcHandle("bridge:audit", (event, rawPayload = {}) => {
@@ -1167,7 +1331,7 @@ safeIpcOn("show-notification", (_event, data) => {
   }
 });
 
-// ── VIEW SWITCHING FROM TRAY ─────────────────────
+// VIEW SWITCHING FROM TRAY
 safeIpcOn("get-autostart", (event) => {
   event.returnValue = app.getLoginItemSettings().openAtLogin;
 }, { returnValue: false });
@@ -1176,7 +1340,7 @@ safeIpcOn("set-autostart", (_event, enabled) => {
   app.setLoginItemSettings({ openAtLogin: enabled });
 });
 
-// ── UPDATE CHECK ────────────────────────────────
+// UPDATE CHECK
 const UPDATE_GITHUB_OWNER = "alexsprogis";
 const UPDATE_GITHUB_REPO = "lexa-ai";
 const UPDATE_GITHUB_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
@@ -1234,7 +1398,7 @@ function checkForUpdates() {
           }
         }
       } catch (e) {
-        // Silent fail — update check is non-critical
+        // Silent fail - update check is non-critical
       }
     });
   });
@@ -1243,7 +1407,7 @@ function checkForUpdates() {
   req.on("timeout", () => req.destroy());
 }
 
-// ── APP LIFECYCLE ────────────────────────────────
+// APP LIFECYCLE
 function isElectronSmokeTestContext() {
   const argvText = Array.isArray(process.argv) ? process.argv.join(" ") : "";
   return process.env.LEXA_ELECTRON_SMOKE_TEST === "1"
@@ -1258,6 +1422,7 @@ function hardenSmokeMockEnvironment() {
 }
 
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return;
   hardenSmokeMockEnvironment();
 
   // Set data directory for backend (e.g. C:\Users\admin\AppData\Roaming\lexa-ai)
@@ -1294,7 +1459,7 @@ app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   } else {
-    mainWindow?.show();
+    focusMainWindow();
   }
 });
 

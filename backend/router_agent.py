@@ -10,13 +10,19 @@ import json
 import logging
 import re
 import time
+import unicodedata
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from backend.config import MAX_CHAT_MESSAGE_LENGTH, AGENT_MAX_STEPS, AGENT_STEP_TIMEOUT, VERSION
-from backend.shared import conversation_history, _history_lock
+from backend.shared import (
+    conversation_history,
+    _history_lock,
+    get_pending_confirmation,
+    clear_pending_confirmation,
+)
 from backend.action_parser import update_history
 from backend.security import sanitize_input, check_rate_limit, audit_log
 from backend.agent_loop import (
@@ -32,6 +38,20 @@ from backend.agent_loop import (
 logger = logging.getLogger("lexa.agent_router")
 
 router = APIRouter(prefix="/agent", tags=["agent"])
+
+_AGENT_CONFIRMATION_WORDS = frozenset({
+    "ja", "yes", "ok", "okay", "confirm", "mach es", "mach das", "ausfuehren",
+    "machen", "los", "klar", "sicher",
+})
+_AGENT_CANCEL_WORDS = frozenset({
+    "nein", "no", "nee", "nope", "abbrechen", "abbruch", "cancel",
+    "stop", "stopp", "verwerfen", "nicht ausfuehren",
+})
+_AGENT_CONFIRMATION_WORDS = frozenset(_AGENT_CONFIRMATION_WORDS | {
+    "bestatige", "bestaetige", "bestatigen", "bestaetigen", "bestatige es", "bestaetige es",
+    "ausfuhren", "ausfuehren",
+})
+_AGENT_CANCEL_WORDS = frozenset(_AGENT_CANCEL_WORDS | {"nicht ausfuhren", "nicht ausfuehren"})
 
 
 # ══════════════════════════════════════════════════
@@ -75,6 +95,43 @@ def _resolve_agent_worker(worker: str | None, message: str) -> str:
 
 def _is_hermes_system_status_request(worker: str, message: str) -> bool:
     return worker == "hermes" and _hermes_forced_first_tool(worker, message) == ("system_info", {})
+
+
+def _is_short_pending_confirmation_message(text: str) -> bool:
+    normalized = _normalize_pending_confirmation_text(text)
+    return len(normalized.split()) <= 4 and normalized in _AGENT_CONFIRMATION_WORDS
+
+
+def _is_short_pending_cancel_message(text: str) -> bool:
+    normalized = _normalize_pending_confirmation_text(text)
+    return len(normalized.split()) <= 4 and normalized in _AGENT_CANCEL_WORDS
+
+
+def _normalize_pending_confirmation_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(text or "").casefold())
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.replace("ß", "ss").replace("ÃŸ", "ss")
+    normalized = re.sub(r"\s+", " ", normalized).strip().rstrip("!.?")
+    return normalized.strip()
+
+
+def _agent_pending_guard_reply(message: str) -> str | None:
+    pending = get_pending_confirmation()
+    if not pending:
+        return None
+    action_name = str(pending.get("action") or "Aktion")
+    if _is_short_pending_cancel_message(message):
+        clear_pending_confirmation()
+        return f"Freigabe fuer {action_name} verworfen. Ich habe nichts ausgefuehrt."
+    if _is_short_pending_confirmation_message(message):
+        return (
+            f"Freigabe offen fuer {action_name}. Bitte bestaetige im normalen Chat kurz mit 'Ja' "
+            "ohne Hermes-/Agent-Prefix, oder schreibe 'Abbrechen'."
+        )
+    return (
+        f"Freigabe offen fuer {action_name}. Ich habe nichts ausgefuehrt. "
+        "Antworte kurz mit 'Ja' zum Ausfuehren oder 'Abbrechen' zum Verwerfen."
+    )
 
 
 async def _hermes_system_status_events(user_message: str):
@@ -167,6 +224,27 @@ async def agent_run(req: AgentRequest):
     sanitized = sanitize_input(req.message)
     worker = _resolve_agent_worker(req.worker, sanitized)
     audit_log("agent", "received", f"WORKER={worker} MSG={sanitized[:100]}")
+    pending_guard_reply = _agent_pending_guard_reply(sanitized)
+    if pending_guard_reply:
+        run = AgentRun(user_message=sanitized, worker=worker)
+        run.status = "completed"
+        run.summary = pending_guard_reply
+
+        async def pending_guard_stream():
+            yield f"data: {json.dumps({'type': 'thinking', 'message': pending_guard_reply}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'run': run.to_dict()}, ensure_ascii=False, default=str)}\n\n"
+
+        async with _history_lock:
+            update_history(
+                conversation_history,
+                sanitized,
+                f"[{'Hermes' if worker == 'hermes' else 'Agent'}] {pending_guard_reply[:2000]}",
+            )
+        return StreamingResponse(
+            pending_guard_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     # Snapshot conversation history under lock
     async with _history_lock:
@@ -230,6 +308,21 @@ async def agent_chat_endpoint(req: AgentRequest):
     sanitized = sanitize_input(req.message)
     worker = _resolve_agent_worker(req.worker, sanitized)
     audit_log("agent_chat", "received", f"WORKER={worker} MSG={sanitized[:100]}")
+    pending_guard_reply = _agent_pending_guard_reply(sanitized)
+    if pending_guard_reply:
+        async with _history_lock:
+            update_history(
+                conversation_history,
+                sanitized,
+                f"[{'Hermes' if worker == 'hermes' else 'Agent'}] {pending_guard_reply[:2000]}",
+            )
+        return {
+            "status": "ok",
+            "reply": pending_guard_reply,
+            "steps": [],
+            "run": {"status": "completed", "summary": pending_guard_reply, "worker": worker},
+            "version": VERSION,
+        }
 
     async with _history_lock:
         history_snapshot = list(conversation_history)

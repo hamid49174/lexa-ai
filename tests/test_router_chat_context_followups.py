@@ -387,6 +387,97 @@ def test_stream_confirmation_executes_pending_action_server_side(monkeypatch):
         clear_pending_confirmation()
 
 
+def test_stream_confirmation_accepts_real_german_umlaut(monkeypatch):
+    from backend.shared import clear_pending_confirmation, set_pending_confirmation
+
+    clear_pending_confirmation()
+    app = FastAPI()
+    app.include_router(router_chat.router)
+    monkeypatch.setattr(router_chat, "check_rate_limit", lambda _bucket: True)
+    monkeypatch.setattr(router_chat, "audit_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(router_chat, "conversation_history", [])
+    seen = {}
+
+    def fake_execute_action(action, source="unknown", confirmed=False):
+        seen.update({"action": action, "source": source, "confirmed": confirmed})
+        return {"success": True, "data": {"matched_text": "Datei", "x": 10, "y": 20}}
+
+    monkeypatch.setattr("backend.action_executor.execute_action", fake_execute_action)
+    set_pending_confirmation({"action": "desktop_click_text", "params": {"text": "Datei"}})
+    client = TestClient(app)
+
+    response = client.post("/chat/stream", json={"message": "ausführen"})
+
+    try:
+        assert response.status_code == 200
+        assert "Datei" in response.text
+        assert seen == {
+            "action": {"action": "desktop_click_text", "params": {"text": "Datei"}},
+            "source": "chat_stream_confirm",
+            "confirmed": True,
+        }
+    finally:
+        clear_pending_confirmation()
+
+
+def test_stream_pending_confirmation_cancels_real_german_umlaut(monkeypatch):
+    from backend.shared import clear_pending_confirmation, get_pending_confirmation, set_pending_confirmation
+
+    clear_pending_confirmation()
+    app = FastAPI()
+    app.include_router(router_chat.router)
+    monkeypatch.setattr(router_chat, "check_rate_limit", lambda _bucket: True)
+    monkeypatch.setattr(router_chat, "audit_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(router_chat, "conversation_history", [])
+    monkeypatch.setattr(
+        "backend.action_executor.execute_action",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("cancel must not execute pending action")),
+    )
+    set_pending_confirmation({"action": "desktop_click_text", "params": {"text": "Datei"}})
+    client = TestClient(app)
+
+    try:
+        response = client.post("/chat/stream", json={"message": "nicht ausführen"})
+
+        assert response.status_code == 200
+        assert "Freigabe fuer desktop_click_text verworfen" in response.text
+        assert "Ich habe nichts ausgefuehrt" in response.text
+        assert get_pending_confirmation() is None
+    finally:
+        clear_pending_confirmation()
+
+
+def test_stream_pending_confirmation_ignores_non_confirmation_text(monkeypatch):
+    from backend.shared import clear_pending_confirmation, get_pending_confirmation, set_pending_confirmation
+
+    clear_pending_confirmation()
+    app = FastAPI()
+    app.include_router(router_chat.router)
+    monkeypatch.setattr(router_chat, "check_rate_limit", lambda _bucket: True)
+    monkeypatch.setattr(router_chat, "audit_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(router_chat, "conversation_history", [])
+    monkeypatch.setattr(
+        "backend.action_executor.execute_action",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("non-confirmation must not execute pending action")),
+    )
+    pending = {
+        "action": "hermes_desktop_commit",
+        "params": {"kind": "hotkey", "keys": "ctrl+a", "window": "Notepad", "verify": True},
+    }
+    set_pending_confirmation(pending)
+    client = TestClient(app)
+
+    try:
+        response = client.post("/chat/stream", json={"message": "Hermes Verify OK 2"})
+
+        assert response.status_code == 200
+        assert "Freigabe offen fuer hermes_desktop_commit" in response.text
+        assert "Ich habe nichts ausgefuehrt" in response.text
+        assert get_pending_confirmation() == pending
+    finally:
+        clear_pending_confirmation()
+
+
 def test_inline_confirmation_executes_pending_ui_action(monkeypatch):
     from backend.shared import clear_pending_confirmation, set_pending_confirmation
 
@@ -417,5 +508,169 @@ def test_inline_confirmation_executes_pending_ui_action(monkeypatch):
             "source": "chat_stream_inline_confirm",
             "confirmed": True,
         }
+    finally:
+        clear_pending_confirmation()
+
+
+def test_hermes_confirmation_prepares_next_queued_desktop_step(monkeypatch):
+    from backend.shared import clear_pending_confirmation, get_pending_confirmation, set_pending_confirmation
+
+    clear_pending_confirmation()
+    seen = {}
+
+    def fake_execute_action(action, source="unknown", confirmed=False):
+        seen.update({"action": action, "source": source, "confirmed": confirmed})
+        return {
+            "success": True,
+            "data": {"summary": "Ich habe ctrl+a gedrueckt."},
+        }
+
+    def fake_hermes_task(message, initial_context=None):
+        seen["queued_message"] = message
+        seen["initial_context"] = initial_context
+        set_pending_confirmation({
+            "action": "hermes_desktop_commit",
+            "params": {
+                "kind": "type",
+                "typing_text": "Hermes Hotkey Fix Test",
+                "window": "Notepad",
+                "typing_interval_ms": 8,
+                "verify": True,
+            },
+        })
+        return {
+            "success": True,
+            "needs_confirmation": True,
+            "summary": 'Freigabe vorbereitet: Ich wuerde Text im Fenster "Notepad" tippen.',
+        }
+
+    monkeypatch.setattr("backend.action_executor.execute_action", fake_execute_action)
+    monkeypatch.setattr("companion.hermes_desktop.hermes_desktop_task", fake_hermes_task)
+    set_pending_confirmation({
+        "action": "hermes_desktop_commit",
+        "params": {"kind": "hotkey", "keys": "ctrl+a", "window": "Notepad", "verify": True},
+        "queue": {
+            "type": "hermes_desktop_instructions",
+            "instructions": ['tippe "Hermes Hotkey Fix Test"'],
+            "context": {"last_window": "Notepad"},
+        },
+    })
+
+    try:
+        reply = asyncio.run(router_chat._execute_pending_confirmation(
+            get_pending_confirmation(),
+            "chat_stream_confirm",
+        ))
+        pending = get_pending_confirmation()
+
+        assert "Ich habe ctrl+a gedrueckt" in reply
+        assert "Naechste Freigabe vorbereitet" in reply
+        assert "Text im Fenster" in reply
+        assert seen == {
+            "action": {
+                "action": "hermes_desktop_commit",
+                "params": {"kind": "hotkey", "keys": "ctrl+a", "window": "Notepad", "verify": True},
+            },
+            "source": "chat_stream_confirm",
+            "confirmed": True,
+            "queued_message": 'tippe "Hermes Hotkey Fix Test"',
+            "initial_context": {"last_window": "Notepad"},
+        }
+        assert pending["action"] == "hermes_desktop_commit"
+        assert pending["params"]["kind"] == "type"
+        assert pending["params"]["window"] == "Notepad"
+    finally:
+        clear_pending_confirmation()
+
+
+def test_hermes_confirmation_stops_queue_when_verification_fails(monkeypatch):
+    from backend.shared import clear_pending_confirmation, get_pending_confirmation, set_pending_confirmation
+
+    clear_pending_confirmation()
+    seen = {"queued": False}
+
+    def fake_execute_action(action, source="unknown", confirmed=False):
+        seen.update({"action": action, "source": source, "confirmed": confirmed})
+        return {
+            "success": True,
+            "data": {
+                "summary": "Ausgefuehrt: Ich habe den vorbereiteten Text in das aktive Feld getippt.",
+                "verification": {
+                    "checked": True,
+                    "status": "failed",
+                    "passed": False,
+                    "summary": "Erwarteter Text wurde nach dem Tippen nicht sichtbar gefunden.",
+                },
+            },
+        }
+
+    def fake_hermes_task(*_args, **_kwargs):
+        seen["queued"] = True
+        raise AssertionError("Queue should stop on failed verification")
+
+    monkeypatch.setattr("backend.action_executor.execute_action", fake_execute_action)
+    monkeypatch.setattr("companion.hermes_desktop.hermes_desktop_task", fake_hermes_task)
+    set_pending_confirmation({
+        "action": "hermes_desktop_commit",
+        "params": {"kind": "type", "typing_text": "Missing", "window": "Notepad", "verify": True},
+        "queue": {
+            "type": "hermes_desktop_instructions",
+            "instructions": ["klicke darauf"],
+            "context": {"last_window": "Notepad", "last_target": "Datei"},
+        },
+    })
+
+    try:
+        reply = asyncio.run(router_chat._execute_pending_confirmation(
+            get_pending_confirmation(),
+            "chat_stream_confirm",
+        ))
+
+        assert "Verifikation fehlgeschlagen" in reply
+        assert "Weitere Desktop-Schritte gestoppt" in reply
+        assert seen["queued"] is False
+        assert seen["action"] == {
+            "action": "hermes_desktop_commit",
+            "params": {"kind": "type", "typing_text": "Missing", "window": "Notepad", "verify": True},
+        }
+    finally:
+        clear_pending_confirmation()
+
+
+def test_hermes_failed_commit_keeps_pending_confirmation_for_retry(monkeypatch):
+    from backend.shared import clear_pending_confirmation, get_pending_confirmation, set_pending_confirmation
+
+    clear_pending_confirmation()
+    pending_action = {
+        "action": "hermes_desktop_commit",
+        "params": {"kind": "hotkey", "keys": "ctrl+a", "window": "Notepad", "verify": True},
+        "queue": {
+            "type": "hermes_desktop_instructions",
+            "instructions": ['tippe "Retry OK"'],
+            "context": {"last_window": "Notepad"},
+        },
+    }
+
+    def fake_execute_action(action, source="unknown", confirmed=False):
+        return {
+            "success": False,
+            "error": "Fehler bei 'hermes_desktop_commit': window not found: Notepad",
+            "executed": False,
+            "requires_confirmation": False,
+        }
+
+    monkeypatch.setattr("backend.action_executor.execute_action", fake_execute_action)
+    set_pending_confirmation(pending_action)
+
+    try:
+        clear_pending_confirmation()
+        reply = asyncio.run(router_chat._execute_pending_confirmation(
+            pending_action,
+            "chat_stream_confirm",
+        ))
+
+        assert "window not found: Notepad" in reply
+        assert "Freigabe bleibt offen" in reply
+        assert get_pending_confirmation() == pending_action
     finally:
         clear_pending_confirmation()

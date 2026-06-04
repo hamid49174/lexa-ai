@@ -104,9 +104,24 @@ function installElectronSmokeSafeIo() {
   installSafeProcessEmit();
 }
 
+function normalizeElectronConsoleMessage(event, legacyLevel, legacyMessage, legacyLine, legacySourceId) {
+  const details = event && typeof event === "object" ? event : {};
+  const rawLevel = legacyLevel ?? details.level ?? "info";
+  const levelMap = { debug: 0, info: 1, warning: 2, error: 3 };
+  const level = typeof rawLevel === "number" ? rawLevel : (levelMap[String(rawLevel).toLowerCase()] ?? 1);
+  return {
+    level,
+    levelName: typeof rawLevel === "string" ? rawLevel : ["debug", "info", "warning", "error"][level] || "info",
+    message: legacyMessage ?? details.message ?? "",
+    line: legacyLine ?? details.lineNumber ?? 0,
+    sourceId: legacySourceId ?? details.sourceId ?? "",
+  };
+}
+
 installElectronSmokeSafeIo();
 
 module.exports = {
   installElectronSmokeSafeIo,
   isBrokenPipeError,
+  normalizeElectronConsoleMessage,
 };

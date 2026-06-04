@@ -14,6 +14,7 @@ import re
 import random
 import logging
 import difflib
+import unicodedata
 from dataclasses import dataclass, field
 from decimal import Decimal, DivisionByZero, InvalidOperation
 from datetime import datetime
@@ -189,6 +190,38 @@ def _fuzzy_match(word: str, candidates: dict, threshold: float = _FUZZY_THRESHOL
     return None
 
 
+def _fold_intent_text(value: object) -> str:
+    text = unicodedata.normalize("NFKD", str(value or "").casefold())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return text.replace("ß", "ss")
+
+
+def _is_weather_keyword(word: str) -> bool:
+    token = str(word or "").lower().strip("?!.,:;")
+    if token in {"wetter", "weather"}:
+        return True
+    if not token.startswith(("wet", "wea")):
+        return False
+    return bool(_fuzzy_match(token, {"wetter": "weather", "weather": "weather"}, 0.78))
+
+
+def _is_hermes_status_note(value: str) -> bool:
+    text = _fold_intent_text(value)
+    return (
+        "desktop-schritte pausiert" in text
+        or "eingebaute ja/ok-zeilen" in text
+        or "freigabe vorbereitet" in text
+        or "freigabe offen fuer" in text
+        or "freigabe offen fur" in text
+        or "wartet auf freigabe" in text
+        or "warte auf freigabe" in text
+        or "bestaetigung noetig" in text
+        or "bestatigung noetig" in text
+        or "zahlen nicht als freigabe" in text
+        or "zaehlen nicht als freigabe" in text
+    )
+
+
 def _split_compound(msg: str) -> list[str]:
     """Split compound commands on 'und', 'and', 'dann', '+'.
     'öffne spotify und spiele mero' → ['öffne spotify', 'spiele mero']"""
@@ -344,6 +377,16 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
             "message": _INTERNAL_RULES_REPLY,
         }
 
+    if _is_hermes_status_note(msg):
+        return {
+            "action": None,
+            "params": {},
+            "message": (
+                "Das war nur der Hermes-Sicherheitshinweis. Sende die Freigabe als eigene kurze Nachricht: Ja. "
+                "Danach kannst du den naechsten Hermes-Befehl separat schicken."
+            ),
+        }
+
     lower = msg.lower()
     words = lower.split()
     if len(words) < 2:
@@ -435,17 +478,13 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
 
     # ── Weather with city (fuzzy) ──
     # "wie ist das wetter in hamburg" / "wetter hamburg" / "weather berlin"
-    weather_words = {"wetter", "weather"}
-    has_weather = any(w in weather_words for w in words)
-    if not has_weather:
-        # Fuzzy check: "wetterr", "weter", etc.
-        has_weather = any(_fuzzy_match(w, {"wetter": "w", "weather": "w"}, 0.7) for w in words if len(w) > 3)
+    has_weather = any(_is_weather_keyword(w) for w in words if len(w.strip("?!.,:;")) > 3)
 
     if has_weather:
         # Extract city: everything after "wetter" / "in" / "für"
         city = ""
         for i, w in enumerate(words):
-            if w in weather_words or _fuzzy_match(w, {"wetter": "w", "weather": "w"}, 0.7):
+            if _is_weather_keyword(w):
                 rest = " ".join(words[i + 1:])
                 city = re.sub(r'^(?:in|für|fuer|for|von|heute|gerade|aktuell|jetzt)\s+', '', rest, flags=re.IGNORECASE).strip()
                 break
@@ -864,6 +903,16 @@ def try_local_intent(user_message: str, context: ConversationIntentContext | dic
     # Catches compound commands ("öffne spotify und spiele mero"),
     # typos ("dpsile" → "spiele"), and natural language patterns.
     # Runs BEFORE rigid regex to handle the 90% case.
+    if _is_hermes_status_note(msg):
+        return {
+            "action": None,
+            "params": {},
+            "message": (
+                "Das war nur der Hermes-Sicherheitshinweis. Sende die Freigabe als eigene kurze Nachricht: Ja. "
+                "Danach kannst du den naechsten Hermes-Befehl separat schicken."
+            ),
+        }
+
     contextual_intent = _try_contextual_intent(msg, context)
     if contextual_intent:
         logger.info(f"[Intent:Context] Matched: {contextual_intent['action']} for '{msg[:60]}'")

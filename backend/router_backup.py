@@ -21,6 +21,8 @@ logger = logging.getLogger("lexa.backup")
 router = APIRouter(tags=["backup"])
 _BACKUP_FILENAME_PREFIX = "lexa-backup-"
 _BACKUP_FILENAME_SUFFIX = ".json"
+_RESTORE_INTENT_HEADER = "X-Lexa-Restore-Intent"
+_RESTORE_INTENT_VALUE = "confirmed"
 
 
 def _get_backup_dir() -> Path:
@@ -63,6 +65,11 @@ def _resolve_backup_path(raw_path: str) -> Path:
     return resolved
 
 
+def _require_restore_intent(req: Request) -> None:
+    if req.headers.get(_RESTORE_INTENT_HEADER, "").strip().lower() != _RESTORE_INTENT_VALUE:
+        raise HTTPException(status_code=403, detail="Restore requires explicit restore intent.")
+
+
 @router.get("/backup")
 async def create_backup():
     """Create a full JSON backup of all data."""
@@ -79,6 +86,7 @@ async def restore_backup(req: Request):
     """Restore data from a JSON backup."""
     if not check_rate_limit("execute"):
         raise HTTPException(status_code=429, detail="Zu viele Anfragen. Bitte kurz warten.")
+    _require_restore_intent(req)
     data = await parse_json_body(req)
     result = await asyncio.to_thread(memory.restore_database, data)
     if result.get("status") == "error":
@@ -125,6 +133,7 @@ async def restore_backup_file(req: Request):
     """Restore a JSON backup selected from the Settings backup UI."""
     if not check_rate_limit("execute"):
         raise HTTPException(status_code=429, detail="Zu viele Anfragen. Bitte kurz warten.")
+    _require_restore_intent(req)
 
     body = await parse_json_body(req)
     path = _resolve_backup_path(str(body.get("path") or ""))

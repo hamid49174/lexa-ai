@@ -1,3 +1,4 @@
+import json
 import sys
 
 
@@ -8,6 +9,7 @@ def test_hermes_status_uses_project_local_paths(monkeypatch):
     monkeypatch.delenv("LEXA_HERMES_RUN_ARGS", raising=False)
     monkeypatch.setattr(hermes, "_resolve_hermes_command", lambda: None)
     monkeypatch.setattr(hermes.shutil, "which", lambda name: None)
+    monkeypatch.setattr(hermes, "PERSONAL_OS_ROOT", hermes.PROJECT_ROOT / "personal_os")
 
     status = hermes.get_hermes_status()
 
@@ -20,6 +22,31 @@ def test_hermes_status_uses_project_local_paths(monkeypatch):
     assert status["hermes_home"].endswith("hermes_workspace\\.hermes") or status["hermes_home"].endswith("hermes_workspace/.hermes")
     assert status["vendor_root"].endswith("vendor\\hermes-agent") or status["vendor_root"].endswith("vendor/hermes-agent")
     assert status["personal_os_root"].endswith("personal_os")
+
+
+def test_personal_os_root_falls_back_to_mcp_config_when_project_link_is_unavailable(monkeypatch, tmp_path):
+    import backend.hermes_adapter as hermes
+
+    os_root = tmp_path / "Office" / "Desktop" / "OS"
+    os_root.mkdir(parents=True)
+    (os_root / "OS_MANIFEST.md").write_text("# Manifest\n", encoding="utf-8")
+    (tmp_path / "mcp_servers.json").write_text(
+        json.dumps({
+            "servers": {
+                "personal_os": {
+                    "env": {
+                        "PERSONAL_OS_ROOT": str(os_root),
+                    },
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(hermes, "PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("LEXA_PERSONAL_OS_ROOT", raising=False)
+    monkeypatch.delenv("PERSONAL_OS_ROOT", raising=False)
+
+    assert hermes._resolve_personal_os_root() == os_root
 
 
 def test_hermes_run_returns_unavailable_without_command(monkeypatch):
@@ -116,6 +143,8 @@ def test_gateway_autostart_enable_writes_and_removes_startup_script(monkeypatch,
 
     assert enabled["success"] is True
     assert enabled["status"] == "enabled"
+    assert enabled["autostart"]["enabled"] is True
+    assert enabled["autostart"]["script_current"] is True
     script_path = tmp_path / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / "Lexa Hermes Gateway.cmd"
     script = script_path.read_text(encoding="utf-8")
     assert "gateway\" \"run\" \"--replace" in script or 'gateway" "run" "--replace' in script
@@ -127,6 +156,47 @@ def test_gateway_autostart_enable_writes_and_removes_startup_script(monkeypatch,
     assert disabled["success"] is True
     assert disabled["status"] == "disabled"
     assert not script_path.exists()
+
+
+def test_gateway_autostart_status_marks_stale_startup_script(monkeypatch, tmp_path):
+    import backend.hermes_adapter as hermes
+
+    monkeypatch.setattr(hermes, "HERMES_HOME_ROOT", tmp_path / ".hermes")
+    monkeypatch.setattr(hermes, "_resolve_hermes_command", lambda: [sys.executable])
+    monkeypatch.setattr(hermes.os, "name", "nt")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_HOME_CHANNEL", raising=False)
+    hermes.configure_hermes_telegram("123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabc", "987654321", "Lexa")
+
+    script_path = tmp_path / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / "Lexa Hermes Gateway.cmd"
+    script_path.parent.mkdir(parents=True)
+    script_path.write_text(
+        "\r\n".join([
+            "@echo off",
+            "set \"HERMES_HOME=C:\\old\\lexa\\hermes_workspace\\.hermes\"",
+            "cd /d \"C:\\old\\lexa\"",
+            "\"C:\\old\\lexa\\vendor\\hermes-agent\\venv\\Scripts\\hermes.exe\" \"gateway\" \"run\" \"--replace\"",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+
+    status = hermes.get_hermes_gateway_autostart_status()
+
+    assert status["script_exists"] is True
+    assert status["enabled"] is False
+    assert status["configured"] is False
+    assert status["stale"] is True
+    assert status["can_enable"] is True
+    assert "current Lexa workspace" in status["nextAction"]
+
+    refreshed = hermes.set_hermes_gateway_autostart(True)
+
+    assert refreshed["success"] is True
+    assert refreshed["autostart"]["enabled"] is True
+    assert refreshed["autostart"]["script_current"] is True
+    assert "C:\\old\\lexa" not in script_path.read_text(encoding="utf-8")
 
 
 def test_gateway_log_summary_reads_bounded_redacted_tail(monkeypatch, tmp_path):
@@ -153,6 +223,28 @@ def test_gateway_log_summary_reads_bounded_redacted_tail(monkeypatch, tmp_path):
     assert summary["counts"]["responses_ready"] == 1
     assert summary["counts"]["issues"] == 1
     assert "1234567890" not in str(summary)
+
+
+def test_gateway_log_summary_marks_raw_traceback_as_attention(monkeypatch, tmp_path):
+    import backend.hermes_adapter as hermes
+
+    monkeypatch.setattr(hermes, "HERMES_HOME_ROOT", tmp_path / ".hermes")
+    log_path = tmp_path / ".hermes" / "logs" / "gateway.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        "\n".join([
+            "Hermes Gateway Starting...",
+            "Traceback (most recent call last):",
+            "ValueError: startup failed",
+        ]),
+        encoding="utf-8",
+    )
+
+    summary = hermes.get_hermes_gateway_log_summary(20)
+
+    assert summary["health_state"] == "attention"
+    assert summary["counts"]["issues"] == 2
+    assert "Auffaelligkeiten" in summary["summary"]
 
 
 def test_telegram_configure_writes_local_env_without_leaking_token(monkeypatch, tmp_path):

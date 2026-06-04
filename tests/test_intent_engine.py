@@ -118,6 +118,45 @@ class TestIntentPriority:
         result = try_local_intent(message)
         assert result is None
 
+    def test_hermes_status_note_is_not_weather_city(self):
+        result = try_local_intent(
+            "Eingebaute Ja/OK-Zeilen zaehlen nicht als Freigabe. Weitere Desktop-Schritte pausiert..."
+        )
+
+        assert result is not None
+        assert result["action"] is None
+        assert "Hermes-Sicherheitshinweis" in result["message"]
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            'Freigabe vorbereitet:Ich wuerde Text im Fenster "Notepad" tippen.',
+            "Freigabe offen fuer hermes_desktop_commit. Ich habe nichts ausgefuehrt.",
+            "wartet auf Freigabe",
+            "Bestaetigung noetig fuer ui_click. Antworte kurz mit ja.",
+        ],
+    )
+    def test_hermes_confirmation_status_notes_are_local_noops(self, message):
+        result = try_local_intent(message)
+
+        assert result is not None
+        assert result["action"] is None
+        assert "Hermes-Sicherheitshinweis" in result["message"]
+
+    def test_weitere_is_not_fuzzy_weather_keyword(self):
+        result = try_local_intent("Weitere Desktop-Schritte pausiert...")
+
+        assert result is not None
+        assert result["action"] is None
+        assert "Stadt" not in result["message"]
+
+    def test_weather_typo_still_routes_to_weather(self):
+        result = try_local_intent("weter Berlin")
+
+        assert result is not None
+        assert result["action"] == "weather_current"
+        assert result["params"]["city"].lower() == "berlin"
+
     def test_internal_rules_question_is_not_app_open(self):
         """Meta questions about tool rules must not be routed to app_open."""
         result = try_local_intent(

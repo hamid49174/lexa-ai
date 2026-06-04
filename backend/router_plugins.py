@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.plugin_manager import plugin_manager
+from backend.security import check_rate_limit
 
 logger = logging.getLogger("lexa.router_plugins")
 router = APIRouter(prefix="/plugins", tags=["plugins"])
@@ -156,6 +157,8 @@ async def execute_plugin_tool(request: PluginExecuteRequest):
 
     if len(request.args) > 50:
         raise HTTPException(status_code=400, detail="Zu viele Argumente (max 50)")
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Plugin-Anfragen. Bitte kurz warten.")
 
     result = await plugin_manager.execute_plugin_tool(
         plugin_name=request.plugin,

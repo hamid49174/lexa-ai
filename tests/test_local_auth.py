@@ -5,6 +5,31 @@ import json
 from fastapi.testclient import TestClient
 
 
+def test_privileged_endpoint_requires_auth_by_default_without_token(monkeypatch):
+    monkeypatch.delenv("LEXA_INSTANCE_TOKEN", raising=False)
+    monkeypatch.delenv("LEXA_LOCAL_AUTH_REQUIRED", raising=False)
+
+    import backend.main as main
+
+    client = TestClient(main.app)
+    res = client.get("/i18n/language")
+
+    assert res.status_code == 401
+    assert res.json()["errorCode"] == "local_auth_required"
+
+
+def test_local_auth_can_be_explicitly_disabled_for_isolated_dev(monkeypatch):
+    monkeypatch.delenv("LEXA_INSTANCE_TOKEN", raising=False)
+    monkeypatch.setenv("LEXA_LOCAL_AUTH_REQUIRED", "0")
+
+    import backend.main as main
+
+    client = TestClient(main.app)
+    res = client.get("/i18n/language")
+
+    assert res.status_code == 200
+
+
 def test_health_never_exposes_instance_token(monkeypatch):
     monkeypatch.setenv("LEXA_INSTANCE_TOKEN", "unit-secret")
 

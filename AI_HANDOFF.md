@@ -6,7 +6,7 @@ Do not scan the whole repository first. Read this file, identify the task, then 
 
 ## Repo
 
-- Path: `C:\Users\admin\OneDrive\Desktop\lexa\lexa-ai`
+- Path: `C:\Users\admin\OneDrive - Office\lexa\lexa-ai`
 - Backend: Python FastAPI in `backend/`
 - Frontend: Electron + modular Vanilla JS in `frontend/`
 - Tests: `tests/`
@@ -33,7 +33,7 @@ The main work is not adding many new features. The main work is finishing, stabi
 Personal OS lives at:
 
 ```text
-C:\Users\admin\OneDrive\Desktop\OS
+C:\Users\admin\OneDrive - Office\Desktop\OS
 ```
 
 Lexa is configured with a `personal_os` MCP server in `mcp_servers.json`.

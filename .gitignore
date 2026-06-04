@@ -36,6 +36,8 @@ desktop.ini
 personal_os/
 tmp/
 vendor/
+!frontend/src/vendor/
+!frontend/src/vendor/**
 audit.log
 bridge-audit.log
 evals/results/*
@@ -55,6 +57,7 @@ vendor/hermes-agent/venv/
 # Build output
 backend-dist/
 frontend/dist/
+dist-*-build/
 
 # Voice models (large binary files)
 voice/piper/
@@ -68,8 +71,40 @@ test_*.mp3
 
 
 # Secrets — NEVER commit
+.npmrc
+.pnpmrc
+.pypirc
+.yarnrc
+.yarnrc.yml
+.netrc
+.aws/credentials
+.aws/config
+.azure/accessTokens.json
+.azure/azureProfile.json
+.config/gcloud/application_default_credentials.json
+.docker/config.json
+.gcloud/application_default_credentials.json
+.kube/config
+.ssh/id_dsa
+.ssh/id_ecdsa
+.ssh/id_ed25519
+.ssh/id_rsa
+pip.conf
+pip.ini
 *.key
 *.pem
+*.ppk
+*.pfx
 *.p12
+*.pvk
+*.cer
+*.crt
+*.spc
+*.jks
+*.keystore
 credentials.*
+secrets.*
+client_secret*.json
+service-account*.json
+service_account*.json
 .env.local

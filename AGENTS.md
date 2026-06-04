@@ -18,9 +18,9 @@ The current work style is security-first and release-gate driven. Do not add pro
 
 ## Important Paths
 
-- Lexa repo: `C:\Users\admin\OneDrive\Desktop\lexa\lexa-ai`
-- Personal OS mount: `personal_os/` is a local junction to `C:\Users\admin\OneDrive\Desktop\OS`
-- Website layer: `C:\Users\admin\OneDrive\Desktop\lexa\lexa-website`
+- Lexa repo: `C:\Users\admin\OneDrive - Office\lexa\lexa-ai`
+- Personal OS source: `C:\Users\admin\OneDrive - Office\Desktop\OS` via `mcp_servers.json`; `personal_os/` may be a local junction and must not be committed
+- Website layer: `C:\Users\admin\OneDrive - Office\lexa\lexa-website`
 - Hermes workspace: `hermes_workspace/` is local/external user data
 - Vendor folder: `vendor/` is external/vendored and must not be swept into commits
 
@@ -33,12 +33,13 @@ The current work style is security-first and release-gate driven. Do not add pro
 - `bridge-audit.log`
 - `lexa_memory.db*`
 - `hermes_workspace/`
-- `.env` or `*.env`
-- `dist/`, `backend-dist/`, `frontend/dist/`, `build/`
+- `.env` or `*.env` except `.env.example`, which must contain placeholders only
+- `dist/`, `dist-*-build/`, `backend-dist/`, `frontend/dist/`, `build/`
 - `evals/results/*`
 - `tmp/agent_traces/*`
 - installers, smoke outputs, trace outputs, dashboard/report outputs
-- `.pfx`, `.p12`, `.pem`, `.key`, `.pvk`, `.cer`, `.crt`
+- package-manager, cloud, container, SSH, and machine credential files such as `.netrc`, `.npmrc`, `.pnpmrc`, `.pypirc`, `.yarnrc`, `.yarnrc.yml`, `.aws/credentials`, `.docker/config.json`, `.kube/config`, `credentials.*`, `secrets.*`, `client_secret*.json`, `service-account*.json`, `service_account*.json`, `.ssh/id_rsa`, `pip.conf`, and `pip.ini`
+- `.pfx`, `.p12`, `.pem`, `.ppk`, `.key`, `.pvk`, `.cer`, `.crt`, `.spc`, `.jks`, `.keystore`
 
 ## Standard Gates
 

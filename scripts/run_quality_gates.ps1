@@ -34,13 +34,19 @@ $PhaseGateTests = @(
   "tests/test_failure_triage.py",
   "tests/test_eval_baseline_update.py",
   "tests/test_release_candidate_check.py",
+  "tests/test_backend_data_dir_static.py",
+  "tests/test_build_backend_script.py",
+  "tests/test_clean_temp_safety.py",
   "tests/test_remote_ci_readiness_script.py",
   "tests/test_codex_context_pack.py",
   "tests/test_quality_gate_scripts.py",
+  "tests/test_dependency_repro_script.py",
   "tests/test_performance_budgets.py",
   "tests/test_risky_artifact_check.py",
   "tests/test_clean_clone_smoke_script.py",
   "tests/test_installer_smoke_script.py",
+  "tests/test_packaged_smoke_script.py",
+  "tests/test_packaging_config_static.py",
   "tests/test_start_launcher_static.py",
   "tests/test_fastapi_lifespan.py",
   "tests/test_eval_trace_replay.py",
@@ -51,7 +57,8 @@ $PhaseGateTests = @(
   "tests/test_agent_trace_capture.py",
   "tests/test_agent_trace_sampling.py",
   "tests/test_agent_policy_enforcement.py",
-  "tests/test_synthetic_trace_generator.py"
+  "tests/test_synthetic_trace_generator.py",
+  "tests/test_router_stripe_security.py"
 )
 $RiskyPaths = @(
   "personal_os",
@@ -61,9 +68,120 @@ $RiskyPaths = @(
   "bridge-audit.log",
   "lexa_memory.db",
   "lexa_memory.db-*",
-  "hermes_workspace"
+  "hermes_workspace",
+  "evals/results",
+  "tmp/agent_traces",
+  "dist",
+  "dist-*-build",
+  "backend-dist",
+  "frontend/dist",
+  "build",
+  ".pytest_cache",
+  ".coverage",
+  "audio_cache",
+  "node_modules",
+  "frontend/node_modules",
+  "venv",
+  ".env",
+  "*.env",
+  ".netrc",
+  ".npmrc",
+  ".pnpmrc",
+  ".pypirc",
+  ".yarnrc",
+  ".yarnrc.yml",
+  ".aws/credentials",
+  ".aws/config",
+  ".azure/accessTokens.json",
+  ".azure/azureProfile.json",
+  ".config/gcloud/application_default_credentials.json",
+  ".docker/config.json",
+  ".gcloud/application_default_credentials.json",
+  ".kube/config",
+  "credentials.json",
+  "credentials.yml",
+  "credentials.yaml",
+  "credentials.toml",
+  "credentials.ini",
+  "credentials.conf",
+  "secrets.json",
+  "secrets.yml",
+  "secrets.yaml",
+  "secrets.toml",
+  "secrets.ini",
+  "secrets.conf",
+  "client_secret.json",
+  "service-account.json",
+  "service_account.json",
+  ".ssh/id_dsa",
+  ".ssh/id_ecdsa",
+  ".ssh/id_ed25519",
+  ".ssh/id_rsa",
+  "pip.conf",
+  "pip.ini",
+  "*.pfx",
+  "*.p12",
+  "*.pem",
+  "*.ppk",
+  "*.key",
+  "*.pvk",
+  "*.cer",
+  "*.crt",
+  "*.spc",
+  "*.jks",
+  "*.keystore",
+  ":(glob)**/.netrc",
+  ":(glob)**/.npmrc",
+  ":(glob)**/.pnpmrc",
+  ":(glob)**/.pypirc",
+  ":(glob)**/.yarnrc",
+  ":(glob)**/.yarnrc.yml",
+  ":(glob)**/.aws/credentials",
+  ":(glob)**/.aws/config",
+  ":(glob)**/.azure/accessTokens.json",
+  ":(glob)**/.azure/azureProfile.json",
+  ":(glob)**/.config/gcloud/application_default_credentials.json",
+  ":(glob)**/.docker/config.json",
+  ":(glob)**/.gcloud/application_default_credentials.json",
+  ":(glob)**/.kube/config",
+  ":(glob)**/credentials.json",
+  ":(glob)**/credentials.yml",
+  ":(glob)**/credentials.yaml",
+  ":(glob)**/credentials.toml",
+  ":(glob)**/credentials.ini",
+  ":(glob)**/credentials.conf",
+  ":(glob)**/secrets.json",
+  ":(glob)**/secrets.yml",
+  ":(glob)**/secrets.yaml",
+  ":(glob)**/secrets.toml",
+  ":(glob)**/secrets.ini",
+  ":(glob)**/secrets.conf",
+  ":(glob)**/client_secret*.json",
+  ":(glob)**/service-account*.json",
+  ":(glob)**/service_account*.json",
+  ":(glob)**/.ssh/id_dsa",
+  ":(glob)**/.ssh/id_ecdsa",
+  ":(glob)**/.ssh/id_ed25519",
+  ":(glob)**/.ssh/id_rsa",
+  ":(glob)**/id_dsa",
+  ":(glob)**/id_ecdsa",
+  ":(glob)**/id_ed25519",
+  ":(glob)**/id_rsa",
+  ":(glob)**/pip.conf",
+  ":(glob)**/pip.ini",
+  ":(glob)**/*.pfx",
+  ":(glob)**/*.p12",
+  ":(glob)**/*.pem",
+  ":(glob)**/*.ppk",
+  ":(glob)**/*.key",
+  ":(glob)**/*.pvk",
+  ":(glob)**/*.cer",
+  ":(glob)**/*.crt",
+  ":(glob)**/*.spc",
+  ":(glob)**/*.jks",
+  ":(glob)**/*.keystore"
 )
-$RiskyStagedPattern = "^(personal_os/|tmp/|vendor/|audit\.log$|bridge-audit\.log$|lexa_memory\.db|hermes_workspace/)"
+$RiskyStagedPattern = '^(?!(.*/)?\.env\.example$)(personal_os/|tmp/|vendor/|audit\.log$|bridge-audit\.log$|lexa_memory\.db|hermes_workspace/|evals/results/|tmp/agent_traces/|dist/|dist-[^/]*build/|backend-dist/|frontend/dist/|build/|\.pytest_cache/|\.coverage$|audio_cache/|(.*/)?node_modules/|venv/|(.*/)?\.env($|\.|/)|.*\.env$|(.*/)?\.netrc$|(.*/)?\.(npmrc|pnpmrc|pypirc)$|(.*/)?\.yarnrc(\.yml)?$|(.*/)?\.aws/(credentials|config)$|(.*/)?\.azure/(accessTokens|azureProfile)\.json$|(.*/)?\.config/gcloud/application_default_credentials\.json$|(.*/)?\.docker/config\.json$|(.*/)?\.gcloud/application_default_credentials\.json$|(.*/)?\.kube/config$|(.*/)?(credentials|secrets)\.(json|ya?ml|toml|ini|conf)$|(.*/)?client_secret[^/]*\.json$|(.*/)?service[-_]?account[^/]*\.json$|(.*/)?\.ssh/(id_dsa|id_ecdsa|id_ed25519|id_rsa)$|(.*/)?(id_dsa|id_ecdsa|id_ed25519|id_rsa)$|(.*/)?pip\.(conf|ini)$|.*\.(pfx|p12|pem|ppk|key|pvk|cer|crt|spc|jks|keystore)$|(.*/)?(codesign|code-sign|signing|signtool)[^/]*\.(json|ps1|env|txt|xml)$|(.*/)?(windows|electron)[_-]?(signing|certificate|cert)[^/]*\.(json|ps1|env|txt|xml)$)'
 
 function Invoke-Gate {
   param(
@@ -154,6 +272,10 @@ function Invoke-JsStaticGate {
   Write-Host "JS static gate completed: $($tests.Count) files."
 }
 
+function Invoke-VendorAssetCheck {
+  Invoke-Gate "bundled vendor asset check" { node "frontend\scripts\sync-vendor.cjs" --check }
+}
+
 function Invoke-ElectronSmokeGate {
   if (!(Test-Path $Electron)) {
     Write-Warning "Electron binary not found at $Electron; skipping Electron smoke gate."
@@ -178,6 +300,7 @@ if ($Mode -eq "Eval") {
 
 Invoke-PythonPhaseGate
 Invoke-EvalSuite
+Invoke-VendorAssetCheck
 Invoke-JsStaticGate
 
 if ($Mode -eq "CI") {

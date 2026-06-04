@@ -114,6 +114,7 @@ const expectedHigh = [
   "conversationDelete",
   "conversationUpdate",
   "setProfile",
+  "licenseActivate",
   "clipboardHistory",
   "clipboardClear",
   "setAutostart",

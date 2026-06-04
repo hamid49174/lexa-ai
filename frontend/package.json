@@ -6,11 +6,18 @@
   "scripts": {
     "start": "set \"ELECTRON_RUN_AS_NODE=\" && electron .",
     "dev": "set \"ELECTRON_RUN_AS_NODE=\" && electron . --dev",
+    "sync-vendor": "node scripts/sync-vendor.cjs",
+    "check-vendor": "node scripts/sync-vendor.cjs --check",
+    "prebuild": "node scripts/ensure-backend-bundle.cjs && node scripts/sync-vendor.cjs --check",
     "build": "set \"ELECTRON_RUN_AS_NODE=\" && electron-builder --config electron-builder.json"
   },
+  "dependencies": {
+    "simplex-noise": "2.4.0",
+    "three": "0.128.0"
+  },
   "devDependencies": {
-    "electron": "33.3.1",
-    "electron-builder": "25.1.8"
+    "electron": "42.3.0",
+    "electron-builder": "26.8.1"
   },
   "author": "alexsprogis",
   "license": "MIT"

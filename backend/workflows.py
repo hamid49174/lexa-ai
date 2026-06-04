@@ -9,7 +9,6 @@ import base64
 import ipaddress
 import json
 import logging
-import os
 import re
 import sqlite3
 import socket
@@ -19,16 +18,15 @@ import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 
+from backend.config import LEXA_DATA_DIR
 from backend.security import is_dangerous_network_ip
 
 logger = logging.getLogger("lexa.workflows")
 
-_DATA_DIR = os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent))
-DB_PATH = Path(_DATA_DIR) / "lexa_memory.db"
+DB_PATH = LEXA_DATA_DIR / "lexa_memory.db"
 MAX_TEMPLATE_DEPTH = 5
 WORKFLOW_BACKOFF_AFTER_FAILURES = 3
 WORKFLOW_BACKOFF_AFTER_MORE_FAILURES = 5

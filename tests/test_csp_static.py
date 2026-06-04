@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import subprocess
 
 
 FRONTEND_ROOT = Path(__file__).resolve().parents[1] / "frontend"
@@ -36,10 +37,38 @@ def test_frontend_has_no_inline_style_or_csp_bypass_regressions():
     assert not findings, "CSP/static inline-style blockers found:\n" + "\n".join(findings)
 
 
-def test_index_does_not_depend_on_ignored_local_vendor_assets():
+def test_index_vendor_assets_are_bundled_and_unignored():
     index_html = FRONTEND_SRC / "index.html"
     text = index_html.read_text(encoding="utf-8")
-    assert "./vendor/" not in text and "/vendor/" not in text
+    expected_assets = [
+        FRONTEND_SRC / "vendor" / "three.min.js",
+        FRONTEND_SRC / "vendor" / "simplex-noise.js",
+    ]
+    for asset in expected_assets:
+        rel = asset.relative_to(FRONTEND_ROOT.parents[0])
+        assert f"./vendor/{asset.name}" in text
+        assert asset.exists(), f"Bundled vendor asset missing: {asset}"
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", str(rel)],
+            cwd=FRONTEND_ROOT.parents[0],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        assert result.returncode != 0, f"Bundled vendor asset is still ignored: {rel}"
+
+
+def test_bundled_vendor_assets_are_dependency_tracked():
+    package = (FRONTEND_ROOT / "package.json").read_text(encoding="utf-8")
+    sync_script = FRONTEND_ROOT / "scripts" / "sync-vendor.cjs"
+    text = sync_script.read_text(encoding="utf-8")
+
+    assert '"three": "0.128.0"' in package
+    assert '"simplex-noise": "2.4.0"' in package
+    assert '"check-vendor": "node scripts/sync-vendor.cjs --check"' in package
+    assert '"sync-vendor": "node scripts/sync-vendor.cjs"' in package
+    assert "node_modules" in text
+    assert "three.min.js" in text
+    assert "simplex-noise.js" in text
 
 
 def test_index_csp_has_electron_defense_in_depth_directives():

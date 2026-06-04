@@ -30,7 +30,7 @@ Recent anchor commits:
 - Release docs: `docs/release/`
 - Tests: `tests/`
 - External Personal OS mount: `personal_os/`
-- External Website layer: `C:\Users\admin\OneDrive\Desktop\lexa\lexa-website`
+- External Website layer: `C:\Users\admin\OneDrive - Office\lexa\lexa-website`
 - External Hermes workspace: `hermes_workspace/`
 
 ## Safe Context Sources

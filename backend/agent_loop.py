@@ -573,12 +573,21 @@ def _short_visible_label(value: object, fallback: str = "Position", limit: int =
 
 
 def _control_center(control: dict) -> tuple[int | None, int | None]:
+    if isinstance(control, dict) and control.get("rect_valid") is False:
+        return None, None
     rect = control.get("rect") if isinstance(control, dict) else None
     if not isinstance(rect, dict):
         return None, None
     try:
-        x = int(round((float(rect.get("left")) + float(rect.get("right"))) / 2))
-        y = int(round((float(rect.get("top")) + float(rect.get("bottom"))) / 2))
+        coords = [float(rect.get(key)) for key in ("left", "top", "right", "bottom")]
+        if (
+            coords[2] <= coords[0]
+            or coords[3] <= coords[1]
+            or any(abs(coord) >= 30000 for coord in coords)
+        ):
+            return None, None
+        x = int(round((coords[0] + coords[2]) / 2))
+        y = int(round((coords[1] + coords[3]) / 2))
     except (TypeError, ValueError):
         return None, None
     return x, y
@@ -592,6 +601,14 @@ def _format_ui_tree_user_summary(data: dict) -> str:
         return "Ich konnte kein UIA-Fenster lesen. Ich habe nichts veraendert."
     first_window = windows[0] if isinstance(windows[0], dict) else {}
     title = _short_visible_label(first_window.get("title"), fallback="aktuelles Fenster", limit=100)
+    selection = data.get("selection") if isinstance(data.get("selection"), dict) else {}
+    prefix = ""
+    if selection.get("foreground_excluded"):
+        foreground = _short_visible_label(selection.get("foreground_title"), fallback="Lexa", limit=80)
+        if selection.get("reason") == "lexa_self_control_guard":
+            prefix = f'"{foreground}" war im Vordergrund und wurde als Lexa/Codex-Schutz ignoriert. '
+        else:
+            prefix = f'"{foreground}" war im Vordergrund, ist aber kein steuerbares App-Fenster. '
     controls: list[dict] = []
     for window in windows:
         if not isinstance(window, dict):
@@ -607,10 +624,10 @@ def _format_ui_tree_user_summary(data: dict) -> str:
         if len(named) >= 12:
             break
     if not named:
-        return f'Aktuelles Fenster analysiert: "{title}". Keine klar klickbaren Controls gefunden. Ich habe nichts veraendert.'
+        return f'{prefix}Analysiert wurde: "{title}". Keine klar klickbaren Controls gefunden. Ich habe nichts veraendert.'
     listed = ", ".join(f'"{item}"' for item in named)
     suffix = f" (+{len(controls) - len(named)} weitere)" if len(controls) > len(named) else ""
-    return f'Aktuelles Fenster analysiert: "{title}". Klickbare Controls: {listed}{suffix}. Ich habe nichts veraendert.'
+    return f'{prefix}Analysiert wurde: "{title}". Klickbare Controls: {listed}{suffix}. Ich habe nichts veraendert.'
 
 
 def _format_ui_find_user_summary(data: dict) -> str:
@@ -638,6 +655,76 @@ def _format_hermes_desktop_task_user_summary(data: dict) -> str:
     steps = data.get("steps") if isinstance(data.get("steps"), list) else []
     lines = [str(step.get("summary") or "").strip() for step in steps if isinstance(step, dict) and step.get("summary")]
     return " ".join(line for line in lines if line)
+
+
+def _format_screen_read_text_user_summary(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+    payload = data.get("data") if isinstance(data.get("data"), dict) else data
+    if not isinstance(payload, dict):
+        return ""
+    text = re.sub(r"\s+", " ", str(payload.get("text") or "").strip())
+    method = str(payload.get("method") or payload.get("provider") or payload.get("engine") or "ocr")
+    prefix = "Bildschirmtext per UIA gelesen." if method == "uia_text" else "Bildschirmtext gelesen."
+    if text:
+        return f"{prefix} Textanfang: {text[:300]}"
+    if data.get("success") is False and data.get("error"):
+        return f"Bildschirmtext konnte nicht gelesen werden: {str(data.get('error'))[:180]}"
+    return f"{prefix} Kein Text erkannt."
+
+
+def _format_desktop_engine_status_user_summary(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+    providers = data.get("providers") if isinstance(data.get("providers"), list) else []
+    active: list[str] = []
+    optional_missing: list[str] = []
+    for provider in providers:
+        if not isinstance(provider, dict):
+            continue
+        provider_id = _short_visible_label(provider.get("id"), fallback="provider", limit=40)
+        if provider.get("active"):
+            active.append(provider_id.upper() if provider_id in {"uia", "ocr"} else provider_id)
+        elif provider.get("optional") and not provider.get("available"):
+            optional_missing.append(provider_id)
+    active_text = ", ".join(active) if active else "keine aktiven Provider erkannt"
+    optional_text = f" Optionale Provider noch nicht aktiv: {', '.join(optional_missing)}." if optional_missing else ""
+    return f"Desktop-Engine bereit. Aktive Provider: {active_text}.{optional_text} Mutierende Aktionen bleiben hinter Lexa-Freigabe."
+
+
+def _format_desktop_engine_observe_user_summary(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+    summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+    titles = summary.get("window_titles") if isinstance(summary.get("window_titles"), list) else []
+    title = _short_visible_label(titles[0] if titles else data.get("window"), fallback="aktuelles Fenster", limit=100)
+    controls = int(summary.get("control_count") or 0)
+    text_preview = _short_visible_label(summary.get("text_preview"), fallback="", limit=220)
+    errors = data.get("errors") if isinstance(data.get("errors"), dict) else {}
+    error_bits = [str(value).strip() for value in errors.values() if str(value or "").strip()]
+    if controls or text_preview:
+        text_part = f" Textanfang: {text_preview}" if text_preview else ""
+        return f'Desktop-Engine hat "{title}" beobachtet: {controls} Controls erkannt.{text_part} Ich habe nichts veraendert.'
+    if error_bits:
+        return f'Desktop-Engine konnte "{title}" nicht voll beobachten: {error_bits[0][:180]}. Ich habe nichts veraendert.'
+    return f'Desktop-Engine hat "{title}" beobachtet, aber keine Controls oder lesbaren Texte erkannt. Ich habe nichts veraendert.'
+
+
+def _hermes_screen_text_needs_llm_followup(user_message: str) -> bool:
+    text = _normalize_agent_text(user_message)
+    return any(term in text for term in (
+        "sag mir",
+        "sage mir",
+        "welchen",
+        "welche",
+        "was soll",
+        "was wuerdest",
+        "was wurdest",
+        "naechstes",
+        "nachstes",
+        "entscheide",
+        "empfiehl",
+    ))
 
 
 def _format_tool_result(action_name: str, result: dict) -> str:
@@ -753,10 +840,55 @@ def _clean_hermes_ui_target(value: str) -> str:
     return target.strip(" ._-")
 
 
+def _extract_hermes_window_hint(value: str) -> str:
+    text = str(value or "").strip()
+    known_app_window = r"notepad|editor|discord|spotify|chrome|brave|code|vscode|explorer|whatsapp|telegram|edge|firefox|obsidian"
+    patterns = (
+        r"\b(?:im|in|ins)\s+(?:fenster|window|app)\s+(?P<window>.+?)(?=\s+(?:und|aber|durch|aus|vor)\b|[,.;!?]|$)",
+        r"\b(?:das|den|die|dem)?\s*(?:fenster|window|app)(?!\s+(?:und|aber|mit|per)\b)\s+(?P<window>.+?)(?=\s+(?:mit|und|aber|per|durch|aus|vor)\b|[,.;!?]|$)",
+        rf"\b(?:in|bei|aus|von)\s+(?P<window>{known_app_window})(?=\s|[,.;!?]|$)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        window = re.sub(r"\s+", " ", match.group("window").strip(" .,:;!?"))
+        if _normalize_agent_text(window) in {
+            "aktuelles fenster",
+            "aktuellen fenster",
+            "aktives fenster",
+            "aktiven fenster",
+            "aktuelles window",
+        }:
+            continue
+        if _normalize_agent_text(window).startswith(("und ", "aber ", "mit ", "per ")):
+            continue
+        if window:
+            return window[:80]
+    return ""
+
+
 def _hermes_forced_first_tool(worker: str, user_message: str) -> tuple[str, dict] | None:
     if worker != "hermes":
         return None
     text = _normalize_agent_text(user_message)
+    desktop_engine_terms = (
+        "desktop-engine",
+        "desktop engine",
+        "desktopengine",
+        "desktop_engine",
+        "hermes engine",
+    )
+    if any(term in text for term in desktop_engine_terms):
+        if any(term in text for term in ("status", "provider", "providers", "bereit", "ready")):
+            return ("desktop_engine_status", {})
+        if any(term in text for term in ("beobachte", "beobachten", "observe", "analysiere", "analysieren", "scanne", "scan")):
+            params = {"include_text": True, "max_depth": 3, "max_controls": 80}
+            window = _extract_hermes_window_hint(user_message)
+            if window:
+                params["window"] = window
+            return ("desktop_engine_observe", params)
+
     system_terms = (
         "systemstatus", "system status", "system-info", "system info",
         "pc status", "pc-status", "status vom system",
@@ -780,11 +912,21 @@ def _hermes_forced_first_tool(worker: str, user_message: str) -> tuple[str, dict
 
     screen_text_terms = (
         "bildschirmtext", "bildschirm text", "text auf dem bildschirm",
+        "fenstertext", "lies den fenstertext", "lese den fenstertext",
         "lies den bildschirm", "lese den bildschirm", "ocr", "screen text",
-        "read screen", "read the screen",
+        "lies mir den text", "lese mir den text", "lies mir bitte den text",
+        "lese mir bitte den text", "lies den text vor", "lese den text vor",
+        "lies den text", "lese den text", "lies bitte den text", "lese bitte den text",
+        "lies kurz den text", "lese kurz den text", "lies mal den text", "lese mal den text",
+        "zeig mir den text", "zeige mir den text", "zeig den text", "zeige den text",
+        "was steht", "read screen", "read the screen", "read text",
     )
     if any(term in text for term in screen_text_terms):
-        return ("screen_read_text", {})
+        params = {}
+        window = _extract_hermes_window_hint(user_message)
+        if window:
+            params["window"] = window
+        return ("screen_read_text", params)
 
     ui_tree_terms = (
         "echte windows controls", "windows controls", "ui controls", "echte controls",
@@ -793,7 +935,11 @@ def _hermes_forced_first_tool(worker: str, user_message: str) -> tuple[str, dict
         "was ist auf dem bildschirm", "was ist offen",
     )
     if any(term in text for term in ui_tree_terms):
-        return ("ui_tree", {"max_depth": 3, "max_controls": 80})
+        params = {"max_depth": 3, "max_controls": 80}
+        window = _extract_hermes_window_hint(user_message)
+        if window:
+            params["window"] = window
+        return ("ui_tree", params)
 
     ui_find_match = re.search(
         r"\b(?:finde|such(?:e)?|suche|zeige|pruefe|prufe)\b"
@@ -827,10 +973,34 @@ def _hermes_forced_first_tool(worker: str, user_message: str) -> tuple[str, dict
 def _hermes_desktop_controller_required(worker: str, user_message: str) -> bool:
     if worker != "hermes":
         return False
+    text = _normalize_agent_text(user_message)
+    if any(term in text for term in (
+        "systemstatus", "system status", "system-info", "system info",
+        "pc status", "pc-status", "status vom system",
+    )):
+        return False
+    metric_terms = (
+        "cpu", "ram", "arbeitsspeicher", "speicherplatz", "speicher", "disk",
+        "platte", "festplatte", "auslastung",
+    )
+    if sum(1 for term in metric_terms if term in text) >= 2:
+        return False
     try:
-        from companion.hermes_desktop import is_multi_step_desktop_prompt
+        from companion.hermes_desktop import (
+            classify_desktop_instruction,
+            is_multi_step_desktop_prompt,
+            split_hermes_desktop_instructions,
+        )
 
-        return is_multi_step_desktop_prompt(user_message)
+        if is_multi_step_desktop_prompt(user_message):
+            return True
+        for instruction in split_hermes_desktop_instructions(user_message):
+            kind = classify_desktop_instruction(instruction)
+            if kind in {"find", "type", "hotkey", "scroll", "wait"}:
+                return True
+            if kind == "click" and _extract_hermes_window_hint(instruction):
+                return True
+        return False
     except Exception as exc:
         logger.debug("Hermes desktop controller precheck failed: %s", exc)
         return False
@@ -857,9 +1027,10 @@ def _build_agent_context(worker: str) -> str:
         "- Nutze ausschliesslich die bereitgestellten Lexa-Tools fuer PC-Aktionen. Keine rohen Shell-/PowerShell-Befehle erfinden.\n"
         "- Apps oeffnest du mit app_open, Ordner legst du mit folder_create an, neue Text-/Code-Dateien schreibst du mit file_write.\n"
         "- file_write erstellt nur neue Dateien; wenn eine Datei existiert, melde das statt zu ueberschreiben.\n"
-        "- Fuer echte Desktop-Steuerung: orientiere dich zuerst mit ui_tree/ui_find fuer echte Windows-Controls; nutze screen_read_text/OCR nur als Fallback.\n"
-        "- Wenn der User mehrere Desktop-Schritte in einem Auftrag nennt, nutze hermes_desktop_task: es beobachtet/sucht read-only und bereitet riskante Aktionen fuer Lexa-Freigabe vor.\n"
+        "- Fuer echte Desktop-Steuerung: orientiere dich zuerst mit desktop_engine_observe oder ui_tree/ui_find fuer echte Windows-Controls; nutze screen_read_text/OCR nur als Fallback.\n"
+        "- Wenn der User mehrere Desktop-Schritte, Scrollen, Tippen, Hotkeys oder Warten in einem Desktop-Auftrag nennt, nutze hermes_desktop_task: es beobachtet/sucht read-only, nutzt OCR als Fallback und bereitet riskante Aktionen fuer Lexa-Freigabe vor.\n"
         "- Fuer Klicks auf sichtbare Buttons nutze bevorzugt ui_click statt desktop_click_text. Danach darfst du kontrolliert desktop_move, desktop_click, desktop_type, desktop_hotkey, desktop_scroll und desktop_wait nutzen.\n"
+        "- Wenn mehrere passende Controls gefunden werden, frage nach statt zu raten. Halte nach jeder mutierenden Aktion an und beobachte neu.\n"
         "- Vor Klicks, Tippen und Hotkeys muss klar sein, welches Fenster/Feld aktiv ist. Wenn nicht klar: erst schauen oder nachfragen.\n"
         "- Erfinde keine Systemwerte und keine UI-Zustaende. Wenn ein Sicht-/PC-Tool fehlschlaegt, melde das statt zu raten.\n"
         "- Riskante oder bestaetigungspflichtige Aktionen werden angehalten; sage dann klar, welche Bestaetigung fehlt.\n"
@@ -1007,12 +1178,22 @@ async def run_agent(
             })
             if action_name == "desktop_position" and exec_result.get("success"):
                 forced_direct_summary = _format_desktop_position_user_summary(exec_result.get("data", {}))
+            elif action_name == "desktop_engine_status" and exec_result.get("success"):
+                forced_direct_summary = _format_desktop_engine_status_user_summary(exec_result.get("data", {}))
+            elif action_name == "desktop_engine_observe" and exec_result.get("success"):
+                forced_direct_summary = _format_desktop_engine_observe_user_summary(exec_result.get("data", {}))
             elif action_name == "ui_tree" and exec_result.get("success"):
                 forced_direct_summary = _format_ui_tree_user_summary(exec_result.get("data", {}))
             elif action_name == "ui_find" and exec_result.get("success"):
                 forced_direct_summary = _format_ui_find_user_summary(exec_result.get("data", {}))
             elif action_name == "hermes_desktop_task" and exec_result.get("success"):
                 forced_direct_summary = _format_hermes_desktop_task_user_summary(exec_result.get("data", {}))
+            elif (
+                action_name == "screen_read_text"
+                and exec_result.get("success")
+                and not _hermes_screen_text_needs_llm_followup(user_message)
+            ):
+                forced_direct_summary = _format_screen_read_text_user_summary(exec_result.get("data", {}))
         step_count += 1
 
     if forced_direct_summary:

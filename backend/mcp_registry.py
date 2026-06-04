@@ -12,15 +12,14 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from backend.config import MCP_ENABLED
+from backend.config import LEXA_DATA_DIR, MCP_ENABLED
 from backend.mcp_client import MCPClient, MCPError
 
 logger = logging.getLogger("lexa.mcp_registry")
 
-# Config file location — project root or LEXA_DATA_DIR
+# Config file location - project root or LEXA_DATA_DIR
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_DATA_DIR = Path(os.environ.get("LEXA_DATA_DIR", str(_PROJECT_ROOT)))
-MCP_CONFIG_PATH = _DATA_DIR / "mcp_servers.json"
+MCP_CONFIG_PATH = LEXA_DATA_DIR / "mcp_servers.json"
 PROJECT_MCP_CONFIG_PATH = _PROJECT_ROOT / "mcp_servers.json"
 _PERSONAL_OS_MCP_INDEX = Path("11_Integrations") / "MCP" / "os-mcp-server" / "dist" / "index.js"
 

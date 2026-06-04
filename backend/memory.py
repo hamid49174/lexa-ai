@@ -35,6 +35,7 @@ from contextlib import contextmanager
 from typing import Any, Optional
 
 from backend.i18n import t
+from backend.config import LEXA_DATA_DIR
 from backend.memory_core.access import MemoryAccessTracker
 from backend.memory_core.connection import (
     close_thread_memory_connection,
@@ -65,8 +66,7 @@ _auto_remember_counter: int = 0
 _tables_ready: bool = False
 _tables_lock = _threading.Lock()
 
-_DATA_DIR = os.environ.get("LEXA_DATA_DIR", str(Path(__file__).resolve().parent.parent))
-DB_PATH = Path(_DATA_DIR) / "lexa_memory.db"
+DB_PATH = LEXA_DATA_DIR / "lexa_memory.db"
 
 MEMORY_GRAPH_MAX_NODES = 220
 MEMORY_GRAPH_KEYWORD_NODES = 24

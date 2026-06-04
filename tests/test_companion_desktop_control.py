@@ -6,6 +6,42 @@ from companion import desktop_control
 def test_hotkey_parser_accepts_bounded_common_combo():
     assert desktop_control._parse_hotkey_keys("ctrl+l") == ["ctrl", "l"]
     assert desktop_control._parse_hotkey_keys(["alt", "tab"]) == ["alt", "tab"]
+    assert desktop_control._parse_hotkey_keys("ctrl+plus") == ["ctrl", "plus"]
+    assert desktop_control._parse_hotkey_keys("ctrl+minus") == ["ctrl", "minus"]
+
+
+def test_hotkey_parser_accepts_german_aliases():
+    assert desktop_control._parse_hotkey_keys("strg+a") == ["ctrl", "a"]
+    assert desktop_control._parse_hotkey_keys(["umschalt", "entf"]) == ["shift", "delete"]
+    assert desktop_control._parse_hotkey_keys("löschen") == ["delete"]
+    assert desktop_control._parse_hotkey_keys("Leertaste") == ["space"]
+    assert desktop_control._parse_hotkey_keys("Eingabetaste") == ["enter"]
+    assert desktop_control._parse_hotkey_keys("Ruecktaste") == ["backspace"]
+
+
+def test_hotkey_parser_accepts_space_separated_combos():
+    assert desktop_control._parse_hotkey_keys("strg a") == ["ctrl", "a"]
+    assert desktop_control._parse_hotkey_keys("alt tab") == ["alt", "tab"]
+    assert desktop_control._parse_hotkey_keys("Control Shift Esc") == ["ctrl", "shift", "esc"]
+
+
+def test_hotkey_parser_ignores_natural_connector_words():
+    assert desktop_control._parse_hotkey_keys("strg und a") == ["ctrl", "a"]
+    assert desktop_control._parse_hotkey_keys("control mit shift esc") == ["ctrl", "shift", "esc"]
+    assert desktop_control._parse_hotkey_keys("alt plus tab") == ["alt", "tab"]
+
+
+def test_hotkey_parser_accepts_navigation_aliases():
+    assert desktop_control._parse_hotkey_keys("pfeil rechts") == ["right"]
+    assert desktop_control._parse_hotkey_keys("Pfeil runter") == ["down"]
+    assert desktop_control._parse_hotkey_keys("Bild runter") == ["pagedown"]
+    assert desktop_control._parse_hotkey_keys("Pos1") == ["home"]
+    assert desktop_control._parse_hotkey_keys("Einfg") == ["insert"]
+
+
+def test_hotkey_parser_keeps_spaced_single_key_names_together():
+    assert desktop_control._parse_hotkey_keys("page down") == ["pagedown"]
+    assert desktop_control._parse_hotkey_keys("page up") == ["pageup"]
 
 
 def test_hotkey_parser_rejects_unknown_or_too_large_combo():
