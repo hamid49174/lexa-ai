@@ -321,6 +321,17 @@ def test_artifact_path_blocks_single_contextual_credential_file(tmp_path):
     assert "credentials" in result.stdout
 
 
+def test_artifact_path_allows_pyinstaller_certifi_ca_bundle(tmp_path):
+    ca_bundle = tmp_path / "win-unpacked" / "resources" / "backend-dist" / "_internal" / "certifi" / "cacert.pem"
+    ca_bundle.parent.mkdir(parents=True)
+    ca_bundle.write_text("-----BEGIN CERTIFICATE-----\npublic-ca-bundle\n-----END CERTIFICATE-----\n", encoding="utf-8")
+
+    result = run_script("-Root", str(tmp_path), "-ArtifactPath", str(tmp_path))
+
+    assert result.returncode == 0, result.stdout
+    assert "Risky artifact check passed" in result.stdout
+
+
 def test_artifact_path_blocks_contextual_credential_directory_root(tmp_path):
     artifact = tmp_path / ".docker"
     artifact.mkdir()

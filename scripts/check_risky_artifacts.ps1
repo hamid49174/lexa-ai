@@ -94,6 +94,12 @@ function Test-RiskyPath {
   return $false
 }
 
+function Test-AllowedArtifactPath {
+  param([string]$PathValue)
+  $normalized = Normalize-RepoPath $PathValue
+  return $normalized -match '(^|/)(resources/backend-dist/)?_internal/certifi/cacert\.pem$'
+}
+
 function Test-StrongSecretLikeText {
   param([string]$Text)
   if (-not $Text) { return $false }
@@ -259,7 +265,8 @@ foreach ($artifact in $ArtifactPath) {
       $isRiskyPath = $true
       $displayPath = $contextualPath
     }
-    if ($isRiskyPath -or $_.Name -match '(?i)^(\.env|audit\.log|bridge-audit\.log|lexa_memory\.db|lexa_memory\.db-|.*\.env$)') {
+    $isAllowedArtifactPath = (Test-AllowedArtifactPath $relative) -or (Test-AllowedArtifactPath $contextualPath)
+    if ((-not $isAllowedArtifactPath) -and ($isRiskyPath -or $_.Name -match '(?i)^(\.env|audit\.log|bridge-audit\.log|lexa_memory\.db|lexa_memory\.db-|.*\.env$)')) {
       Add-Finding "Forbidden file in artifact path '$artifactRoot': $displayPath" $true
     }
   }
