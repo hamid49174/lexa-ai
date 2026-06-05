@@ -92,6 +92,18 @@ class TestNoteRead:
         assert result["content"] == "Some content"
         assert result["category"] == "docs"
 
+    def test_read_title_escapes_like_wildcards(self):
+        """Titles containing '_' should be matched literally, not as LIKE wildcards."""
+        from backend.memory import note_create, note_read
+
+        note_create("releaseX1", "wrong wildcard match", "docs")
+        note_create("release_1", "literal underscore match", "docs")
+
+        result = note_read("release_1")
+
+        assert result["title"] == "release_1"
+        assert result["content"] == "literal underscore match"
+
     def test_read_nonexistent_returns_error(self):
         """note_read for a missing title returns an error dict."""
         from backend.memory import note_read
@@ -419,6 +431,23 @@ class TestMemoryRanking:
         ).fetchone()
         assert row["access_count"] >= 1
         assert row["last_accessed_at"]
+
+    def test_like_fallback_escapes_memory_query_wildcards(self, monkeypatch):
+        import backend.memory as mem
+
+        mem.add_memory("volumeXset false memory", "fact", 3)
+        mem.add_memory("volume_set correct memory", "fact", 3)
+
+        def force_like_fallback(_terms):
+            raise RuntimeError("force LIKE fallback")
+
+        monkeypatch.setattr(mem, "_escape_fts5_query", force_like_fallback)
+
+        results = mem.search_memory("volume_set", limit=5)
+        contents = [row["content"] for row in results]
+
+        assert "volume_set correct memory" in contents
+        assert "volumeXset false memory" not in contents
 
     def test_stop_words_cover_german_and_english(self):
         from backend.memory import _extract_search_terms

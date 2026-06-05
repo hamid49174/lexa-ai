@@ -91,6 +91,21 @@ def _track_memory_access(db: sqlite3.Connection, memory_ids: list[int]) -> None:
     _memory_access_tracker.track(db, memory_ids)
 
 
+def _escape_like_pattern(value: str) -> str:
+    """Escape SQLite LIKE wildcards while keeping normal substring search."""
+    return (
+        str(value or "")
+        .lower()
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+
+
+def _like_contains(value: str) -> str:
+    return f"%{_escape_like_pattern(value)}%"
+
+
 def _finalize_memory_results(
     db: sqlite3.Connection,
     memories: list[dict],
@@ -250,11 +265,12 @@ def _like_search_all(db: sqlite3.Connection, query: str, limit: int = 20) -> dic
 
     # Notes fallback
     note_conditions = " OR ".join(
-        ["LOWER(title) LIKE ? OR LOWER(content) LIKE ?" for _ in words]
+        ["LOWER(title) LIKE ? ESCAPE '\\' OR LOWER(content) LIKE ? ESCAPE '\\'" for _ in words]
     )
     note_params: list[Any] = []
     for w in words:
-        note_params.extend([f"%{w}%", f"%{w}%"])
+        like_param = _like_contains(w)
+        note_params.extend([like_param, like_param])
     try:
         notes = [dict(r) for r in db.execute(
             f"SELECT * FROM notes WHERE {note_conditions} ORDER BY updated_at DESC LIMIT ?",
@@ -264,8 +280,8 @@ def _like_search_all(db: sqlite3.Connection, query: str, limit: int = 20) -> dic
         notes = []
 
     # Memories fallback
-    mem_conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in words])
-    mem_params = [f"%{w}%" for w in words]
+    mem_conditions = " OR ".join(["LOWER(content) LIKE ? ESCAPE '\\'" for _ in words])
+    mem_params = [_like_contains(w) for w in words]
     try:
         memories = [dict(r) for r in db.execute(
             f"""SELECT id, content, category, memory_type, importance, source,
@@ -309,8 +325,8 @@ def note_read(title: str = "", *, limit: Optional[int] = None, offset: int = 0) 
     db = _get_db()
     if title:
         row = db.execute(
-            "SELECT * FROM notes WHERE title LIKE ?",
-            (f"%{title}%",),
+            "SELECT * FROM notes WHERE LOWER(title) LIKE ? ESCAPE '\\'",
+            (_like_contains(title),),
         ).fetchone()
         if row:
             return dict(row)
@@ -528,8 +544,8 @@ def search_memory(
 
     if not results:
         # Fallback: LIKE search with extracted keywords
-        conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in keywords])
-        params: list[Any] = [f"%{w}%" for w in keywords]
+        conditions = " OR ".join(["LOWER(content) LIKE ? ESCAPE '\\'" for _ in keywords])
+        params: list[Any] = [_like_contains(w) for w in keywords]
         rows = db.execute(
             f"""SELECT id, content, category, memory_type, importance, source,
                        created_at, access_count, last_accessed_at
@@ -1317,11 +1333,12 @@ def global_search(query: str, limit: int = 30, *, include_ranking: bool = False)
 
     # Search conversations (title + messages content) — always LIKE (no FTS on JSON)
     conv_conditions = " OR ".join(
-        ["LOWER(title) LIKE ? OR LOWER(messages) LIKE ?" for _ in words]
+        ["LOWER(title) LIKE ? ESCAPE '\\' OR LOWER(messages) LIKE ? ESCAPE '\\'" for _ in words]
     )
     conv_params: list[Any] = []
     for w in words:
-        conv_params.extend([f"%{w}%", f"%{w}%"])
+        like_param = _like_contains(w)
+        conv_params.extend([like_param, like_param])
     convs = db.execute(
         f"SELECT id, title, message_count, updated_at FROM conversations "
         f"WHERE {conv_conditions} ORDER BY updated_at DESC LIMIT ?",
@@ -1345,11 +1362,12 @@ def global_search(query: str, limit: int = 30, *, include_ranking: bool = False)
     except Exception:
         # FTS5 fallback to LIKE
         note_conditions = " OR ".join(
-            ["LOWER(title) LIKE ? OR LOWER(content) LIKE ?" for _ in words]
+            ["LOWER(title) LIKE ? ESCAPE '\\' OR LOWER(content) LIKE ? ESCAPE '\\'" for _ in words]
         )
         note_params: list[Any] = []
         for w in words:
-            note_params.extend([f"%{w}%", f"%{w}%"])
+            like_param = _like_contains(w)
+            note_params.extend([like_param, like_param])
         notes_rows = db.execute(
             f"SELECT id, title, category, created_at FROM notes "
             f"WHERE {note_conditions} ORDER BY updated_at DESC LIMIT ?",
@@ -1374,8 +1392,8 @@ def global_search(query: str, limit: int = 30, *, include_ranking: bool = False)
         mems_list = [dict(r) for r in mem_rows]
     except Exception:
         # FTS5 fallback to LIKE
-        mem_conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in words])
-        mem_params = [f"%{w}%" for w in words]
+        mem_conditions = " OR ".join(["LOWER(content) LIKE ? ESCAPE '\\'" for _ in words])
+        mem_params = [_like_contains(w) for w in words]
         mem_rows = db.execute(
             f"SELECT id, content, category, memory_type, importance, source, "
             f"created_at, access_count, last_accessed_at FROM memories "
