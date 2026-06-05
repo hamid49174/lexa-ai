@@ -566,6 +566,15 @@ _AUDIT_NOISE_COMMANDS: frozenset[str] = frozenset({"system_info", "system_uptime
 _AUDIT_DETAIL_PAIR_RE = re.compile(
     r"(?P<prefix>(?:^|\s)(?P<key>[A-Za-z_][\w.-]{0,40})=)(?P<value>.*?)(?=(?:\s+[A-Za-z_][\w.-]{0,40}=)|$)"
 )
+_AUDIT_COMPONENT_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
+_AUDIT_LOCAL_PATH_RE = re.compile(
+    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
+)
+_AUDIT_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+_AUDIT_SECRET_ASSIGNMENT_RE = re.compile(
+    r"\b(?P<key>api[_-]?key|apikey|authorization|credential|password|secret|token)\s*[:=]\s*[^\s,;]+",
+    re.IGNORECASE,
+)
 _AUDIT_SENSITIVE_DETAIL_KEYS: frozenset[str] = frozenset({
     "api_key",
     "apikey",
@@ -595,6 +604,7 @@ _AUDIT_SENSITIVE_DETAIL_KEYS: frozenset[str] = frozenset({
     "repo_path",
     "reply",
     "response",
+    "reason",
     "secret",
     "source",
     "target",
@@ -637,13 +647,43 @@ def _rotate_audit_log() -> None:
         logger.warning(f"Audit-Log Rotation fehlgeschlagen: {e}")
 
 
+def _safe_audit_component(value: object, *, fallback: str, max_chars: int = 120) -> str:
+    """Return a command/status component that cannot inject audit lines."""
+    text = str(value or "").strip()
+    if _AUDIT_COMPONENT_RE.match(text):
+        return text[:max_chars]
+    digest = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:12]
+    return f"{fallback}_{digest}"
+
+
+def _redact_audit_freeform_text(value: str) -> str:
+    text = _AUDIT_LOCAL_PATH_RE.sub("[local-path-redacted]", str(value or ""))
+    text = _AUDIT_EMAIL_RE.sub("[email-redacted]", text)
+    return _AUDIT_SECRET_ASSIGNMENT_RE.sub(
+        lambda match: f"{match.group('key')}=[redacted]",
+        text,
+    )
+
+
+def _safe_audit_entry(command: object, status: object, details: object = "") -> str:
+    safe_command = _safe_audit_component(command, fallback="command")
+    safe_status = _safe_audit_component(status, fallback="status", max_chars=80)
+    raw_details = _clip_audit_field(str(details or ""), 2000)
+    if raw_details and _should_redact_keyless_audit_details(safe_command, safe_status, raw_details):
+        safe_details = "[redacted]"
+    else:
+        safe_details, _redacted_fields = _redact_audit_details(raw_details)
+    suffix = f" {safe_details}" if safe_details else ""
+    return f"CMD={safe_command} STATUS={safe_status}{suffix}"
+
+
 def audit_log(command: str, status: str, details: str = "") -> None:
     """Log every command execution to audit log (with rotation at 10 MB).
 
     Falls back to stderr if file writing fails.
     """
     timestamp = datetime.now().isoformat()
-    entry = f"[{timestamp}] CMD={command} STATUS={status} {details}\n"
+    entry = f"[{timestamp}] {_safe_audit_entry(command, status, details)}\n"
     try:
         with _audit_lock:
             _rotate_audit_log()
@@ -741,7 +781,11 @@ def _redact_audit_details(details: str) -> tuple[str, list[str]]:
             redacted_fields.append(normalized)
         return f"{match.group('prefix')}[redacted]"
 
-    return _AUDIT_DETAIL_PAIR_RE.sub(replace, text), redacted_fields
+    redacted = _AUDIT_DETAIL_PAIR_RE.sub(replace, text)
+    freeform_redacted = _redact_audit_freeform_text(redacted)
+    if freeform_redacted != redacted and "freeform" not in seen_fields:
+        redacted_fields.append("freeform")
+    return freeform_redacted, redacted_fields
 
 
 def _should_redact_keyless_audit_details(command: str, status: str, details: str) -> bool:
@@ -761,10 +805,12 @@ def _parse_audit_entry(line: str) -> dict | None:
         return None
     command = match.group("command")
     status = match.group("status")
-    details, redacted_fields = _redact_audit_details(match.group("details") or "")
-    if not redacted_fields and _should_redact_keyless_audit_details(command, status, details):
+    raw_details = match.group("details") or ""
+    if _should_redact_keyless_audit_details(command, status, raw_details):
         details = "[redacted]"
         redacted_fields = ["details"]
+    else:
+        details, redacted_fields = _redact_audit_details(raw_details)
     return {
         "timestamp": _clip_audit_field(match.group("timestamp"), 80),
         "command": _clip_audit_field(command, 120),

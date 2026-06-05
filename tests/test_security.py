@@ -493,6 +493,64 @@ class TestEnvironmentTools:
 # ---------------------------------------------------------------------------
 
 class TestAuditLogRead:
+    def test_audit_log_writes_redacted_details_to_raw_log(self, tmp_path, monkeypatch):
+        """Raw audit.log storage redacts sensitive detail values before writing."""
+        import backend.security as sec
+
+        audit_path = tmp_path / "audit.log"
+        monkeypatch.setattr(sec, "AUDIT_LOG_PATH", audit_path)
+
+        sec.audit_log(
+            "note_create",
+            "blocked",
+            "MSG=call Alice about payroll FILE=C:\\Users\\admin\\secret.txt "
+            "REASON=C:\\Users\\admin\\private-plan.md token=abc123 alice@example.com",
+        )
+
+        raw_log = audit_path.read_text(encoding="utf-8")
+
+        assert "CMD=note_create STATUS=blocked" in raw_log
+        assert "MSG=[redacted]" in raw_log
+        assert "FILE=[redacted]" in raw_log
+        assert "REASON=[redacted]" in raw_log
+        assert "token=[redacted]" in raw_log
+        assert "call Alice" not in raw_log
+        assert "C:\\Users\\admin" not in raw_log
+        assert "abc123" not in raw_log
+        assert "alice@example.com" not in raw_log
+
+    def test_audit_log_redacts_keyless_error_details_before_writing(self, tmp_path, monkeypatch):
+        """Bare error/path detail strings are not persisted in raw audit.log."""
+        import backend.security as sec
+
+        audit_path = tmp_path / "audit.log"
+        monkeypatch.setattr(sec, "AUDIT_LOG_PATH", audit_path)
+
+        sec.audit_log("window_open", "execution_error", "C:\\Users\\admin\\secret.txt failed")
+
+        raw_log = audit_path.read_text(encoding="utf-8")
+
+        assert "CMD=window_open STATUS=execution_error [redacted]" in raw_log
+        assert "C:\\Users\\admin" not in raw_log
+
+    def test_audit_log_sanitizes_command_and_status_components(self, tmp_path, monkeypatch):
+        """Malformed command/status values cannot inject extra audit lines."""
+        import backend.security as sec
+
+        audit_path = tmp_path / "audit.log"
+        monkeypatch.setattr(sec, "AUDIT_LOG_PATH", audit_path)
+
+        sec.audit_log("bad\nCMD=injected", "blocked STATUS=ok", "area=00_System")
+
+        raw_log = audit_path.read_text(encoding="utf-8")
+
+        assert raw_log.count("\n") == 1
+        assert "CMD=injected" not in raw_log
+        assert "STATUS=ok" not in raw_log
+        assert "CMD=command_" in raw_log
+        assert "STATUS=status_" in raw_log
+        assert "area=00_System" in raw_log
+
     def test_raw_audit_metadata_helpers_redact_values(self):
         """Raw audit helpers preserve correlation data without raw secrets or paths."""
         import backend.security as sec
@@ -579,6 +637,7 @@ class TestAuditLogRead:
         audit_path.write_text(
             "[2026-05-17T07:03:00] CMD=note_create STATUS=blocked "
             "MSG=call Alice about payroll FILE=C:\\Users\\admin\\secret.txt "
+            "REASON=blocked by C:\\Users\\admin\\private-plan.md "
             "area=00_System tag=lexa params=[] token=abc123\n",
             encoding="utf-8",
         )
@@ -589,6 +648,7 @@ class TestAuditLogRead:
 
         assert "MSG=[redacted]" in details
         assert "FILE=[redacted]" in details
+        assert "REASON=[redacted]" in details
         assert "token=[redacted]" in details
         assert "area=00_System" in details
         assert "tag=lexa" in details
@@ -597,7 +657,7 @@ class TestAuditLogRead:
         assert "C:\\Users\\admin" not in details
         assert "abc123" not in details
         assert result["entries"][0]["redacted"] is True
-        assert result["entries"][0]["redacted_fields"] == ["msg", "file", "token"]
+        assert result["entries"][0]["redacted_fields"] == ["msg", "file", "reason", "token"]
 
     def test_read_recent_audit_entries_redacts_reply_source_and_error_fields(self, tmp_path, monkeypatch):
         """Common action/voice detail keys are hidden from trust surfaces."""
