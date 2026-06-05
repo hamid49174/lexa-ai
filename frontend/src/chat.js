@@ -270,9 +270,6 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   // Orb stays visible — don't hide voice-orb-container
   const floatingCards = document.getElementById("floating-cards-container");
   if (floatingCards && !floatingCards.classList.contains("hidden")) floatingCards.classList.add("hidden");
-  // Hide conversation starters when sending a message
-  const starters = document.getElementById("conversation-starters");
-  if (starters && !starters.classList.contains("hidden")) starters.classList.add("hidden");
   // Chat messages stay hidden in ambient mode — only revealed by arrow key
   // (chat-messages visibility is managed by toggleChatView)
 
@@ -2331,7 +2328,7 @@ function selectSnippetPopup() {
 }
 function invalidateSnippetCache() { _snippetCache = null; }
 
-// Composer command palette and starter cards live in chat_composer_palette.js.
+// Composer command palette helpers live in chat_composer_palette.js.
 
 // Performance helpers.
 function trimChatMessages() {

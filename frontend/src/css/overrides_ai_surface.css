@@ -406,93 +406,6 @@
   color: rgba(162, 172, 255, 0.86);
 }
 
-.animated-ai-chat .conversation-starters {
-  order: 21;
-  width: min(260px, 100%);
-  max-width: 260px;
-  padding: 0;
-  margin-top: -6px;
-}
-
-.animated-ai-chat .starter-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 40px);
-  justify-content: center;
-  gap: 8px;
-}
-
-.animated-ai-chat .starter-card {
-  display: inline-flex;
-  width: 40px;
-  min-width: 40px;
-  height: 38px;
-  min-height: 38px;
-  padding: 0;
-  grid-template-columns: none;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  border-radius: 10px;
-  border-color: rgba(194, 77, 224, 0.16);
-  background:
-    linear-gradient(145deg, rgba(194, 77, 224, 0.075), rgba(91, 124, 246, 0.04)),
-    rgba(16, 16, 26, 0.68);
-  box-shadow: none;
-}
-
-.animated-ai-chat .starter-card:hover {
-  border-color: rgba(194, 77, 224, 0.32);
-  background:
-    linear-gradient(145deg, rgba(194, 77, 224, 0.12), rgba(91, 124, 246, 0.07)),
-    rgba(18, 18, 30, 0.86);
-  box-shadow: none;
-  transform: translateY(-1px);
-}
-
-.animated-ai-chat .starter-icon {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: transparent;
-  color: rgba(233, 226, 255, 0.96);
-}
-
-.animated-ai-chat .starter-icon svg {
-  width: 18px;
-  height: 18px;
-}
-
-.animated-ai-chat .starter-content {
-  display: none;
-}
-
-.animated-ai-chat .starter-title {
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.18;
-  letter-spacing: 0;
-  color: rgba(248, 247, 255, 0.94);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.animated-ai-chat .starter-desc {
-  color: rgba(205, 200, 224, 0.72);
-  font-size: 11px;
-  line-height: 1.25;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.animated-ai-chat .starter-prefix {
-  color: rgba(162, 172, 255, 0.86);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1.2;
-}
-
 .animated-ai-chat .chat-messages {
   width: min(820px, calc(100% - 32px));
 }
@@ -535,16 +448,6 @@
 
   .animated-ai-chat #send-btn .send-btn-label {
     display: none;
-  }
-}
-
-@media (max-width: 980px) {
-  .animated-ai-chat .conversation-starters {
-    width: min(260px, 100%);
-  }
-
-  .animated-ai-chat .starter-grid {
-    grid-template-columns: repeat(4, 40px);
   }
 }
 

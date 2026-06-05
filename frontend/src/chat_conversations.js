@@ -171,8 +171,6 @@ async function newConversation() {
       window._chatViewOpen = false;
       const chatArrow = document.getElementById("chat-view-arrow");
       if (chatArrow) chatArrow.classList.remove("flipped");
-      const startersEl = document.getElementById("conversation-starters");
-      if (startersEl) { startersEl.classList.remove("hidden"); renderConversationStarters(); }
       try {
         await refreshConversationSidebar();
       } catch (e) {

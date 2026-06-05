@@ -212,7 +212,6 @@ async function init() {
     updateSystemStats();
     await loadConversations();
     updateConversationCount();
-    if (typeof renderConversationStarters === "function") renderConversationStarters();
 
     // Close nav menu when clicking overlay
     const navOverlay = document.getElementById("nav-overlay");

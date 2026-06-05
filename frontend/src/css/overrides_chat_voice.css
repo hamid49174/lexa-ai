@@ -414,11 +414,6 @@
   }
 }
 
-.conversation-starters {
-  max-width: 540px;
-  padding: 0 20px 12px;
-}
-
 .agent-attention-panel,
 .agent-resolved-panel {
   display: grid;
@@ -655,61 +650,6 @@
   font-family: var(--font-main);
   font-size: 10px;
   font-weight: 700;
-}
-
-.starter-grid {
-  gap: 8px;
-}
-
-.starter-card {
-  min-height: 58px;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.075);
-  background: rgba(15, 15, 25, 0.58);
-  box-shadow: none;
-  backdrop-filter: blur(14px);
-  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
-}
-
-.starter-card:hover {
-  transform: translateY(-1px);
-  border-color: rgba(165, 154, 255, 0.24);
-  background: rgba(22, 22, 34, 0.74);
-  box-shadow: none;
-}
-
-.starter-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 30px;
-  color: rgba(198, 190, 255, 0.9);
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 0;
-}
-
-.starter-icon svg {
-  width: 16px;
-  height: 16px;
-  display: block;
-}
-
-.starter-title {
-  font-size: 13px;
-  line-height: 1.2;
-  letter-spacing: 0;
-}
-
-.starter-desc {
-  font-size: 11px;
-  line-height: 1.35;
-  color: rgba(194, 190, 213, 0.58);
 }
 
 .chat-messages {
