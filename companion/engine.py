@@ -70,6 +70,59 @@ _DATA_DIR = LEXA_DATA_DIR
 # ── Global timer results (queryable by frontend) ──
 _timer_results = []  # list of {"message": str, "fired_at": float, "acknowledged": bool}
 
+_COMMAND_PARAM_ALIASES: dict[str, dict[str, str]] = {
+    "archive_create": {"path": "source"},
+    "archive_extract": {"path": "archive_path", "dest": "destination"},
+    "archive_list": {"path": "archive_path"},
+    "backup_create": {"dest": "destination"},
+    "convert_media": {"path": "input_path"},
+    "dns_lookup": {"domain": "host"},
+    "docker_logs": {"name": "container"},
+    "docker_start": {"name": "container"},
+    "docker_stop": {"name": "container"},
+    "git_add": {"path": "repo_path"},
+    "git_branch_list": {"path": "repo_path"},
+    "git_commit": {"path": "repo_path"},
+    "git_diff": {"path": "repo_path"},
+    "git_log": {"path": "repo_path"},
+    "git_pull": {"path": "repo_path"},
+    "git_push": {"path": "repo_path"},
+    "git_status": {"path": "repo_path"},
+    "image_convert": {"path": "source", "format": "output_format"},
+    "image_info": {"path": "source"},
+    "image_resize": {"path": "source"},
+    "organize_downloads": {"path": "downloads_path"},
+}
+
+_COMMAND_PARAM_DROPS: dict[str, frozenset[str]] = {
+    "backup_list": frozenset({"dest"}),
+    "image_batch_resize": frozenset({"height"}),
+    "time_tracking_start": frozenset({"task"}),
+}
+
+
+def _normalize_command_params(command: str, params: dict | None) -> dict:
+    """Map registry-friendly argument names to the existing command signatures."""
+    normalized = dict(params or {})
+
+    if command == "batch_rename" and "replacement" in normalized:
+        replacement = normalized.pop("replacement")
+        if "replace_to" not in normalized:
+            normalized["replace_to"] = replacement
+        if "replace_from" not in normalized and "pattern" in normalized:
+            normalized["replace_from"] = normalized.pop("pattern")
+
+    for old_key, new_key in _COMMAND_PARAM_ALIASES.get(command, {}).items():
+        if old_key not in normalized:
+            continue
+        value = normalized.pop(old_key)
+        normalized.setdefault(new_key, value)
+
+    for key in _COMMAND_PARAM_DROPS.get(command, frozenset()):
+        normalized.pop(key, None)
+
+    return normalized
+
 
 class CompanionEngine:
     """Hauptklasse für PC-Kontrolle."""
@@ -302,7 +355,7 @@ class CompanionEngine:
 
     def execute(self, command: str, params: dict | None = None) -> dict:
         """Execute a command with security checks."""
-        params = params or {}
+        params = _normalize_command_params(command, params)
 
         # Limit param count and key length to prevent abuse
         if len(params) > 20:
