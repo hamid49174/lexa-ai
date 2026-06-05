@@ -11,6 +11,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from backend.agent_protocol import redacted_summary
 from backend.obsidian_context import build_obsidian_context_payload, format_obsidian_context_for_prompt
 from backend.hermes_adapter import (
     configure_hermes_telegram,
@@ -30,6 +31,11 @@ logger = logging.getLogger("lexa.hermes_router")
 router = APIRouter(prefix="/hermes", tags=["hermes"])
 
 _DRAFT_APPROVALS = {"pending", "approved", "rejected", "conflict", "missing"}
+_LOCAL_PATH_RE = re.compile(
+    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
+)
+_TELEGRAM_TOKEN_RE = re.compile(r"\b\d{5,20}:[A-Za-z0-9_-]{20,120}\b")
+_LEXA_LICENSE_RE = re.compile(r"\bLEXA-[A-Z0-9]{5}(?:-[A-Z0-9]{5}){3}\b", re.IGNORECASE)
 
 
 class HermesTaskRequest(BaseModel):
@@ -70,6 +76,19 @@ class HermesDraftRequest(BaseModel):
 def _slug(value: str, fallback: str = "telegram-draft") -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")[:80]
     return slug or fallback
+
+
+def _client_safe_error(exc: Exception, *, max_chars: int = 220) -> str:
+    """Return a compact client-facing error without local paths or secrets."""
+    text = redacted_summary(str(exc), max_chars=max_chars)
+    text = _TELEGRAM_TOKEN_RE.sub("[telegram-token-redacted]", text)
+    text = _LEXA_LICENSE_RE.sub("[license-redacted]", text)
+    text = _LOCAL_PATH_RE.sub("[local-path-redacted]", text)
+    return text or "Details wurden lokal protokolliert."
+
+
+def _hermes_error_detail(prefix: str, exc: Exception) -> str:
+    return f"{prefix}: {_client_safe_error(exc)}"
 
 
 def _draft_title(body: str, explicit: str = "") -> str:
@@ -213,7 +232,7 @@ async def _safe_to_thread(fn, *args) -> dict:
         return result if isinstance(result, dict) else {}
     except Exception as exc:
         logger.warning("Hermes overview read failed for %s: %s", getattr(fn, "__name__", fn), exc)
-        return {"status": "error", "error": str(exc)}
+        return {"status": "error", "error": _client_safe_error(exc)}
 
 
 async def _safe_draft_queue() -> dict:
@@ -221,7 +240,7 @@ async def _safe_draft_queue() -> dict:
         return await list_hermes_os_drafts("all", 50, True)
     except Exception as exc:
         logger.warning("Hermes overview draft read failed: %s", exc)
-        return {"ok": False, "counts": {}, "drafts": [], "errors": [{"error": str(exc)}]}
+        return {"ok": False, "counts": {}, "drafts": [], "errors": [{"error": _client_safe_error(exc)}]}
 
 
 async def build_hermes_overview(include_context: bool = True) -> dict:
@@ -255,7 +274,7 @@ async def build_hermes_overview(include_context: bool = True) -> dict:
             context = context_result if isinstance(context_result, dict) else {}
         except Exception as exc:
             logger.warning("Hermes overview context read failed: %s", exc)
-            context = {"ok": False, "error": str(exc)}
+            context = {"ok": False, "error": _client_safe_error(exc)}
 
     obsidian = hermes.get("obsidian_context") if isinstance(hermes.get("obsidian_context"), dict) else {}
     context_files = context.get("files") if isinstance(context.get("files"), list) else []
@@ -431,7 +450,7 @@ async def hermes_overview(includeContext: bool = Query(default=True)):
         raise
     except Exception as exc:
         logger.exception("Hermes overview failed")
-        raise HTTPException(status_code=502, detail=f"Hermes-Overview konnte nicht gebaut werden: {exc}") from exc
+        raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes-Overview konnte nicht gebaut werden", exc)) from exc
 
 
 @router.post("/context")
@@ -441,15 +460,19 @@ async def hermes_context(req: HermesContextRequest):
         raise HTTPException(status_code=429, detail="Zu viele Hermes-Kontext-Anfragen.")
 
     topic = sanitize_input(req.topic)
-    audit_log("hermes", "context", f"topic={topic[:100]}")
-    payload = await asyncio.to_thread(
-        build_obsidian_context_payload,
-        topic=topic,
-        max_files=req.maxFiles,
-        body_chars=req.bodyChars,
-        include_previews=req.includePreviews,
-    )
-    prompt = await asyncio.to_thread(format_obsidian_context_for_prompt, payload)
+    audit_log("hermes", "context", f"topicChars={len(topic)} includePreviews={req.includePreviews}")
+    try:
+        payload = await asyncio.to_thread(
+            build_obsidian_context_payload,
+            topic=topic,
+            max_files=req.maxFiles,
+            body_chars=req.bodyChars,
+            include_previews=req.includePreviews,
+        )
+        prompt = await asyncio.to_thread(format_obsidian_context_for_prompt, payload)
+    except Exception as exc:
+        logger.exception("Hermes context failed")
+        raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes-Kontext konnte nicht gebaut werden", exc)) from exc
     return {
         "ok": True,
         "context": payload,
@@ -463,14 +486,18 @@ async def hermes_draft(req: HermesDraftRequest):
     if not check_rate_limit("execute"):
         raise HTTPException(status_code=429, detail="Zu viele Hermes-Draft-Anfragen.")
 
-    audit_log("hermes", "draft_create", f"title={_draft_title(req.body, req.title)[:80]}")
+    audit_log(
+        "hermes",
+        "draft_create",
+        f"titleChars={len(sanitize_input(req.title))} bodyChars={len(sanitize_input(req.body))} targetSet={bool(req.targetPath.strip())}",
+    )
     try:
         return await create_hermes_os_draft(req)
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("Hermes draft create failed")
-        raise HTTPException(status_code=502, detail=f"Hermes-Draft konnte nicht erstellt werden: {exc}") from exc
+        raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes-Draft konnte nicht erstellt werden", exc)) from exc
 
 
 @router.get("/drafts")
@@ -490,7 +517,7 @@ async def hermes_drafts(
         raise
     except Exception as exc:
         logger.exception("Hermes draft list failed")
-        raise HTTPException(status_code=502, detail=f"Hermes-Drafts konnten nicht gelesen werden: {exc}") from exc
+        raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes-Drafts konnten nicht gelesen werden", exc)) from exc
 
 
 @router.get("/telegram/status")
@@ -530,7 +557,7 @@ async def hermes_gateway_autostart_set(req: HermesGatewayAutostartRequest):
         return await asyncio.to_thread(set_hermes_gateway_autostart, req.enabled)
     except Exception as exc:
         logger.exception("Hermes gateway autostart update failed")
-        raise HTTPException(status_code=502, detail=f"Hermes-Gateway-Autostart fehlgeschlagen: {exc}")
+        raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes-Gateway-Autostart fehlgeschlagen", exc))
 
 
 @router.post("/telegram/configure")
@@ -551,7 +578,7 @@ async def hermes_telegram_configure(req: HermesTelegramConfigureRequest):
         )
     except Exception as exc:
         logger.exception("Hermes Telegram configure failed")
-        raise HTTPException(status_code=502, detail=f"Hermes-Telegram-Setup fehlgeschlagen: {exc}")
+        raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes-Telegram-Setup fehlgeschlagen", exc))
 
 
 @router.post("/run")
@@ -566,7 +593,7 @@ async def hermes_run(req: HermesTaskRequest):
         return await asyncio.to_thread(run_hermes_task, message, req.mode, req.timeoutSeconds)
     except Exception as exc:
         logger.exception("Hermes run failed")
-        raise HTTPException(status_code=502, detail=f"Hermes konnte nicht gestartet werden: {exc}")
+        raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes konnte nicht gestartet werden", exc))
 
 
 @router.post("/improve-lexa")
@@ -576,9 +603,9 @@ async def hermes_improve_lexa(req: HermesImproveRequest):
         raise HTTPException(status_code=429, detail="Zu viele Hermes-Anfragen.")
 
     focus = sanitize_input(req.focus)
-    audit_log("hermes", "improve_lexa", f"focus={focus[:100]}")
+    audit_log("hermes", "improve_lexa", f"focusChars={len(focus)}")
     try:
         return await asyncio.to_thread(improve_lexa_with_hermes, focus, req.timeoutSeconds)
     except Exception as exc:
         logger.exception("Hermes improve failed")
-        raise HTTPException(status_code=502, detail=f"Hermes-Verbesserung fehlgeschlagen: {exc}")
+        raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes-Verbesserung fehlgeschlagen", exc))

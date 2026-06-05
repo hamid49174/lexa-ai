@@ -298,6 +298,68 @@ def test_hermes_telegram_configure_endpoint_does_not_log_token(monkeypatch):
     assert "ABCDEFGHIJKLMNOPQRSTUVWXYZabc" not in str(seen)
 
 
+def test_hermes_error_details_redact_paths_tokens_and_license(monkeypatch):
+    client, router_hermes = _client(monkeypatch)
+    local_path = r"C:\Users\admin\secret.txt"
+    telegram_token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabc"
+    license_key = "LEXA-ABCDE-12345-F00D1-BEEF0"
+
+    def fake_run(message, mode, timeout):
+        raise RuntimeError(
+            f"failed at {local_path} token=supersecretvalue bot={telegram_token} license={license_key}"
+        )
+
+    monkeypatch.setattr(router_hermes, "run_hermes_task", fake_run)
+
+    res = client.post("/hermes/run", json={"message": "status"})
+
+    assert res.status_code == 502
+    detail = res.json()["detail"]
+    assert "[local-path-redacted]" in detail
+    assert "[telegram-token-redacted]" in detail
+    assert "[license-redacted]" in detail
+    assert local_path not in detail
+    assert telegram_token not in detail
+    assert license_key not in detail
+    assert "supersecretvalue" not in detail
+
+
+def test_hermes_audit_metadata_does_not_store_user_prompt_text(monkeypatch):
+    client, router_hermes = _client(monkeypatch)
+    seen = []
+    secret_text = "Private Hermes note token=supersecretvalue"
+    monkeypatch.setattr(router_hermes, "audit_log", lambda *args, **kwargs: seen.append(args))
+    monkeypatch.setattr(router_hermes, "build_obsidian_context_payload", lambda **kwargs: {
+        "ok": True,
+        "vault": {"loadedAll": False},
+        "files": [],
+    })
+    monkeypatch.setattr(router_hermes, "format_obsidian_context_for_prompt", lambda payload: "prompt")
+
+    context = client.post("/hermes/context", json={"topic": secret_text})
+
+    async def fake_create(req):
+        return {"success": True, "status": "draft", "safeMode": True}
+
+    monkeypatch.setattr(router_hermes, "create_hermes_os_draft", fake_create)
+    draft = client.post("/hermes/draft", json={"title": secret_text, "body": secret_text})
+    monkeypatch.setattr(router_hermes, "improve_lexa_with_hermes", lambda focus, timeout: {
+        "success": False,
+        "status": "unavailable",
+    })
+    improve = client.post("/hermes/improve-lexa", json={"focus": secret_text, "timeoutSeconds": 20})
+
+    assert context.status_code == 200
+    assert draft.status_code == 200
+    assert improve.status_code == 200
+    audit_text = str(seen)
+    assert "Private Hermes note" not in audit_text
+    assert "supersecretvalue" not in audit_text
+    assert "topicChars=" in audit_text
+    assert "bodyChars=" in audit_text
+    assert "focusChars=" in audit_text
+
+
 def test_hermes_improve_endpoint(monkeypatch):
     client, router_hermes = _client(monkeypatch)
     monkeypatch.setattr(router_hermes, "improve_lexa_with_hermes", lambda focus, timeout: {
