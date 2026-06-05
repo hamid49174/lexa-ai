@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from backend.agent_protocol import redacted_summary, stable_hash
 from backend.config import MAX_CHAT_MESSAGE_LENGTH, AGENT_MAX_STEPS, AGENT_STEP_TIMEOUT, VERSION
 from backend.shared import (
     conversation_history,
@@ -52,6 +53,9 @@ _AGENT_CONFIRMATION_WORDS = frozenset(_AGENT_CONFIRMATION_WORDS | {
     "ausfuhren", "ausfuehren",
 })
 _AGENT_CANCEL_WORDS = frozenset(_AGENT_CANCEL_WORDS | {"nicht ausfuhren", "nicht ausfuehren"})
+_LOCAL_PATH_RE = re.compile(
+    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
+)
 
 
 # ══════════════════════════════════════════════════
@@ -91,6 +95,17 @@ def _resolve_agent_worker(worker: str | None, message: str) -> str:
     if _is_hermes_worker_request(message):
         return "hermes"
     return "lexa"
+
+
+def _agent_request_audit_details(worker: str, message: str) -> str:
+    text = str(message or "")
+    return f"WORKER={worker} messageChars={len(text)} messageHash={stable_hash(text)[:12]}"
+
+
+def _client_safe_agent_error(value: object, *, max_chars: int = 220) -> str:
+    text = redacted_summary(str(value or ""), max_chars=max_chars)
+    text = _LOCAL_PATH_RE.sub("[local-path-redacted]", text)
+    return text or "Details wurden lokal protokolliert."
 
 
 def _is_hermes_system_status_request(worker: str, message: str) -> bool:
@@ -195,7 +210,7 @@ def _agent_events_summary(events: list[dict]) -> tuple[str, list[dict], dict]:
             run_data = event.get("run", {}) or {}
             summary = run_data.get("summary", summary)
         elif etype == "error":
-            summary = event.get("message", "Fehler")
+            summary = _client_safe_agent_error(event.get("message", "Fehler"))
     return summary, steps, run_data
 
 
@@ -223,7 +238,7 @@ async def agent_run(req: AgentRequest):
 
     sanitized = sanitize_input(req.message)
     worker = _resolve_agent_worker(req.worker, sanitized)
-    audit_log("agent", "received", f"WORKER={worker} MSG={sanitized[:100]}")
+    audit_log("agent", "received", _agent_request_audit_details(worker, sanitized))
     pending_guard_reply = _agent_pending_guard_reply(sanitized)
     if pending_guard_reply:
         run = AgentRun(user_message=sanitized, worker=worker)
@@ -274,7 +289,7 @@ async def agent_run(req: AgentRequest):
             logger.info("Agent stream cancelled by client")
         except Exception as e:
             logger.exception("Agent stream error")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': _client_safe_agent_error(e)})}\n\n"
         finally:
             # Save agent interaction to conversation history
             if full_summary:
@@ -307,7 +322,7 @@ async def agent_chat_endpoint(req: AgentRequest):
 
     sanitized = sanitize_input(req.message)
     worker = _resolve_agent_worker(req.worker, sanitized)
-    audit_log("agent_chat", "received", f"WORKER={worker} MSG={sanitized[:100]}")
+    audit_log("agent_chat", "received", _agent_request_audit_details(worker, sanitized))
     pending_guard_reply = _agent_pending_guard_reply(sanitized)
     if pending_guard_reply:
         async with _history_lock:

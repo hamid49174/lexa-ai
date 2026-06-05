@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 
 
 def collect_agent_events(coro):
@@ -46,6 +47,40 @@ def test_agent_ledger_feature_flag_on_emits_redacted_ledger(monkeypatch):
     assert ledger["plan"]["forbidden_tools"] == ["shell", "unsafe_direct_write", "mcpCallTool"]
     assert "supersecretvalue" not in ledger_json
     assert "[REDACTED]" in ledger_json
+
+
+def test_agent_start_audit_uses_message_metadata_not_prompt(monkeypatch):
+    import backend.ai_engine as ai_engine
+    import backend.agent_loop as agent_loop
+
+    entries = []
+
+    def fake_chat(*args, **kwargs):
+        return {"type": "text", "content": "Done"}
+
+    monkeypatch.setattr(ai_engine, "chat", fake_chat)
+    monkeypatch.setattr(agent_loop, "audit_log", lambda *args, **_kwargs: entries.append(args))
+
+    collect_agent_events(agent_loop.run_agent("handle request token=supersecretvalue", []))
+
+    start_entry = next(entry for entry in entries if entry[:2] == ("agent", "start"))
+    details = start_entry[2]
+    assert "RUN=" in details
+    assert "WORKER=lexa" in details
+    assert "messageChars=" in details
+    assert "messageHash=" in details
+    assert "handle request" not in details
+    assert "supersecretvalue" not in details
+    assert "MSG=" not in details
+
+
+def test_agent_loop_source_does_not_log_prompt_previews():
+    import backend.agent_loop as agent_loop
+
+    source = Path(agent_loop.__file__).read_text(encoding="utf-8")
+
+    assert "MSG={user_message[:100]}" not in source
+    assert "MSG=" not in source
 
 
 def test_agent_ledger_records_tool_action_and_verification(monkeypatch):

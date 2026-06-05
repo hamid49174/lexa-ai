@@ -125,6 +125,17 @@ def _agent_policy_enforce_enabled() -> bool:
     return os.getenv("LEXA_AGENT_POLICY_ENFORCE", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _agent_start_audit_details(run_id: str, worker_name: str, user_message: str) -> str:
+    """Return start-audit metadata without writing raw prompts to audit.log."""
+    from backend.agent_protocol import stable_hash
+
+    message = str(user_message or "")
+    return (
+        f"RUN={run_id} WORKER={worker_name} "
+        f"messageChars={len(message)} messageHash={stable_hash(message)[:12]}"
+    )
+
+
 def _agent_trace_path(run_id: str) -> Path:
     root = Path(__file__).resolve().parents[1]
     configured = os.getenv("LEXA_AGENT_TRACE_DIR", "").strip()
@@ -1116,7 +1127,7 @@ async def run_agent(
                     "forbidden_tools": run.ledger.plan.forbidden_tools,
                 },
             )
-    audit_log("agent", "start", f"RUN={run.id} WORKER={worker_name} MSG={user_message[:100]}")
+    audit_log("agent", "start", _agent_start_audit_details(run.id, worker_name, user_message))
 
     # Build agent-specific system context
     agent_context = _build_agent_context(worker_name)
