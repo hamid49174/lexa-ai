@@ -41,7 +41,10 @@ def test_quality_gates_include_release_script_tests_and_startup_smoke():
     assert "--cov=backend" in src
     assert "check_risky_artifacts.ps1" in src
     assert "sync-vendor.cjs" in src
-    assert "electron_startup_health_smoke.js" in src
+    assert 'Filter "electron_*_smoke.js"' in src
+    assert "node $test.FullName" in src
+    assert "Electron smoke gate completed" in src
+    assert "& $Electron" not in src
 
 
 def test_quality_gates_support_eval_and_ci_modes():

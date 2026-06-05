@@ -1,5 +1,8 @@
 import subprocess
+import tempfile
 from pathlib import Path
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -23,10 +26,16 @@ def write_minimal_repo(repo_root: Path) -> None:
     (repo_root / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
 
 
-def test_dependency_repro_does_not_report_optional_lockfile_without_package(tmp_path):
-    repo_root = tmp_path / "repo"
-    website_root = tmp_path / "website"
-    os_root = tmp_path / "OS"
+@pytest.fixture
+def script_tmp_path():
+    with tempfile.TemporaryDirectory(prefix="lexa-dep-repro-") as temp_dir:
+        yield Path(temp_dir)
+
+
+def test_dependency_repro_does_not_report_optional_lockfile_without_package(script_tmp_path):
+    repo_root = script_tmp_path / "repo"
+    website_root = script_tmp_path / "website"
+    os_root = script_tmp_path / "OS"
     write_minimal_repo(repo_root)
     (repo_root / "frontend").mkdir()
     (repo_root / "frontend" / "package.json").write_text("{}", encoding="utf-8")
@@ -52,10 +61,10 @@ def test_dependency_repro_does_not_report_optional_lockfile_without_package(tmp_
     assert "missing: website" not in result.stdout
 
 
-def test_dependency_repro_warns_for_lockfile_without_package(tmp_path):
-    repo_root = tmp_path / "repo"
-    website_root = tmp_path / "website"
-    os_root = tmp_path / "OS"
+def test_dependency_repro_warns_for_lockfile_without_package(script_tmp_path):
+    repo_root = script_tmp_path / "repo"
+    website_root = script_tmp_path / "website"
+    os_root = script_tmp_path / "OS"
     write_minimal_repo(repo_root)
     (repo_root / "frontend").mkdir()
     (repo_root / "frontend" / "package.json").write_text("{}", encoding="utf-8")
@@ -78,10 +87,10 @@ def test_dependency_repro_warns_for_lockfile_without_package(tmp_path):
     assert "yarn.lock" in result.stdout
 
 
-def test_dependency_repro_rejects_directory_named_package_json(tmp_path):
-    repo_root = tmp_path / "repo"
-    website_root = tmp_path / "website"
-    os_root = tmp_path / "OS"
+def test_dependency_repro_rejects_directory_named_package_json(script_tmp_path):
+    repo_root = script_tmp_path / "repo"
+    website_root = script_tmp_path / "website"
+    os_root = script_tmp_path / "OS"
     write_minimal_repo(repo_root)
     (repo_root / "frontend").mkdir()
     (repo_root / "frontend" / "package.json").write_text("{}", encoding="utf-8")
@@ -105,10 +114,10 @@ def test_dependency_repro_rejects_directory_named_package_json(tmp_path):
     assert "package.json" in result.stdout
 
 
-def test_dependency_repro_warns_for_optional_package_without_lockfile(tmp_path):
-    repo_root = tmp_path / "repo"
-    website_root = tmp_path / "website"
-    os_root = tmp_path / "OS"
+def test_dependency_repro_warns_for_optional_package_without_lockfile(script_tmp_path):
+    repo_root = script_tmp_path / "repo"
+    website_root = script_tmp_path / "website"
+    os_root = script_tmp_path / "OS"
     write_minimal_repo(repo_root)
     (repo_root / "frontend").mkdir()
     (repo_root / "frontend" / "package.json").write_text("{}", encoding="utf-8")
@@ -131,10 +140,10 @@ def test_dependency_repro_warns_for_optional_package_without_lockfile(tmp_path):
     assert "package-lock.json" in result.stdout
 
 
-def test_dependency_repro_rejects_directory_named_lockfile(tmp_path):
-    repo_root = tmp_path / "repo"
-    website_root = tmp_path / "website"
-    os_root = tmp_path / "OS"
+def test_dependency_repro_rejects_directory_named_lockfile(script_tmp_path):
+    repo_root = script_tmp_path / "repo"
+    website_root = script_tmp_path / "website"
+    os_root = script_tmp_path / "OS"
     write_minimal_repo(repo_root)
     (repo_root / "frontend").mkdir()
     (repo_root / "frontend" / "package.json").write_text("{}", encoding="utf-8")
@@ -158,10 +167,10 @@ def test_dependency_repro_rejects_directory_named_lockfile(tmp_path):
     assert "ok: website lockfile" not in result.stdout
 
 
-def test_dependency_repro_rejects_directory_named_required_file(tmp_path):
-    repo_root = tmp_path / "repo"
-    website_root = tmp_path / "website"
-    os_root = tmp_path / "OS"
+def test_dependency_repro_rejects_directory_named_required_file(script_tmp_path):
+    repo_root = script_tmp_path / "repo"
+    website_root = script_tmp_path / "website"
+    os_root = script_tmp_path / "OS"
     write_minimal_repo(repo_root)
     (repo_root / "requirements.txt").unlink()
     (repo_root / "requirements.txt").mkdir()

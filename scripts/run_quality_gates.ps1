@@ -307,9 +307,16 @@ function Invoke-ElectronSmokeGate {
     Write-Warning "Electron binary not found at $Electron; skipping Electron smoke gate."
     return
   }
-  Invoke-Gate "electron startup health smoke" { & $Electron "tests/electron_startup_health_smoke.js" }
-  Invoke-Gate "electron presence challenge smoke" { & $Electron "tests/electron_presence_challenge_smoke.js" }
-  Invoke-Gate "electron UI visual smoke" { & $Electron "tests/electron_ui_visual_smoke.js" }
+  $tests = Get-ChildItem (Join-Path $RepoRoot "tests") -Filter "electron_*_smoke.js" | Sort-Object Name
+  if ($tests.Count -eq 0) {
+    Write-Warning "No Electron smoke tests found."
+    return
+  }
+  foreach ($test in $tests) {
+    Invoke-Gate "node $($test.Name)" { node $test.FullName }
+  }
+  Write-Host ""
+  Write-Host "Electron smoke gate completed: $($tests.Count) files."
 }
 
 Write-Host "Lexa quality gates ($Mode)"
