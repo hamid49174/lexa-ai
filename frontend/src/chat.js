@@ -481,7 +481,17 @@ function chatSuggestionHasAnyWord(text, words) {
   return (words || []).some((word) => chatSuggestionHasWord(text, word));
 }
 
+function chatSuggestionShouldStayQuietForExactOutput(userQuestion) {
+  const query = chatSuggestionNormalizedText(userQuestion);
+  return /\b(beende|endet|ende)\b.*\b(exakt|genau)\b/.test(query)
+    || /\b(exakt|genau)\b.*\b(beende|endet|ende)\b/.test(query)
+    || /\b(beginnt|starte|start)\b.*\bendet\b/.test(query)
+    || /\bmarkdown[-\s]?format\b.*\b(codeblock|code block|tabelle)\b/.test(query);
+}
+
 function generateSuggestions(responseText, userQuestion) {
+  if (chatSuggestionShouldStayQuietForExactOutput(userQuestion)) return [];
+
   const suggestions = [];
   const lower = chatSuggestionNormalizedText(responseText);
   const questionLower = chatSuggestionNormalizedText(userQuestion);
@@ -710,9 +720,17 @@ function generateSuggestions(responseText, userQuestion) {
     "permission review", "permissions review", "least privilege",
     "data loss", "data-loss", "data loss risk", "data exfiltration",
     "exfiltration", "secret leak", "secret leakage", "prompt injection",
+    "security", "privacy", "secrets", "secret", "api key", "api keys",
+    "token", "tokens", "system prompt", "system prompts", "hidden instructions",
+      "audit logs", "raw logs", "stacktrace", "private paths", "sensitive data",
+      "safe error", "safe error message", "secure error message",
     "datenschutz review", "datenschutz audit", "bedrohungsmodell",
     "berechtigungsreview", "berechtigungspruefung", "berechtigungen pruefen",
-    "datenverlust", "datenabfluss",
+    "datenschutz", "sicherheit", "secrets", "api keys", "token", "tokens",
+    "systemprompt", "systemprompts", "systemanweisung", "systemanweisungen",
+    "versteckte anweisungen", "rohlogs", "audit logs", "stacktrace",
+    "private pfade", "sensible daten", "sensible upload", "interne fehlermeldungen",
+    "datenleck", "datenleak", "datenverlust", "datenabfluss",
   ]);
   const hasSecurityPrivacyContextTopic = hasAnyTopic([
     "for", "fuer", "von", "before", "vor", "lexa", "memory",
@@ -869,12 +887,13 @@ function generateSuggestions(responseText, userQuestion) {
     "einstellungen zuruecksetzen", "backup wiederherstellen",
     "migration anwenden", "datenbank migrieren", "index neu aufbauen",
     "massenloeschung", "destruktive aktion", "gefaehrliche aenderung",
+    "gefaehrliche desktop aktion", "datei ausserhalb", "ausserhalb des projekts loeschen",
     "datenverlust risiko",
   ]);
   const hasDataSafetyContextTopic = hasAnyTopic([
     "lexa", "assistant", "app", "workspace", "project", "repo",
     "database", "sqlite", "memory", "memories", "settings",
-    "downloads", "files", "folder", "folders", "backup",
+    "downloads", "files", "folder", "folders", "desktop", "backup",
     "migration", "index", "local", "dry run", "read only",
     "read-only", "restore", "rollback", "confirm", "confirmation",
     "projekt", "datenbank", "erinnerung", "erinnerungen",
@@ -882,6 +901,21 @@ function generateSuggestions(responseText, userQuestion) {
     "nur lesend", "wiederherstellen", "bestaetigen", "bestaetigung",
   ]);
   const hasDataSafetyReviewTopic = hasDataSafetyTopic && hasDataSafetyContextTopic;
+  const hasSecuritySensitiveSuggestionContext = hasSecurityPrivacyReviewTopic
+    || hasDataSafetyReviewTopic
+    || hasAnyTopic([
+      "secret", "secrets", "api key", "api keys", "token", "tokens",
+      "system prompt", "system prompts", "hidden instructions", "raw logs",
+      "audit logs", "stacktrace", "private paths", "sensitive data",
+      "prompt injection", "data leak", "data exfiltration", "dangerous action",
+      "secret leak",
+      "systemprompt", "systemprompts", "systemanweisung", "systemanweisungen",
+      "versteckte anweisungen", "rohlogs", "private pfade", "sensible daten",
+      "sensible upload", "interne fehlermeldungen", "datenleck", "datenabfluss",
+      "sichere fehlermeldung", "sichere fehlermeldungen",
+      "gefaehrliche aktion", "gefaehrliche desktop aktion", "datei ausserhalb",
+      "ausserhalb des projekts",
+    ]);
   const hasDebugTriageTopic = hasAnyTopic([
     "bug triage", "incident triage", "debug plan", "debugging plan",
     "debug this", "debug lexa", "debug the error", "debug error",
@@ -1154,6 +1188,7 @@ function generateSuggestions(responseText, userQuestion) {
     (hasDecisionConstraintTopic && (hasDecisionPlanningTopic || hasDecisionIntentTopic)) ||
     hasRiskPlanningTopic ||
     hasSecurityPrivacyReviewTopic ||
+    hasSecuritySensitiveSuggestionContext ||
     hasAccessibilityReviewTopic ||
     hasPerformanceReviewTopic ||
     hasTestingReviewTopic ||
@@ -1193,6 +1228,8 @@ function generateSuggestions(responseText, userQuestion) {
       suggestions.unshift(t("chat.suggDryRunFirst"), t("chat.suggCheckBackup"), t("chat.suggConfirmChanges"));
     } else if (hasShipCheckReviewTopic) {
       suggestions.unshift(t("chat.suggShipChecklist"), t("chat.suggRunSmokeTests"), t("chat.suggCheckRollback"));
+    } else if (hasRiskPlanningTopic || hasSecurityPrivacyReviewTopic || hasSecuritySensitiveSuggestionContext) {
+      suggestions.unshift(t("chat.suggCheckRisks"), t("chat.suggMakeRecommendation"), t("chat.suggListOpenQuestions"));
     } else if (hasMemoryContextReviewTopic) {
       suggestions.unshift(t("chat.suggReviewMemory"), t("chat.suggBuildContextPack"), t("chat.suggListOpenQuestions"));
     } else if (hasAgentToolReviewTopic) {
@@ -1203,11 +1240,12 @@ function generateSuggestions(responseText, userQuestion) {
       suggestions.unshift(t("chat.suggMeasurePerformance"), t("chat.suggRunFocusedTests"), t("chat.suggCheckRisks"));
     } else if (hasAccessibilityReviewTopic) {
       suggestions.unshift(t("chat.suggCheckAccessibility"), t("chat.suggRunFocusedTests"), t("chat.suggListOpenQuestions"));
-    } else if (hasRiskPlanningTopic || hasSecurityPrivacyReviewTopic) {
-      suggestions.unshift(t("chat.suggCheckRisks"), t("chat.suggMakeRecommendation"), t("chat.suggListOpenQuestions"));
     } else {
       suggestions.unshift(t("chat.suggCompareOptions"), t("chat.suggMakeRecommendation"), t("chat.suggListOpenQuestions"));
     }
+  }
+  if (hasSecuritySensitiveSuggestionContext) {
+    return [...new Set(suggestions)].slice(0, 3);
   }
   // Music context
   if (hasAny(["spotify", "musik", "song", "playlist"])) {

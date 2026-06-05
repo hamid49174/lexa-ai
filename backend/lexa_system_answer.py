@@ -67,7 +67,6 @@ def _has_system_intent(value: str) -> bool:
         "was bringt",
         "wofuer",
         "sinn",
-        "spaeter",
         "veroeffentlich",
         "veroffentlich",
         "release",
@@ -75,14 +74,23 @@ def _has_system_intent(value: str) -> bool:
         "fertig",
         "stand",
         "was kann",
-        "wert",
     )
-    return any(pattern in value for pattern in patterns)
+    return any(pattern in value for pattern in patterns) or re.search(r"\bwert\b", value) is not None
+
+
+def _looks_like_task_or_memory_request(value: str) -> bool:
+    return bool(re.search(
+        r"\b(?:merke|merk|speicher|aendere|andere|mach|mache|erstelle|fasse|"
+        r"vergleiche|stelle|antworte|erklaere|pruefe)\b",
+        value,
+    ))
 
 
 def looks_like_lexa_system_question(text: str) -> bool:
     value = _normalize(text)
     if not value or value.startswith("/"):
+        return False
+    if _looks_like_task_or_memory_request(value):
         return False
     return _has_system_subject(value) and _has_system_intent(value)
 

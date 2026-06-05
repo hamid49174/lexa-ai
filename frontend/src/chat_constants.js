@@ -4,12 +4,11 @@
 const _AGENT_PATTERNS = [
   // Sequential actions
   /\bund\s+(dann|danach|anschliessend)\b/i,
-  /\bdanach\b/i,
   /\berstens\b.*\bzweitens\b/i,
   /\bschritt\s*\d/i,
   /\b(zuerst|erst)\b.*\b(dann|danach)\b/i,
   // Batch/bulk operations
-  /\b(alle|saemtliche|jeden|jede|jedes)\b.*\b(und|dann|danach)\b/i,
+  /\b(alle|saemtliche|jeden|jede|jedes)\b.*\b(dateien|ordner|todos|aufgaben|bugs|probleme|tests|logs|dokumente|notizen|eintraege|items)\b.*\b(und|dann|danach)\b.*\b(loesch|entfern|verschieb|kopier|erstell|fix|beheb|scan|scanne|pruef|pruefe|sortier|organisier|bereinig)/i,
   /\braeume?\s+(auf|auf\b|den|die|das|meinen?)/i,
   /\bsortiere?\b.*\bund\b/i,
   /\borganisiere?\b/i,

@@ -10,6 +10,16 @@ def test_lexa_system_answer_detects_os_hermes_opinion_questions():
     assert not answer.looks_like_lexa_system_question("wie findest du kuenstliche intelligenz")
 
 
+def test_lexa_system_answer_does_not_steal_memory_or_planning_prompts():
+    assert not answer.looks_like_lexa_system_question(
+        "Merke dir fuer diesen Chat: Mein Hauptziel ist, Lexa stabil und hochwertig zu machen."
+    )
+    assert not answer.looks_like_lexa_system_question(
+        "Mach aus dieser chaotischen Idee einen klaren Plan: Lexa besser machen, Bugs finden, "
+        "morgen testen, spaeter Website, keine halben Sachen."
+    )
+
+
 def test_lexa_system_answer_uses_live_status_shape(monkeypatch):
     monkeypatch.setattr(answer, "get_hermes_status", lambda: {
         "health_state": "ready",

@@ -253,6 +253,32 @@ def test_complex_day_plan_is_answered_with_consistent_planning(monkeypatch):
     assert "Abendessen weg" not in reply
 
 
+def test_day_plan_question_request_does_not_generate_default_hamburg_plan():
+    reply = router_chat.try_day_plan_reply(
+        "Stelle mir genau 3 Rueckfragen, bevor du mir einen Tagesplan machst.",
+        [],
+    )
+
+    assert reply is None
+
+
+def test_day_plan_followup_ignores_stale_plan_after_topic_switch():
+    ctx = router_chat._day_plan_context_from_text(COMPLEX_DAY_PLAN)
+    history = [
+        {"role": "user", "content": COMPLEX_DAY_PLAN},
+        {"role": "assistant", "content": router_chat._day_plan_full_reply(ctx)},
+        {"role": "user", "content": "Was ist mein Hauptziel in diesem Chat?"},
+        {"role": "assistant", "content": "Dein Hauptziel ist jetzt, Voice und Agenten zuerst zu testen."},
+    ]
+
+    reply = router_chat.try_day_plan_reply(
+        "Beziehe dich auf deine letzte Antwort und mache daraus eine Checkliste.",
+        history,
+    )
+
+    assert reply is None
+
+
 def test_day_plan_shorter_followup_preserves_constraints(monkeypatch):
     client = _client_with_day_plan_history(monkeypatch)
     monkeypatch.setattr(router_chat, "chat", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("no provider")))

@@ -356,6 +356,11 @@ _DAY_PLAN_SIGNAL_RE = re.compile(
     r"\b(?:arbeitstag|tagesplan|realistisch\w*\s+plan|realistisch\w*\s+tagesplan)\b",
     re.IGNORECASE,
 )
+_DAY_PLAN_DEFERRED_QUESTION_RE = re.compile(
+    r"\b(?:rueckfragen|fragen)\b.*\bbevor\b.*\b(?:tagesplan|plan)\b|"
+    r"\bbevor\b.*\b(?:tagesplan|plan)\b.*\b(?:rueckfragen|fragen)\b",
+    re.IGNORECASE,
+)
 _WORK_WINDOW_RE = re.compile(
     r"(?:von\s*)?(?P<start>\d{1,2})(?::(?P<smin>\d{2}))?\s*"
     r"(?:bis|-|–)\s*(?P<end>\d{1,2})(?::(?P<emin>\d{2}))?\s*(?:uhr)?"
@@ -372,6 +377,11 @@ _START_UPDATE_RE = re.compile(
 )
 _SHORTER_PLAN_RE = re.compile(r"\b(?:kuerzer|kürzer|kurzfassung|knapper|kompakt|zusammenfassen)\b", re.IGNORECASE)
 _TODO_PLAN_RE = re.compile(r"\b(?:daraus|mach|mache|erstell|erstelle).*\b(?:todo|to-do|checkliste|liste)\b", re.IGNORECASE)
+_DAY_PLAN_ASSISTANT_MARKER_RE = re.compile(
+    r"\b(?:Realistischer Plan fuer morgen|Kurzfassung:|Todo fuer morgen|Freie Zeit/Puffer|"
+    r"Schlaf nicht kuerzen|Essen und Schlaf bleiben drin)\b",
+    re.IGNORECASE,
+)
 _PRIORITY_PLAN_RE = re.compile(r"\b(?:welche\s+aufgabe\s+zuerst|was\s+zuerst|priorisier|prioritaet|priorität)\b", re.IGNORECASE)
 
 
@@ -453,6 +463,8 @@ def _day_plan_context_from_text(text: str) -> dict | None:
     source = text or ""
     if not _DAY_PLAN_SIGNAL_RE.search(source):
         return None
+    if _DAY_PLAN_DEFERRED_QUESTION_RE.search(source):
+        return None
     work_match = _WORK_WINDOW_RE.search(source)
     if work_match:
         work_start = _parse_clock_minutes(work_match.group("start"), work_match.group("smin"))
@@ -512,6 +524,14 @@ def _latest_day_plan_context(history: list[dict]) -> dict | None:
             continue
         _apply_day_plan_start_update(latest, str(msg.get("content") or ""))
     return latest
+
+
+def _latest_assistant_is_day_plan(history: list[dict]) -> bool:
+    for msg in reversed(history or []):
+        if msg.get("role") != "assistant":
+            continue
+        return bool(_DAY_PLAN_ASSISTANT_MARKER_RE.search(str(msg.get("content") or "")))
+    return False
 
 
 def _apply_day_plan_start_update(context: dict, text: str) -> bool:
@@ -642,6 +662,8 @@ def try_day_plan_reply(user_message: str, history: list[dict]) -> str | None:
 
     context = _latest_day_plan_context(history)
     if not context:
+        return None
+    if not _latest_assistant_is_day_plan(history):
         return None
     if _apply_day_plan_start_update(context, text):
         return _day_plan_shifted_reply(context)
