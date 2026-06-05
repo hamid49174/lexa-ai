@@ -54,6 +54,13 @@ def unregister_ws_client(client_id: int):
     logger.info(f"WebSocket voice client {client_id} disconnected (total: {len(_ws_queues)})")
 
 
+def _enqueue_ws_event(queue: asyncio.Queue, evt: dict, event_type: str) -> None:
+    try:
+        queue.put_nowait(evt)
+    except asyncio.QueueFull:
+        logger.warning(f"[VoiceWS] Queue full for client, dropping {event_type} event")
+
+
 def push_event(event_type: str, text: str = "", **extra):
     """Thread-safe push to all WebSocket clients + fallback deque.
     Safe to call from any thread (wakeword, TTS, etc.).
@@ -76,9 +83,7 @@ def push_event(event_type: str, text: str = "", **extra):
         with _ws_lock:
             for q in list(_ws_queues.values()):
                 try:
-                    _main_loop.call_soon_threadsafe(q.put_nowait, evt)
-                except asyncio.QueueFull:
-                    logger.warning(f"[VoiceWS] Queue full for client, dropping {event_type} event")
+                    _main_loop.call_soon_threadsafe(_enqueue_ws_event, q, evt, event_type)
                 except RuntimeError:
                     pass  # Event loop closed
 
