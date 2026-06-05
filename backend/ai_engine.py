@@ -3878,8 +3878,6 @@ def chat_stream(
                     full_text_parts.append(content)
                     yield content
 
-            streamed = True
-
             # If we accumulated tool calls, yield them as a single dict
             if tool_call_chunks:
                 tool_calls = []
@@ -3904,9 +3902,13 @@ def chat_stream(
                 yield {"type": "tool_call", "tool_calls": tool_calls}
                 return
 
+            if not full_text_parts:
+                raise RuntimeError(f"{stream_model['provider']} stream returned no content")
+
             full_text = "".join(full_text_parts)
             logger.info(f"{stream_model['provider'].title()} stream complete ({len(full_text)} chars)")
             _save_interaction(user_message, full_text)
+            streamed = True
     except Exception as e:
         logger.warning(f"{selected_model['provider'].title()} stream failed: {e}")
         if full_text_parts:

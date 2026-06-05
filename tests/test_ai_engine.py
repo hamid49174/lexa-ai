@@ -1950,6 +1950,57 @@ class TestProviderFallback:
         assert meta["id"] == "openai:gpt-4o"
         assert list(stream) == ["ok"]
 
+    def test_chat_stream_falls_back_after_empty_primary_stream(self, monkeypatch):
+        from backend import ai_engine
+        import backend.config as config
+
+        class Delta:
+            def __init__(self, content):
+                self.content = content
+                self.tool_calls = None
+
+        class Choice:
+            def __init__(self, content):
+                self.delta = Delta(content)
+
+        class Chunk:
+            def __init__(self, content):
+                self.choices = [Choice(content)]
+
+        selected = ai_engine.AI_MODEL_REGISTRY["gemini:gemini-2.5-flash"]
+        fallback = ai_engine.AI_MODEL_REGISTRY["openai:gpt-4o"]
+        calls = []
+
+        monkeypatch.setattr(config, "TOOL_USE_ENABLED", False)
+        monkeypatch.setattr(ai_engine, "_get_selected_model_meta", lambda: selected)
+        monkeypatch.setattr(
+            ai_engine,
+            "_build_messages",
+            lambda user_message, conversation_history=None: [
+                {"role": "user", "content": user_message or ""}
+            ],
+        )
+        monkeypatch.setattr(ai_engine, "_save_interaction", lambda *args, **kwargs: None)
+
+        def fake_primary_stream(messages, selected_model=None, tools=None):
+            calls.append(("primary", selected_model["id"], tools))
+            return iter([])
+
+        def fake_provider_fallbacks(messages, selected_model=None, tools=None):
+            calls.append(("fallback", selected_model["id"], tools))
+            return iter([Chunk("Fallback antwortet.")]), fallback
+
+        monkeypatch.setattr(ai_engine, "_stream_with_selected_provider", fake_primary_stream)
+        monkeypatch.setattr(ai_engine, "_stream_with_provider_fallbacks", fake_provider_fallbacks)
+
+        result = list(ai_engine.chat_stream("ping"))
+
+        assert result == ["Fallback antwortet."]
+        assert calls == [
+            ("primary", "gemini:gemini-2.5-flash", None),
+            ("fallback", "gemini:gemini-2.5-flash", None),
+        ]
+
 
 class TestAnthropicProvider:
     def test_anthropic_message_conversion_splits_system_and_messages(self):
