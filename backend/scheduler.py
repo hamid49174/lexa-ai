@@ -11,7 +11,14 @@ from datetime import datetime
 
 from backend import memory
 from backend.agent_reflection import reflect_action
-from backend.security import is_command_allowed, audit_log, validate_params
+from backend.security import (
+    audit_error_details,
+    audit_log,
+    audit_safe_token,
+    audit_value_metadata,
+    is_command_allowed,
+    validate_params,
+)
 from backend.tool_registry import ToolSchemaValidationError, validate_tool_arguments
 from backend.i18n import t
 
@@ -19,6 +26,23 @@ logger = logging.getLogger("lexa.scheduler")
 
 _scheduler_task: asyncio.Task | None = None
 _companion_execute = None
+
+
+def _routine_audit_details(
+    routine_name: object,
+    *,
+    command: object | None = None,
+    error: object | None = None,
+    reason: object | None = None,
+) -> str:
+    parts = [audit_value_metadata("routine", routine_name)]
+    if command is not None:
+        parts.append(f"cmd={audit_safe_token(command)}")
+    if error is not None:
+        parts.append(audit_error_details(error, source="scheduler"))
+    if reason is not None:
+        parts.append(audit_value_metadata("reason", reason))
+    return " ".join(parts)
 
 
 def _parse_schedule(schedule: str) -> bool:
@@ -74,7 +98,7 @@ async def _run_routine(routine: dict):
     name = routine["name"]
     actions = routine.get("actions", [])[:20]  # Safety cap: max 20 actions per routine
     logger.info(f"Scheduler: Starte Routine '{name}' ({len(actions)} Aktionen)")
-    audit_log("scheduler", "routine_start", f"ROUTINE={name}")
+    audit_log("scheduler", "routine_start", _routine_audit_details(name))
 
     for i, action in enumerate(actions):
         if not isinstance(action, dict):
@@ -89,7 +113,7 @@ async def _run_routine(routine: dict):
             schema_params = validate_tool_arguments(command, params)
         except ToolSchemaValidationError as e:
             logger.warning("Scheduler: invalid tool args for %s in routine %s: %s", command, name, e)
-            audit_log("scheduler", "tool_schema_invalid", f"CMD={command} ROUTINE={name} ERR={str(e)[:200]}")
+            audit_log("scheduler", "tool_schema_invalid", _routine_audit_details(name, command=command, error=e))
             continue
 
         permission = is_command_allowed(command)
@@ -102,36 +126,40 @@ async def _run_routine(routine: dict):
         )
         if reflection is not None and not reflection.should_execute:
             logger.warning("Scheduler: reflection blocked %s in routine %s: %s", command, name, reflection.reason)
-            audit_log("scheduler", "reflection_blocked", f"CMD={command} ROUTINE={name} REASON={reflection.reason[:120]}")
+            audit_log(
+                "scheduler",
+                "reflection_blocked",
+                _routine_audit_details(name, command=command, reason=reflection.reason),
+            )
             continue
 
         if permission == "blocked":
             logger.warning(t("scheduler.blocked", command=command, name=name))
-            audit_log("scheduler", "blocked", f"CMD={command} ROUTINE={name}")
+            audit_log("scheduler", "blocked", _routine_audit_details(name, command=command))
             continue
 
         if permission in {"confirmation_required", "unknown"}:
             logger.info(t("scheduler.needsConfirmation", command=command))
-            audit_log("scheduler", "skipped_confirmation", f"CMD={command} ROUTINE={name}")
+            audit_log("scheduler", "skipped_confirmation", _routine_audit_details(name, command=command))
             continue
 
         try:
             safe_params = validate_params(command, schema_params)
         except ValueError as e:
             logger.warning("Scheduler: blocked params for %s in routine %s: %s", command, name, e)
-            audit_log("scheduler", "param_blocked", f"CMD={command} ROUTINE={name} ERR={str(e)[:200]}")
+            audit_log("scheduler", "param_blocked", _routine_audit_details(name, command=command, error=e))
             continue
 
         try:
             if _companion_execute:
                 _companion_execute(command, safe_params)
                 logger.info(f"Scheduler: {command} -> OK")
-                audit_log("scheduler", "executed", f"CMD={command} ROUTINE={name}")
+                audit_log("scheduler", "executed", _routine_audit_details(name, command=command))
             else:
                 logger.warning("Scheduler: CompanionEngine nicht verfügbar")
         except Exception as e:
             logger.error(f"Scheduler: {command} fehlgeschlagen: {e}", exc_info=True)
-            audit_log("scheduler", "error", f"CMD={command} ERR={str(e)[:200]}")
+            audit_log("scheduler", "error", _routine_audit_details(name, command=command, error=e))
 
     # Update last_run
     db = memory._get_db()
@@ -144,7 +172,7 @@ async def _run_routine(routine: dict):
     finally:
         db.close()
 
-    audit_log("scheduler", "routine_done", f"ROUTINE={name}")
+    audit_log("scheduler", "routine_done", _routine_audit_details(name))
     logger.info(f"Scheduler: Routine '{name}' abgeschlossen")
 
 
