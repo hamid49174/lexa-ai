@@ -101,6 +101,39 @@ TEMP_DIR.mkdir(exist_ok=True)
 
 _MAX_AUDIO_SIZE = 25 * 1024 * 1024
 _UPLOAD_CHUNK_SIZE = 64 * 1024
+_ALLOWED_AUDIO_EXTS = {".wav", ".mp3", ".ogg", ".webm", ".m4a", ".flac"}
+_ALLOWED_AUDIO_CONTENT_TYPES = {
+    "audio/flac",
+    "audio/m4a",
+    "audio/mp3",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/wav",
+    "audio/wave",
+    "audio/webm",
+    "audio/x-m4a",
+    "audio/x-wav",
+    "audio/vnd.wave",
+    "application/ogg",
+    "video/webm",
+}
+_AUDIO_CONTENT_TYPE_EXTS = {
+    "audio/flac": ".flac",
+    "audio/m4a": ".m4a",
+    "audio/mp3": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/mpeg": ".mp3",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "audio/wave": ".wav",
+    "audio/webm": ".webm",
+    "audio/x-m4a": ".m4a",
+    "audio/x-wav": ".wav",
+    "audio/vnd.wave": ".wav",
+    "application/ogg": ".ogg",
+    "video/webm": ".webm",
+}
 
 
 def _normalize_stt_result(result):
@@ -114,6 +147,28 @@ def _normalize_stt_result(result):
         }
         return text, metadata
     return str(result or "").strip(), {}
+
+
+def _audio_content_type(upload: UploadFile) -> str:
+    return str(upload.content_type or "").split(";", 1)[0].strip().lower()
+
+
+def _validated_audio_extension(upload: UploadFile) -> tuple[str, JSONResponse | None]:
+    content_type = _audio_content_type(upload)
+    ext = Path(str(upload.filename or "")).suffix.lower()
+
+    if ext and ext not in _ALLOWED_AUDIO_EXTS:
+        return "", JSONResponse({"error": "Nicht unterstuetztes Audioformat."}, status_code=415)
+    if (
+        content_type
+        and content_type not in _ALLOWED_AUDIO_CONTENT_TYPES
+        and not (content_type == "application/octet-stream" and ext)
+    ):
+        return "", JSONResponse({"error": "Nicht unterstuetzter Audio-MIME-Type."}, status_code=415)
+
+    if not ext:
+        ext = _AUDIO_CONTENT_TYPE_EXTS.get(content_type, ".webm")
+    return ext, None
 
 
 def _device_summary(device) -> dict | None:
@@ -469,8 +524,9 @@ async def speech_to_text(audio: UploadFile = File(...)):
     if not check_rate_limit("voice"):
         return JSONResponse({"error": "Rate limit erreicht."}, status_code=429)
 
-    ext = Path(audio.filename).suffix.lower() if audio.filename else ".webm"
-    ext = ext if ext in (".wav", ".mp3", ".ogg", ".webm", ".m4a", ".flac") else ".webm"
+    ext, error = _validated_audio_extension(audio)
+    if error is not None:
+        return error
     audio_path = TEMP_DIR / f"stt_{_uuid.uuid4().hex[:12]}{ext}"
 
     try:

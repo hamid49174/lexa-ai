@@ -420,13 +420,44 @@ class TestSTTEndpoints:
 
     def test_stt_upload_wrong_extension(self, client):
         """Upload a file with unsupported extension."""
+        sys.modules["voice.stt"].transcribe_file.reset_mock()
         file_data = io.BytesIO(b"fake audio data")
         res = client.post(
             "/voice/stt",
-            files={"file": ("test.txt", file_data, "text/plain")},
+            files={"audio": ("test.txt", file_data, "text/plain")},
         )
-        # Should reject non-audio extensions (400 or 422 depending on validation)
-        assert res.status_code in (200, 400, 415, 422)
+        assert res.status_code == 415
+        assert sys.modules["voice.stt"].transcribe_file.call_count == 0
+
+    def test_stt_upload_wrong_mime_type(self, client):
+        sys.modules["voice.stt"].transcribe_file.reset_mock()
+        file_data = io.BytesIO(b"fake audio data")
+        res = client.post(
+            "/voice/stt",
+            files={"audio": ("test.webm", file_data, "text/plain")},
+        )
+        assert res.status_code == 415
+        assert sys.modules["voice.stt"].transcribe_file.call_count == 0
+
+    def test_stt_upload_accepts_browser_webm_mime(self, client):
+        sys.modules["voice.stt"].transcribe_file.return_value = "Hallo WebM"
+        file_data = io.BytesIO(b"fake audio data")
+        res = client.post(
+            "/voice/stt",
+            files={"audio": ("recording.webm", file_data, "video/webm")},
+        )
+        assert res.status_code == 200
+        assert res.json()["text"] == "Hallo WebM"
+
+    def test_stt_upload_accepts_octet_stream_with_audio_extension(self, client):
+        sys.modules["voice.stt"].transcribe_file.return_value = "Hallo Blob"
+        file_data = io.BytesIO(b"fake audio data")
+        res = client.post(
+            "/voice/stt",
+            files={"audio": ("recording.webm", file_data, "application/octet-stream")},
+        )
+        assert res.status_code == 200
+        assert res.json()["text"] == "Hallo Blob"
 
 
 # ══════════════════════════════════════════════════
