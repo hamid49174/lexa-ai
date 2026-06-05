@@ -47,6 +47,28 @@ def test_hermes_capabilities_endpoint(monkeypatch):
     assert data["gaps"][0]["id"] == "tool-platform"
 
 
+def test_hermes_providers_endpoint(monkeypatch):
+    client, router_hermes = _client(monkeypatch)
+    monkeypatch.setattr(router_hermes, "get_hermes_provider_status", lambda: {
+        "ok": True,
+        "healthState": "attention",
+        "summary": "Hermes provider setup: primary ready, 0/0 fallback(s) credential-ready.",
+        "primary": {"provider": "auto", "effectiveProviderHint": "openai"},
+        "fallbacks": [],
+        "counts": {"configuredProviders": 1, "fallbacks": 0, "fallbacksReady": 0},
+        "setup": {"secretsRedacted": True},
+        "safeMode": True,
+    })
+
+    res = client.get("/hermes/providers")
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["safeMode"] is True
+    assert data["primary"]["effectiveProviderHint"] == "openai"
+    assert data["setup"]["secretsRedacted"] is True
+
+
 def test_hermes_overview_endpoint_returns_compact_system_packet(monkeypatch):
     client, router_hermes = _client(monkeypatch)
     monkeypatch.setattr(router_hermes, "get_hermes_status", lambda: {
@@ -86,6 +108,12 @@ def test_hermes_overview_endpoint_returns_compact_system_packet(monkeypatch):
         "summary": "Hermes capability map: 6/11 groups ready.",
         "counts": {"ready": 6, "total": 11, "weakLexaSurface": 3, "missingLexaSurface": 2},
         "gaps": [{"id": "tool-platform", "state": "attention", "lexaSurface": "weak"}],
+        "providerStatus": {
+            "healthState": "attention",
+            "primary": {"provider": "auto", "effectiveProviderHint": "openai"},
+            "fallbacks": [],
+            "counts": {"fallbacks": 0, "fallbacksReady": 0},
+        },
     })
 
     res = client.get("/hermes/overview")
@@ -100,6 +128,7 @@ def test_hermes_overview_endpoint_returns_compact_system_packet(monkeypatch):
     assert "/hermes/telegram/commands/selftest" in data["capabilities"]["backendEndpoints"]
     assert data["capabilities"]["counts"]["missingLexaSurface"] == 2
     assert data["capabilities"]["gaps"][0]["id"] == "tool-platform"
+    assert data["providerStatus"]["primary"]["effectiveProviderHint"] == "openai"
     assert "/lexa_overview" in data["capabilities"]["telegramCommands"]
     assert "Drafts 0 pending, 11 approved, 3 rejected" in data["summary"]
     assert data["contextFiles"][0]["path"] == "08_Lexa/Architecture/Hermes_Capabilities.md"

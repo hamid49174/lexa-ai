@@ -182,6 +182,7 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("hermesGatewayAutostartStatus", "low", "read", "/hermes/gateway/autostart", { batch_allowed: true }),
   bridgePolicy("hermesGatewayAutostartSet", "high", "admin", "/hermes/gateway/autostart"),
   bridgePolicy("hermesCapabilities", "low", "read", "/hermes/capabilities", { batch_allowed: true }),
+  bridgePolicy("hermesProviders", "low", "read", "/hermes/providers", { batch_allowed: true }),
   bridgePolicy("hermesOverview", "low", "read", "/hermes/overview", { batch_allowed: true }),
   bridgePolicy("backupCreate", "high", "secret", "/backup"),
   bridgePolicy("backupRestore", "critical", "admin", "/backup/restore"),
@@ -1048,6 +1049,17 @@ if (isLexaSmokeMockAllowed()) {
       ],
       safeMode: true,
     }),
+    hermesProviders: async () => ({
+      ok: true,
+      healthState: "attention",
+      summary: "Hermes provider setup: primary ready, 0/0 fallback(s) credential-ready, 1 provider credential group(s) detected.",
+      nextAction: "Add at least one fallback with `hermes fallback add`.",
+      primary: { provider: "auto", providerId: "auto", model: "", effectiveProviderHint: "openai" },
+      fallbacks: [],
+      counts: { configuredProviders: 1, fallbacks: 0, fallbacksReady: 0, fallbacksNotReady: 0 },
+      setup: { primaryCommand: "hermes model", fallbackAddCommand: "hermes fallback add", secretsRedacted: true },
+      safeMode: true,
+    }),
     hermesOverview: async () => ({
       ok: true,
       healthState: "ready",
@@ -1070,6 +1082,14 @@ if (isLexaSmokeMockAllowed()) {
         gaps: [
           { id: "tool-platform", label: "Tool Platform", state: "attention", lexaSurface: "weak", nextAction: "Expose safe toolset presets in Lexa." },
         ],
+      },
+      providerStatus: {
+        healthState: "attention",
+        summary: "Hermes provider setup: primary ready, 0/0 fallback(s) credential-ready, 1 provider credential group(s) detected.",
+        nextAction: "Add at least one fallback with `hermes fallback add`.",
+        primary: { provider: "auto", providerId: "auto", model: "", effectiveProviderHint: "openai" },
+        fallbacks: [],
+        counts: { configuredProviders: 1, fallbacks: 0, fallbacksReady: 0, fallbacksNotReady: 0 },
       },
       contextFiles: [
         { title: "Current AI Brief", path: "05_Memory/Rollups/Current_AI_Brief.md" },
@@ -2216,6 +2236,23 @@ const lexaBridge = {
         groups: [],
         gaps: [],
         error: "Hermes Capabilities nicht erreichbar",
+      };
+    }
+  },
+  hermesProviders: async () => {
+    try {
+      const res = await fetchWithTimeout(`${API}/hermes/providers`);
+      return apiJson(res, "Hermes Providerstatus nicht erreichbar");
+    } catch (e) {
+      console.warn("[Preload] hermesProviders failed:", e.message || e);
+      return {
+        ok: false,
+        healthState: "offline",
+        summary: "Hermes Providerstatus nicht erreichbar",
+        counts: {},
+        primary: {},
+        fallbacks: [],
+        error: "Hermes Providerstatus nicht erreichbar",
       };
     }
   },

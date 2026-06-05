@@ -129,6 +129,22 @@ _HERMES_MEDIA_PROVIDER_IDS = {
     "browser_use",
     "browserbase",
 }
+_HERMES_PROVIDER_ALIASES = {
+    "gemini": "google",
+    "google-ai": "google",
+    "google": "google",
+    "kimi-coding": "kimi",
+    "moonshot": "kimi",
+    "kimi": "kimi",
+    "minimax-cn": "minimax",
+    "openai-codex": "openai",
+    "codex": "openai",
+    "grok": "xai",
+    "xai-oauth": "xai",
+    "z.ai": "zai",
+    "zhipu": "zai",
+}
+_HERMES_LOCAL_PROVIDER_IDS = {"custom", "lmstudio", "ollama", "vllm", "llamacpp"}
 _HERMES_DEFAULT_TOOLSETS = (
     {"id": "web", "label": "Web Search & Scraping", "default": "enabled"},
     {"id": "browser", "label": "Browser Automation", "default": "enabled"},
@@ -159,6 +175,7 @@ _HERMES_DEFAULT_TOOLSETS = (
 _LEXA_HERMES_BACKEND_ENDPOINTS = (
     "/hermes/status",
     "/hermes/capabilities",
+    "/hermes/providers",
     "/hermes/overview",
     "/hermes/context",
     "/hermes/draft",
@@ -293,6 +310,10 @@ def _build_hermes_env() -> dict[str, str]:
 
 def _hermes_env_path() -> Path:
     return HERMES_HOME_ROOT / ".env"
+
+
+def _hermes_config_path() -> Path:
+    return HERMES_HOME_ROOT / "config.yaml"
 
 
 def _hermes_gateway_log_path() -> Path:
@@ -603,6 +624,206 @@ def _configured_provider_ids(env_values: dict[str, str]) -> list[str]:
     )
 
 
+def _canonical_provider_id(provider: Any) -> str:
+    value = str(provider or "").strip().lower()
+    return _HERMES_PROVIDER_ALIASES.get(value, value)
+
+
+def _read_hermes_config_file() -> tuple[dict[str, Any], dict[str, Any]]:
+    path = _hermes_config_path()
+    meta = {
+        "path": str(path),
+        "exists": path.exists(),
+        "loaded": False,
+        "error": "",
+    }
+    if not path.exists():
+        return {}, meta
+    try:
+        import yaml  # type: ignore
+    except Exception as exc:
+        meta["error"] = f"PyYAML unavailable: {exc}"
+        return {}, meta
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8", errors="replace")) or {}
+    except Exception as exc:
+        meta["error"] = f"config parse failed: {exc}"
+        return {}, meta
+    if not isinstance(raw, dict):
+        meta["error"] = "config root is not an object"
+        return {}, meta
+    meta["loaded"] = True
+    return raw, meta
+
+
+def _safe_model_label(value: Any) -> str:
+    text = str(value or "").strip()
+    return text[:180]
+
+
+def _fallback_entries_from_config(config: dict[str, Any]) -> list[dict[str, Any]]:
+    def iter_entries(raw: Any) -> list[dict[str, Any]]:
+        if isinstance(raw, dict):
+            candidates = [raw]
+        elif isinstance(raw, list):
+            candidates = raw
+        else:
+            return []
+        entries: list[dict[str, Any]] = []
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            provider = str(item.get("provider") or "").strip()
+            model = str(item.get("model") or item.get("default") or "").strip()
+            if not provider or not model:
+                continue
+            entry = {
+                "provider": provider,
+                "providerId": _canonical_provider_id(provider),
+                "model": _safe_model_label(model),
+                "baseUrlConfigured": bool(str(item.get("base_url") or "").strip()),
+            }
+            api_mode = str(item.get("api_mode") or "").strip()
+            if api_mode:
+                entry["apiMode"] = api_mode[:80]
+            entries.append(entry)
+        return entries
+
+    chain: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, bool]] = set()
+    for key in ("fallback_providers", "fallback_model"):
+        for entry in iter_entries(config.get(key)):
+            identity = (
+                str(entry.get("providerId") or "").lower(),
+                str(entry.get("model") or "").lower(),
+                bool(entry.get("baseUrlConfigured")),
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
+            chain.append(entry)
+    return chain
+
+
+def _primary_model_from_config(config: dict[str, Any]) -> dict[str, Any]:
+    model_cfg = config.get("model")
+    if isinstance(model_cfg, dict):
+        provider = str(model_cfg.get("provider") or "auto").strip() or "auto"
+        model = str(model_cfg.get("default") or model_cfg.get("model") or "").strip()
+        base_url_configured = bool(str(model_cfg.get("base_url") or "").strip())
+        api_mode = str(model_cfg.get("api_mode") or "").strip()
+    elif isinstance(model_cfg, str):
+        provider = "auto"
+        model = model_cfg.strip()
+        base_url_configured = False
+        api_mode = ""
+    else:
+        provider = "auto"
+        model = ""
+        base_url_configured = False
+        api_mode = ""
+
+    result = {
+        "provider": provider,
+        "providerId": _canonical_provider_id(provider),
+        "model": _safe_model_label(model),
+        "configuredInConfig": bool(model_cfg),
+        "baseUrlConfigured": base_url_configured,
+        "apiMode": api_mode[:80] if api_mode else "",
+    }
+    return result
+
+
+def _provider_is_ready(provider_id: str, env_values: dict[str, str], *, base_url_configured: bool = False) -> bool:
+    canonical = _canonical_provider_id(provider_id)
+    if canonical in {"", "auto"}:
+        return False
+    if canonical in _HERMES_LOCAL_PROVIDER_IDS:
+        return bool(base_url_configured or canonical == "lmstudio")
+    if canonical in _HERMES_PROVIDER_ENV_KEYS:
+        return _provider_configured(env_values, canonical)
+    return bool(base_url_configured)
+
+
+def get_hermes_provider_status(status_info: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return safe Hermes model/provider/fallback readiness without secrets."""
+    status_info = status_info or get_hermes_status()
+    env_values = _read_hermes_env_file()
+    config, config_meta = _read_hermes_config_file()
+    configured_providers = _configured_provider_ids(env_values)
+    primary = _primary_model_from_config(config)
+    fallback_chain = _fallback_entries_from_config(config)
+
+    if primary["providerId"] == "auto":
+        primary_candidates = [provider for provider in configured_providers if provider in _HERMES_PRIMARY_PROVIDER_IDS]
+        primary_ready = bool(primary_candidates)
+        selected_provider = primary_candidates[0] if primary_candidates else ""
+        primary["effectiveProviderHint"] = selected_provider or "auto"
+    else:
+        primary_ready = _provider_is_ready(
+            primary["providerId"],
+            env_values,
+            base_url_configured=bool(primary.get("baseUrlConfigured")),
+        )
+        primary["effectiveProviderHint"] = primary["providerId"]
+
+    for entry in fallback_chain:
+        entry["credentialReady"] = _provider_is_ready(
+            str(entry.get("providerId") or ""),
+            env_values,
+            base_url_configured=bool(entry.get("baseUrlConfigured")),
+        )
+
+    fallback_ready_count = sum(1 for entry in fallback_chain if entry.get("credentialReady"))
+    command_available = bool(status_info.get("available"))
+    if not command_available:
+        health_state = "blocked"
+        next_action = "Install or configure the Hermes command before provider fallback can run."
+    elif not primary_ready:
+        health_state = "blocked"
+        next_action = "Configure the Hermes primary model/provider with `hermes model`."
+    elif not fallback_chain:
+        health_state = "attention"
+        next_action = "Add at least one fallback with `hermes fallback add`."
+    elif fallback_ready_count < len(fallback_chain):
+        health_state = "attention"
+        next_action = "Fix credentials for fallback entries that are not ready."
+    else:
+        health_state = "ready"
+        next_action = "Provider fallback chain is ready; expose model-switch controls next."
+
+    summary = (
+        f"Hermes provider setup: primary {'ready' if primary_ready else 'not ready'}, "
+        f"{fallback_ready_count}/{len(fallback_chain)} fallback(s) credential-ready, "
+        f"{len(configured_providers)} provider credential group(s) detected."
+    )
+    return {
+        "ok": health_state != "blocked",
+        "status": "ok",
+        "healthState": health_state,
+        "summary": summary,
+        "nextAction": next_action,
+        "primary": primary,
+        "fallbacks": fallback_chain,
+        "counts": {
+            "configuredProviders": len(configured_providers),
+            "fallbacks": len(fallback_chain),
+            "fallbacksReady": fallback_ready_count,
+            "fallbacksNotReady": max(0, len(fallback_chain) - fallback_ready_count),
+        },
+        "configuredProviderIds": configured_providers,
+        "config": config_meta,
+        "setup": {
+            "primaryCommand": "hermes model",
+            "fallbackAddCommand": "hermes fallback add",
+            "fallbackListCommand": "hermes fallback list",
+            "configKey": "fallback_providers",
+            "secretsRedacted": True,
+        },
+        "safeMode": True,
+    }
+
+
 def _capability_state(
     *,
     command_available: bool,
@@ -665,6 +886,9 @@ def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[s
     primary_model_ready = bool(primary_providers)
     telegram_configured = bool((status_info.get("gateway") or {}).get("configured"))
     personal_os_available = bool(status_info.get("personal_os_available"))
+    provider_status = get_hermes_provider_status(status_info)
+    fallback_count = int((provider_status.get("counts") or {}).get("fallbacks") or 0)
+    fallback_ready_count = int((provider_status.get("counts") or {}).get("fallbacksReady") or 0)
 
     provider_detail = (
         f"{len(primary_providers)} primary provider(s) configured."
@@ -716,12 +940,12 @@ def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[s
         _capability_group(
             "provider-fallbacks",
             "Provider Fallbacks",
-            "attention" if command_available else "blocked",
-            "Hermes supports fallback providers, but Lexa currently only surfaces general AI provider status.",
-            "Add a Lexa setup surface for Hermes primary model and fallback chain.",
-            lexa_surface="missing",
+            "ready" if provider_status.get("healthState") == "ready" else ("attention" if command_available else "blocked"),
+            f"Hermes provider fallback status is surfaced in Lexa: {fallback_ready_count}/{fallback_count} fallback(s) ready.",
+            provider_status.get("nextAction") or "Add a Lexa setup surface for Hermes primary model and fallback chain.",
+            lexa_surface="partial",
             toolsets=[],
-            surfaces=["hermes fallback"],
+            surfaces=["/hermes/providers", "hermes fallback"],
             priority=12,
         ),
         _capability_group(
@@ -868,6 +1092,7 @@ def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[s
             "primaryReady": primary_model_ready,
             "secretsRedacted": True,
         },
+        "providerStatus": provider_status,
         "toolsets": list(_HERMES_DEFAULT_TOOLSETS),
         "groups": groups,
         "gaps": gaps,

@@ -367,6 +367,71 @@ def test_hermes_capabilities_parse_export_env_with_invalid_bytes(monkeypatch, tm
     assert "placeholder-provider-token" not in str(capabilities)
 
 
+def test_hermes_provider_status_reads_fallback_chain_without_leaking_secrets(monkeypatch, tmp_path):
+    import backend.hermes_adapter as hermes
+
+    secret = "sk-test-provider-secret"
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    (hermes_home / ".env").write_text(f'OPENAI_API_KEY="{secret}"\nGEMINI_API_KEY="gemini-secret"\n', encoding="utf-8")
+    (hermes_home / "config.yaml").write_text(
+        "\n".join([
+            "model:",
+            "  provider: openai",
+            "  default: gpt-4.1",
+            "fallback_providers:",
+            "  - provider: gemini",
+            "    model: gemini-2.5-pro",
+            "  - provider: custom",
+            "    model: local-agent",
+            "    base_url: http://127.0.0.1:1234/v1",
+            "fallback_model:",
+            "  provider: gemini",
+            "  model: gemini-2.5-pro",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(hermes, "HERMES_HOME_ROOT", hermes_home)
+    for keys in hermes._HERMES_PROVIDER_ENV_KEYS.values():
+        for key in keys:
+            monkeypatch.delenv(key, raising=False)
+
+    status = hermes.get_hermes_provider_status({"available": True})
+
+    assert status["healthState"] == "ready"
+    assert status["primary"]["provider"] == "openai"
+    assert status["counts"]["fallbacks"] == 2
+    assert status["counts"]["fallbacksReady"] == 2
+    assert status["fallbacks"][0]["providerId"] == "google"
+    assert status["fallbacks"][1]["providerId"] == "custom"
+    assert secret not in str(status)
+    assert "gemini-secret" not in str(status)
+    assert status["setup"]["secretsRedacted"] is True
+
+
+def test_hermes_provider_status_blocks_when_primary_missing(monkeypatch, tmp_path):
+    import backend.hermes_adapter as hermes
+
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    (hermes_home / "config.yaml").write_text(
+        "model:\n  provider: anthropic\n  default: claude-opus-4.6\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(hermes, "HERMES_HOME_ROOT", hermes_home)
+    for keys in hermes._HERMES_PROVIDER_ENV_KEYS.values():
+        for key in keys:
+            monkeypatch.delenv(key, raising=False)
+
+    status = hermes.get_hermes_provider_status({"available": True})
+
+    assert status["healthState"] == "blocked"
+    assert status["ok"] is False
+    assert status["counts"]["fallbacks"] == 0
+    assert "hermes model" in status["nextAction"]
+
+
 def test_hermes_prompt_injects_bounded_obsidian_context(monkeypatch):
     import backend.hermes_adapter as hermes
 

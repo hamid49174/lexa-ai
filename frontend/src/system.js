@@ -459,6 +459,36 @@ function hermesCapabilityMetric(capCounts) {
   return `${ready}/${total} ready, ${weak}/${missing} weak/missing`;
 }
 
+function hermesProviderMetric(providerCounts) {
+  const ready = systemDisplayCount(providerCounts?.fallbacksReady);
+  const total = systemDisplayCount(providerCounts?.fallbacks);
+  return `${ready}/${total} fallbacks`;
+}
+
+function createHermesProviderRows(providerStatus) {
+  if (!providerStatus || typeof providerStatus !== "object") {
+    return [createSystemOverviewMuted(t("system.hermesNoProviderStatus"))];
+  }
+  const rows = [];
+  const primary = providerStatus.primary || {};
+  const primaryProvider = primary.effectiveProviderHint || primary.provider || primary.providerId || "auto";
+  const primaryModel = primary.model || primary.provider || "auto";
+  rows.push(createSystemOverviewFileRow(t("system.hermesPrimaryProvider"), `${primaryModel} via ${primaryProvider}`));
+  const fallbacks = Array.isArray(providerStatus.fallbacks) ? providerStatus.fallbacks.slice(0, 4) : [];
+  if (!fallbacks.length) {
+    rows.push(createSystemOverviewMuted(providerStatus.nextAction || t("system.hermesNoFallbacks")));
+    return rows;
+  }
+  fallbacks.forEach((entry, index) => {
+    const state = entry.credentialReady ? "ready" : "needs credentials";
+    rows.push(createSystemOverviewFileRow(
+      `${t("system.hermesFallbackProvider")} ${index + 1}`,
+      `${entry.model || "model"} via ${entry.provider || entry.providerId || "provider"} (${state})`
+    ));
+  });
+  return rows;
+}
+
 function renderHermesOverview(payload) {
   const target = document.getElementById("hermes-overview-content");
   if (!target) return;
@@ -474,6 +504,8 @@ function renderHermesOverview(payload) {
   const capabilityPayload = payload.capabilities || {};
   const capCounts = counts.capabilities || capabilityPayload.counts || {};
   const capGaps = Array.isArray(capabilityPayload.gaps) ? capabilityPayload.gaps.slice(0, 4) : [];
+  const providerStatus = payload.providerStatus || {};
+  const providerCounts = providerStatus.counts || {};
   const stateTone = hermesOverviewTone(payload.healthState);
   const contextCount = systemDisplayCount(counts.contextFiles ?? files.length ?? 0);
 
@@ -484,7 +516,8 @@ function renderHermesOverview(payload) {
     createSystemOverviewMetric(t("system.hermesMetricDrafts"), hermesDraftMetric(counts)),
     createSystemOverviewMetric(t("system.hermesMetricContext"), contextCount),
     createSystemOverviewMetric(t("system.hermesMetricSafeMode"), payload.safeMode ? t("common.yes") : t("common.no")),
-    createSystemOverviewMetric(t("system.hermesMetricCapabilities"), hermesCapabilityMetric(capCounts))
+    createSystemOverviewMetric(t("system.hermesMetricCapabilities"), hermesCapabilityMetric(capCounts)),
+    createSystemOverviewMetric(t("system.hermesMetricFallbacks"), hermesProviderMetric(providerCounts))
   );
 
   const checkRows = checks.length
@@ -496,6 +529,7 @@ function renderHermesOverview(payload) {
   const gapRows = capGaps.length
     ? capGaps.map((gap) => createSystemOverviewCapabilityGapRow(gap))
     : [createSystemOverviewMuted(t("system.hermesNoCapabilityGaps"))];
+  const providerRows = createHermesProviderRows(providerStatus);
   const nextText = document.createTextNode(String(payload.nextAction || t("system.hermesNoNextTask")));
   const taskList = createSystemOverviewTaskList(tasks, payload.nextAction || t("system.hermesNoNextTask"));
 
@@ -504,6 +538,7 @@ function renderHermesOverview(payload) {
   grid.append(
     createSystemOverviewSection(t("system.hermesChecks"), "system-overview-checks", checkRows),
     createSystemOverviewSection(t("system.hermesContextFiles"), "system-overview-files", fileRows),
+    createSystemOverviewSection(t("system.hermesProviders"), "system-overview-files", providerRows),
     createSystemOverviewSection(t("system.hermesCapabilityGaps"), "system-overview-checks", gapRows),
     createSystemOverviewSection(t("system.hermesNextAction"), "system-overview-next", [nextText, taskList])
   );
