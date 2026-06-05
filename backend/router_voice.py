@@ -5,6 +5,7 @@ All conversation logic lives in voice/conversation.py.
 
 import asyncio
 import logging
+import re
 import tempfile
 import threading
 import time as _time
@@ -14,6 +15,7 @@ from fastapi import APIRouter, UploadFile, File, Query, WebSocket, WebSocketDisc
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
+from backend.agent_protocol import redacted_summary
 from backend.security import check_rate_limit, audit_log
 from backend.i18n import t
 from backend.voice_ws import (
@@ -134,6 +136,22 @@ _AUDIO_CONTENT_TYPE_EXTS = {
     "application/ogg": ".ogg",
     "video/webm": ".webm",
 }
+_LOCAL_PATH_RE = re.compile(
+    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
+)
+
+
+def _voice_safe_error(value, *, max_chars: int = 220) -> str:
+    """Return a compact client-facing voice error without paths or secrets."""
+    text = redacted_summary(str(value or ""), max_chars=max_chars)
+    text = _LOCAL_PATH_RE.sub("[local-path-redacted]", text)
+    return text or "Details wurden lokal protokolliert."
+
+
+def _voice_safe_list(values) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [_voice_safe_error(value) for value in values[:10]]
 
 
 def _normalize_stt_result(result):
@@ -215,14 +233,14 @@ def _voice_audio_status(probe_audio: bool = False) -> dict:
             "output": None,
             "default_device": None,
             "probe": {"ok": False, "skipped": True},
-            "error": f"sounddevice unavailable: {e}",
+            "error": f"sounddevice unavailable: {_voice_safe_error(e)}",
         }
 
     try:
         input_device = _device_summary(sd.query_devices(kind="input"))
     except Exception as e:
         input_device = None
-        input_error = str(e)
+        input_error = _voice_safe_error(e)
     else:
         input_error = ""
 
@@ -230,7 +248,7 @@ def _voice_audio_status(probe_audio: bool = False) -> dict:
         output_device = _device_summary(sd.query_devices(kind="output"))
     except Exception as e:
         output_device = None
-        output_error = str(e)
+        output_error = _voice_safe_error(e)
     else:
         output_error = ""
 
@@ -262,8 +280,9 @@ def _voice_audio_status(probe_audio: bool = False) -> dict:
             "rms": round(rms, 6),
         }
     except Exception as e:
-        payload["probe"] = {"ok": False, "skipped": False, "error": str(e)}
-        payload["error"] = str(e)
+        error = _voice_safe_error(e)
+        payload["probe"] = {"ok": False, "skipped": False, "error": error}
+        payload["error"] = error
     return payload
 
 
@@ -281,14 +300,14 @@ async def _build_voice_diagnostics(probe_audio: bool = False) -> dict:
         from voice.stt import get_stt_status
         stt = await asyncio.to_thread(get_stt_status)
     except Exception as e:
-        stt = {"ready": False, "available": False, "error": str(e)}
+        stt = {"ready": False, "available": False, "error": _voice_safe_error(e)}
 
     try:
         from voice.tts import get_tts_status
         tts_raw = await asyncio.to_thread(get_tts_status)
         tts = {"tts": tts_raw, **tts_raw}
     except Exception as e:
-        tts = {"ready": False, "available": False, "error": str(e)}
+        tts = {"ready": False, "available": False, "error": _voice_safe_error(e)}
 
     wake = _wakeword_status_payload(_wake_detector)
     audio = await asyncio.to_thread(_voice_audio_status, probe_audio)
@@ -299,11 +318,12 @@ async def _build_voice_diagnostics(probe_audio: bool = False) -> dict:
         if not isinstance(realtime, dict):
             realtime = {}
     except Exception as e:
-        realtime = {"ready": False, "error": str(e)}
+        error = _voice_safe_error(e)
+        realtime = {"ready": False, "error": error}
         realtime_preflight = {
             "ok": False,
             "can_start": False,
-            "blockers": [str(e)],
+            "blockers": [error],
             "warnings": [],
             "next_action": "Realtime preflight failed.",
         }
@@ -317,6 +337,14 @@ async def _build_voice_diagnostics(probe_audio: bool = False) -> dict:
     wake_engine_name = wake_engine.get("name") or "unknown"
     realtime_blockers = realtime_preflight.get("blockers") if isinstance(realtime_preflight, dict) else []
     realtime_warnings = realtime_preflight.get("warnings") if isinstance(realtime_preflight, dict) else []
+    realtime_blockers = _voice_safe_list(realtime_blockers)
+    realtime_warnings = _voice_safe_list(realtime_warnings)
+    if isinstance(realtime_preflight, dict):
+        realtime_preflight = {
+            **realtime_preflight,
+            "blockers": realtime_blockers,
+            "warnings": realtime_warnings,
+        }
     realtime_reason = ""
     if realtime_blockers:
         realtime_reason = f" Blocker: {realtime_blockers[0]}"
@@ -549,7 +577,8 @@ async def speech_to_text(audio: UploadFile = File(...)):
         from voice.stt import transcribe_file
         raw_result = await asyncio.to_thread(transcribe_file, str(audio_path))
         text, metadata = _normalize_stt_result(raw_result)
-        audit_log("stt", "transcribed", f"text={text[:80]}")
+        language = re.sub(r"[^A-Za-z0-9_-]+", "", str(metadata.get("language") or ""))[:16]
+        audit_log("stt", "transcribed", f"success={bool(text)} textChars={len(text)} language={language}")
         payload = {"text": text, "success": bool(text), **metadata}
         if not text and "error" not in payload:
             payload["error"] = "Keine Sprache erkannt."
@@ -637,7 +666,7 @@ async def text_to_speech(data: TTSRequest):
     try:
         from voice.tts import speak_async
         audio_path = await speak_async(text)
-        audit_log("tts", "generated", f"text={text[:50]}")
+        audit_log("tts", "generated", f"textChars={len(text)}")
         is_mp3 = audio_path.endswith(".mp3")
         return FileResponse(
             audio_path,
@@ -832,6 +861,16 @@ def _wakeword_status_payload(detector) -> dict:
             payload[key] = int(payload.get(key) or 0)
         except Exception:
             payload[key] = 0
+    if payload.get("error"):
+        payload["error"] = _voice_safe_error(payload.get("error"))
+    for key in ("last_transcript", "last_detected_text", "last_command"):
+        value = str(payload.get(key) or "")
+        if value:
+            payload[f"{key}_chars"] = len(value)
+            payload[key] = "[redacted]"
+    wake_engine = payload.get("wake_engine")
+    if isinstance(wake_engine, dict) and wake_engine.get("detail"):
+        payload["wake_engine"] = {**wake_engine, "detail": _voice_safe_error(wake_engine.get("detail"))}
     return payload
 
 

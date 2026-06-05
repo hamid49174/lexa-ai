@@ -309,6 +309,25 @@ class TestTTSEndpoints:
         assert data["state"] == "ready"
         assert data["nextAction"] == "Voice stack is ready."
 
+    def test_voice_diagnostics_redacts_internal_errors(self, client):
+        local_path = r"C:\Users\admin\secret\voice.txt"
+        sys.modules["voice.stt"].get_stt_status.side_effect = RuntimeError(
+            f"failed at {local_path} token=supersecretvalue"
+        )
+        sys.modules["voice.realtime"].get_realtime_session_preflight.side_effect = RuntimeError(
+            f"realtime failed at {local_path} api_key=sk-testsecret12345"
+        )
+
+        res = client.get("/voice/diagnostics")
+
+        assert res.status_code == 200
+        payload_text = str(res.json())
+        assert "[local-path-redacted]" in payload_text
+        assert "[REDACTED]" in payload_text
+        assert local_path not in payload_text
+        assert "supersecretvalue" not in payload_text
+        assert "sk-testsecret12345" not in payload_text
+
     def test_tts_status(self, client):
         res = client.get("/voice/tts/status")
         assert res.status_code == 200
@@ -323,6 +342,24 @@ class TestTTSEndpoints:
         res = client.post("/voice/tts", json={"text": "x" * 2001})
         assert res.status_code == 413
         assert sys.modules["voice.tts"].speak_async.await_count == 0
+
+    def test_tts_audit_does_not_store_spoken_text(self, client, monkeypatch, tmp_path):
+        import backend.router_voice as router_voice
+
+        audio_path = tmp_path / "tts.mp3"
+        audio_path.write_bytes(b"mp3")
+        secret_text = "Sprich meinen geheimen API key sk-testsecret12345"
+        seen = []
+        monkeypatch.setattr(router_voice, "audit_log", lambda *args, **kwargs: seen.append(args))
+        sys.modules["voice.tts"].speak_async = AsyncMock(return_value=str(audio_path))
+
+        res = client.post("/voice/tts", json={"text": secret_text})
+
+        assert res.status_code == 200
+        audit_text = str(seen)
+        assert "textChars=" in audit_text
+        assert "Sprich meinen" not in audit_text
+        assert "sk-testsecret12345" not in audit_text
 
     def test_tts_voices_list(self, client):
         res = client.get("/voice/tts/voices")
@@ -459,6 +496,29 @@ class TestSTTEndpoints:
         assert res.status_code == 200
         assert res.json()["text"] == "Hallo Blob"
 
+    def test_stt_audit_does_not_store_transcript_text(self, client, monkeypatch):
+        import backend.router_voice as router_voice
+
+        secret_text = "Mein API key ist sk-testsecret12345 und token=supersecretvalue"
+        seen = []
+        monkeypatch.setattr(router_voice, "audit_log", lambda *args, **kwargs: seen.append(args))
+        sys.modules["voice.stt"].transcribe_file.return_value = {"text": secret_text, "language": "de"}
+        file_data = io.BytesIO(b"fake audio data")
+
+        res = client.post(
+            "/voice/stt",
+            files={"audio": ("recording.webm", file_data, "audio/webm")},
+        )
+
+        assert res.status_code == 200
+        assert res.json()["text"] == secret_text
+        audit_text = str(seen)
+        assert "textChars=" in audit_text
+        assert "language=de" in audit_text
+        assert "Mein API key" not in audit_text
+        assert "sk-testsecret12345" not in audit_text
+        assert "supersecretvalue" not in audit_text
+
 
 # ══════════════════════════════════════════════════
 #  WAKEWORD ENDPOINTS
@@ -490,6 +550,21 @@ class TestWakeWordEndpoints:
         assert data["active"] is False
         assert data["ready"] is False
         assert data["error"] == "microphone unavailable"
+
+    def test_wakeword_start_failure_redacts_internal_error(self, client):
+        local_path = r"C:\Users\admin\voice\model.onnx"
+        sys.modules["voice.wakeword"].WakeWordDetector.start_error = (
+            f"load failed at {local_path} token=supersecretvalue"
+        )
+
+        res = client.post("/voice/wakeword/start")
+
+        assert res.status_code == 503
+        data = res.json()
+        assert "[local-path-redacted]" in data["error"]
+        assert "[REDACTED]" in data["error"]
+        assert local_path not in data["error"]
+        assert "supersecretvalue" not in data["error"]
 
     def test_wakeword_start_not_ready_is_rejected(self, client):
         sys.modules["voice.wakeword"].WakeWordDetector.start_ready = False
