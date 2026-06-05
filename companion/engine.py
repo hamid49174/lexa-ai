@@ -22,7 +22,7 @@ import psutil
 import pyperclip
 
 from backend.config import LEXA_DATA_DIR, PROJECT_ROOT
-from backend.security import is_command_allowed, audit_log, validate_url
+from backend.security import audit_error_details, audit_log, audit_param_keys_details, is_command_allowed, validate_url
 from backend.i18n import t
 from backend.plugin_loader import discover_plugins, list_plugins
 
@@ -311,7 +311,7 @@ class CompanionEngine:
         # Security check
         permission = is_command_allowed(command)
         if permission == "blocked":
-            audit_log(command, "blocked", f"params={list(params.keys())}")
+            audit_log(command, "blocked", audit_param_keys_details(params))
             return {"success": False, "error": t("command.blockedEngine", command=command)}
 
         if command not in self.commands:
@@ -322,18 +322,18 @@ class CompanionEngine:
 
         try:
             result = self.commands[command](**params)
-            audit_log(command, "executed", f"params={list(params.keys())}")
+            audit_log(command, "executed", audit_param_keys_details(params))
             return {"success": True, "data": result}
         except TypeError as e:
             # Wrong parameters
             import inspect
             func = self.commands[command]
             sig = str(inspect.signature(func))
-            audit_log(command, "param_error", str(e))
+            audit_log(command, "param_error", audit_error_details(e))
             logger.warning(f"Command {command} Paramter-Fehler: {e}")
             return {"success": False, "error": t("error.paramError", command=command, sig=sig, error=str(e))}
         except Exception as e:
-            audit_log(command, "error", str(e)[:200])
+            audit_log(command, "error", audit_error_details(e))
             logger.error(f"Command {command} failed: {e}", exc_info=True)
             return {"success": False, "error": t("error.commandError", command=command, error=str(e))}
 
