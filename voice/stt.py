@@ -119,6 +119,11 @@ def _mime_for_ext(path: str) -> str:
     }.get(ext, "audio/wav")
 
 
+def _log_transcription_success(label: str, latency_ms: int, text: str, *, file: bool = False) -> None:
+    source = " File" if file else ""
+    logger.info("[%s]%s (%sms): textChars=%s", label, source, latency_ms, len(str(text or "")))
+
+
 # ═══════════════════════════════════════════════════
 #  DEEPGRAM NOVA-3 (Primary — best German, ~150ms)
 # ═══════════════════════════════════════════════════
@@ -159,7 +164,7 @@ def _transcribe_deepgram(audio: np.ndarray, sample_rate: int = 16000,
                     .get("channels", [{}])[0]
                     .get("alternatives", [{}]))
             text = alts[0].get("transcript", "").strip() if alts else ""
-            logger.info(f"[Deepgram] ({latency}ms): '{text[:80]}'")
+            _log_transcription_success("Deepgram", latency, text)
             _record_success("deepgram")
             return text
         else:
@@ -209,7 +214,7 @@ def _transcribe_deepgram_file(audio_path: str) -> str | None:
                     .get("channels", [{}])[0]
                     .get("alternatives", [{}]))
             text = alts[0].get("transcript", "").strip() if alts else ""
-            logger.info(f"[Deepgram] File ({latency}ms): '{text[:80]}'")
+            _log_transcription_success("Deepgram", latency, text, file=True)
             _record_success("deepgram")
             return text
         else:
@@ -251,7 +256,7 @@ def _transcribe_groq(audio: np.ndarray, sample_rate: int = 16000,
 
         if resp.status_code == 200:
             text = resp.json().get("text", "").strip()
-            logger.info(f"[Groq] ({latency}ms): '{text[:80]}'")
+            _log_transcription_success("Groq", latency, text)
             _record_success("groq")
             return text
         elif resp.status_code == 429:
@@ -297,7 +302,7 @@ def _transcribe_groq_file(audio_path: str) -> str | None:
 
         if resp.status_code == 200:
             text = resp.json().get("text", "").strip()
-            logger.info(f"[Groq] File ({latency}ms): '{text[:80]}'")
+            _log_transcription_success("Groq", latency, text, file=True)
             _record_success("groq")
             return text
         else:
@@ -337,7 +342,7 @@ def _transcribe_openai(audio: np.ndarray, sample_rate: int = 16000) -> str | Non
 
         if resp.status_code == 200:
             text = resp.json().get("text", "").strip()
-            logger.info(f"[OpenAI STT {OPENAI_STT_MODEL}] ({latency}ms): '{text[:80]}'")
+            _log_transcription_success(f"OpenAI STT {OPENAI_STT_MODEL}", latency, text)
             _record_success("openai")
             return text
         logger.warning(f"[OpenAI STT] Error {resp.status_code}: {resp.text[:200]}")
@@ -377,7 +382,7 @@ def _transcribe_openai_file(audio_path: str) -> str | None:
 
         if resp.status_code == 200:
             text = resp.json().get("text", "").strip()
-            logger.info(f"[OpenAI STT {OPENAI_STT_MODEL}] File ({latency}ms): '{text[:80]}'")
+            _log_transcription_success(f"OpenAI STT {OPENAI_STT_MODEL}", latency, text, file=True)
             _record_success("openai")
             return text
         logger.warning(f"[OpenAI STT] File error {resp.status_code}: {resp.text[:200]}")

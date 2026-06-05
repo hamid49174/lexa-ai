@@ -29,6 +29,18 @@ from voice.wakeword_engines import (
 logger = logging.getLogger("lexa.wakeword")
 
 
+def _safe_log_token(value: object, *, fallback: str = "unknown") -> str:
+    text = "".join(ch for ch in str(value or "") if ch.isalnum() or ch in "._:-").strip("._:-")
+    return (text[:64] or fallback)
+
+
+def _log_wake_text_event(label: str, text: object, *, source: object = "") -> None:
+    fields = [f"textChars={len(str(text or ''))}"]
+    if source:
+        fields.append(f"source={_safe_log_token(source)}")
+    logger.info("[%s] %s", label, " ".join(fields))
+
+
 class WakeWordDetector:
     """Listens for wake phrases and triggers conversation.
 
@@ -246,7 +258,7 @@ class WakeWordDetector:
                 self._last_detected_text = text[:160]
                 self._last_detected_at = now
 
-                logger.info(f"[Wake] Detected: '{text}'")
+                _log_wake_text_event("Wake Detected", text, source=detection.source)
                 if self.on_wake:
                     self.on_wake()
 
@@ -273,7 +285,7 @@ class WakeWordDetector:
                     from voice.stt import transcribe_audio_data
                     command = transcribe_audio_data(cmd_audio, SAMPLE_RATE).strip()
                     self._last_command_source = "post_wake_recording"
-                logger.info(f"[Wake] Command: '{command}'")
+                _log_wake_text_event("Wake Command", command, source=self._last_command_source)
                 self._last_command = command[:160]
 
                 if not command:
@@ -335,7 +347,7 @@ class WakeWordDetector:
 
         from voice.stt import transcribe_audio_data
         command = transcribe_audio_data(cmd_audio, SAMPLE_RATE).strip()
-        logger.info(f"[Direct] Command: '{command}'")
+        _log_wake_text_event("Direct Command", command)
 
         if command and self.on_chat:
             engine.run_conversation(

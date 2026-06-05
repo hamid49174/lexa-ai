@@ -1,3 +1,5 @@
+import logging
+
 from voice.wakeword import _command_after_wake_phrase, _contains_wake_phrase
 from voice.wakeword_engines import (
     TranscriptWakeWordEngine,
@@ -5,7 +7,7 @@ from voice.wakeword_engines import (
     create_default_wakeword_engine,
     get_wakeword_engine_capabilities,
 )
-from voice.wakeword import WakeWordDetector
+from voice.wakeword import WakeWordDetector, _log_wake_text_event
 
 
 def test_wake_phrase_matches_exact_token():
@@ -120,3 +122,17 @@ def test_wakeword_empty_command_emits_timeout_and_end(monkeypatch):
     assert ("event", "wake_timeout", "No command heard.") in calls
     assert ("state", "conversation_end", "") in calls
     assert detector.status["last_command"] == ""
+
+
+def test_wakeword_text_event_log_redacts_transcript_text(caplog):
+    secret_text = "Lexa sende token=supersecretvalue an sk-testsecret12345"
+
+    caplog.set_level(logging.INFO, logger="lexa.wakeword")
+    _log_wake_text_event("Wake Command", secret_text, source="post_wake_recording")
+
+    logged = caplog.text
+    assert "textChars=" in logged
+    assert "source=post_wake_recording" in logged
+    assert "Lexa sende" not in logged
+    assert "supersecretvalue" not in logged
+    assert "sk-testsecret12345" not in logged

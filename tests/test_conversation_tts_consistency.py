@@ -1,5 +1,6 @@
 """Regression tests for voice conversation TTS consistency."""
 
+import logging
 import sys
 import types
 
@@ -52,3 +53,17 @@ def test_streaming_voice_turn_generates_one_tts_file(monkeypatch):
     assert tts_calls == ["Erster Satz. Zweiter Satz."]
     assert ("chunk", "Erster Satz.") in ws_calls
     assert ("chunk", "Zweiter Satz.") in ws_calls
+
+
+def test_conversation_text_event_log_redacts_transcript_text(caplog):
+    secret_text = "Bitte merke dir token=supersecretvalue und sk-testsecret12345"
+
+    caplog.set_level(logging.INFO, logger="lexa.conversation")
+    conversation._log_conversation_text_event("Conv Turn input", secret_text, turn=2)
+
+    logged = caplog.text
+    assert "textChars=" in logged
+    assert "turn=2" in logged
+    assert "Bitte merke" not in logged
+    assert "supersecretvalue" not in logged
+    assert "sk-testsecret12345" not in logged

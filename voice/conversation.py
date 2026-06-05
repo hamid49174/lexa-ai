@@ -15,6 +15,18 @@ from voice.playback import AudioPlayer
 
 logger = logging.getLogger("lexa.conversation")
 
+
+def _safe_log_token(value: object, *, fallback: str = "unknown") -> str:
+    text = "".join(ch for ch in str(value or "") if ch.isalnum() or ch in "._:-").strip("._:-")
+    return (text[:64] or fallback)
+
+
+def _log_conversation_text_event(label: str, text: object, **metadata: object) -> None:
+    fields = [f"textChars={len(str(text or ''))}"]
+    for key, value in metadata.items():
+        fields.append(f"{_safe_log_token(key, fallback='field')}={_safe_log_token(value)}")
+    logger.info("[%s] %s", label, " ".join(fields))
+
 # Sentence boundary pattern
 _SENTENCE_END = re.compile(r'(?<=[.!?])\s+|(?<=\n)')
 
@@ -374,7 +386,7 @@ class ConversationEngine:
             turn += 1
 
             if _is_exit(command):
-                logger.info(f"[Conv] Exit phrase: '{command}'")
+                _log_conversation_text_event("Conv Exit phrase", command, turn=turn)
                 push_state("conversation_end")
                 break
 
@@ -417,7 +429,7 @@ class ConversationEngine:
 
                     command = transcribe_audio_data(bargein_audio, SAMPLE_RATE).strip()
                     if command:
-                        logger.info(f"[Conv] Barge-in transcript: '{command}'")
+                        _log_conversation_text_event("Conv Barge-in transcript", command, turn=turn)
                         continue
             else:
                 time.sleep(0.2)
@@ -435,7 +447,7 @@ class ConversationEngine:
                 break
 
             command = transcribe_audio_data(cmd_audio, SAMPLE_RATE).strip()
-            logger.info(f"[Conv] Turn {turn} input: '{command}'")
+            _log_conversation_text_event("Conv Turn input", command, turn=turn)
 
         self._active = False
         if self._on_volume:
