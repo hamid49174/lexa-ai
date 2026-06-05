@@ -31,6 +31,7 @@ from voice.config import (
     WAKE_OPENWAKEWORD_THRESHOLD,
     WAKE_OPENWAKEWORD_VAD_THRESHOLD,
     WAKE_PHRASES,
+    MAX_TTS_TEXT_CHARS,
 )
 
 # ═══════════════════════════════════════════════════
@@ -569,15 +570,18 @@ async def deepgram_delete_key():
 @router.post("/tts")
 async def text_to_speech(data: TTSRequest):
     """Convert text to speech. Returns audio file."""
-    if not data.text:
+    text = str(data.text or "").strip()
+    if not text:
         return JSONResponse({"error": "Kein Text angegeben."}, status_code=400)
+    if len(text) > MAX_TTS_TEXT_CHARS:
+        return JSONResponse({"error": f"Text ist zu lang (max {MAX_TTS_TEXT_CHARS} Zeichen)."}, status_code=413)
     if not check_rate_limit("voice"):
         return JSONResponse({"error": "Rate limit erreicht."}, status_code=429)
 
     try:
         from voice.tts import speak_async
-        audio_path = await speak_async(data.text)
-        audit_log("tts", "generated", f"text={data.text[:50]}")
+        audio_path = await speak_async(text)
+        audit_log("tts", "generated", f"text={text[:50]}")
         is_mp3 = audio_path.endswith(".mp3")
         return FileResponse(
             audio_path,

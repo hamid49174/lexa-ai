@@ -478,7 +478,8 @@ PATH_PARAM_KEYS: frozenset[str] = frozenset({
 })
 
 COMMAND_PATH_PARAM_KEYS: dict[str, frozenset[str]] = {
-    "archive_extract": frozenset({"dest", "destination"}),
+    "archive_create": frozenset({"source", "output"}),
+    "archive_extract": frozenset({"archive_path", "dest", "destination"}),
     "backup_create": frozenset({"source", "dest", "destination"}),
     "file_move": frozenset({"source", "destination"}),
     "file_copy": frozenset({"source", "destination"}),

@@ -429,6 +429,27 @@ class TestValidateParams:
                 },
             )
 
+    def test_archive_command_path_aliases_are_validated(self):
+        from backend.security import validate_params
+
+        with pytest.raises(ValueError, match="Verzeichnis"):
+            validate_params(
+                "archive_extract",
+                {
+                    "archive_path": "C:\\Windows\\System32\\payload.zip",
+                    "destination": "C:\\Users\\admin\\Desktop\\out",
+                },
+            )
+
+        with pytest.raises(ValueError, match="Verzeichnis"):
+            validate_params(
+                "archive_create",
+                {
+                    "source": "C:\\Users\\admin\\Desktop\\notes",
+                    "output": "C:\\Windows\\System32\\notes.zip",
+                },
+            )
+
     def test_unrelated_source_param_is_not_treated_as_path(self):
         from backend.security import validate_params
 

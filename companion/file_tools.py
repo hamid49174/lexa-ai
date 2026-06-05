@@ -510,6 +510,24 @@ def archive_create(source: str = "", output: str = "", format: str = "zip") -> s
         return t("error.createFailed", error=str(e))
 
 
+def _safe_archive_members(names, destination: Path) -> tuple[list[str], int]:
+    """Return archive member names that stay inside the extraction destination."""
+    safe: list[str] = []
+    skipped = 0
+    dest_path = destination.resolve()
+    for name in names:
+        member_name = str(name or "")
+        try:
+            member_path = (dest_path / member_name).resolve()
+            member_path.relative_to(dest_path)
+        except (OSError, ValueError):
+            logger.warning("Archive path traversal blocked: %s", member_name)
+            skipped += 1
+            continue
+        safe.append(member_name)
+    return safe, skipped
+
+
 def archive_extract(archive_path: str = "", destination: str = "") -> str:
     """Extract a ZIP archive."""
     if not archive_path:
@@ -526,16 +544,11 @@ def archive_extract(archive_path: str = "", destination: str = "") -> str:
         if ext == ".zip":
             with zipfile.ZipFile(archive_path, "r") as zf:
                 dest_path = Path(destination).resolve()
+                safe_names, skipped = _safe_archive_members((m.filename for m in zf.infolist()), dest_path)
+                safe_name_set = set(safe_names)
                 safe_count = 0
-                skipped = 0
                 for member in zf.infolist():
-                    # Zip Slip protection: ensure extracted path stays within destination
-                    member_path = (dest_path / member.filename).resolve()
-                    try:
-                        member_path.relative_to(dest_path)
-                    except ValueError:
-                        logger.warning(f"ZIP Slip geblockt: {member.filename}")
-                        skipped += 1
+                    if member.filename not in safe_name_set:
                         continue
                     zf.extract(member, destination)
                     safe_count += 1
@@ -547,7 +560,10 @@ def archive_extract(archive_path: str = "", destination: str = "") -> str:
             try:
                 import py7zr
                 with py7zr.SevenZipFile(archive_path, mode="r") as z:
-                    z.extractall(path=destination)
+                    safe_names, skipped = _safe_archive_members(z.getnames(), Path(destination))
+                    if skipped:
+                        return f"7z-Archiv nicht entpackt: {skipped} unsichere Einträge geblockt."
+                    z.extractall(path=destination, targets=safe_names)
                 return f"7z-Archiv entpackt nach {destination}"
             except ImportError:
                 return "py7zr nicht installiert. Installiere mit: pip install py7zr"
@@ -555,7 +571,17 @@ def archive_extract(archive_path: str = "", destination: str = "") -> str:
             try:
                 import rarfile
                 with rarfile.RarFile(archive_path) as rf:
-                    rf.extractall(destination)
+                    dest_path = Path(destination).resolve()
+                    safe_names, skipped = _safe_archive_members((m.filename for m in rf.infolist()), dest_path)
+                    safe_name_set = set(safe_names)
+                    safe_count = 0
+                    for member in rf.infolist():
+                        if member.filename not in safe_name_set:
+                            continue
+                        rf.extract(member, destination)
+                        safe_count += 1
+                if skipped:
+                    return f"RAR-Archiv entpackt nach {destination} ({skipped} unsichere Einträge geblockt)"
                 return f"RAR-Archiv entpackt nach {destination}"
             except ImportError:
                 return "rarfile nicht installiert. Installiere mit: pip install rarfile"

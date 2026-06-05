@@ -32,6 +32,7 @@ def _setup_voice_stubs():
     config_stub.WAKE_OPENWAKEWORD_PATIENCE = 2
     config_stub.WAKE_OPENWAKEWORD_VAD_THRESHOLD = 0.05
     config_stub.WAKE_OPENWAKEWORD_AUTO_DOWNLOAD = True
+    config_stub.MAX_TTS_TEXT_CHARS = 2000
     config_stub.WAKE_FALLBACK_STT_MIN_INTERVAL_S = 0.75
     config_stub.WAKE_FALLBACK_STT_MAX_INTERVAL_S = 1.5
     config_stub.WAKE_FALLBACK_STT_BACKOFF_STEP_S = 0.25
@@ -317,6 +318,11 @@ class TestTTSEndpoints:
     def test_tts_empty_text(self, client):
         res = client.post("/voice/tts", json={"text": ""})
         assert res.status_code == 400
+
+    def test_tts_text_too_long(self, client):
+        res = client.post("/voice/tts", json={"text": "x" * 2001})
+        assert res.status_code == 413
+        assert sys.modules["voice.tts"].speak_async.await_count == 0
 
     def test_tts_voices_list(self, client):
         res = client.get("/voice/tts/voices")
