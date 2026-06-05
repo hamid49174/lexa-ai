@@ -172,7 +172,8 @@ async function main() {
       addFileUploadResponse({
         reply: "Attachment result <script>alert(1)</script> with **markdown**.",
         file_info: {
-          type: "md<script>",
+          type: "text",
+          extension: ".md",
           size_kb: "12<script>",
           line_count: 3,
         },
@@ -292,7 +293,7 @@ async function main() {
   assert("image file upload card renders a local preview", result.imagePreview?.exists === true && /^blob:/.test(result.imagePreview?.src || "") && result.imagePreview?.ariaHidden === "true" && /file-card-with-preview/.test(result.imagePreview?.cardClass || ""), JSON.stringify(result.imagePreview || {}));
 
   const resultBadge = result.resultBadge || {};
-  assert("file result badge renders metadata safely", resultBadge.text.includes("MD<SCRIPT>") && resultBadge.text.includes("12<script> KB") && resultBadge.text.includes("3") && !/<script/i.test(resultBadge.html || ""), JSON.stringify(resultBadge));
+  assert("file result badge renders metadata safely", resultBadge.text.includes("MD") && resultBadge.text.includes("0 KB") && resultBadge.text.includes("3") && !/12<script>|<script/i.test(resultBadge.html || ""), JSON.stringify(resultBadge));
   assert("file result content remains escaped while markdown renders", resultBadge.systemText.includes("Attachment result") && resultBadge.systemText.includes("alert(1)") && !/<script/i.test(resultBadge.systemHtml || "") && /<strong>markdown<\/strong>/i.test(resultBadge.systemHtml || ""), JSON.stringify(resultBadge));
 
   const failedResult = result.failedResult || {};

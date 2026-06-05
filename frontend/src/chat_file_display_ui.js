@@ -19,12 +19,30 @@ function fileUploadCanPreview(file) {
   return type.startsWith("image/") || ["PNG", "JPG", "JPEG", "GIF", "WEBP", "BMP", "AVIF"].includes(ext);
 }
 
+function fileUploadSafeNumber(value, fallback = 0) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return fallback;
+  return num;
+}
+
+function fileUploadDisplayNumber(value, fallback = 0) {
+  const num = fileUploadSafeNumber(value, fallback);
+  return Number.isInteger(num) ? String(num) : String(Math.round(num * 10) / 10);
+}
+
+function fileInfoBadgeType(fileInfo) {
+  const raw = String(fileInfo?.extension || fileInfo?.type || "file").trim();
+  const withoutDot = raw.replace(/^\.+/, "");
+  return String(withoutDot || "file").toUpperCase();
+}
+
 function fileInfoBadgeText(fileInfo) {
+  const lineCount = fileUploadSafeNumber(fileInfo?.line_count, 0);
   const parts = [
-    String(fileInfo?.type || "file").toUpperCase(),
-    `${fileInfo?.size_kb || 0} KB`,
+    fileInfoBadgeType(fileInfo),
+    `${fileUploadDisplayNumber(fileInfo?.size_kb)} KB`,
   ];
-  if (fileInfo?.line_count) parts.push(t("chat.fileLines", {count: fileInfo.line_count}));
+  if (lineCount) parts.push(t("chat.fileLines", {count: fileUploadDisplayNumber(lineCount)}));
   const status = String(fileInfo?.analysis_status || "");
   if (status === "vision_provider_required") parts.push(t("chat.fileVisionPendingBadge"));
   else if (status === "analyzed" || status === "text_analyzed") parts.push(t("chat.fileAnalyzedBadge"));
