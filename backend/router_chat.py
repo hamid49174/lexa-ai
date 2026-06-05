@@ -4,6 +4,7 @@ Chat endpoints: /chat, /chat/file, /chat/stream, /chat/confirm
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import mimetypes
@@ -17,6 +18,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from backend.agent_protocol import redacted_summary
 from backend.config import (
     MAX_HISTORY,
     MAX_CHAT_MESSAGE_LENGTH,
@@ -59,6 +61,9 @@ _PENDING_CANCEL_WORDS = frozenset({
     "nein", "no", "nee", "nope", "abbrechen", "abbruch", "cancel",
     "stop", "stopp", "verwerfen", "nicht ausfuehren",
 })
+_LOCAL_PATH_RE = re.compile(
+    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
+)
 
 
 _CONFIRMATION_WORDS = frozenset(_CONFIRMATION_WORDS | {
@@ -157,6 +162,19 @@ def _short_action_label(value: object, fallback: str = "Position", limit: int = 
     return text
 
 
+def _client_safe_chat_error(value: object, *, max_chars: int = 220) -> str:
+    """Return a compact client-facing error without local paths or secrets."""
+    text = redacted_summary(str(value or ""), max_chars=max_chars)
+    text = _LOCAL_PATH_RE.sub("[local-path-redacted]", text)
+    return text or "Details wurden lokal protokolliert."
+
+
+def _audit_message_details(message: str) -> str:
+    text = str(message or "")
+    digest = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:12]
+    return f"messageChars={len(text)} messageHash={digest}"
+
+
 def _format_confirmed_action_reply(action_name: str, result: dict) -> str:
     if result.get("success"):
         data = result.get("data")
@@ -180,7 +198,7 @@ def _format_confirmed_action_reply(action_name: str, result: dict) -> str:
         if isinstance(data, str) and data.strip():
             return data
         return f"Ausgefuehrt: {action_name}."
-    error = result.get("error") or "unbekannter Fehler"
+    error = _client_safe_chat_error(result.get("error") or "unbekannter Fehler")
     return f"Ich konnte {action_name} nicht ausfuehren: {error}"
 
 
@@ -234,7 +252,7 @@ async def _continue_hermes_desktop_queue(pending: dict, reply: str, source: str)
         )
     except Exception as exc:
         logger.warning("Hermes queue continuation failed from %s: %s", source, exc)
-        return f"{reply}\nNaechster Hermes-Schritt konnte nicht vorbereitet werden: {str(exc)[:180]}"
+        return f"{reply}\nNaechster Hermes-Schritt konnte nicht vorbereitet werden: {_client_safe_chat_error(exc)}"
 
     summary = str(data.get("summary") or "").strip()
     if not summary:
@@ -273,7 +291,7 @@ async def _collect_hermes_worker_reply(user_message: str, history_snapshot: list
             run_data = event.get("run", {}) or {}
             summary = run_data.get("summary", summary)
         elif etype == "error":
-            summary = event.get("message", "Hermes-Worker Fehler")
+            summary = _client_safe_chat_error(event.get("message", "Hermes-Worker Fehler"))
     return summary or "Hermes hat den Auftrag verarbeitet.", steps, run_data
 
 logger = logging.getLogger("lexa.chat")
@@ -804,7 +822,7 @@ def extract_file_content(filepath: Path, original_name: str) -> dict:
             result["line_count"] = text.count("\n") + 1
         except Exception as e:
             result["content"] = None
-            result["preview"] = t("error.readFile", error=str(e))
+            result["preview"] = t("error.readFile", error=_client_safe_chat_error(e))
     elif mime and mime.startswith("image/"):
         result["type"] = "image"
         result["preview"] = f"Bild: {original_name} ({size_kb} KB)"
@@ -895,7 +913,7 @@ async def chat_endpoint(req: ChatRequest):
         )
 
     sanitized = sanitize_input(req.message)
-    audit_log("chat", "received", f"MSG={sanitized[:100]}")
+    audit_log("chat", "received", _audit_message_details(sanitized))
 
     # Fast path: check if this is a confirmation of a pending action
     pending = get_pending_confirmation()
@@ -921,7 +939,7 @@ async def chat_endpoint(req: ChatRequest):
 
     system_reply = await try_lexa_system_answer(sanitized)
     if system_reply:
-        audit_log("chat", "lexa_system_answer", f"MSG={sanitized[:100]}")
+        audit_log("chat", "lexa_system_answer", _audit_message_details(sanitized))
         async with _history_lock:
             update_history(conversation_history, sanitized, system_reply, MAX_HISTORY)
         return ChatResponse(reply=system_reply, action=None, requires_confirmation=False)
@@ -931,7 +949,7 @@ async def chat_endpoint(req: ChatRequest):
     intent_context = build_conversation_intent_context(history_snapshot)
     publish_chat_context(sanitized, intent_context=intent_context, source="chat")
     if _is_hermes_worker_request(sanitized) or _is_hermes_desktop_control_request(sanitized):
-        audit_log("chat", "hermes_worker", f"MSG={sanitized[:100]}")
+        audit_log("chat", "hermes_worker", _audit_message_details(sanitized))
         reply_msg, _steps, _run_data = await _collect_hermes_worker_reply(sanitized, history_snapshot)
         reply_msg = await _maybe_execute_inline_confirmation(sanitized, reply_msg, "chat_inline_confirm")
         async with _history_lock:
@@ -940,7 +958,7 @@ async def chat_endpoint(req: ChatRequest):
 
     contextual_reply = try_contextual_followup(sanitized, history_snapshot)
     if contextual_reply:
-        audit_log("chat", "contextual_followup", f"MSG={sanitized[:100]}")
+        audit_log("chat", "contextual_followup", _audit_message_details(sanitized))
         async with _history_lock:
             update_history(conversation_history, sanitized, contextual_reply, MAX_HISTORY)
         return ChatResponse(reply=contextual_reply, action=None, requires_confirmation=False)
@@ -1176,7 +1194,7 @@ async def chat_stream_endpoint(req: ChatRequest):
         )
 
     sanitized = sanitize_input(req.message)
-    audit_log("chat_stream", "received", f"MSG={sanitized[:100]}")
+    audit_log("chat_stream", "received", _audit_message_details(sanitized))
 
     # Fast path: check if this is a confirmation of a pending action
     pending = get_pending_confirmation()
@@ -1220,7 +1238,7 @@ async def chat_stream_endpoint(req: ChatRequest):
 
     system_reply = await try_lexa_system_answer(sanitized)
     if system_reply:
-        audit_log("chat_stream", "lexa_system_answer", f"MSG={sanitized[:100]}")
+        audit_log("chat_stream", "lexa_system_answer", _audit_message_details(sanitized))
         async with _history_lock:
             update_history(conversation_history, sanitized, system_reply, MAX_HISTORY)
 
@@ -1239,7 +1257,7 @@ async def chat_stream_endpoint(req: ChatRequest):
     intent_context = build_conversation_intent_context(history_snapshot)
     publish_chat_context(sanitized, intent_context=intent_context, source="chat_stream")
     if _is_hermes_worker_request(sanitized) or _is_hermes_desktop_control_request(sanitized):
-        audit_log("chat_stream", "hermes_worker", f"MSG={sanitized[:100]}")
+        audit_log("chat_stream", "hermes_worker", _audit_message_details(sanitized))
 
         async def hermes_worker_stream():
             from backend.agent_loop import run_agent
@@ -1256,9 +1274,10 @@ async def chat_stream_endpoint(req: ChatRequest):
                     elif etype == "step_blocked":
                         if not inline_confirmation:
                             step = event.get("step", {}) or {}
-                            chunk = f"\nBestaetigung noetig fuer {step.get('action', 'Aktion')}: {step.get('error', '')}"
+                            error = _client_safe_chat_error(step.get("error", ""))
+                            chunk = f"\nBestaetigung noetig fuer {step.get('action', 'Aktion')}: {error}"
                     elif etype == "error":
-                        chunk = str(event.get("message") or "Hermes-Worker Fehler")
+                        chunk = _client_safe_chat_error(event.get("message") or "Hermes-Worker Fehler")
                     elif etype == "done":
                         run_data = event.get("run", {}) or {}
                         final_reply = str(run_data.get("summary") or final_reply or full_text or "Hermes hat den Auftrag verarbeitet.")
@@ -1286,7 +1305,7 @@ async def chat_stream_endpoint(req: ChatRequest):
                 logger.info("Hermes worker stream cancelled by client")
             except Exception as e:
                 logger.exception("Hermes worker stream failed")
-                yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'error': _client_safe_chat_error(e)}, ensure_ascii=False)}\n\n"
 
         return StreamingResponse(
             hermes_worker_stream(),
@@ -1296,7 +1315,7 @@ async def chat_stream_endpoint(req: ChatRequest):
 
     contextual_reply = try_contextual_followup(sanitized, history_snapshot)
     if contextual_reply:
-        audit_log("chat_stream", "contextual_followup", f"MSG={sanitized[:100]}")
+        audit_log("chat_stream", "contextual_followup", _audit_message_details(sanitized))
         async with _history_lock:
             update_history(conversation_history, sanitized, contextual_reply, MAX_HISTORY)
 

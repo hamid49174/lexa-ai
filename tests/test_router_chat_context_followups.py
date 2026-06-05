@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -16,6 +17,93 @@ COMPLEX_DAY_PLAN = (
     "und Weg nach draussen. Rechne aus, wie viel freie Zeit ungefaehr bleibt. "
     "Sag mir ausserdem, was ich weglassen sollte, falls ich muede bin."
 )
+
+
+def test_chat_audit_message_details_redacts_prompt_text():
+    secret_prompt = "call Alice about payroll token=abc123456789 C:\\Users\\admin\\secret.txt"
+
+    details = router_chat._audit_message_details(secret_prompt)
+
+    assert details.startswith("messageChars=")
+    assert "messageHash=" in details
+    assert "call Alice" not in details
+    assert "abc123456789" not in details
+    assert "C:\\Users\\admin" not in details
+    assert "MSG=" not in details
+
+
+def test_router_chat_source_does_not_log_prompt_previews():
+    source = Path(router_chat.__file__).read_text(encoding="utf-8")
+
+    assert "MSG={sanitized[:100]}" not in source
+    assert "MSG=" not in source
+
+
+def test_chat_endpoint_audit_uses_message_metadata(monkeypatch):
+    entries = []
+    app = FastAPI()
+    app.include_router(router_chat.router)
+    monkeypatch.setattr(router_chat, "check_rate_limit", lambda _bucket: True)
+    monkeypatch.setattr(router_chat, "audit_log", lambda *args, **_kwargs: entries.append(args))
+    monkeypatch.setattr(router_chat, "conversation_history", [])
+
+    async def fake_system_answer(_message):
+        return "System OK"
+
+    monkeypatch.setattr(router_chat, "try_lexa_system_answer", fake_system_answer)
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat",
+        json={"message": "call Alice about payroll token=abc123456789"},
+    )
+
+    assert response.status_code == 200
+    details = [entry[2] for entry in entries if entry[0] == "chat" and len(entry) >= 3]
+    assert details
+    for detail in details:
+        assert "messageChars=" in detail
+        assert "messageHash=" in detail
+        assert "call Alice" not in detail
+        assert "abc123456789" not in detail
+        assert "MSG=" not in detail
+
+
+def test_chat_stream_hermes_error_redacts_client_and_audit_details(monkeypatch):
+    entries = []
+    app = FastAPI()
+    app.include_router(router_chat.router)
+    monkeypatch.setattr(router_chat, "check_rate_limit", lambda _bucket: True)
+    monkeypatch.setattr(router_chat, "audit_log", lambda *args, **_kwargs: entries.append(args))
+    monkeypatch.setattr(router_chat, "conversation_history", [])
+    monkeypatch.setattr(router_chat, "publish_chat_context", lambda *_args, **_kwargs: None)
+
+    async def no_system_answer(_message):
+        return None
+
+    async def failing_run_agent(*_args, **_kwargs):
+        if False:
+            yield {}
+        raise RuntimeError("boom C:\\Users\\admin\\secret.txt token=supersecretvalue")
+
+    monkeypatch.setattr(router_chat, "try_lexa_system_answer", no_system_answer)
+    monkeypatch.setattr("backend.agent_loop.run_agent", failing_run_agent)
+    client = TestClient(app)
+
+    response = client.post("/chat/stream", json={"message": "/hermes diagnose token=abc123456789"})
+
+    assert response.status_code == 200
+    assert "[local-path-redacted]" in response.text
+    assert "C:\\Users\\admin" not in response.text
+    assert "supersecretvalue" not in response.text
+    details = [entry[2] for entry in entries if entry[0] == "chat_stream" and len(entry) >= 3]
+    assert details
+    for detail in details:
+        assert "messageChars=" in detail
+        assert "messageHash=" in detail
+        assert "/hermes diagnose" not in detail
+        assert "abc123456789" not in detail
+        assert "MSG=" not in detail
 
 
 def _client_with_weather_history(monkeypatch):

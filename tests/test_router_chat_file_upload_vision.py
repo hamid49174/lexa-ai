@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -90,6 +91,23 @@ def test_text_upload_still_uses_existing_chat_analysis(chat_file_client, monkeyp
     assert payload["reply"] == "Text file analysis"
     assert payload["analysis_status"] == "text_analyzed"
     assert payload["file_info"]["analysis_status"] == "text_analyzed"
+
+
+def test_text_upload_read_error_preview_is_client_safe(monkeypatch, tmp_path):
+    upload_path = tmp_path / "notes.txt"
+    upload_path.write_text("placeholder", encoding="utf-8")
+
+    def failing_read_bytes(self):
+        raise OSError("failed C:\\Users\\admin\\secret.txt token=supersecretvalue")
+
+    monkeypatch.setattr(Path, "read_bytes", failing_read_bytes)
+
+    file_info = router_chat.extract_file_content(upload_path, "notes.txt")
+
+    assert file_info["content"] is None
+    assert "[local-path-redacted]" in file_info["preview"]
+    assert "C:\\Users\\admin" not in file_info["preview"]
+    assert "supersecretvalue" not in file_info["preview"]
 
 
 def test_blocked_extension_is_rejected_before_chat_analysis(chat_file_client, monkeypatch):
