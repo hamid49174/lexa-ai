@@ -15,13 +15,20 @@ import base64
 import logging
 import re
 
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 
 from backend.agent_protocol import redacted_summary
 from backend.security import check_rate_limit
+from backend.vision_uploads import (
+    ALLOWED_IMAGE_TYPES,
+    invalid_image_upload_error,
+    normalized_upload_content_type,
+    supported_image_signature,
+    unsupported_upload_format_error,
+)
 
 logger = logging.getLogger("lexa.vision.router")
 
@@ -34,8 +41,6 @@ _VISION_PROVIDER_MISSING_RE = re.compile(
     r"(?:Kein Vision-Provider|API-Key im Keyring|keyring\.set_password|no vision provider)",
     re.IGNORECASE,
 )
-
-
 # ══════════════════════════════════════════════════
 #  REQUEST MODELS
 # ══════════════════════════════════════════════════
@@ -186,8 +191,8 @@ async def analyze_screenshot_endpoint(req: AnalyzeRequest):
 
 @router.post("/analyze-file")
 async def analyze_uploaded_file(
-    prompt: str = "Beschreibe dieses Bild detailliert.",
-    quality_mode: bool = False,
+    prompt: str = Form("Beschreibe dieses Bild detailliert."),
+    quality_mode: bool = Form(False),
     file: UploadFile = File(...),
 ):
     """Analysiert ein hochgeladenes Bild mit Vision AI.
@@ -199,10 +204,10 @@ async def analyze_uploaded_file(
     if limited is not None:
         return limited
 
-    # Validierung: Dateityp
-    allowed_types = {"image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"}
-    if file.content_type and file.content_type not in allowed_types:
-        return _error(f"Nicht unterstuetztes Format: {file.content_type}. Erlaubt: PNG, JPEG, WEBP, GIF, BMP", 400)
+    # Validierung: gemeldeter Dateityp ist nur ein erster Filter; Bytes werden unten geprueft.
+    content_type = normalized_upload_content_type(file.content_type)
+    if content_type and content_type not in ALLOWED_IMAGE_TYPES:
+        return _error(unsupported_upload_format_error(content_type), 400)
 
     try:
         # Datei lesen (max 10MB)
@@ -211,6 +216,8 @@ async def analyze_uploaded_file(
             return _error("Datei zu gross (max. 10MB)", 413)
         if len(image_bytes) == 0:
             return _error("Leere Datei", 400)
+        if supported_image_signature(image_bytes) is None:
+            return _error(invalid_image_upload_error(), 400)
 
         from backend.vision import analyze_image
 

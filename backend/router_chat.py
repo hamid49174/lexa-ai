@@ -43,6 +43,7 @@ from backend.intent_engine import build_conversation_intent_context, try_local_i
 from backend.lexa_system_answer import try_lexa_system_answer
 from backend.lexa_voice import lexa_user_error
 from backend.response_cache import get_cached_chat_response, remember_chat_response
+from backend.vision_uploads import invalid_image_upload_error, supported_image_signature
 from backend.security import (
     sanitize_input,
     check_rate_limit,
@@ -1104,6 +1105,10 @@ async def chat_file_endpoint(
         user_msg = sanitize_input(message) if message else "Analysiere diese Datei."
 
         if file_info["type"] == "image":
+            image_bytes = tmp_path.read_bytes()
+            if supported_image_signature(image_bytes) is None:
+                raise HTTPException(status_code=400, detail=invalid_image_upload_error())
+
             analysis_status = "vision_provider_required"
             reply = image_upload_provider_required_reply(file_info)
             if chat_file_vision_available():
@@ -1111,7 +1116,7 @@ async def chat_file_endpoint(
                     from backend.vision import analyze_image
 
                     reply = await analyze_image(
-                        image_input=tmp_path.read_bytes(),
+                        image_input=image_bytes,
                         prompt=user_msg,
                         quality_mode=False,
                     )

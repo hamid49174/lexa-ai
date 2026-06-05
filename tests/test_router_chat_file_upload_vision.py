@@ -71,6 +71,24 @@ def test_image_upload_with_provider_uses_vision_pipeline(chat_file_client, monke
     assert payload["file_info"]["analysis_status"] == "analyzed"
 
 
+def test_spoofed_image_upload_is_rejected_before_analysis(chat_file_client, monkeypatch):
+    monkeypatch.setattr(router_chat, "chat_file_vision_available", lambda: True)
+
+    def fail_chat(*_args, **_kwargs):
+        raise AssertionError("spoofed image uploads must not be routed to text chat")
+
+    async def fail_analyze_image(**_kwargs):
+        raise AssertionError("spoofed image uploads must not reach a vision provider")
+
+    monkeypatch.setattr(router_chat, "chat", fail_chat)
+    monkeypatch.setattr("backend.vision.analyze_image", fail_analyze_image)
+
+    response = _post_image(chat_file_client, content=b"not actually an image")
+
+    assert response.status_code == 400
+    assert "kein unterstuetztes Bild" in response.json()["detail"]
+
+
 def test_text_upload_still_uses_existing_chat_analysis(chat_file_client, monkeypatch):
     def fake_chat(prompt, history):
         assert "notes.txt" in prompt
