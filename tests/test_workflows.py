@@ -117,6 +117,76 @@ def test_workflow_reflection_block_prevents_tool_execution(monkeypatch):
     assert calls == []
 
 
+def test_workflow_reflection_block_audit_redacts_reason(monkeypatch):
+    from backend.agent_reflection import ReflectionDecision
+
+    calls = []
+    entries = []
+    engine = workflows.WorkflowEngine()
+    engine._companion_execute = lambda tool, args: calls.append((tool, args))
+    monkeypatch.setattr("backend.security.audit_log", lambda *args, **kwargs: entries.append(args))
+    monkeypatch.setattr(
+        "backend.agent_reflection.reflect_action",
+        lambda *args, **kwargs: ReflectionDecision(
+            should_execute=False,
+            risk_level="medium",
+            confidence=0.2,
+            concerns=["unit"],
+            safer_alternative={"mode": "read_only"},
+            requires_confirmation=False,
+            verification_step="verify first",
+            reason="blocked C:\\Users\\admin\\secret.txt token=supersecretvalue",
+        ),
+    )
+
+    with pytest.raises(PermissionError, match="safety reflection"):
+        _run(engine._step_tool(
+            {"type": "tool", "tool": "app_open", "args": {"name": "notepad"}},
+            {"workflow_step_count": 2},
+        ))
+
+    assert calls == []
+    entry = next(item for item in entries if item[:2] == ("app_open", "workflow_reflection_blocked"))
+    details = entry[2]
+    assert "reasonChars=" in details
+    assert "reasonHash=" in details
+    assert "C:\\Users\\admin" not in details
+    assert "supersecretvalue" not in details
+    assert "reason=" not in details
+
+
+def test_workflow_param_block_audit_redacts_error(monkeypatch):
+    calls = []
+    entries = []
+    engine = workflows.WorkflowEngine()
+    engine._companion_execute = lambda tool, args: calls.append((tool, args))
+    monkeypatch.setattr("backend.security.audit_log", lambda *args, **kwargs: entries.append(args))
+    monkeypatch.setattr("backend.security.is_command_allowed", lambda _tool: "allowed")
+    monkeypatch.setattr("backend.agent_reflection.reflect_action", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "backend.security.validate_params",
+        lambda _tool, _args: (_ for _ in ()).throw(
+            ValueError("bad C:\\Users\\admin\\secret.txt token=supersecretvalue")
+        ),
+    )
+
+    with pytest.raises(PermissionError):
+        _run(engine._step_tool(
+            {"type": "tool", "tool": "app_open", "args": {"name": "notepad"}},
+            {"workflow_step_count": 1},
+        ))
+
+    assert calls == []
+    entry = next(item for item in entries if item[:2] == ("app_open", "workflow_param_blocked"))
+    details = entry[2]
+    assert "errorType=ValueError" in details
+    assert "errorChars=" in details
+    assert "errorHash=" in details
+    assert "C:\\Users\\admin" not in details
+    assert "supersecretvalue" not in details
+    assert "error=" not in details
+
+
 def test_workflow_tool_reflection_receives_multi_step_context(monkeypatch):
     captured = []
     calls = []

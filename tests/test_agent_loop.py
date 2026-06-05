@@ -413,6 +413,34 @@ class TestToolExecution(unittest.TestCase):
 
     @patch("backend.agent_loop.is_command_allowed", return_value="allowed")
     @patch("companion.engine.companion")
+    def test_reflection_block_audit_redacts_reason(self, mock_companion, mock_perm):
+        entries = []
+        blocked = ReflectionDecision(
+            should_execute=False,
+            risk_level="medium",
+            confidence=0.2,
+            concerns=["unit"],
+            safer_alternative={"mode": "read_only"},
+            requires_confirmation=False,
+            verification_step="verify first",
+            reason="blocked C:\\Users\\admin\\secret.txt token=supersecretvalue",
+        )
+        with patch("backend.agent_loop.reflect_action", return_value=blocked), \
+             patch("backend.agent_loop.audit_log", lambda *args, **_kwargs: entries.append(args)):
+            result = _run(_execute_tool("system_info", {}))
+
+        self.assertFalse(result["success"])
+        entry = next(item for item in entries if item[:2] == ("system_info", "agent_reflection_blocked"))
+        details = entry[2]
+        self.assertIn("reasonChars=", details)
+        self.assertIn("reasonHash=", details)
+        self.assertNotIn("C:\\Users\\admin", details)
+        self.assertNotIn("supersecretvalue", details)
+        self.assertNotIn("reason=", details)
+        mock_companion.execute.assert_not_called()
+
+    @patch("backend.agent_loop.is_command_allowed", return_value="allowed")
+    @patch("companion.engine.companion")
     def test_low_confidence_write_call_is_reflection_blocked(self, mock_companion, mock_perm):
         with patch("backend.agent_reflection.audit_log"), \
              patch("backend.agent_loop.validate_params") as mock_validate:

@@ -34,7 +34,7 @@ from backend.config import (
     AGENT_STEP_TIMEOUT,
 )
 from backend.agent_reflection import reflect_action
-from backend.security import is_command_allowed, audit_log, validate_params
+from backend.security import audit_value_metadata, is_command_allowed, audit_log, validate_params
 from backend.action_parser import _ACTION_NAME_PATTERN, _sanitize_params
 logger = logging.getLogger("lexa.agent")
 _AGENT_ARGS_MISSING = object()
@@ -379,7 +379,7 @@ async def _execute_tool(action_name: str, params: dict, *, plan_length: int = 1,
         low_confidence=low_confidence,
     )
     if reflection is not None and not reflection.should_execute:
-        audit_log(action_name, "agent_reflection_blocked", f"reason={reflection.reason[:120]}")
+        audit_log(action_name, "agent_reflection_blocked", audit_value_metadata("reason", reflection.reason))
         return {
             "success": False,
             "error": "Aktion wurde nach Sicherheitsreflexion nicht ausgefuehrt.",
