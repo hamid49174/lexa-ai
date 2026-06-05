@@ -90,3 +90,50 @@ def test_text_upload_still_uses_existing_chat_analysis(chat_file_client, monkeyp
     assert payload["reply"] == "Text file analysis"
     assert payload["analysis_status"] == "text_analyzed"
     assert payload["file_info"]["analysis_status"] == "text_analyzed"
+
+
+def test_blocked_extension_is_rejected_before_chat_analysis(chat_file_client, monkeypatch):
+    def fail_chat(*_args, **_kwargs):
+        raise AssertionError("blocked uploads must not be routed to chat")
+
+    monkeypatch.setattr(router_chat, "chat", fail_chat)
+
+    response = chat_file_client.post(
+        "/chat/file",
+        files={"file": ("malware.exe", b"MZ", "application/octet-stream")},
+        data={"message": "Bitte pruefen."},
+    )
+
+    assert response.status_code == 400
+    assert "nicht erlaubt" in response.json()["detail"]
+
+
+def test_path_like_filename_is_rejected(chat_file_client, monkeypatch):
+    def fail_chat(*_args, **_kwargs):
+        raise AssertionError("unsafe filenames must not be routed to chat")
+
+    monkeypatch.setattr(router_chat, "chat", fail_chat)
+
+    response = chat_file_client.post(
+        "/chat/file",
+        files={"file": ("../notes.txt", b"secret", "text/plain")},
+        data={"message": "Bitte pruefen."},
+    )
+
+    assert response.status_code == 400
+    assert "Dateiname" in response.json()["detail"]
+
+
+def test_oversize_upload_cleans_temporary_file(chat_file_client, monkeypatch, tmp_path):
+    monkeypatch.setattr(router_chat, "MAX_FILE_SIZE", 4)
+    monkeypatch.setattr(router_chat, "MAX_FILE_SIZE_MB", 1)
+    monkeypatch.setattr(router_chat.tempfile, "tempdir", str(tmp_path))
+
+    response = chat_file_client.post(
+        "/chat/file",
+        files={"file": ("notes.txt", b"too large", "text/plain")},
+        data={"message": "Bitte pruefen."},
+    )
+
+    assert response.status_code == 413
+    assert list(tmp_path.iterdir()) == []

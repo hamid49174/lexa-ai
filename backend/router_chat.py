@@ -822,6 +822,23 @@ def extract_file_content(filepath: Path, original_name: str) -> dict:
 #  CHAT ENDPOINTS
 # ══════════════════════════════════════════════════
 
+def validate_chat_upload_filename(filename: str | None) -> tuple[str, str]:
+    """Return a safe display filename and suffix, or raise for unsafe uploads."""
+    original = str(filename or "upload").strip() or "upload"
+    safe_filename = Path(original).name
+    if not safe_filename or safe_filename != original:
+        raise HTTPException(status_code=400, detail="Ungueltiger Dateiname.")
+
+    suffix = Path(safe_filename).suffix.lower()
+    if suffix in BLOCKED_EXTENSIONS:
+        audit_log("chat_file", "blocked_extension", f"EXT={suffix}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Dateityp '{suffix}' ist nicht erlaubt.",
+        )
+    return safe_filename, suffix
+
+
 def chat_file_public_info(file_info: dict, *, analysis_status: str | None = None) -> dict:
     """Return the stable file metadata payload exposed to the renderer."""
     payload = {
@@ -1028,42 +1045,37 @@ async def chat_file_endpoint(
     if not check_rate_limit("chat"):
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
 
-    # Read file in chunks to prevent OOM on large uploads
-    chunks = []
+    safe_filename, suffix = validate_chat_upload_filename(file.filename)
+
+    # Stream the upload directly to disk so large configured uploads do not pile up in RAM.
+    tmp_path: Path | None = None
     total_size = 0
-    while True:
-        chunk = await file.read(65536)
-        if not chunk:
-            break
-        total_size += len(chunk)
-        if total_size > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Datei zu groß (max {MAX_FILE_SIZE_MB} MB).",
-            )
-        chunks.append(chunk)
-    content = b"".join(chunks)
-
-    # Validate filename — prevent path traversal and suspicious names
-    original_filename = file.filename or "upload"
-    safe_filename = Path(original_filename).name
-    if not safe_filename or safe_filename != original_filename:
-        safe_filename = "upload"
-
-    # Block dangerous extensions
-    suffix = Path(safe_filename).suffix.lower()
-    if suffix in BLOCKED_EXTENSIONS:
-        audit_log("chat_file", "blocked_extension", f"EXT={suffix}")
-        raise HTTPException(
-            status_code=400,
-            detail=f"Dateityp '{suffix}' ist nicht erlaubt.",
-        )
+    too_large = False
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(content)
         tmp_path = Path(tmp.name)
+        while True:
+            chunk = await file.read(65536)
+            if not chunk:
+                break
+            total_size += len(chunk)
+            if total_size > MAX_FILE_SIZE:
+                too_large = True
+                break
+            tmp.write(chunk)
 
+    if too_large:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise HTTPException(
+            status_code=413,
+            detail=f"Datei zu gross (max {MAX_FILE_SIZE_MB} MB).",
+        )
+
+    # Analyze the already validated temporary upload.
     try:
-        file_info = extract_file_content(tmp_path, file.filename or "upload")
+        file_info = extract_file_content(tmp_path, safe_filename)
         user_msg = sanitize_input(message) if message else "Analysiere diese Datei."
 
         if file_info["type"] == "image":
@@ -1074,7 +1086,7 @@ async def chat_file_endpoint(
                     from backend.vision import analyze_image
 
                     reply = await analyze_image(
-                        image_input=content,
+                        image_input=tmp_path.read_bytes(),
                         prompt=user_msg,
                         quality_mode=False,
                     )
