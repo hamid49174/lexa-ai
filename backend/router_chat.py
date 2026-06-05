@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib
 import json
 import logging
 import mimetypes
@@ -70,6 +71,13 @@ _LOCAL_PATH_RE = re.compile(
     r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
 )
 _GENERIC_UPLOAD_MIME_TYPES = frozenset({"application/octet-stream", "binary/octet-stream"})
+PDF_TEXT_MAX_PAGES = 25
+FILE_ANALYSIS_DIRECTIVE = (
+    "Datei-Analyse-Regel: Antworte direkt anhand des bereitgestellten Datei-Kontexts. "
+    "Behaupte nicht, dass du spaeter weiterliest, gleich Ergebnisse nachreichst oder im Hintergrund "
+    "weiterarbeitest. Wenn der Inhalt nicht ausreicht oder nur Metadaten verfuegbar sind, sage das klar "
+    "und nenne konkrete naechste Schritte."
+)
 
 
 _CONFIRMATION_WORDS = frozenset(_CONFIRMATION_WORDS | {
@@ -173,6 +181,94 @@ def _client_safe_chat_error(value: object, *, max_chars: int = 220) -> str:
     text = redacted_summary(str(value or ""), max_chars=max_chars)
     text = _LOCAL_PATH_RE.sub("[local-path-redacted]", text)
     return text or "Details wurden lokal protokolliert."
+
+
+def _looks_like_file_upload_capability_question(text: str) -> bool:
+    folded = _ascii_fold(text)
+    if not folded:
+        return False
+    has_upload_subject = any(term in folded for term in (
+        "datei", "dateien", "dateityp", "dateitypen", "upload",
+        "uploads", "dokument", "pdf", "bild", "bilder",
+    ))
+    has_capability_ask = any(term in folded for term in (
+        "welche", "was", "kannst du", "kannst", "kann ich",
+        "unterstuetzt", "unterstuetzen", "sinnvoll", "faehig",
+        "moeglich", "geht",
+    ))
+    has_analysis_context = any(term in folded for term in (
+        "analys", "auswert", "lesen", "verarbeiten", "hochlad",
+        "hochladen", "upload", "dateityp",
+    ))
+    return has_upload_subject and has_capability_ask and has_analysis_context
+
+
+def try_file_upload_capability_answer(user_message: str) -> str | None:
+    """Deterministic answer for upload capability questions, without overclaiming."""
+    if not _looks_like_file_upload_capability_question(user_message):
+        return None
+    return "\n".join([
+        "Aktuell kann ich Uploads so sinnvoll analysieren:",
+        "",
+        "- Direkt als Inhalt: Text-/Code-Dateien wie txt, md, csv, json, log und aehnliche Textformate.",
+        "- PDFs: wenn Text extrahierbar ist, werte ich den Text direkt aus und melde Seiten-/Metadaten mit.",
+        "- Bilder: nur mit verbundenem Vision-Provider. Ohne Vision sage ich ehrlich, dass Bildanalyse noch nicht aktiv ist.",
+        "- Office-Dateien und Archive: aktuell nicht als Dokumentinhalt im Chat extrahiert. Ich kann Metadaten sehen oder passende Datei-/Archiv-Tools nutzen, aber nicht so tun, als haette ich den Inhalt gelesen.",
+        "",
+        "Bei jedem Upload sage ich klar, ob ich Inhalt analysiert habe oder nur Metadaten sehe.",
+    ])
+
+
+def _load_pdf_reader_class():
+    return importlib.import_module("pypdf").PdfReader
+
+
+def _extract_pdf_text(filepath: Path, original_name: str) -> dict:
+    try:
+        reader_cls = _load_pdf_reader_class()
+        reader = reader_cls(str(filepath))
+        pages = list(getattr(reader, "pages", []) or [])
+    except Exception as e:
+        return {
+            "content": None,
+            "line_count": None,
+            "page_count": None,
+            "preview": f"PDF: {original_name} - Text konnte nicht extrahiert werden: {_client_safe_chat_error(e)}",
+        }
+
+    chunks: list[str] = []
+    for index, page in enumerate(pages[:PDF_TEXT_MAX_PAGES], start=1):
+        try:
+            text = str(page.extract_text() or "").strip()
+        except Exception:
+            text = ""
+        if text:
+            chunks.append(f"[Seite {index}]\n{text}")
+
+    extracted = "\n\n".join(chunks).strip()
+    if not extracted:
+        return {
+            "content": None,
+            "line_count": None,
+            "page_count": len(pages),
+            "preview": f"PDF: {original_name} - kein extrahierbarer Text gefunden.",
+        }
+
+    total_chars = len(extracted)
+    content = extracted[:MAX_TEXT_CHARS]
+    truncated = total_chars > MAX_TEXT_CHARS or len(pages) > PDF_TEXT_MAX_PAGES
+    preview = (
+        f"[PDF-Textauszug: {min(len(pages), PDF_TEXT_MAX_PAGES)}/{len(pages)} Seiten, "
+        f"{min(total_chars, MAX_TEXT_CHARS)} von {total_chars} Zeichen]"
+        if truncated
+        else f"PDF-Text extrahiert: {len(pages)} Seiten, {total_chars} Zeichen"
+    )
+    return {
+        "content": content,
+        "line_count": content.count("\n") + 1,
+        "page_count": len(pages),
+        "preview": preview,
+    }
 
 
 def _audit_message_details(message: str) -> str:
@@ -866,7 +962,7 @@ def extract_file_content(filepath: Path, original_name: str, content_type: str |
             result["preview"] = t("error.readFile", error=_client_safe_chat_error(e))
     elif ext == ".pdf":
         result["type"] = "pdf"
-        result["preview"] = f"PDF: {original_name} ({size_kb} KB)"
+        result.update(_extract_pdf_text(filepath, original_name))
     else:
         result["type"] = "binary"
         result["preview"] = f"Datei: {original_name} ({size_kb} KB, {mime})"
@@ -904,6 +1000,7 @@ def chat_file_public_info(file_info: dict, *, analysis_status: str | None = None
         "extension": file_info["extension"],
         "mime": file_info["mime"],
         "line_count": file_info.get("line_count"),
+        "page_count": file_info.get("page_count"),
         "preview": file_info["preview"],
     }
     if analysis_status:
@@ -974,6 +1071,13 @@ async def chat_endpoint(req: ChatRequest):
         async with _history_lock:
             update_history(conversation_history, sanitized, reply, MAX_HISTORY)
         return ChatResponse(reply=reply, action=None, requires_confirmation=False)
+
+    file_capability_reply = try_file_upload_capability_answer(sanitized)
+    if file_capability_reply:
+        audit_log("chat", "file_upload_capability", _audit_message_details(sanitized))
+        async with _history_lock:
+            update_history(conversation_history, sanitized, file_capability_reply, MAX_HISTORY)
+        return ChatResponse(reply=file_capability_reply, action=None, requires_confirmation=False)
 
     system_reply = await try_lexa_system_answer(sanitized)
     if system_reply:
@@ -1175,11 +1279,13 @@ async def chat_file_endpoint(
                 f"{file_info.get('line_count', '?')} Zeilen | {file_info['extension']}]\n"
                 f"```\n{file_info['content']}\n```"
             )
-            full_prompt = f"{user_msg}\n\n{file_context}"
+            full_prompt = f"{FILE_ANALYSIS_DIRECTIVE}\n\nNutzerfrage: {user_msg}\n\n{file_context}"
         else:
             full_prompt = (
-                f"{user_msg}\n\n[Datei: {file_info['filename']} "
-                f"({file_info['size_kb']} KB, {file_info['mime']})]"
+                f"{FILE_ANALYSIS_DIRECTIVE}\n\nNutzerfrage: {user_msg}\n\n"
+                f"[Datei: {file_info['filename']} "
+                f"({file_info['size_kb']} KB, {file_info['mime']}); "
+                f"Inhalt nicht extrahiert; Hinweis: {file_info.get('preview') or 'keine Vorschau'}]"
             )
 
         audit_log("chat_file", "received", _audit_file_details(file_info["filename"]))
@@ -1202,15 +1308,16 @@ async def chat_file_endpoint(
         async with _history_lock:
             update_history(conversation_history, full_prompt[:2000], reply, MAX_HISTORY)
 
+        analysis_status = "text_analyzed" if file_info.get("content") else "metadata_only"
         return {
             "status": "ok",
             "reply": reply,
             "action": action,
             "requires_confirmation": requires_confirmation,
-            "analysis_status": "text_analyzed" if file_info["type"] == "text" else "metadata_only",
+            "analysis_status": analysis_status,
             "file_info": chat_file_public_info(
                 file_info,
-                analysis_status="text_analyzed" if file_info["type"] == "text" else "metadata_only",
+                analysis_status=analysis_status,
             ),
         }
     finally:
@@ -1274,6 +1381,22 @@ async def chat_stream_endpoint(req: ChatRequest):
 
         return StreamingResponse(
             pending_wait_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    file_capability_reply = try_file_upload_capability_answer(sanitized)
+    if file_capability_reply:
+        audit_log("chat_stream", "file_upload_capability", _audit_message_details(sanitized))
+        async with _history_lock:
+            update_history(conversation_history, sanitized, file_capability_reply, MAX_HISTORY)
+
+        async def file_capability_stream():
+            yield f"data: {json.dumps({'c': file_capability_reply})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'action': None, 'rc': False})}\n\n"
+
+        return StreamingResponse(
+            file_capability_stream(),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )

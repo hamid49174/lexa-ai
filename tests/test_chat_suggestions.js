@@ -48,6 +48,8 @@ const labels = {
   "chat.suggShowNotes": "Zeig meine Notizen",
   "chat.suggProcessList": "Prozessliste",
   "chat.suggDiskAnalysis": "Disk Analyse",
+  "chat.suggCleanDownloads": "Downloads aufraeumen",
+  "chat.suggFindDuplicates": "Duplikate finden",
   "chat.suggNextLexaImprovement": "Next Lexa improvement",
   "chat.suggRunFocusedTests": "Run focused tests",
   "chat.suggCheckRisks": "Check risks",
@@ -204,6 +206,28 @@ assert(
   "dangerous desktop-action safety answers get data-safety chips",
   dangerousDesktopSafetySuggestions.join("|") === "Dry run first|Check backup|Confirm changes",
   JSON.stringify(dangerousDesktopSafetySuggestions)
+);
+
+const uploadedPdfAnalysisSuggestions = generateSuggestions(
+  "Die PDF-Datei enthaelt eine Vorlage mit Aufgaben, Terminen und Risiken.",
+  "Extrahiere Aufgaben, Termine und Risiken aus der Datei."
+);
+assert(
+  "uploaded document analysis does not get cleanup shortcut chips",
+  !uploadedPdfAnalysisSuggestions.includes("Downloads aufraeumen")
+    && !uploadedPdfAnalysisSuggestions.includes("Duplikate finden"),
+  JSON.stringify(uploadedPdfAnalysisSuggestions)
+);
+
+const duplicateFileSuggestions = generateSuggestions(
+  "Ich kann nach doppelten Dateien suchen.",
+  "Duplikate finden"
+);
+assert(
+  "explicit duplicate-file search still gets file-management shortcut chips",
+  duplicateFileSuggestions.includes("Downloads aufraeumen")
+    && duplicateFileSuggestions.includes("Duplikate finden"),
+  JSON.stringify(duplicateFileSuggestions)
 );
 
 const systemSuggestions = generateSuggestions("CPU 20%, RAM 50%, Speicher okay.", "systeminfo");

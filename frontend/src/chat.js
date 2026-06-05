@@ -1283,8 +1283,13 @@ function generateSuggestions(responseText, userQuestion) {
       suggestions.push(t("chat.suggTimerStatus"), t("chat.suggStopPomodoro"));
     }
   }
-  // File context
-  if (hasAny(["datei", "dateien", "ordner", "file", "files", "download", "downloads"])) {
+  // File-management context. Keep this narrow so uploaded-document analysis does not suggest cleanup actions.
+  if (hasAnyTopic([
+    "downloads aufraeumen", "downloads bereinigen", "download ordner aufraeumen",
+    "duplikate finden", "doppelte dateien", "dateien aufraeumen",
+    "ordner aufraeumen", "clean downloads", "clean up downloads",
+    "find duplicates", "duplicate files", "file cleanup",
+  ])) {
     suggestions.push(t("chat.suggCleanDownloads"), t("chat.suggFindDuplicates"));
   }
   // Git/Dev context

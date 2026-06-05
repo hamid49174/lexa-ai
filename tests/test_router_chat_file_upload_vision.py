@@ -125,6 +125,9 @@ def test_reported_text_mime_does_not_bypass_image_suffix_validation(chat_file_cl
 
 def test_text_upload_still_uses_existing_chat_analysis(chat_file_client, monkeypatch):
     def fake_chat(prompt, history):
+        assert prompt.startswith(router_chat.FILE_ANALYSIS_DIRECTIVE)
+        assert "im Hintergrund" in prompt
+        assert "Nutzerfrage: Bitte zusammenfassen." in prompt
         assert "notes.txt" in prompt
         assert "plain file content" in prompt
         assert history == []
@@ -147,6 +150,7 @@ def test_text_upload_still_uses_existing_chat_analysis(chat_file_client, monkeyp
 
 def test_text_upload_uses_reported_mime_when_filename_has_no_suffix(chat_file_client, monkeypatch):
     def fake_chat(prompt, history):
+        assert prompt.startswith(router_chat.FILE_ANALYSIS_DIRECTIVE)
         assert "README" in prompt
         assert "plain file content" in prompt
         assert history == []
@@ -224,6 +228,157 @@ def test_generic_upload_mime_keeps_useful_filename_metadata(tmp_path):
     assert file_info["type"] == "text"
     assert file_info["mime"] == "text/plain"
     assert file_info["content"] == "plain file content"
+
+
+def test_pdf_upload_extracts_text_with_page_metadata(tmp_path, monkeypatch):
+    upload_path = tmp_path / "report.pdf"
+    upload_path.write_bytes(b"%PDF fake")
+
+    class FakePage:
+        def __init__(self, text):
+            self._text = text
+
+        def extract_text(self):
+            return self._text
+
+    class FakePdfReader:
+        def __init__(self, path):
+            assert path == str(upload_path)
+            self.pages = [FakePage("Alpha summary"), FakePage("Beta risks")]
+
+    monkeypatch.setattr(router_chat, "_load_pdf_reader_class", lambda: FakePdfReader)
+
+    file_info = router_chat.extract_file_content(
+        upload_path,
+        "report.pdf",
+        "application/pdf",
+    )
+
+    assert file_info["type"] == "pdf"
+    assert file_info["page_count"] == 2
+    assert "[Seite 1]" in file_info["content"]
+    assert "Alpha summary" in file_info["content"]
+    assert "Beta risks" in file_info["content"]
+    assert "PDF-Text extrahiert" in file_info["preview"]
+
+
+def test_pdf_upload_reader_error_preview_is_client_safe(tmp_path, monkeypatch):
+    upload_path = tmp_path / "report.pdf"
+    upload_path.write_bytes(b"%PDF fake")
+
+    def fail_reader():
+        raise RuntimeError("failed C:\\Users\\admin\\secret.pdf token=supersecretvalue")
+
+    monkeypatch.setattr(router_chat, "_load_pdf_reader_class", fail_reader)
+
+    file_info = router_chat.extract_file_content(upload_path, "report.pdf", "application/pdf")
+
+    assert file_info["type"] == "pdf"
+    assert file_info["content"] is None
+    assert "[local-path-redacted]" in file_info["preview"]
+    assert "C:\\Users\\admin" not in file_info["preview"]
+    assert "supersecretvalue" not in file_info["preview"]
+
+
+def test_pdf_upload_routes_extracted_text_to_chat(chat_file_client, monkeypatch):
+    class FakePage:
+        def extract_text(self):
+            return "PDF body content for Lexa"
+
+    class FakePdfReader:
+        def __init__(self, _path):
+            self.pages = [FakePage()]
+
+    def fake_chat(prompt, history):
+        assert prompt.startswith(router_chat.FILE_ANALYSIS_DIRECTIVE)
+        assert "spaeter weiterliest" in prompt
+        assert "Nutzerfrage: Bitte zusammenfassen." in prompt
+        assert "report.pdf" in prompt
+        assert "PDF body content for Lexa" in prompt
+        assert history == []
+        return {"type": "text", "content": "PDF analysis"}
+
+    monkeypatch.setattr(router_chat, "_load_pdf_reader_class", lambda: FakePdfReader)
+    monkeypatch.setattr(router_chat, "chat", fake_chat)
+
+    response = chat_file_client.post(
+        "/chat/file",
+        files={"file": ("report.pdf", b"%PDF fake", "application/pdf")},
+        data={"message": "Bitte zusammenfassen."},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reply"] == "PDF analysis"
+    assert payload["analysis_status"] == "text_analyzed"
+    assert payload["file_info"]["analysis_status"] == "text_analyzed"
+    assert payload["file_info"]["page_count"] == 1
+
+
+def test_pdf_upload_metadata_only_prompt_is_honest(chat_file_client, monkeypatch):
+    def fail_reader():
+        raise RuntimeError("reader unavailable")
+
+    def fake_chat(prompt, history):
+        assert prompt.startswith(router_chat.FILE_ANALYSIS_DIRECTIVE)
+        assert "Inhalt nicht extrahiert" in prompt
+        assert "Text konnte nicht extrahiert werden" in prompt
+        assert "Bitte keine Hintergrundanalyse vortaeuschen." in prompt
+        assert history == []
+        return {"type": "text", "content": "Ich sehe nur Metadaten und brauche eine lesbare Datei."}
+
+    monkeypatch.setattr(router_chat, "_load_pdf_reader_class", fail_reader)
+    monkeypatch.setattr(router_chat, "chat", fake_chat)
+
+    response = chat_file_client.post(
+        "/chat/file",
+        files={"file": ("report.pdf", b"%PDF fake", "application/pdf")},
+        data={"message": "Bitte keine Hintergrundanalyse vortaeuschen."},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reply"] == "Ich sehe nur Metadaten und brauche eine lesbare Datei."
+    assert payload["analysis_status"] == "metadata_only"
+    assert payload["file_info"]["analysis_status"] == "metadata_only"
+
+
+def test_chat_file_upload_capability_answer_is_honest(chat_file_client, monkeypatch):
+    def fail_chat(*_args, **_kwargs):
+        raise AssertionError("upload capability questions should not need the model")
+
+    monkeypatch.setattr(router_chat, "chat", fail_chat)
+
+    response = chat_file_client.post(
+        "/chat",
+        json={"message": "Ich lade gleich eine Datei hoch. Sag mir zuerst, welche Dateitypen du sinnvoll analysieren kannst."},
+    )
+
+    assert response.status_code == 200
+    reply = response.json()["reply"]
+    assert "PDFs" in reply
+    assert "Text-/Code-Dateien" in reply
+    assert "Office-Dateien und Archive" in reply
+    assert "nicht als Dokumentinhalt im Chat extrahiert" in reply
+    assert "nicht so tun" in reply
+
+
+def test_chat_stream_file_upload_capability_answer_is_honest(chat_file_client, monkeypatch):
+    def fail_chat(*_args, **_kwargs):
+        raise AssertionError("streamed upload capability questions should not need the model")
+
+    monkeypatch.setattr(router_chat, "chat", fail_chat)
+    monkeypatch.setattr(router_chat, "chat_stream", fail_chat)
+
+    response = chat_file_client.post(
+        "/chat/stream",
+        json={"message": "Welche Upload-Dateitypen kannst du lesen und analysieren?"},
+    )
+
+    assert response.status_code == 200
+    assert "Text-/Code-Dateien" in response.text
+    assert "Office-Dateien und Archive" in response.text
+    assert "nicht als Dokumentinhalt im Chat extrahiert" in response.text
 
 
 def test_blocked_extension_is_rejected_before_chat_analysis(chat_file_client, monkeypatch):
