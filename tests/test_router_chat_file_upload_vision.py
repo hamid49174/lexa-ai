@@ -93,6 +93,33 @@ def test_text_upload_still_uses_existing_chat_analysis(chat_file_client, monkeyp
     assert payload["file_info"]["analysis_status"] == "text_analyzed"
 
 
+def test_file_upload_audit_uses_metadata_not_filename(monkeypatch):
+    entries = []
+    app = FastAPI()
+    app.include_router(router_chat.router)
+    monkeypatch.setattr(router_chat, "check_rate_limit", lambda _bucket: True)
+    monkeypatch.setattr(router_chat, "audit_log", lambda *args, **_kwargs: entries.append(args))
+    monkeypatch.setattr(router_chat, "conversation_history", [])
+    monkeypatch.setattr(router_chat, "chat", lambda *_args, **_kwargs: {"type": "text", "content": "ok"})
+
+    client = TestClient(app)
+    response = client.post(
+        "/chat/file",
+        files={"file": ("private payroll notes.txt", b"plain file content", "text/plain")},
+        data={"message": "Bitte zusammenfassen."},
+    )
+
+    assert response.status_code == 200
+    details = [entry[2] for entry in entries if entry[0] == "chat_file" and len(entry) >= 3]
+    assert details
+    for detail in details:
+        assert "fileChars=" in detail
+        assert "fileHash=" in detail
+        assert "ext=.txt" in detail
+        assert "private payroll" not in detail
+        assert "FILE=" not in detail
+
+
 def test_text_upload_read_error_preview_is_client_safe(monkeypatch, tmp_path):
     upload_path = tmp_path / "notes.txt"
     upload_path.write_text("placeholder", encoding="utf-8")

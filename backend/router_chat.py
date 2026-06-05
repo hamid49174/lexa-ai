@@ -175,6 +175,13 @@ def _audit_message_details(message: str) -> str:
     return f"messageChars={len(text)} messageHash={digest}"
 
 
+def _audit_file_details(filename: str) -> str:
+    text = str(filename or "")
+    digest = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:12]
+    suffix = Path(text).suffix.lower()[:20] or "none"
+    return f"fileChars={len(text)} fileHash={digest} ext={suffix}"
+
+
 def _format_confirmed_action_reply(action_name: str, result: dict) -> str:
     if result.get("success"):
         data = result.get("data")
@@ -1116,7 +1123,7 @@ async def chat_file_endpoint(
                     logger.exception("Vision image upload analysis failed")
                     raise HTTPException(status_code=502, detail="Bildanalyse fehlgeschlagen. Bitte erneut versuchen.")
 
-            audit_log("chat_file", analysis_status, f"FILE={file_info['filename']}")
+            audit_log("chat_file", analysis_status, _audit_file_details(file_info["filename"]))
             return {
                 "status": "ok",
                 "reply": reply,
@@ -1140,7 +1147,7 @@ async def chat_file_endpoint(
                 f"({file_info['size_kb']} KB, {file_info['mime']})]"
             )
 
-        audit_log("chat_file", "received", f"FILE={file_info['filename']}")
+        audit_log("chat_file", "received", _audit_file_details(file_info["filename"]))
 
         # AI call in thread pool
         try:
