@@ -6,7 +6,7 @@
  */
 
 const path = require("path");
-const { normalizeElectronConsoleMessage } = require("./electron_smoke_safe_io");
+const { loadElectronSmokeFile, normalizeElectronConsoleMessage } = require("./electron_smoke_safe_io");
 
 if (!process.versions.electron) {
   const { spawnSync } = require("child_process");
@@ -146,7 +146,7 @@ async function main() {
     }
   });
 
-  await win.loadFile(smokeHtml);
+  await loadElectronSmokeFile(win, smokeHtml);
   let bridgeReady = false;
   for (let attempt = 0; attempt < 30; attempt += 1) {
     bridgeReady = await runRenderer(win, "Boolean(window.lexa && window.lexa.health && window.lexa.setAutostart)");

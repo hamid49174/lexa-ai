@@ -4,7 +4,7 @@
  */
 
 const path = require("path");
-const { normalizeElectronConsoleMessage } = require("./electron_smoke_safe_io");
+const { loadElectronSmokeFile, normalizeElectronConsoleMessage } = require("./electron_smoke_safe_io");
 
 if (!process.versions.electron) {
   const { spawnSync } = require("child_process");
@@ -100,7 +100,7 @@ async function runBridgeSecurityProbe() {
       sandbox: true,
     },
   });
-  await win.loadFile(probeHtml);
+  await loadElectronSmokeFile(win, probeHtml);
   const preloadReady = await waitForBridge(win);
   const readResult = preloadReady ? await runRenderer(win, "window.lexa.getAutostart()") : null;
   const beforeWrites = smokeAutostartWrites;
@@ -163,7 +163,7 @@ async function main() {
     rendererErrors.push({ level: 3, message: `did-fail-load ${code}: ${description || ""} ${url || ""}`.trim() });
   });
 
-  await win.loadFile(path.join(__dirname, "..", "frontend", "src", "index.html"));
+  await loadElectronSmokeFile(win, path.join(__dirname, "..", "frontend", "src", "index.html"));
   await new Promise((resolve) => setTimeout(resolve, 1800));
 
   const result = await win.webContents.executeJavaScript(`

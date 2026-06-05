@@ -1,5 +1,8 @@
 "use strict";
 
+const path = require("path");
+const { pathToFileURL } = require("url");
+
 function isBrokenPipeError(error) {
   const message = String(error?.message || error || "");
   return error?.code === "EPIPE" || /EPIPE|broken pipe/i.test(message);
@@ -118,10 +121,20 @@ function normalizeElectronConsoleMessage(event, legacyLevel, legacyMessage, lega
   };
 }
 
+function electronSmokeFileUrl(filePath) {
+  return pathToFileURL(path.resolve(filePath)).href;
+}
+
+function loadElectronSmokeFile(win, filePath) {
+  return win.loadURL(electronSmokeFileUrl(filePath));
+}
+
 installElectronSmokeSafeIo();
 
 module.exports = {
+  electronSmokeFileUrl,
   installElectronSmokeSafeIo,
   isBrokenPipeError,
+  loadElectronSmokeFile,
   normalizeElectronConsoleMessage,
 };

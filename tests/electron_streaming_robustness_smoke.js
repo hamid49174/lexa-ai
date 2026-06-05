@@ -5,7 +5,7 @@
  */
 
 const path = require("path");
-const { normalizeElectronConsoleMessage } = require("./electron_smoke_safe_io");
+const { loadElectronSmokeFile, normalizeElectronConsoleMessage } = require("./electron_smoke_safe_io");
 
 if (!process.versions.electron) {
   const { spawnSync } = require("child_process");
@@ -98,7 +98,7 @@ async function main() {
     rendererErrors.push({ level: 3, message: `did-fail-load ${code}: ${description || ""} ${url || ""}`.trim() });
   });
 
-  await win.loadFile(path.join(__dirname, "..", "frontend", "src", "index.html"));
+  await loadElectronSmokeFile(win, path.join(__dirname, "..", "frontend", "src", "index.html"));
   await new Promise((resolve) => setTimeout(resolve, 1400));
 
   const result = await runRenderer(win, `

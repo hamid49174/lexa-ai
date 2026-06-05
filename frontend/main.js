@@ -128,7 +128,7 @@ const http = require("http");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
-const { fileURLToPath } = require("url");
+const { fileURLToPath, pathToFileURL } = require("url");
 
 // Suppress broken stdout/stderr pipes when launched from transient shells or tests.
 let safeConsoleFallbackWriter = null;
@@ -582,6 +582,18 @@ function isTrustedRendererUrl(rawUrl) {
   }
 }
 
+function rendererIndexPath() {
+  return path.join(__dirname, "src", "index.html");
+}
+
+function rendererIndexUrl() {
+  return pathToFileURL(rendererIndexPath()).href;
+}
+
+function loadRendererIndex(win) {
+  return win.loadURL(rendererIndexUrl());
+}
+
 const RENDERER_CSP_HEADER = [
   "default-src 'self'",
   "script-src 'self'",
@@ -908,7 +920,7 @@ function createWindow() {
 
   installRendererConsoleGuard(mainWindow.webContents);
   installElectronSecurityGuards(mainWindow);
-  mainWindow.loadFile(path.join(__dirname, "src", "index.html"));
+  loadRendererIndex(mainWindow);
   setupFrontendAutoReload();
 
   // DevTools in development

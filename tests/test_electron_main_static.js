@@ -31,7 +31,8 @@ assert("filters reloads to frontend source assets", src.includes("(?:js|css|html
 assert("debounces reloads", src.includes("setTimeout") && src.includes("350"));
 assert("reloads renderer without cache", src.includes("reloadIgnoringCache()"));
 assert("closes watcher with the main window", src.includes('mainWindow?.on("closed"'));
-assert("enables watcher after loading index", src.indexOf("mainWindow.loadFile") < src.indexOf("setupFrontendAutoReload();"));
+assert("loads renderer index through encoded file URL", src.includes("function rendererIndexUrl()") && src.includes("pathToFileURL(rendererIndexPath()).href") && src.includes("function loadRendererIndex(win)") && src.includes("win.loadURL(rendererIndexUrl())"));
+assert("enables watcher after loading index", src.indexOf("loadRendererIndex(mainWindow)") < src.indexOf("setupFrontendAutoReload();"));
 
 console.log("\nElectron backend recovery:");
 assert("defines backend restart delay", src.includes("BACKEND_RESTART_DELAY_MS"));
@@ -77,10 +78,10 @@ assert("patches stdio socket prototype for Electron cached console writers", src
 assert("wraps main process console methods safely", src.includes("function installSafeConsole()") && src.includes('console.warn = (...args) => safeCall("warn", args)') && src.includes('console.error = (...args) => safeCall("error", args)'));
 assert("keeps EPIPE fallback logs under userData, not repo audit.log", src.includes("safeConsoleFallbackWriter") && src.includes("function appendSafeMainProcessLog") && src.includes("MAIN_PROCESS_LOG_MAX_BYTES") && src.includes('app.getPath("userData")') && src.includes('"main-process.log"'));
 assert("swallows uncaught EPIPE exceptions before Electron dialog listeners", src.includes("process.emit = (eventName, ...args)") && src.includes('eventName === "uncaughtException"') && src.includes("return true") && src.includes('process.on("uncaughtException"') && src.includes("if (isBrokenPipeError(error)) return"));
-assert("prevents renderer console forwarding from using Electron default pipe writer", src.includes("function installRendererConsoleGuard") && src.includes("function normalizeRendererConsoleMessage") && src.includes('webContents.on("console-message", (event, ...legacyConsoleArgs) =>') && src.includes("details.lineNumber") && src.includes("event.preventDefault?.()") && src.includes("installRendererConsoleGuard(mainWindow.webContents);") && src.indexOf("installRendererConsoleGuard(mainWindow.webContents);") < src.indexOf("mainWindow.loadFile"));
+assert("prevents renderer console forwarding from using Electron default pipe writer", src.includes("function installRendererConsoleGuard") && src.includes("function normalizeRendererConsoleMessage") && src.includes('webContents.on("console-message", (event, ...legacyConsoleArgs) =>') && src.includes("details.lineNumber") && src.includes("event.preventDefault?.()") && src.includes("installRendererConsoleGuard(mainWindow.webContents);") && src.indexOf("installRendererConsoleGuard(mainWindow.webContents);") < src.indexOf("loadRendererIndex(mainWindow)"));
 
 console.log("\nElectron renderer security guards:");
-assert("installs renderer security guards before loading index", src.includes("function installElectronSecurityGuards") && src.indexOf("installElectronSecurityGuards(mainWindow);") > 0 && src.indexOf("installElectronSecurityGuards(mainWindow);") < src.indexOf("mainWindow.loadFile"));
+assert("installs renderer security guards before loading index", src.includes("function installElectronSecurityGuards") && src.indexOf("installElectronSecurityGuards(mainWindow);") > 0 && src.indexOf("installElectronSecurityGuards(mainWindow);") < src.indexOf("loadRendererIndex(mainWindow)"));
 assert("denies renderer-created windows", src.includes("setWindowOpenHandler") && src.includes('return { action: "deny" };'));
 assert("opens only safe external URLs outside Lexa webContents", src.includes("function safeExternalUrl") && src.includes('["http:", "https:", "mailto:"]') && src.includes("electron.shell.openExternal"));
 assert("blocks unsafe renderer navigation", src.includes('webContents.on("will-navigate"') && src.includes("event.preventDefault();") && src.includes("isTrustedRendererUrl(url)"));

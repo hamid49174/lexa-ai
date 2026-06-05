@@ -50,10 +50,19 @@ assert(
     && helperSrc.includes("details.lineNumber")
     && helperSrc.includes("levelMap")
 );
+assert(
+  "safe IO helper loads local HTML through encoded file URLs",
+  helperSrc.includes("pathToFileURL")
+    && helperSrc.includes("function electronSmokeFileUrl")
+    && helperSrc.includes("path.resolve(filePath)")
+    && helperSrc.includes("function loadElectronSmokeFile")
+    && helperSrc.includes("win.loadURL(electronSmokeFileUrl(filePath))")
+);
 assert("electron smoke files are discovered", smokeFiles.length >= 10, String(smokeFiles.length));
 
 const missingSafeIo = [];
 const lateSafeIo = [];
+const directLoadFile = [];
 const missingLaunchFailureGuard = [];
 for (const name of smokeFiles) {
   const src = fs.readFileSync(path.join(testsDir, name), "utf8");
@@ -68,6 +77,7 @@ for (const name of smokeFiles) {
   ) {
     lateSafeIo.push(name);
   }
+  if (src.includes(".loadFile(")) directLoadFile.push(name);
   if (
     spawnIndex >= 0
     && (
@@ -83,6 +93,7 @@ for (const name of smokeFiles) {
 
 assert("all Electron smoke tests load safe IO helper", missingSafeIo.length === 0, missingSafeIo.join(", "));
 assert("safe IO loads before Electron spawn/import paths", lateSafeIo.length === 0, lateSafeIo.join(", "));
+assert("Electron smoke tests avoid raw loadFile Windows path handling", directLoadFile.length === 0, directLoadFile.join(", "));
 assert("Electron smoke launch failures are not treated as passes", missingLaunchFailureGuard.length === 0, missingLaunchFailureGuard.join(", "));
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
