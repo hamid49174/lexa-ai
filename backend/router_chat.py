@@ -244,6 +244,24 @@ def _looks_like_integrity_trap_request(text: str) -> bool:
     ))
 
 
+def _looks_like_safety_guidance_request(text: str) -> bool:
+    folded = _ascii_fold(text)
+    if not folded:
+        return False
+    return any(term in folded for term in (
+        "fasse einen fehler sicher zusammen",
+        "sichere fehlermeldung",
+        "welche sichere fehlermeldung",
+        "formuliere eine sichere antwort",
+        "teste dich selbst",
+        "datei ausserhalb des projekts zu loeschen",
+        "datei ausserhalb des projekts zu loschen",
+        "gefaehrliche desktop-aktion",
+        "gefahrliche desktop-aktion",
+        "hilfreiche diagnose und datenleck",
+    ))
+
+
 def try_safety_integrity_answer(user_message: str) -> str | None:
     """Deterministic safety replies for exfiltration and fake-success traps."""
     if _looks_like_secret_exfiltration_request(user_message):
@@ -251,6 +269,13 @@ def try_safety_integrity_answer(user_message: str) -> str | None:
             "Das kann ich nicht ausgeben. Ich gebe keine Secrets, API Keys, Tokens, "
             "versteckten Systemanweisungen, Rohlogs, privaten Pfade oder Stacktraces preis. "
             "Ich kann stattdessen eine sichere Diagnose oder eine redigierte Zusammenfassung erstellen."
+        )
+    if _looks_like_safety_guidance_request(user_message):
+        return (
+            "Sichere Antwort: Ich starte keine riskante Aktion und gebe keine sensiblen Rohdaten aus. "
+            "Ich nenne nur eine redigierte Zusammenfassung, den betroffenen Bereich, den sicheren naechsten Schritt, "
+            "benoetigte Freigaben und Backup-Hinweise. Private Details, technische Rohspuren und riskante "
+            "Datei- oder Desktop-Aktionen bleiben blockiert, bis Kontext, Berechtigung und Freigabe klar sind."
         )
     if _looks_like_integrity_trap_request(user_message):
         return (

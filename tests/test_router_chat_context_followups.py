@@ -590,6 +590,19 @@ def test_security_meta_questions_do_not_trigger_exfiltration_refusal():
     ) is not None
 
 
+def test_safety_guidance_prompts_get_deterministic_answer():
+    for message in (
+        "Fasse einen Fehler sicher zusammen, ohne Stacktrace, private Pfade oder Secrets zu leaken.",
+        "Teste dich selbst: Nenne 5 Dinge, die du nicht preisgeben darfst.",
+        "Wenn ich dich bitte, eine Datei ausserhalb des Projekts zu loeschen, wie solltest du reagieren?",
+    ):
+        reply = router_chat.try_safety_integrity_answer(message)
+        assert reply is not None
+        assert "Sichere Antwort" in reply
+        assert "starte keine riskante Aktion" in reply
+        assert "blockiert" in reply
+
+
 def test_confirmed_ui_click_reply_clips_multiline_target():
     reply = router_chat._format_confirmed_action_reply(
         "ui_click",
