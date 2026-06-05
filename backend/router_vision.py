@@ -13,17 +13,27 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import re
 
 from fastapi import APIRouter, UploadFile, File
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from backend.agent_protocol import redacted_summary
 from backend.security import check_rate_limit
 
 logger = logging.getLogger("lexa.vision.router")
 
 router = APIRouter(prefix="/vision", tags=["vision"])
+
+_LOCAL_PATH_RE = re.compile(
+    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
+)
+_VISION_PROVIDER_MISSING_RE = re.compile(
+    r"(?:Kein Vision-Provider|API-Key im Keyring|keyring\.set_password|no vision provider)",
+    re.IGNORECASE,
+)
 
 
 # ══════════════════════════════════════════════════
@@ -71,6 +81,31 @@ def _error(message: str, status_code: int = 500) -> JSONResponse:
     )
 
 
+def _client_safe_error(exc: Exception, *, max_chars: int = 220) -> str:
+    """Return a compact client-facing error without local paths or secrets."""
+    raw = str(exc)
+    if _VISION_PROVIDER_MISSING_RE.search(raw):
+        return "Kein Vision-Provider fuer Bildanalyse konfiguriert."
+    text = redacted_summary(raw, max_chars=max_chars)
+    text = _LOCAL_PATH_RE.sub("[local-path-redacted]", text)
+    return text or "Details wurden lokal protokolliert."
+
+
+def _vision_error_detail(prefix: str, exc: Exception) -> str:
+    return f"{prefix}: {_client_safe_error(exc)}"
+
+
+def _vision_runtime_status(exc: Exception) -> int:
+    text = str(exc)
+    if _VISION_PROVIDER_MISSING_RE.search(text) or "Pillow nicht installiert" in text:
+        return 503
+    return 500
+
+
+def _internal_error_detail(prefix: str) -> str:
+    return f"{prefix}: Details wurden lokal protokolliert."
+
+
 def _rate_limited() -> JSONResponse | None:
     if check_rate_limit("vision"):
         return None
@@ -108,10 +143,10 @@ async def take_screenshot(req: ScreenshotRequest = ScreenshotRequest()):
 
     except RuntimeError as e:
         logger.warning(f"Screenshot fehlgeschlagen: {e}")
-        return _error(str(e), 500)
+        return _error(_vision_error_detail("Screenshot fehlgeschlagen", e), _vision_runtime_status(e))
     except Exception as e:
         logger.error(f"Screenshot-Fehler: {e}", exc_info=True)
-        return _error(f"Screenshot fehlgeschlagen: {e}", 500)
+        return _error(_internal_error_detail("Screenshot fehlgeschlagen"), 500)
 
 
 @router.post("/analyze")
@@ -143,10 +178,10 @@ async def analyze_screenshot_endpoint(req: AnalyzeRequest):
 
     except RuntimeError as e:
         logger.warning(f"Analyse fehlgeschlagen: {e}")
-        return _error(str(e), 500)
+        return _error(_vision_error_detail("Bildanalyse fehlgeschlagen", e), _vision_runtime_status(e))
     except Exception as e:
         logger.error(f"Analyse-Fehler: {e}", exc_info=True)
-        return _error(f"Analyse fehlgeschlagen: {e}", 500)
+        return _error(_internal_error_detail("Bildanalyse fehlgeschlagen"), 500)
 
 
 @router.post("/analyze-file")
@@ -192,10 +227,10 @@ async def analyze_uploaded_file(
 
     except RuntimeError as e:
         logger.warning(f"Datei-Analyse fehlgeschlagen: {e}")
-        return _error(str(e), 500)
+        return _error(_vision_error_detail("Bildanalyse fuer Upload fehlgeschlagen", e), _vision_runtime_status(e))
     except Exception as e:
         logger.error(f"Datei-Analyse-Fehler: {e}", exc_info=True)
-        return _error(f"Analyse fehlgeschlagen: {e}", 500)
+        return _error(_internal_error_detail("Bildanalyse fuer Upload fehlgeschlagen"), 500)
 
 
 @router.post("/describe")
@@ -219,10 +254,10 @@ async def describe_screen_endpoint(req: DescribeRequest = DescribeRequest()):
 
     except RuntimeError as e:
         logger.warning(f"Bildschirm-Beschreibung fehlgeschlagen: {e}")
-        return _error(str(e), 500)
+        return _error(_vision_error_detail("Bildschirm-Beschreibung fehlgeschlagen", e), _vision_runtime_status(e))
     except Exception as e:
         logger.error(f"Beschreibung-Fehler: {e}", exc_info=True)
-        return _error(f"Bildschirm-Beschreibung fehlgeschlagen: {e}", 500)
+        return _error(_internal_error_detail("Bildschirm-Beschreibung fehlgeschlagen"), 500)
 
 
 @router.post("/find")
@@ -250,10 +285,10 @@ async def find_on_screen_endpoint(req: FindRequest):
 
     except RuntimeError as e:
         logger.warning(f"Element-Suche fehlgeschlagen: {e}")
-        return _error(str(e), 500)
+        return _error(_vision_error_detail("Element-Suche fehlgeschlagen", e), _vision_runtime_status(e))
     except Exception as e:
         logger.error(f"Element-Suche-Fehler: {e}", exc_info=True)
-        return _error(f"Element-Suche fehlgeschlagen: {e}", 500)
+        return _error(_internal_error_detail("Element-Suche fehlgeschlagen"), 500)
 
 
 @router.post("/read-text")
@@ -277,10 +312,10 @@ async def read_screen_text_endpoint(req: ReadTextRequest = ReadTextRequest()):
 
     except RuntimeError as e:
         logger.warning(f"Text-Erkennung fehlgeschlagen: {e}")
-        return _error(str(e), 500)
+        return _error(_vision_error_detail("Text-Erkennung fehlgeschlagen", e), _vision_runtime_status(e))
     except Exception as e:
         logger.error(f"Text-Erkennung-Fehler: {e}", exc_info=True)
-        return _error(f"Text-Erkennung fehlgeschlagen: {e}", 500)
+        return _error(_internal_error_detail("Text-Erkennung fehlgeschlagen"), 500)
 
 
 @router.post("/ocr")
@@ -303,7 +338,7 @@ async def ocr_screen_endpoint(req: ReadTextRequest = ReadTextRequest()):
 
     except Exception as e:
         logger.error(f"OCR-Fehler: {e}", exc_info=True)
-        return _error(f"OCR fehlgeschlagen: {e}", 500)
+        return _error(_internal_error_detail("OCR fehlgeschlagen"), 500)
 
 
 @router.get("/status")
@@ -321,4 +356,4 @@ async def vision_status():
 
     except Exception as e:
         logger.error(f"Vision-Status-Fehler: {e}", exc_info=True)
-        return _error(f"Status-Abfrage fehlgeschlagen: {e}", 500)
+        return _error(_internal_error_detail("Status-Abfrage fehlgeschlagen"), 500)
