@@ -15,6 +15,7 @@ from backend.agent_protocol import redacted_summary
 from backend.obsidian_context import build_obsidian_context_payload, format_obsidian_context_for_prompt
 from backend.hermes_adapter import (
     configure_hermes_telegram,
+    get_hermes_capabilities,
     get_hermes_gateway_log_summary,
     get_hermes_gateway_autostart_status,
     get_hermes_status,
@@ -276,11 +277,14 @@ async def build_hermes_overview(include_context: bool = True) -> dict:
             logger.warning("Hermes overview context read failed: %s", exc)
             context = {"ok": False, "error": _client_safe_error(exc)}
 
+    capabilities = await _safe_to_thread(get_hermes_capabilities, hermes)
     obsidian = hermes.get("obsidian_context") if isinstance(hermes.get("obsidian_context"), dict) else {}
     context_files = context.get("files") if isinstance(context.get("files"), list) else []
     draft_counts = drafts.get("counts") if isinstance(drafts.get("counts"), dict) else {}
     log_counts = logs.get("counts") if isinstance(logs.get("counts"), dict) else {}
     next_tasks = _read_next_work_tasks(hermes)
+    cap_counts = capabilities.get("counts") if isinstance(capabilities.get("counts"), dict) else {}
+    cap_gaps = capabilities.get("gaps") if isinstance(capabilities.get("gaps"), list) else []
 
     backend_ok = True
     hermes_ok = hermes.get("health_state") == "ready"
@@ -320,10 +324,12 @@ async def build_hermes_overview(include_context: bool = True) -> dict:
             "drafts": draft_counts,
             "logs": log_counts,
             "contextFiles": len(context_files),
+            "capabilities": cap_counts,
         },
         "capabilities": {
             "backendEndpoints": [
                 "/hermes/status",
+                "/hermes/capabilities",
                 "/hermes/overview",
                 "/hermes/context",
                 "/hermes/draft",
@@ -344,6 +350,10 @@ async def build_hermes_overview(include_context: bool = True) -> dict:
                 "/lexa_drafts",
             ],
             "stableWrites": "draft-approval-only",
+            "summary": capabilities.get("summary"),
+            "healthState": capabilities.get("healthState"),
+            "counts": cap_counts,
+            "gaps": cap_gaps,
         },
         "contextFiles": [_compact_context_file(file_info) for file_info in context_files[:5] if isinstance(file_info, dict)],
         "nextTasks": next_tasks,
@@ -435,6 +445,20 @@ async def list_hermes_os_drafts(approval: str, max_drafts: int, hide_smoke: bool
 async def hermes_status():
     """Return Hermes integration readiness."""
     return await asyncio.to_thread(get_hermes_status)
+
+
+@router.get("/capabilities")
+async def hermes_capabilities():
+    """Return Hermes feature inventory and Lexa exposure gaps."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Hermes-Capability-Anfragen.")
+
+    audit_log("hermes", "capabilities", "read")
+    try:
+        return await asyncio.to_thread(get_hermes_capabilities)
+    except Exception as exc:
+        logger.exception("Hermes capabilities failed")
+        raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes-Capabilities konnten nicht gebaut werden", exc)) from exc
 
 
 @router.get("/overview")

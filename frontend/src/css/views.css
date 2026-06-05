@@ -400,7 +400,7 @@
 
 .system-overview-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
 }
 
@@ -428,10 +428,13 @@
 
 .system-overview-metric strong {
   display: block;
+  min-width: 0;
   margin-top: 5px;
   color: var(--accent2);
   font-family: var(--font-mono);
   font-size: 17px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .system-overview-grid {

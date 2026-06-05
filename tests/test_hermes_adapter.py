@@ -298,6 +298,75 @@ def test_improve_prompt_mentions_os_draft_boundary():
     assert "Obsidian/Personal OS Context Layer" in prompt
 
 
+def test_hermes_capabilities_report_model_provider_blocker(monkeypatch, tmp_path):
+    import backend.hermes_adapter as hermes
+
+    monkeypatch.setattr(hermes, "HERMES_HOME_ROOT", tmp_path / ".hermes")
+    for keys in hermes._HERMES_PROVIDER_ENV_KEYS.values():
+        for key in keys:
+            monkeypatch.delenv(key, raising=False)
+
+    capabilities = hermes.get_hermes_capabilities({
+        "available": True,
+        "source_available": True,
+        "personal_os_available": True,
+        "gateway": {"configured": False},
+    })
+
+    assert capabilities["healthState"] == "attention"
+    assert capabilities["providerAccess"]["primaryReady"] is False
+    assert capabilities["providerAccess"]["secretsRedacted"] is True
+    assert "/hermes/capabilities" in capabilities["lexaSurfaces"]["backendEndpoints"]
+    assert any(gap["id"] == "agent-runtime" for gap in capabilities["gaps"])
+    assert capabilities["counts"]["missingLexaSurface"] >= 1
+
+
+def test_hermes_capabilities_detect_provider_without_leaking_secret(monkeypatch, tmp_path):
+    import backend.hermes_adapter as hermes
+
+    secret = "sk-test-super-secret-value"
+    monkeypatch.setattr(hermes, "HERMES_HOME_ROOT", tmp_path / ".hermes")
+    for keys in hermes._HERMES_PROVIDER_ENV_KEYS.values():
+        for key in keys:
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+
+    capabilities = hermes.get_hermes_capabilities({
+        "available": True,
+        "source_available": True,
+        "personal_os_available": True,
+        "gateway": {"configured": True},
+    })
+
+    assert capabilities["providerAccess"]["primaryReady"] is True
+    assert capabilities["providerAccess"]["primary"] == ["openai"]
+    assert secret not in str(capabilities)
+    assert capabilities["counts"]["primaryProviders"] == 1
+
+
+def test_hermes_capabilities_parse_export_env_with_invalid_bytes(monkeypatch, tmp_path):
+    import backend.hermes_adapter as hermes
+
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    (hermes_home / ".env").write_bytes(b"export OPENAI_API_KEY=placeholder-provider-token\xff\n")
+    monkeypatch.setattr(hermes, "HERMES_HOME_ROOT", hermes_home)
+    for keys in hermes._HERMES_PROVIDER_ENV_KEYS.values():
+        for key in keys:
+            monkeypatch.delenv(key, raising=False)
+
+    capabilities = hermes.get_hermes_capabilities({
+        "available": True,
+        "source_available": True,
+        "personal_os_available": True,
+        "gateway": {"configured": False},
+    })
+
+    assert capabilities["providerAccess"]["primaryReady"] is True
+    assert capabilities["providerAccess"]["primary"] == ["openai"]
+    assert "placeholder-provider-token" not in str(capabilities)
+
+
 def test_hermes_prompt_injects_bounded_obsidian_context(monkeypatch):
     import backend.hermes_adapter as hermes
 

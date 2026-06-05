@@ -48,12 +48,14 @@ assert("system page exposes Startup Health panel", html.includes('id="startup-he
 assert("system page exposes Hermes overview cockpit", html.includes('id="hermes-overview-panel"') && html.includes('id="hermes-overview-content"') && html.includes('data-action="refreshHermesOverview"'));
 assert("system view renders Startup Health from backend", system.includes("function refreshStartupHealth") && system.includes("window.lexa.startupHealth({ probeVoice: false })") && system.includes("function renderStartupHealth"));
 assert("system view renders Hermes overview from backend", system.includes("function refreshHermesOverview") && system.includes("window.lexa.hermesOverview({ includeContext: true })") && system.includes("function renderHermesOverview"));
+assert("system view renders Hermes capability gaps", system.includes("function createSystemOverviewCapabilityGapRow") && system.includes('t("system.hermesMetricCapabilities")') && system.includes('t("system.hermesCapabilityGaps")') && system.includes("capabilityPayload.gaps"));
 assert("system view preserves canonical backend request ids in errors", system.includes("function systemErrorMessage") && system.includes("payload?.requestId") && system.includes("Request ID:") && system.includes('systemErrorMessage(payload, t("system.hermesOverviewUnavailable")'));
 assert("preload smoke mock includes Hermes health", preload.includes("hermes: {") && preload.includes('state: "ready"') && preload.includes("telegram_configured"));
 assert("preload exposes Hermes gateway autostart API", preload.includes("hermesGatewayAutostartStatus") && preload.includes("hermesGatewayAutostartSet") && preload.includes("/hermes/gateway/autostart"));
+assert("preload exposes Hermes capabilities API", preload.includes("hermesCapabilities: async") && preload.includes("/hermes/capabilities"));
 assert("preload exposes Hermes overview API", preload.includes("hermesOverview: async") && preload.includes("/hermes/overview?"));
 assert("preload exposes startup health through canonical apiJson", preload.includes("startupHealth: async") && preload.includes("/health/startup") && preload.includes('apiJson(res, "Startup health not reachable")'));
-assert("i18n includes new Hermes/fallback labels", deI18n.includes('"dashboard.aiFallback"') && enI18n.includes('"settings.anthropicDesc"') && deI18n.includes('"settings.hermesGatewayAutostart"') && deI18n.includes('"system.hermesCockpitTitle"') && deI18n.includes('"system.startupHealthTitle"') && enI18n.includes('"system.startupHealthTitle"'));
+assert("i18n includes new Hermes/fallback labels", deI18n.includes('"dashboard.aiFallback"') && enI18n.includes('"settings.anthropicDesc"') && deI18n.includes('"settings.hermesGatewayAutostart"') && deI18n.includes('"system.hermesCockpitTitle"') && deI18n.includes('"system.hermesCapabilityGaps"') && deI18n.includes('"system.startupHealthTitle"') && enI18n.includes('"system.startupHealthTitle"'));
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

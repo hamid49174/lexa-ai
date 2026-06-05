@@ -181,6 +181,7 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
 
   bridgePolicy("hermesGatewayAutostartStatus", "low", "read", "/hermes/gateway/autostart", { batch_allowed: true }),
   bridgePolicy("hermesGatewayAutostartSet", "high", "admin", "/hermes/gateway/autostart"),
+  bridgePolicy("hermesCapabilities", "low", "read", "/hermes/capabilities", { batch_allowed: true }),
   bridgePolicy("hermesOverview", "low", "read", "/hermes/overview", { batch_allowed: true }),
   bridgePolicy("backupCreate", "high", "secret", "/backup"),
   bridgePolicy("backupRestore", "critical", "admin", "/backup/restore"),
@@ -1017,6 +1018,36 @@ if (isLexaSmokeMockAllowed()) {
         nextAction: "",
       },
     }),
+    hermesCapabilities: async () => ({
+      ok: true,
+      healthState: "attention",
+      summary: "Hermes capability map: 6/11 groups ready, 5 need attention, 0 blocked. Lexa surfaces: 2 strong, 4 partial, 3 weak, 2 missing.",
+      nextAction: "Expose safe toolset presets in Lexa instead of one generic Hermes run box.",
+      counts: {
+        total: 11,
+        ready: 6,
+        attention: 5,
+        blocked: 0,
+        strongLexaSurface: 2,
+        partialLexaSurface: 4,
+        weakLexaSurface: 3,
+        missingLexaSurface: 2,
+        defaultToolsets: 25,
+        enabledDefaultToolsets: 18,
+        configuredProviders: 1,
+        primaryProviders: 1,
+        mediaProviders: 0,
+      },
+      groups: [
+        { id: "desktop-control", label: "Desktop Control", state: "ready", lexaSurface: "strong" },
+        { id: "tool-platform", label: "Tool Platform", state: "attention", lexaSurface: "weak" },
+      ],
+      gaps: [
+        { id: "tool-platform", label: "Tool Platform", state: "attention", lexaSurface: "weak", nextAction: "Expose safe toolset presets in Lexa instead of one generic Hermes run box." },
+        { id: "automation-board", label: "Automation, Cron & Kanban", state: "attention", lexaSurface: "missing", nextAction: "Expose read-only job/board status first." },
+      ],
+      safeMode: true,
+    }),
     hermesOverview: async () => ({
       ok: true,
       healthState: "ready",
@@ -1030,6 +1061,15 @@ if (isLexaSmokeMockAllowed()) {
       counts: {
         drafts: { pending: 0, approved: 11, rejected: 3 },
         contextFiles: 5,
+        capabilities: { ready: 6, total: 11, weakLexaSurface: 3, missingLexaSurface: 2 },
+      },
+      capabilities: {
+        healthState: "attention",
+        summary: "Hermes capability map: 6/11 groups ready, 5 need attention, 0 blocked.",
+        counts: { ready: 6, total: 11, weakLexaSurface: 3, missingLexaSurface: 2 },
+        gaps: [
+          { id: "tool-platform", label: "Tool Platform", state: "attention", lexaSurface: "weak", nextAction: "Expose safe toolset presets in Lexa." },
+        ],
       },
       contextFiles: [
         { title: "Current AI Brief", path: "05_Memory/Rollups/Current_AI_Brief.md" },
@@ -2161,6 +2201,23 @@ const lexaBridge = {
       body: JSON.stringify({ enabled: Boolean(enabled) }),
     });
     return apiJson(res, "Hermes Gateway Autostart nicht erreichbar");
+  },
+  hermesCapabilities: async () => {
+    try {
+      const res = await fetchWithTimeout(`${API}/hermes/capabilities`);
+      return apiJson(res, "Hermes Capabilities nicht erreichbar");
+    } catch (e) {
+      console.warn("[Preload] hermesCapabilities failed:", e.message || e);
+      return {
+        ok: false,
+        healthState: "offline",
+        summary: "Hermes Capabilities nicht erreichbar",
+        counts: {},
+        groups: [],
+        gaps: [],
+        error: "Hermes Capabilities nicht erreichbar",
+      };
+    }
   },
   hermesOverview: async ({ includeContext = true } = {}) => {
     try {

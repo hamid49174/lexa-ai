@@ -91,6 +91,93 @@ _LEXA_TELEGRAM_COMMANDS = (
     "lexa-draft",
     "lexa-drafts",
 )
+_HERMES_PROVIDER_ENV_KEYS = {
+    "openai": ("OPENAI_API_KEY",),
+    "anthropic": ("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN"),
+    "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+    "openrouter": ("OPENROUTER_API_KEY",),
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "xai": ("XAI_API_KEY", "GROK_API_KEY"),
+    "kimi": ("MOONSHOT_API_KEY", "KIMI_API_KEY"),
+    "zai": ("ZAI_API_KEY", "GLM_API_KEY"),
+    "minimax": ("MINIMAX_API_KEY", "MINIMAX_CN_API_KEY"),
+    "nvidia": ("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"),
+    "tavily": ("TAVILY_API_KEY",),
+    "firecrawl": ("FIRECRAWL_API_KEY",),
+    "browser_use": ("BROWSER_USE_API_KEY",),
+    "browserbase": ("BROWSERBASE_API_KEY",),
+    "fal": ("FAL_KEY", "FAL_API_KEY"),
+    "elevenlabs": ("ELEVENLABS_API_KEY",),
+}
+_HERMES_PRIMARY_PROVIDER_IDS = {
+    "openai",
+    "anthropic",
+    "google",
+    "openrouter",
+    "deepseek",
+    "xai",
+    "kimi",
+    "zai",
+    "minimax",
+    "nvidia",
+}
+_HERMES_MEDIA_PROVIDER_IDS = {
+    "elevenlabs",
+    "fal",
+    "tavily",
+    "firecrawl",
+    "browser_use",
+    "browserbase",
+}
+_HERMES_DEFAULT_TOOLSETS = (
+    {"id": "web", "label": "Web Search & Scraping", "default": "enabled"},
+    {"id": "browser", "label": "Browser Automation", "default": "enabled"},
+    {"id": "terminal", "label": "Terminal & Processes", "default": "enabled"},
+    {"id": "file", "label": "File Operations", "default": "enabled"},
+    {"id": "code_execution", "label": "Code Execution", "default": "enabled"},
+    {"id": "vision", "label": "Vision / Image Analysis", "default": "enabled"},
+    {"id": "image_gen", "label": "Image Generation", "default": "enabled"},
+    {"id": "tts", "label": "Text-to-Speech", "default": "enabled"},
+    {"id": "skills", "label": "Skills", "default": "enabled"},
+    {"id": "todo", "label": "Task Planning", "default": "enabled"},
+    {"id": "memory", "label": "Memory", "default": "enabled"},
+    {"id": "session_search", "label": "Session Search", "default": "enabled"},
+    {"id": "clarify", "label": "Clarifying Questions", "default": "enabled"},
+    {"id": "delegation", "label": "Task Delegation", "default": "enabled"},
+    {"id": "cronjob", "label": "Cron Jobs", "default": "enabled"},
+    {"id": "messaging", "label": "Cross-Platform Messaging", "default": "enabled"},
+    {"id": "computer_use", "label": "Computer Use", "default": "enabled"},
+    {"id": "video", "label": "Video Analysis", "default": "disabled"},
+    {"id": "video_gen", "label": "Video Generation", "default": "disabled"},
+    {"id": "x_search", "label": "X Search", "default": "disabled"},
+    {"id": "moa", "label": "Mixture of Agents", "default": "disabled"},
+    {"id": "context_engine", "label": "Context Engine", "default": "disabled"},
+    {"id": "homeassistant", "label": "Home Assistant", "default": "disabled"},
+    {"id": "spotify", "label": "Spotify", "default": "disabled"},
+    {"id": "yuanbao", "label": "Yuanbao", "default": "disabled"},
+)
+_LEXA_HERMES_BACKEND_ENDPOINTS = (
+    "/hermes/status",
+    "/hermes/capabilities",
+    "/hermes/overview",
+    "/hermes/context",
+    "/hermes/draft",
+    "/hermes/drafts",
+    "/hermes/run",
+    "/hermes/improve-lexa",
+    "/hermes/gateway/logs",
+    "/hermes/gateway/autostart",
+    "/hermes/telegram/status",
+    "/hermes/telegram/commands/selftest",
+)
+_LEXA_HERMES_CHAT_SURFACES = (
+    "/hermes desktop observe",
+    "/hermes desktop click/type/hotkey with confirmation",
+    "/hermes system status",
+    "/hermes screen text/OCR",
+    "Lexa System Cockpit",
+    "Telegram Lexa status commands",
+)
 
 logger = logging.getLogger("lexa.hermes_adapter")
 
@@ -352,13 +439,21 @@ def _read_hermes_env_file() -> dict[str, str]:
         return {}
 
     values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        logger.warning("Hermes env file could not be read: %s", exc)
+        return {}
+
+    for raw_line in lines:
         line = raw_line.strip()
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
         key = key.strip()
-        if key:
+        if key and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
             values[key] = _unquote_env_value(value)
     return values
 
@@ -490,6 +585,298 @@ def get_hermes_status() -> dict[str, Any]:
             "command": _display_command(gateway_command),
         },
         "install_hint": install_hint,
+    }
+
+
+def _provider_configured(env_values: dict[str, str], provider_id: str) -> bool:
+    for key in _HERMES_PROVIDER_ENV_KEYS.get(provider_id, ()):
+        if os.environ.get(key, "").strip() or env_values.get(key, "").strip():
+            return True
+    return False
+
+
+def _configured_provider_ids(env_values: dict[str, str]) -> list[str]:
+    return sorted(
+        provider_id
+        for provider_id in _HERMES_PROVIDER_ENV_KEYS
+        if _provider_configured(env_values, provider_id)
+    )
+
+
+def _capability_state(
+    *,
+    command_available: bool,
+    primary_model_ready: bool,
+    requires_command: bool = True,
+    requires_model: bool = True,
+    ready: bool = True,
+    attention_when_unwired: bool = False,
+) -> str:
+    if requires_command and not command_available:
+        return "blocked"
+    if requires_model and not primary_model_ready:
+        return "attention"
+    if not ready:
+        return "attention"
+    if attention_when_unwired:
+        return "attention"
+    return "ready"
+
+
+def _capability_group(
+    capability_id: str,
+    label: str,
+    state: str,
+    detail: str,
+    next_action: str,
+    *,
+    lexa_surface: str = "partial",
+    toolsets: list[str] | None = None,
+    surfaces: list[str] | None = None,
+    priority: int = 50,
+) -> dict[str, Any]:
+    return {
+        "id": capability_id,
+        "label": label,
+        "state": state,
+        "detail": detail,
+        "nextAction": next_action,
+        "lexaSurface": lexa_surface,
+        "toolsets": toolsets or [],
+        "surfaces": surfaces or [],
+        "priority": priority,
+    }
+
+
+def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return a product-facing map of Hermes power vs Lexa exposure.
+
+    The payload intentionally avoids shelling out to Hermes on every request.
+    It combines local readiness, non-secret provider presence, known Hermes
+    0.15.x toolsets, and the Lexa surfaces that currently expose them.
+    """
+    status_info = status_info or get_hermes_status()
+    env_values = _read_hermes_env_file()
+    configured_providers = _configured_provider_ids(env_values)
+    primary_providers = [provider for provider in configured_providers if provider in _HERMES_PRIMARY_PROVIDER_IDS]
+    media_providers = [provider for provider in configured_providers if provider in _HERMES_MEDIA_PROVIDER_IDS]
+    command_available = bool(status_info.get("available"))
+    source_available = bool(status_info.get("source_available"))
+    primary_model_ready = bool(primary_providers)
+    telegram_configured = bool((status_info.get("gateway") or {}).get("configured"))
+    personal_os_available = bool(status_info.get("personal_os_available"))
+
+    provider_detail = (
+        f"{len(primary_providers)} primary provider(s) configured."
+        if primary_model_ready else
+        "No Hermes primary model provider detected in Lexa-local env/config."
+    )
+    command_detail = (
+        "Hermes command is available." if command_available else
+        "Hermes source is present but no runnable command is configured." if source_available else
+        "Hermes source/command is not available."
+    )
+
+    groups = [
+        _capability_group(
+            "agent-runtime",
+            "Agent Runtime",
+            _capability_state(command_available=command_available, primary_model_ready=primary_model_ready),
+            f"{command_detail} {provider_detail}",
+            "Configure a Hermes model provider with `hermes model` or matching API/OAuth credentials."
+            if command_available and not primary_model_ready else
+            "Wire richer run presets into Lexa chat and cockpit.",
+            lexa_surface="partial",
+            toolsets=["terminal", "file", "code_execution", "todo", "clarify"],
+            surfaces=["/hermes/run", "/hermes/improve-lexa"],
+            priority=10,
+        ),
+        _capability_group(
+            "desktop-control",
+            "Desktop Control",
+            "ready",
+            "Lexa exposes deterministic Hermes desktop observation, OCR, UIA search, clicks, typing, hotkeys and confirmation gates.",
+            "Add visible desktop action templates and richer examples in the chat composer.",
+            lexa_surface="strong",
+            toolsets=["computer_use", "vision"],
+            surfaces=["/agent/run worker=hermes", "companion.hermes_desktop"],
+            priority=25,
+        ),
+        _capability_group(
+            "tool-platform",
+            "Tool Platform",
+            _capability_state(command_available=command_available, primary_model_ready=primary_model_ready),
+            "Hermes includes web, browser, terminal, file, code execution, vision, image generation, TTS, skills, memory, delegation, cron and messaging toolsets.",
+            "Expose safe toolset presets in Lexa instead of one generic Hermes run box.",
+            lexa_surface="weak",
+            toolsets=[item["id"] for item in _HERMES_DEFAULT_TOOLSETS if item["default"] == "enabled"],
+            surfaces=["/hermes/run"],
+            priority=15,
+        ),
+        _capability_group(
+            "provider-fallbacks",
+            "Provider Fallbacks",
+            "attention" if command_available else "blocked",
+            "Hermes supports fallback providers, but Lexa currently only surfaces general AI provider status.",
+            "Add a Lexa setup surface for Hermes primary model and fallback chain.",
+            lexa_surface="missing",
+            toolsets=[],
+            surfaces=["hermes fallback"],
+            priority=12,
+        ),
+        _capability_group(
+            "skills-memory",
+            "Skills & Memory",
+            _capability_state(command_available=command_available, primary_model_ready=primary_model_ready, attention_when_unwired=True),
+            "Hermes ships skill management, built-in memory, session search and optional external memory providers.",
+            "Expose read-only skill/memory status first; keep durable writes review-gated.",
+            lexa_surface="partial",
+            toolsets=["skills", "memory", "session_search"],
+            surfaces=["/hermes/context", "/hermes/draft", "/hermes/drafts"],
+            priority=20,
+        ),
+        _capability_group(
+            "personal-os-context",
+            "Personal OS Context",
+            "ready" if personal_os_available else "attention",
+            "Lexa can build bounded Obsidian/Personal OS context for Hermes." if personal_os_available else "Personal OS manifest is not reachable.",
+            "Keep expanding context packs and review packets, without direct stable-memory writes.",
+            lexa_surface="strong",
+            toolsets=["memory"],
+            surfaces=["/hermes/context", "/personal-os/context-pack"],
+            priority=35,
+        ),
+        _capability_group(
+            "messaging-gateway",
+            "Messaging Gateway",
+            "ready" if command_available and telegram_configured else ("attention" if command_available else "blocked"),
+            "Telegram is configured for Lexa/Hermes." if telegram_configured else "Hermes supports Telegram, Discord, WhatsApp, Signal, Slack, Email and more; Lexa currently configures mainly Telegram.",
+            "Finish Telegram setup/autostart, then decide which second platform matters.",
+            lexa_surface="partial",
+            toolsets=["messaging"],
+            surfaces=["/hermes/telegram/status", "/hermes/gateway/autostart", "/hermes/gateway/logs"],
+            priority=30,
+        ),
+        _capability_group(
+            "media-generation",
+            "Voice, Image & Video Media",
+            "ready" if primary_model_ready and media_providers else ("attention" if command_available else "blocked"),
+            "Hermes has TTS, transcription, vision, image generation and video generation code paths. Lexa has its own STT/TTS, but Hermes media providers are not fully bridged.",
+            "Bridge Hermes image/TTS/transcription provider status before adding generation buttons.",
+            lexa_surface="weak",
+            toolsets=["tts", "vision", "image_gen", "video", "video_gen"],
+            surfaces=["Lexa voice routes", "Hermes media toolsets"],
+            priority=18,
+        ),
+        _capability_group(
+            "mcp-plugins",
+            "MCP & Plugins",
+            "attention" if command_available else "blocked",
+            "Hermes can install plugins and MCP servers; Lexa has a separate MCP router but no unified Hermes MCP/plugin cockpit.",
+            "Unify Lexa MCP status with Hermes MCP/plugin discovery.",
+            lexa_surface="weak",
+            toolsets=["mcp", "plugins"],
+            surfaces=["/mcp/servers", "hermes mcp", "hermes plugins"],
+            priority=22,
+        ),
+        _capability_group(
+            "automation-board",
+            "Automation, Cron & Kanban",
+            _capability_state(command_available=command_available, primary_model_ready=primary_model_ready, attention_when_unwired=True),
+            "Hermes includes cron jobs, kanban boards, delegation and gateway dispatch loops.",
+            "Expose read-only job/board status first; add write actions behind explicit confirmation.",
+            lexa_surface="missing",
+            toolsets=["cronjob", "delegation", "todo", "messaging"],
+            surfaces=["hermes cron", "hermes kanban"],
+            priority=28,
+        ),
+        _capability_group(
+            "diagnostics-dashboard",
+            "Diagnostics & Dashboard",
+            "ready" if command_available else "blocked",
+            "Hermes has status, doctor, security, logs, sessions, prompt-size and dashboard commands.",
+            "Add one Lexa diagnostics panel that links capability gaps to exact setup actions.",
+            lexa_surface="partial",
+            toolsets=[],
+            surfaces=["/hermes/status", "/hermes/overview", "hermes doctor", "hermes dashboard"],
+            priority=32,
+        ),
+    ]
+
+    counts = {
+        "total": len(groups),
+        "ready": sum(1 for group in groups if group["state"] == "ready"),
+        "attention": sum(1 for group in groups if group["state"] == "attention"),
+        "blocked": sum(1 for group in groups if group["state"] == "blocked"),
+        "strongLexaSurface": sum(1 for group in groups if group["lexaSurface"] == "strong"),
+        "partialLexaSurface": sum(1 for group in groups if group["lexaSurface"] == "partial"),
+        "weakLexaSurface": sum(1 for group in groups if group["lexaSurface"] == "weak"),
+        "missingLexaSurface": sum(1 for group in groups if group["lexaSurface"] == "missing"),
+        "defaultToolsets": len(_HERMES_DEFAULT_TOOLSETS),
+        "enabledDefaultToolsets": sum(1 for item in _HERMES_DEFAULT_TOOLSETS if item["default"] == "enabled"),
+        "configuredProviders": len(configured_providers),
+        "primaryProviders": len(primary_providers),
+        "mediaProviders": len(media_providers),
+    }
+    gaps = sorted(
+        [
+            {
+                "id": group["id"],
+                "label": group["label"],
+                "state": group["state"],
+                "lexaSurface": group["lexaSurface"],
+                "nextAction": group["nextAction"],
+                "priority": group["priority"],
+            }
+            for group in groups
+            if group["state"] != "ready" or group["lexaSurface"] in {"weak", "missing"}
+        ],
+        key=lambda item: (item["state"] == "ready", item["priority"]),
+    )[:8]
+
+    if not command_available:
+        health_state = "blocked"
+        next_action = "Install or configure the Hermes command inside Lexa."
+    elif not primary_model_ready:
+        health_state = "attention"
+        next_action = "Configure a Hermes model provider; most advanced Hermes functions are blocked without it."
+    elif counts["missingLexaSurface"] or counts["weakLexaSurface"]:
+        health_state = "attention"
+        next_action = gaps[0]["nextAction"] if gaps else "Expose the next Hermes capability in Lexa."
+    else:
+        health_state = "ready"
+        next_action = "Hermes capability exposure looks strong; expand tests and UX polish next."
+
+    summary = (
+        f"Hermes capability map: {counts['ready']}/{counts['total']} groups ready, "
+        f"{counts['attention']} need attention, {counts['blocked']} blocked. "
+        f"Lexa surfaces: {counts['strongLexaSurface']} strong, {counts['partialLexaSurface']} partial, "
+        f"{counts['weakLexaSurface']} weak, {counts['missingLexaSurface']} missing."
+    )
+
+    return {
+        "ok": health_state != "blocked",
+        "status": "ok",
+        "healthState": health_state,
+        "summary": summary,
+        "nextAction": next_action,
+        "counts": counts,
+        "providerAccess": {
+            "configured": configured_providers,
+            "primary": primary_providers,
+            "media": media_providers,
+            "primaryReady": primary_model_ready,
+            "secretsRedacted": True,
+        },
+        "toolsets": list(_HERMES_DEFAULT_TOOLSETS),
+        "groups": groups,
+        "gaps": gaps,
+        "lexaSurfaces": {
+            "backendEndpoints": list(_LEXA_HERMES_BACKEND_ENDPOINTS),
+            "chatSurfaces": list(_LEXA_HERMES_CHAT_SURFACES),
+            "telegramCommands": [f"/{command.replace('-', '_')}" for command in _LEXA_TELEGRAM_COMMANDS],
+        },
+        "safeMode": True,
     }
 
 

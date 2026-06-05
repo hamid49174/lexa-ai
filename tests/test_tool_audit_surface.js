@@ -48,6 +48,7 @@ assert("Hermes overview renders through DOM helpers", system.includes("function 
 assert("system overview counters are normalized before template rendering", system.includes("function systemDisplayCount") && system.includes("return `${systemDisplayCount(counts?.ok)}") && system.includes("const toolsPct = systemDisplayNumber(systemDisplayPercent(tools.healthPct))") && system.includes("const contextCount = systemDisplayCount(counts.contextFiles ?? files.length ?? 0)") && !system.includes("const toolsPct = Number(tools.healthPct || 0)") && !system.includes("const contextCount = Number("));
 assert("renderer classifies audit status", system.includes("function systemAuditStatusClass"));
 assert("styles keep audit rows bounded", styles.includes(".system-audit-command") && styles.includes("text-overflow: ellipsis"));
+assert("styles keep overview metrics bounded", styles.includes("grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))") && styles.includes(".system-overview-metric strong") && styles.includes("overflow-wrap: anywhere"));
 assert("redaction label is localized", en.includes("system.auditDetailsRedacted") && de.includes("system.auditDetailsRedacted"));
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
