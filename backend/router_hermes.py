@@ -16,6 +16,7 @@ from backend.obsidian_context import build_obsidian_context_payload, format_obsi
 from backend.hermes_adapter import (
     configure_hermes_telegram,
     get_hermes_capabilities,
+    get_hermes_extension_status,
     get_hermes_gateway_log_summary,
     get_hermes_gateway_autostart_status,
     get_hermes_media_status,
@@ -289,6 +290,7 @@ async def build_hermes_overview(include_context: bool = True) -> dict:
     cap_gaps = capabilities.get("gaps") if isinstance(capabilities.get("gaps"), list) else []
     provider_status = capabilities.get("providerStatus") if isinstance(capabilities.get("providerStatus"), dict) else {}
     media_status = capabilities.get("mediaStatus") if isinstance(capabilities.get("mediaStatus"), dict) else {}
+    extension_status = capabilities.get("extensionStatus") if isinstance(capabilities.get("extensionStatus"), dict) else {}
 
     backend_ok = True
     hermes_ok = hermes.get("health_state") == "ready"
@@ -330,6 +332,7 @@ async def build_hermes_overview(include_context: bool = True) -> dict:
             "contextFiles": len(context_files),
             "capabilities": cap_counts,
             "media": media_status.get("counts") if isinstance(media_status.get("counts"), dict) else {},
+            "extensions": extension_status.get("counts") if isinstance(extension_status.get("counts"), dict) else {},
         },
         "capabilities": {
             "backendEndpoints": [
@@ -337,6 +340,7 @@ async def build_hermes_overview(include_context: bool = True) -> dict:
                 "/hermes/capabilities",
                 "/hermes/providers",
                 "/hermes/media",
+                "/hermes/extensions",
                 "/hermes/overview",
                 "/hermes/context",
                 "/hermes/draft",
@@ -364,6 +368,7 @@ async def build_hermes_overview(include_context: bool = True) -> dict:
         },
         "providerStatus": provider_status,
         "mediaStatus": media_status,
+        "extensionStatus": extension_status,
         "contextFiles": [_compact_context_file(file_info) for file_info in context_files[:5] if isinstance(file_info, dict)],
         "nextTasks": next_tasks,
         "safeMode": True,
@@ -496,6 +501,20 @@ async def hermes_media():
     except Exception as exc:
         logger.exception("Hermes media status failed")
         raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes-Mediastatus konnte nicht gebaut werden", exc)) from exc
+
+
+@router.get("/extensions")
+async def hermes_extensions():
+    """Return Hermes skills, memory, MCP, plugin and automation readiness."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Hermes-Extension-Anfragen.")
+
+    audit_log("hermes", "extensions", "read")
+    try:
+        return await asyncio.to_thread(get_hermes_extension_status)
+    except Exception as exc:
+        logger.exception("Hermes extension status failed")
+        raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes-Extensionstatus konnte nicht gebaut werden", exc)) from exc
 
 
 @router.get("/overview")

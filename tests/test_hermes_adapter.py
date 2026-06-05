@@ -317,8 +317,10 @@ def test_hermes_capabilities_report_model_provider_blocker(monkeypatch, tmp_path
     assert capabilities["providerAccess"]["primaryReady"] is False
     assert capabilities["providerAccess"]["secretsRedacted"] is True
     assert "/hermes/capabilities" in capabilities["lexaSurfaces"]["backendEndpoints"]
+    assert "/hermes/extensions" in capabilities["lexaSurfaces"]["backendEndpoints"]
     assert any(gap["id"] == "agent-runtime" for gap in capabilities["gaps"])
-    assert capabilities["counts"]["missingLexaSurface"] >= 1
+    assert capabilities["counts"]["missingLexaSurface"] == 0
+    assert capabilities["extensionStatus"]["safeMode"] is True
 
 
 def test_hermes_capabilities_detect_provider_without_leaking_secret(monkeypatch, tmp_path):
@@ -484,6 +486,67 @@ def test_hermes_media_status_reads_config_without_leaking_secrets(monkeypatch, t
     assert any(area["id"] == "image-generation" and area["provider"] == "fal" for area in status["areas"])
     assert secret not in str(status)
     assert codex_secret not in str(status)
+    assert status["setup"]["secretsRedacted"] is True
+
+
+def test_hermes_extension_status_reads_local_surfaces(monkeypatch, tmp_path):
+    import backend.hermes_adapter as hermes
+
+    hermes_home = tmp_path / ".hermes"
+    vendor_root = tmp_path / "vendor" / "hermes-agent"
+    project_root = tmp_path / "project"
+    (hermes_home / "skills" / "local-demo").mkdir(parents=True)
+    (hermes_home / "skills" / "local-demo" / "SKILL.md").write_text("# Local Demo", encoding="utf-8")
+    (hermes_home / "skills" / ".usage.json").write_text('{"local-demo":{"use_count":1}}', encoding="utf-8")
+    (hermes_home / "memories").mkdir(parents=True)
+    (hermes_home / "memories" / "MEMORY.md").write_text("Remember stable facts.", encoding="utf-8")
+    (hermes_home / "memories" / "USER.md").write_text("User profile.", encoding="utf-8")
+    (hermes_home / "plugins" / "lexa-status").mkdir(parents=True)
+    (hermes_home / "plugins" / "lexa-status" / "__init__.py").write_text("# plugin", encoding="utf-8")
+    (hermes_home / "cron").mkdir(parents=True)
+    (hermes_home / "cron" / "nightly.json").write_text("{}", encoding="utf-8")
+    (hermes_home / "kanban.db").write_bytes(b"kanban")
+    (vendor_root / "skills" / "bundled-demo").mkdir(parents=True)
+    (vendor_root / "skills" / "bundled-demo" / "SKILL.md").write_text("# Bundled Demo", encoding="utf-8")
+    (vendor_root / "optional-skills" / "optional-demo").mkdir(parents=True)
+    (vendor_root / "optional-skills" / "optional-demo" / "SKILL.md").write_text("# Optional Demo", encoding="utf-8")
+    (vendor_root / "plugins" / "memory" / "honcho").mkdir(parents=True)
+    (vendor_root / "plugins" / "memory" / "honcho" / "plugin.yaml").write_text("name: honcho\n", encoding="utf-8")
+    project_root.mkdir()
+    (project_root / "mcp_servers.json").write_text(
+        '{"servers":{"personal_os":{"command":"node","enabled":true}}}',
+        encoding="utf-8",
+    )
+    (hermes_home / "config.yaml").write_text(
+        "\n".join([
+            "plugins:",
+            "  enabled:",
+            "    - lexa-status",
+            "memory:",
+            "  memory_enabled: true",
+            "  user_profile_enabled: true",
+            "mcp_servers:",
+            "  time:",
+            "    command: uvx",
+            "    args: ['mcp-server-time']",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(hermes, "HERMES_HOME_ROOT", hermes_home)
+    monkeypatch.setattr(hermes, "HERMES_VENDOR_ROOT", vendor_root)
+    monkeypatch.setattr(hermes, "PROJECT_ROOT", project_root)
+
+    status = hermes.get_hermes_extension_status({"available": True})
+
+    assert status["safeMode"] is True
+    assert status["counts"]["ready"] == status["counts"]["total"]
+    assert status["counts"]["skills"] == 2
+    assert status["counts"]["optionalSkills"] == 1
+    assert status["counts"]["hermesMcpServers"] == 1
+    assert status["counts"]["lexaMcpEnabled"] == 1
+    assert status["counts"]["enabledPlugins"] == 1
+    assert status["counts"]["cronJobs"] == 1
     assert status["setup"]["secretsRedacted"] is True
 
 

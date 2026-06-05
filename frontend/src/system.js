@@ -472,6 +472,13 @@ function hermesMediaMetric(mediaCounts) {
   return `${ready}/${total} ready, ${attention} setup`;
 }
 
+function hermesExtensionMetric(extensionCounts) {
+  const ready = systemDisplayCount(extensionCounts?.ready);
+  const total = systemDisplayCount(extensionCounts?.total);
+  const plugins = systemDisplayCount(extensionCounts?.enabledPlugins);
+  return `${ready}/${total} ready, ${plugins} plugins`;
+}
+
 function createHermesProviderRows(providerStatus) {
   if (!providerStatus || typeof providerStatus !== "object") {
     return [createSystemOverviewMuted(t("system.hermesNoProviderStatus"))];
@@ -512,6 +519,22 @@ function createHermesMediaRows(mediaStatus) {
   });
 }
 
+function createHermesExtensionRows(extensionStatus) {
+  if (!extensionStatus || typeof extensionStatus !== "object") {
+    return [createSystemOverviewMuted(t("system.hermesNoExtensionStatus"))];
+  }
+  const areas = Array.isArray(extensionStatus.areas) ? extensionStatus.areas.slice(0, 5) : [];
+  if (!areas.length) {
+    return [createSystemOverviewMuted(extensionStatus.nextAction || t("system.hermesNoExtensionStatus"))];
+  }
+  return areas.map((area) => {
+    const state = area.healthState || (area.ready ? "ready" : "attention");
+    const counts = area.counts && typeof area.counts === "object" ? Object.values(area.counts).filter((value) => Number.isFinite(Number(value))).slice(0, 2).join("/") : "";
+    const suffix = counts ? ` · ${counts}` : "";
+    return createSystemOverviewFileRow(area.label || area.id || "Extension", `${state}${suffix}`);
+  });
+}
+
 function renderHermesOverview(payload) {
   const target = document.getElementById("hermes-overview-content");
   if (!target) return;
@@ -531,6 +554,8 @@ function renderHermesOverview(payload) {
   const providerCounts = providerStatus.counts || {};
   const mediaStatus = payload.mediaStatus || capabilityPayload.mediaStatus || {};
   const mediaCounts = counts.media || mediaStatus.counts || {};
+  const extensionStatus = payload.extensionStatus || capabilityPayload.extensionStatus || {};
+  const extensionCounts = counts.extensions || extensionStatus.counts || {};
   const stateTone = hermesOverviewTone(payload.healthState);
   const contextCount = systemDisplayCount(counts.contextFiles ?? files.length ?? 0);
 
@@ -543,7 +568,8 @@ function renderHermesOverview(payload) {
     createSystemOverviewMetric(t("system.hermesMetricSafeMode"), payload.safeMode ? t("common.yes") : t("common.no")),
     createSystemOverviewMetric(t("system.hermesMetricCapabilities"), hermesCapabilityMetric(capCounts)),
     createSystemOverviewMetric(t("system.hermesMetricFallbacks"), hermesProviderMetric(providerCounts)),
-    createSystemOverviewMetric(t("system.hermesMetricMedia"), hermesMediaMetric(mediaCounts))
+    createSystemOverviewMetric(t("system.hermesMetricMedia"), hermesMediaMetric(mediaCounts)),
+    createSystemOverviewMetric(t("system.hermesMetricExtensions"), hermesExtensionMetric(extensionCounts))
   );
 
   const checkRows = checks.length
@@ -557,6 +583,7 @@ function renderHermesOverview(payload) {
     : [createSystemOverviewMuted(t("system.hermesNoCapabilityGaps"))];
   const providerRows = createHermesProviderRows(providerStatus);
   const mediaRows = createHermesMediaRows(mediaStatus);
+  const extensionRows = createHermesExtensionRows(extensionStatus);
   const nextText = document.createTextNode(String(payload.nextAction || t("system.hermesNoNextTask")));
   const taskList = createSystemOverviewTaskList(tasks, payload.nextAction || t("system.hermesNoNextTask"));
 
@@ -567,6 +594,7 @@ function renderHermesOverview(payload) {
     createSystemOverviewSection(t("system.hermesContextFiles"), "system-overview-files", fileRows),
     createSystemOverviewSection(t("system.hermesProviders"), "system-overview-files", providerRows),
     createSystemOverviewSection(t("system.hermesMedia"), "system-overview-files", mediaRows),
+    createSystemOverviewSection(t("system.hermesExtensions"), "system-overview-files", extensionRows),
     createSystemOverviewSection(t("system.hermesCapabilityGaps"), "system-overview-checks", gapRows),
     createSystemOverviewSection(t("system.hermesNextAction"), "system-overview-next", [nextText, taskList])
   );

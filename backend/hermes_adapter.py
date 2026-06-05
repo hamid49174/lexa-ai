@@ -187,6 +187,7 @@ _LEXA_HERMES_BACKEND_ENDPOINTS = (
     "/hermes/capabilities",
     "/hermes/providers",
     "/hermes/media",
+    "/hermes/extensions",
     "/hermes/overview",
     "/hermes/context",
     "/hermes/draft",
@@ -1262,6 +1263,320 @@ def get_hermes_media_status(status_info: dict[str, Any] | None = None) -> dict[s
     }
 
 
+def _safe_dir_names(path: Path) -> list[str]:
+    try:
+        if not path.is_dir():
+            return []
+        return sorted(
+            child.name
+            for child in path.iterdir()
+            if child.is_dir() and not child.name.startswith(".") and child.name != "__pycache__"
+        )
+    except OSError:
+        return []
+
+
+def _safe_rglob_count(path: Path, pattern: str) -> int:
+    try:
+        if not path.is_dir():
+            return 0
+        return sum(1 for item in path.rglob(pattern) if item.is_file())
+    except OSError:
+        return 0
+
+
+def _safe_file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size if path.is_file() else 0
+    except OSError:
+        return 0
+
+
+def _safe_json_file(path: Path) -> dict[str, Any]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8", errors="replace") or "{}")
+    except Exception:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _expand_hermes_path(value: Any) -> Path:
+    text = str(value or "").strip()
+    text = text.replace("${HERMES_HOME}", str(HERMES_HOME_ROOT))
+    text = os.path.expandvars(os.path.expanduser(text))
+    return Path(text)
+
+
+def _enabled_lexa_mcp_servers() -> tuple[int, int]:
+    config_path = PROJECT_ROOT / "mcp_servers.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        return 0, 0
+    servers = config.get("servers") if isinstance(config.get("servers"), dict) else {}
+    total = len(servers)
+    enabled = sum(1 for server in servers.values() if isinstance(server, dict) and server.get("enabled", True))
+    return enabled, total
+
+
+def _known_plugin_keys(root: Path) -> set[str]:
+    keys: set[str] = set()
+    try:
+        manifests = list(root.rglob("plugin.yaml")) if root.is_dir() else []
+    except OSError:
+        return keys
+    for manifest in manifests:
+        try:
+            rel = manifest.parent.relative_to(root)
+        except ValueError:
+            continue
+        key = "/".join(part for part in rel.parts if part and part != "__pycache__")
+        if key:
+            keys.add(key)
+    return keys
+
+
+def _extension_area(
+    area_id: str,
+    label: str,
+    state: str,
+    detail: str,
+    next_action: str,
+    *,
+    counts: dict[str, Any] | None = None,
+    items: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": area_id,
+        "label": label,
+        "healthState": state,
+        "ready": state == "ready",
+        "detail": detail,
+        "nextAction": "" if state == "ready" else next_action,
+        "counts": counts or {},
+        "items": items or [],
+    }
+
+
+def get_hermes_extension_status(status_info: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return read-only Hermes skills, memory, MCP, plugin and automation readiness."""
+    status_info = status_info or get_hermes_status()
+    config, config_meta = _read_hermes_config_file()
+    command_available = bool(status_info.get("available"))
+
+    skills_cfg = _config_section(config, "skills")
+    external_raw = skills_cfg.get("external_dirs") if isinstance(skills_cfg.get("external_dirs"), list) else []
+    external_dirs = []
+    for raw in external_raw[:12]:
+        path = _expand_hermes_path(raw)
+        external_dirs.append({"path": str(path), "exists": path.is_dir()})
+    local_skills_root = HERMES_HOME_ROOT / "skills"
+    bundled_skills_root = HERMES_VENDOR_ROOT / "skills"
+    optional_skills_root = HERMES_VENDOR_ROOT / "optional-skills"
+    local_skill_count = _safe_rglob_count(local_skills_root, "SKILL.md")
+    bundled_skill_count = _safe_rglob_count(bundled_skills_root, "SKILL.md")
+    optional_skill_count = _safe_rglob_count(optional_skills_root, "SKILL.md")
+    usage = _safe_json_file(local_skills_root / ".usage.json")
+    skills_state = "blocked" if not command_available else ("ready" if local_skill_count or bundled_skill_count else "attention")
+    skills_detail = (
+        f"{local_skill_count} local/copied skill(s), {bundled_skill_count} bundled, "
+        f"{optional_skill_count} optional; {sum(1 for item in external_dirs if item['exists'])}/{len(external_dirs)} external dirs reachable."
+    )
+    skills_area = _extension_area(
+        "skills",
+        "Skills",
+        skills_state,
+        skills_detail,
+        "Install or sync Hermes skills into the Lexa-local Hermes home.",
+        counts={
+            "local": local_skill_count,
+            "bundled": bundled_skill_count,
+            "optional": optional_skill_count,
+            "externalDirs": len(external_dirs),
+            "externalDirsReachable": sum(1 for item in external_dirs if item["exists"]),
+            "usageEntries": len(usage),
+        },
+        items=[
+            {"id": "local", "label": "Lexa-local skills", "path": str(local_skills_root), "count": local_skill_count},
+            {"id": "bundled", "label": "Bundled skills", "path": str(bundled_skills_root), "count": bundled_skill_count},
+            {"id": "optional", "label": "Optional skills", "path": str(optional_skills_root), "count": optional_skill_count},
+        ],
+    )
+
+    memory_cfg = _config_section(config, "memory")
+    memory_enabled = _config_bool(memory_cfg.get("memory_enabled"), default=True)
+    user_profile_enabled = _config_bool(memory_cfg.get("user_profile_enabled"), default=True)
+    memory_provider = _config_text(memory_cfg, "provider", "memory_provider") or "local"
+    memories_root = HERMES_HOME_ROOT / "memories"
+    memory_file = memories_root / "MEMORY.md"
+    user_file = memories_root / "USER.md"
+    memory_file_ready = _safe_file_size(memory_file) > 0
+    user_file_ready = _safe_file_size(user_file) > 0
+    memory_provider_count = len(_safe_dir_names(HERMES_VENDOR_ROOT / "plugins" / "memory"))
+    if not command_available:
+        memory_state = "blocked"
+    elif not memory_enabled and not user_profile_enabled:
+        memory_state = "attention"
+    elif memory_file_ready and (user_file_ready or not user_profile_enabled):
+        memory_state = "ready"
+    elif user_file_ready:
+        memory_state = "attention"
+    else:
+        memory_state = "attention"
+    memory_area = _extension_area(
+        "memory",
+        "Memory",
+        memory_state,
+        (
+            f"Memory enabled={memory_enabled}, user profile enabled={user_profile_enabled}, "
+            f"provider={memory_provider}, MEMORY.md={'present' if memory_file_ready else 'missing/empty'}, "
+            f"USER.md={'present' if user_file_ready else 'missing/empty'}."
+        ),
+        "Let Hermes create or import MEMORY.md, or configure an external memory provider if you want long-term recall.",
+        counts={
+            "localFiles": sum(1 for ready in (memory_file_ready, user_file_ready) if ready),
+            "memoryProvidersBundled": memory_provider_count,
+            "memoryBytes": _safe_file_size(memory_file),
+            "userBytes": _safe_file_size(user_file),
+        },
+        items=[
+            {"id": "memory", "label": "MEMORY.md", "exists": memory_file.exists(), "bytes": _safe_file_size(memory_file)},
+            {"id": "user", "label": "USER.md", "exists": user_file.exists(), "bytes": _safe_file_size(user_file)},
+        ],
+    )
+
+    hermes_mcp = config.get("mcp_servers") if isinstance(config.get("mcp_servers"), dict) else {}
+    lexa_mcp_enabled, lexa_mcp_total = _enabled_lexa_mcp_servers()
+    hermes_mcp_total = len(hermes_mcp)
+    hermes_mcp_http = sum(1 for server in hermes_mcp.values() if isinstance(server, dict) and str(server.get("url") or "").strip())
+    hermes_mcp_stdio = sum(1 for server in hermes_mcp.values() if isinstance(server, dict) and str(server.get("command") or "").strip())
+    mcp_state = "blocked" if not command_available else ("ready" if hermes_mcp_total else ("attention" if lexa_mcp_enabled else "attention"))
+    mcp_area = _extension_area(
+        "mcp",
+        "MCP Servers",
+        mcp_state,
+        (
+            f"Hermes MCP servers: {hermes_mcp_total} ({hermes_mcp_stdio} stdio, {hermes_mcp_http} HTTP). "
+            f"Lexa MCP servers: {lexa_mcp_enabled}/{lexa_mcp_total} enabled."
+        ),
+        "Mirror the important Lexa MCP servers into Hermes config or expose a unified MCP bridge.",
+        counts={
+            "hermesServers": hermes_mcp_total,
+            "hermesStdio": hermes_mcp_stdio,
+            "hermesHttp": hermes_mcp_http,
+            "lexaServers": lexa_mcp_total,
+            "lexaEnabled": lexa_mcp_enabled,
+        },
+        items=[
+            {"id": name, "label": name, "mode": "http" if isinstance(server, dict) and server.get("url") else "stdio"}
+            for name, server in list(hermes_mcp.items())[:8]
+        ],
+    )
+
+    plugins_cfg = _config_section(config, "plugins")
+    enabled_plugins = [str(item).strip() for item in plugins_cfg.get("enabled", []) if str(item).strip()] if isinstance(plugins_cfg.get("enabled"), list) else []
+    disabled_plugins = [str(item).strip() for item in plugins_cfg.get("disabled", []) if str(item).strip()] if isinstance(plugins_cfg.get("disabled"), list) else []
+    bundled_keys = _known_plugin_keys(HERMES_VENDOR_ROOT / "plugins")
+    user_plugin_root = HERMES_HOME_ROOT / "plugins"
+    user_plugin_dirs = _safe_dir_names(user_plugin_root)
+    known_keys = set(bundled_keys) | set(user_plugin_dirs)
+    missing_enabled = [name for name in enabled_plugins if name not in known_keys]
+    plugins_state = "blocked" if not command_available else ("attention" if missing_enabled else ("ready" if enabled_plugins or bundled_keys else "attention"))
+    plugins_area = _extension_area(
+        "plugins",
+        "Plugins",
+        plugins_state,
+        (
+            f"{len(enabled_plugins)} enabled, {len(disabled_plugins)} disabled, "
+            f"{len(user_plugin_dirs)} user plugin dir(s), {len(bundled_keys)} bundled manifests."
+        ),
+        "Fix enabled plugin names that are not installed, or enable the plugin categories Lexa needs.",
+        counts={
+            "enabled": len(enabled_plugins),
+            "disabled": len(disabled_plugins),
+            "userDirs": len(user_plugin_dirs),
+            "bundled": len(bundled_keys),
+            "missingEnabled": len(missing_enabled),
+        },
+        items=[
+            {"id": name, "label": name, "state": "missing" if name in missing_enabled else "enabled"}
+            for name in enabled_plugins[:10]
+        ],
+    )
+
+    cron_root = HERMES_HOME_ROOT / "cron"
+    cron_job_count = _safe_rglob_count(cron_root, "*.json") + _safe_rglob_count(cron_root, "*.yaml") + _safe_rglob_count(cron_root, "*.yml")
+    cron_output_count = _safe_rglob_count(cron_root / "output", "*")
+    kanban_db = HERMES_HOME_ROOT / "kanban.db"
+    kanban_ready = kanban_db.exists() and _safe_file_size(kanban_db) > 0
+    automation_state = "blocked" if not command_available else ("ready" if kanban_ready or cron_job_count else "attention")
+    automation_area = _extension_area(
+        "automation",
+        "Automation & Kanban",
+        automation_state,
+        f"Cron jobs detected: {cron_job_count}; cron output files: {cron_output_count}; kanban DB {'present' if kanban_ready else 'missing'}.",
+        "Expose Hermes cron/kanban read-only status first, then add write actions behind confirmation.",
+        counts={
+            "cronJobs": cron_job_count,
+            "cronOutputs": cron_output_count,
+            "kanbanDb": 1 if kanban_ready else 0,
+            "kanbanBytes": _safe_file_size(kanban_db),
+        },
+        items=[
+            {"id": "cron", "label": "Cron", "path": str(cron_root), "count": cron_job_count},
+            {"id": "kanban", "label": "Kanban DB", "path": str(kanban_db), "exists": kanban_ready},
+        ],
+    )
+
+    areas = [skills_area, memory_area, mcp_area, plugins_area, automation_area]
+    counts = {
+        "total": len(areas),
+        "ready": sum(1 for area in areas if area["healthState"] == "ready"),
+        "attention": sum(1 for area in areas if area["healthState"] == "attention"),
+        "blocked": sum(1 for area in areas if area["healthState"] == "blocked"),
+        "skills": local_skill_count + bundled_skill_count,
+        "optionalSkills": optional_skill_count,
+        "hermesMcpServers": hermes_mcp_total,
+        "lexaMcpEnabled": lexa_mcp_enabled,
+        "enabledPlugins": len(enabled_plugins),
+        "cronJobs": cron_job_count,
+        "kanbanReady": 1 if kanban_ready else 0,
+    }
+    if counts["blocked"]:
+        health_state = "blocked"
+        next_action = "Install or configure the Hermes command before extension surfaces can run."
+    elif counts["attention"]:
+        health_state = "attention"
+        first_attention = next((area for area in areas if area["healthState"] == "attention"), {})
+        next_action = str(first_attention.get("nextAction") or "Finish Hermes extension setup.")
+    else:
+        health_state = "ready"
+        next_action = "Hermes extension surfaces are visible; add safe action controls next."
+
+    return {
+        "ok": health_state != "blocked",
+        "status": "ok",
+        "healthState": health_state,
+        "summary": (
+            f"Hermes extension readiness: {counts['ready']}/{counts['total']} areas ready, "
+            f"{counts['attention']} need attention, {counts['blocked']} blocked."
+        ),
+        "nextAction": next_action,
+        "counts": counts,
+        "areas": areas,
+        "config": config_meta,
+        "setup": {
+            "skillsCommand": "hermes skills",
+            "pluginsCommand": "hermes plugins",
+            "mcpCommand": "hermes mcp",
+            "cronCommand": "hermes cron",
+            "kanbanCommand": "hermes kanban",
+            "secretsRedacted": True,
+        },
+        "safeMode": True,
+    }
+
+
 def _capability_state(
     *,
     command_available: bool,
@@ -1325,7 +1640,15 @@ def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[s
     personal_os_available = bool(status_info.get("personal_os_available"))
     provider_status = get_hermes_provider_status(status_info)
     media_status = get_hermes_media_status(status_info)
+    extension_status = get_hermes_extension_status(status_info)
     media_counts = media_status.get("counts") if isinstance(media_status.get("counts"), dict) else {}
+    extension_counts = extension_status.get("counts") if isinstance(extension_status.get("counts"), dict) else {}
+    extension_areas = extension_status.get("areas") if isinstance(extension_status.get("areas"), list) else []
+    extension_by_id = {
+        str(area.get("id")): area
+        for area in extension_areas
+        if isinstance(area, dict)
+    }
     fallback_count = int((provider_status.get("counts") or {}).get("fallbacks") or 0)
     fallback_ready_count = int((provider_status.get("counts") or {}).get("fallbacksReady") or 0)
     primary_model_ready = provider_status.get("healthState") != "blocked"
@@ -1393,12 +1716,12 @@ def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[s
         _capability_group(
             "skills-memory",
             "Skills & Memory",
-            _capability_state(command_available=command_available, primary_model_ready=primary_model_ready, attention_when_unwired=True),
-            "Hermes ships skill management, built-in memory, session search and optional external memory providers.",
-            "Expose read-only skill/memory status first; keep durable writes review-gated.",
+            "ready" if all((extension_by_id.get(key) or {}).get("healthState") == "ready" for key in ("skills", "memory")) else ("attention" if command_available else "blocked"),
+            f"Lexa now surfaces Hermes skills/memory: {extension_counts.get('skills', 0)} loaded/bundled skills, {extension_counts.get('optionalSkills', 0)} optional, memory state={(extension_by_id.get('memory') or {}).get('healthState', 'unknown')}.",
+            (extension_by_id.get("memory") or {}).get("nextAction") or "Keep durable memory writes review-gated.",
             lexa_surface="partial",
             toolsets=["skills", "memory", "session_search"],
-            surfaces=["/hermes/context", "/hermes/draft", "/hermes/drafts"],
+            surfaces=["/hermes/extensions", "/hermes/context", "/hermes/draft", "/hermes/drafts"],
             priority=20,
         ),
         _capability_group(
@@ -1437,23 +1760,23 @@ def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[s
         _capability_group(
             "mcp-plugins",
             "MCP & Plugins",
-            "attention" if command_available else "blocked",
-            "Hermes can install plugins and MCP servers; Lexa has a separate MCP router but no unified Hermes MCP/plugin cockpit.",
-            "Unify Lexa MCP status with Hermes MCP/plugin discovery.",
-            lexa_surface="weak",
+            "ready" if all((extension_by_id.get(key) or {}).get("healthState") == "ready" for key in ("mcp", "plugins")) else ("attention" if command_available else "blocked"),
+            f"Lexa now surfaces Hermes MCP/plugins: {extension_counts.get('hermesMcpServers', 0)} Hermes MCP server(s), {extension_counts.get('lexaMcpEnabled', 0)} Lexa MCP enabled, {extension_counts.get('enabledPlugins', 0)} enabled plugin(s).",
+            (extension_by_id.get("mcp") or {}).get("nextAction") or "Unify Lexa MCP status with Hermes MCP/plugin discovery.",
+            lexa_surface="partial",
             toolsets=["mcp", "plugins"],
-            surfaces=["/mcp/servers", "hermes mcp", "hermes plugins"],
+            surfaces=["/hermes/extensions", "/mcp/servers", "hermes mcp", "hermes plugins"],
             priority=22,
         ),
         _capability_group(
             "automation-board",
             "Automation, Cron & Kanban",
-            _capability_state(command_available=command_available, primary_model_ready=primary_model_ready, attention_when_unwired=True),
-            "Hermes includes cron jobs, kanban boards, delegation and gateway dispatch loops.",
-            "Expose read-only job/board status first; add write actions behind explicit confirmation.",
-            lexa_surface="missing",
+            "ready" if (extension_by_id.get("automation") or {}).get("healthState") == "ready" else ("attention" if command_available else "blocked"),
+            f"Lexa now surfaces Hermes automation: {extension_counts.get('cronJobs', 0)} cron job(s), kanban ready={bool(extension_counts.get('kanbanReady'))}.",
+            (extension_by_id.get("automation") or {}).get("nextAction") or "Add write actions behind explicit confirmation.",
+            lexa_surface="partial",
             toolsets=["cronjob", "delegation", "todo", "messaging"],
-            surfaces=["hermes cron", "hermes kanban"],
+            surfaces=["/hermes/extensions", "hermes cron", "hermes kanban"],
             priority=28,
         ),
         _capability_group(
@@ -1484,6 +1807,7 @@ def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[s
         "primaryProviders": len(primary_providers),
         "mediaProviders": int(media_counts.get("credentialReadyOptions") or len(media_providers)),
         "mediaAreasReady": int(media_counts.get("ready") or 0),
+        "extensionAreasReady": int(extension_counts.get("ready") or 0),
     }
     gaps = sorted(
         [
@@ -1537,6 +1861,7 @@ def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[s
         },
         "providerStatus": provider_status,
         "mediaStatus": media_status,
+        "extensionStatus": extension_status,
         "toolsets": list(_HERMES_DEFAULT_TOOLSETS),
         "groups": groups,
         "gaps": gaps,

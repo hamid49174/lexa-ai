@@ -184,6 +184,7 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("hermesCapabilities", "low", "read", "/hermes/capabilities", { batch_allowed: true }),
   bridgePolicy("hermesProviders", "low", "read", "/hermes/providers", { batch_allowed: true }),
   bridgePolicy("hermesMedia", "low", "read", "/hermes/media", { batch_allowed: true }),
+  bridgePolicy("hermesExtensions", "low", "read", "/hermes/extensions", { batch_allowed: true }),
   bridgePolicy("hermesOverview", "low", "read", "/hermes/overview", { batch_allowed: true }),
   bridgePolicy("backupCreate", "high", "secret", "/backup"),
   bridgePolicy("backupRestore", "critical", "admin", "/backup/restore"),
@@ -1075,6 +1076,20 @@ if (isLexaSmokeMockAllowed()) {
       setup: { toolsCommand: "hermes tools", secretsRedacted: true },
       safeMode: true,
     }),
+    hermesExtensions: async () => ({
+      ok: true,
+      healthState: "attention",
+      summary: "Hermes extension readiness: 3/5 areas ready, 2 need attention, 0 blocked.",
+      nextAction: "Mirror the important Lexa MCP servers into Hermes config.",
+      counts: { total: 5, ready: 3, attention: 2, blocked: 0, skills: 120, enabledPlugins: 1 },
+      areas: [
+        { id: "skills", label: "Skills", healthState: "ready", detail: "Bundled and local skills visible." },
+        { id: "memory", label: "Memory", healthState: "attention", detail: "USER.md exists; MEMORY.md missing/empty." },
+        { id: "mcp", label: "MCP Servers", healthState: "attention", detail: "Lexa MCP configured; Hermes MCP empty." },
+      ],
+      setup: { skillsCommand: "hermes skills", pluginsCommand: "hermes plugins", secretsRedacted: true },
+      safeMode: true,
+    }),
     hermesOverview: async () => ({
       ok: true,
       healthState: "ready",
@@ -1113,6 +1128,16 @@ if (isLexaSmokeMockAllowed()) {
         areas: [
           { id: "tts", label: "Text-to-Speech", healthState: "ready", provider: "edge", toolset: "tts" },
           { id: "image-generation", label: "Image Generation", healthState: "attention", provider: "fal", toolset: "image_gen" },
+        ],
+      },
+      extensionStatus: {
+        healthState: "attention",
+        summary: "Hermes extension readiness: 3/5 areas ready, 2 need attention, 0 blocked.",
+        counts: { total: 5, ready: 3, attention: 2, blocked: 0, skills: 120, enabledPlugins: 1 },
+        areas: [
+          { id: "skills", label: "Skills", healthState: "ready" },
+          { id: "memory", label: "Memory", healthState: "attention" },
+          { id: "mcp", label: "MCP Servers", healthState: "attention" },
         ],
       },
       contextFiles: [
@@ -2293,6 +2318,22 @@ const lexaBridge = {
         counts: {},
         areas: [],
         error: "Hermes Mediastatus nicht erreichbar",
+      };
+    }
+  },
+  hermesExtensions: async () => {
+    try {
+      const res = await fetchWithTimeout(`${API}/hermes/extensions`);
+      return apiJson(res, "Hermes Extensionstatus nicht erreichbar");
+    } catch (e) {
+      console.warn("[Preload] hermesExtensions failed:", e.message || e);
+      return {
+        ok: false,
+        healthState: "offline",
+        summary: "Hermes Extensionstatus nicht erreichbar",
+        counts: {},
+        areas: [],
+        error: "Hermes Extensionstatus nicht erreichbar",
       };
     }
   },
