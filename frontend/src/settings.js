@@ -52,6 +52,7 @@ let _aiModelChangeRunning = false;
 let _sttModelChangeRunning = false;
 let _sttEngineChangeRunning = false;
 let _settingsSecretActionRunning = false;
+let _licenseActionRunning = false;
 let _hermesGatewayAutostartRunning = false;
 let _hermesGatewayAutostartLastPayload = null;
 let _settingsRefreshSeq = 0;
@@ -61,6 +62,10 @@ const SETTINGS_SECRET_ACTIONS = [
   "setCartesiaKey",
   "deleteCartesiaKey",
   "elevenlabsKeyAction",
+];
+const SETTINGS_LICENSE_ACTIONS = [
+  "activateLicense",
+  "removeLicense",
 ];
 
 function setSettingsActionBusy(button, busy) {
@@ -77,6 +82,22 @@ function setSettingsActionButtonsBusy(actionName, busy) {
 
 function setSettingsSecretActionsBusy(busy) {
   SETTINGS_SECRET_ACTIONS.forEach((actionName) => setSettingsActionButtonsBusy(actionName, busy));
+}
+
+function setSettingsLicenseActionsBusy(busy) {
+  SETTINGS_LICENSE_ACTIONS.forEach((actionName) => setSettingsActionButtonsBusy(actionName, busy));
+}
+
+async function runSettingsLicenseAction(actionFn) {
+  if (_licenseActionRunning) return;
+  _licenseActionRunning = true;
+  setSettingsLicenseActionsBusy(true);
+  try {
+    await actionFn();
+  } finally {
+    _licenseActionRunning = false;
+    setSettingsLicenseActionsBusy(false);
+  }
 }
 
 async function runSettingsSecretAction(actionFn) {
@@ -1292,40 +1313,48 @@ function _hideTrialBar(el) {
 }
 
 async function activateLicense() {
-  const result = await showInputModal(t("settings.licenseActivateTitle"), [
-    { name: "key", label: t("settings.licenseKeyLabel"), type: "text", required: true }
-  ], t("settings.licenseActivateBtn"));
-  if (!result || !result.key) return;
+  await runSettingsLicenseAction(async () => {
+    const result = await showInputModal(t("settings.licenseActivateTitle"), [
+      { name: "key", label: t("settings.licenseKeyLabel"), type: "text", required: true }
+    ], t("settings.licenseActivateBtn"));
+    if (!result || !result.key) return;
 
-  const key = result.key.trim().toUpperCase();
-  if (!/^LEXA-[A-F0-9]{5}-[A-F0-9]{5}-[A-F0-9]{5}-[A-F0-9]{5}$/.test(key)) {
-    showToast(t("license.invalidFormat"), "error");
-    return;
-  }
-
-  showToast(t("license.checking"), "info");
-  try {
-    const activation = await window.lexa.licenseActivate(key);
-    if (activation.valid && activation.success !== false) {
-      showToast(t("license.activated", {plan: (activation.plan || "pro").toUpperCase()}), "success");
-      loadLicenseStatus();
-    } else {
-      showToast(activation.error || t("license.invalid"), "error");
+    const key = result.key.trim().toUpperCase();
+    if (!/^LEXA-[A-F0-9]{5}-[A-F0-9]{5}-[A-F0-9]{5}-[A-F0-9]{5}$/.test(key)) {
+      showToast(t("license.invalidFormat"), "error");
+      return;
     }
-  } catch (e) {
-    showToast(t("license.validationError", {error: e.message}), "error");
-  }
+
+    showToast(t("license.checking"), "info");
+    try {
+      const activation = await window.lexa.licenseActivate(key);
+      if (activation.valid && activation.success !== false) {
+        showToast(t("license.activated", {plan: (activation.plan || "pro").toUpperCase()}), "success");
+        await loadLicenseStatus();
+      } else {
+        showToast(activation.error || t("license.invalid"), "error");
+      }
+    } catch (e) {
+      showToast(t("license.validationError", {error: e.message}), "error");
+    }
+  });
 }
 
 async function removeLicense() {
-  const result = await showInputModal(t("settings.licenseRemoveTitle"), [
-    { name: "confirm", label: t("settings.licenseRemoveConfirm"), type: "text", required: true }
-  ], t("settings.licenseRemoveBtn"));
-  if (!result || result.confirm.toLowerCase() !== "ja") return;
+  await runSettingsLicenseAction(async () => {
+    const result = await showInputModal(t("settings.licenseRemoveTitle"), [
+      { name: "confirm", label: t("settings.licenseRemoveConfirm"), type: "text", required: true }
+    ], t("settings.licenseRemoveBtn"));
+    if (!result || result.confirm.toLowerCase() !== "ja") return;
 
-  await window.lexa.licenseSet({ key: "", plan: "free", status: "inactive", expires: null });
-  showToast(t("license.removed"), "info");
-  loadLicenseStatus();
+    try {
+      await window.lexa.licenseSet({ key: "", plan: "free", status: "inactive", expires: null });
+      showToast(t("license.removed"), "info");
+      await loadLicenseStatus();
+    } catch (e) {
+      showToast(t("common.error") + ": " + settingsClip(e.message || e, 120), "error");
+    }
+  });
 }
 
 async function saveProfile() {
