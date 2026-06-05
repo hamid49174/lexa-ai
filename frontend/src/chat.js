@@ -1547,6 +1547,16 @@ async function sendMessage() {
     let streamTimedOut = false;
     const streamStart = Date.now();
     const STREAM_TIMEOUT_MS = 45000;
+    const handleStreamData = (data) => {
+      if (!data) return;
+      if (data.c) { fullText += data.c; scheduleStreamRender(); }
+      if (data.done) {
+        actionData = data.action;
+        requiresConfirmation = data.rc;
+        if (data.reply && !fullText) fullText = data.reply;
+        streamError = null;
+      }
+    };
     try {
       while (true) {
         if (Date.now() - streamStart > STREAM_TIMEOUT_MS) {
@@ -1564,11 +1574,15 @@ async function sendMessage() {
         buffer = parsedBuffer.buffer;
         for (const line of lines) {
           const data = parseChatStreamDataLine(line);
-          if (!data) continue;
-          if (data.c) { fullText += data.c; scheduleStreamRender(); }
-          if (data.done) { actionData = data.action; requiresConfirmation = data.rc; if (data.reply && !fullText) { fullText = data.reply; } streamError = null; }
+          handleStreamData(data);
         }
       }
+      buffer += decoder.decode();
+      for (const line of chatStreamFinalLines(buffer)) {
+        const data = parseChatStreamDataLine(line);
+        handleStreamData(data);
+      }
+      buffer = "";
     } catch (streamErr) {
       streamStoppedByUser = window._lexaStreamAbortReason === "user";
       if (!streamStoppedByUser) {

@@ -482,33 +482,40 @@ async function voiceStreamChat(text) {
     const decoder = new TextDecoder();
     let buffer = "";
     let ttsBuf = "";
+    const handleVoiceStreamData = (d) => {
+      if (!d) return;
+      if (d.c) {
+        fullText += d.c;
+        ttsBuf += d.c;
+        ttsBuf = voiceTTSFlushBuffer(ttsBuf);
+      }
+      if (d.done) {
+        action = d.action || null;
+        requiresConfirmation = d.rc || false;
+        if (d.reply && !fullText) fullText = d.reply;
+        ttsBuf = voiceTTSFlushBuffer(ttsBuf, true);
+      }
+    };
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
+      const parsedBuffer = chatStreamBufferedLines(buffer);
+      const lines = parsedBuffer.lines;
+      buffer = parsedBuffer.buffer;
 
       for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        try {
-          const d = JSON.parse(line.slice(6));
-          if (d.c) {
-            fullText += d.c;
-            ttsBuf += d.c;
-            ttsBuf = voiceTTSFlushBuffer(ttsBuf);
-          }
-          if (d.done) {
-            action = d.action || null;
-            requiresConfirmation = d.rc || false;
-            ttsBuf = voiceTTSFlushBuffer(ttsBuf, true);
-          }
-        } catch (_) {}
+        handleVoiceStreamData(parseChatStreamDataLine(line));
       }
     }
 
+    buffer += decoder.decode();
+    for (const line of chatStreamFinalLines(buffer)) {
+      handleVoiceStreamData(parseChatStreamDataLine(line));
+    }
+    buffer = "";
     ttsBuf = voiceTTSFlushBuffer(ttsBuf, true);
     if (timeout) { clearTimeout(timeout); timeout = null; }
 

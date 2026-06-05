@@ -259,6 +259,16 @@ async function main() {
         () => responseForStream(streamFromParts(splitEvery(malformedNoFinalText, [9, 1, 14, 6]))),
       );
 
+      const finalNoNewlineText = [
+        sse({ c: "Final SSE " }),
+        "data: " + JSON.stringify({ c: "tail without newline", done: true, action: null, rc: false }),
+      ].join("");
+      const finalNoNewline = await submitScenario(
+        "final-no-newline",
+        "Final no newline smoke",
+        () => responseForStream(streamFromParts(splitEvery(finalNoNewlineText, [5, 13, 2, 19]))),
+      );
+
       const streamError = await submitScenario(
         "stream-error",
         "Stream error smoke",
@@ -303,7 +313,7 @@ async function main() {
 
       window.fetch = originalFetch;
       window.playTTS = originalTts;
-      return { chunkBoundary, malformedNoFinal, streamError, userAbort, timeoutBeforeResponse };
+      return { chunkBoundary, malformedNoFinal, finalNoNewline, streamError, userAbort, timeoutBeforeResponse };
     })();
   `);
 
@@ -320,6 +330,11 @@ async function main() {
   assert("malformed SSE does not crash or drop later content", malformed.waitOk === true && /Recovered after malformed event without final marker/.test(malformed.text || ""), malformed.text);
   assert("stream without final marker recovers to usable state", malformed.sendEnabled === true && malformed.inputCleared === true && malformed.loading === false && malformed.systemMessageCount === 1, JSON.stringify(malformed));
   assert("malformed stream unsafe HTML remains text", Number(malformed.scriptTags || 0) === 0 && !/<script/i.test(malformed.html || "") && /alert/.test(malformed.text || ""), malformed.html);
+
+  const finalTail = result.finalNoNewline || {};
+  console.log("\nFinal unterminated SSE tail:");
+  assert("final SSE line without trailing newline is rendered", finalTail.waitOk === true && /Final SSE tail without newline/.test(finalTail.text || ""), JSON.stringify(finalTail));
+  assert("final SSE tail keeps chat usable", finalTail.sendEnabled === true && finalTail.inputCleared === true && finalTail.loading === false && finalTail.systemMessageCount === 1, JSON.stringify(finalTail));
 
   const interrupted = result.streamError || {};
   console.log("\nStreaming error recovery:");

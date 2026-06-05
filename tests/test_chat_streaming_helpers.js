@@ -40,6 +40,10 @@ const split = context.chatStreamBufferedLines('data: {"c":"A"}\n\ndata: {"c":"B"
 assert("buffer helper returns complete lines", Array.isArray(split.lines) && split.lines.length === 2 && split.lines[0] === 'data: {"c":"A"}' && split.lines[1] === "", JSON.stringify(split));
 assert("buffer helper keeps incomplete tail", split.buffer === 'data: {"c":"B"', JSON.stringify(split));
 
+const finalLines = context.chatStreamFinalLines('data: {"c":"tail"}');
+assert("final-line helper returns unterminated SSE tail", Array.isArray(finalLines) && finalLines.length === 1 && finalLines[0] === 'data: {"c":"tail"}', JSON.stringify(finalLines));
+assert("final-line helper ignores whitespace-only tails", context.chatStreamFinalLines("\n  \n").length === 0);
+
 const parsedContent = context.parseChatStreamDataLine('data: {"c":"Hello"}');
 assert("data parser reads content chunks", parsedContent && parsedContent.c === "Hello", JSON.stringify(parsedContent));
 

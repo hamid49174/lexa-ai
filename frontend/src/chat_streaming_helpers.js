@@ -8,6 +8,12 @@ function chatStreamBufferedLines(buffer) {
   return { lines, buffer: lines.pop() || "" };
 }
 
+function chatStreamFinalLines(buffer) {
+  const tail = String(buffer || "");
+  if (!tail.trim()) return [];
+  return tail.split("\n");
+}
+
 function chatStreamDebugEnabled() {
   return typeof window !== "undefined" && window?.LEXA_DEBUG_STREAM === true;
 }
