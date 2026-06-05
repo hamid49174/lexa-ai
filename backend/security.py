@@ -7,6 +7,7 @@ import json
 import sys
 import time
 import re
+import hashlib
 import logging
 import threading
 import unicodedata
@@ -652,6 +653,51 @@ def audit_log(command: str, status: str, details: str = "") -> None:
         # Don't swallow errors — log to stderr as fallback
         print(f"[AUDIT FALLBACK] {entry.strip()} (write failed: {e})", file=sys.stderr)
     logger.info(entry.strip())
+
+
+def audit_safe_token(value: object, *, fallback: str = "unknown", max_chars: int = 80) -> str:
+    """Return a compact token safe for raw audit metadata values."""
+    text = str(value or "").strip()
+    text = re.sub(r"[^A-Za-z0-9_.:-]+", "_", text).strip("_")
+    if not text:
+        return fallback
+    return text[:max_chars]
+
+
+def audit_value_metadata(label: str, value: object) -> str:
+    """Return length/hash metadata without writing the raw value."""
+    safe_label = audit_safe_token(label, fallback="value", max_chars=40)
+    text = str(value or "")
+    digest = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:12]
+    return f"{safe_label}Chars={len(text)} {safe_label}Hash={digest}"
+
+
+def audit_error_details(error: object, *, source: object | None = None) -> str:
+    """Return client/support useful error metadata without raw paths, prompts, or secrets."""
+    parts: list[str] = []
+    if source is not None:
+        parts.append(f"source={audit_safe_token(source)}")
+    error_type = type(error).__name__ if not isinstance(error, str) else "message"
+    parts.append(f"errorType={audit_safe_token(error_type, fallback='error')}")
+    parts.append(audit_value_metadata("error", error))
+    return " ".join(parts)
+
+
+def audit_param_keys_details(params: object) -> str:
+    """Return safe parameter-key metadata without values or sensitive key names."""
+    if not isinstance(params, dict):
+        return "paramCount=0 paramKeys=none"
+    keys: list[str] = []
+    for key in sorted(str(item) for item in params.keys()):
+        if _is_sensitive_audit_key(key):
+            keys.append("[sensitive]")
+        else:
+            keys.append(audit_safe_token(key, fallback="key", max_chars=40))
+    clipped = keys[:20]
+    key_text = ",".join(clipped) if clipped else "none"
+    if len(keys) > len(clipped):
+        key_text += ",..."
+    return f"paramCount={len(keys)} paramKeys={key_text}"
 
 
 def _clip_audit_field(value: str, max_chars: int = 500) -> str:

@@ -493,6 +493,32 @@ class TestEnvironmentTools:
 # ---------------------------------------------------------------------------
 
 class TestAuditLogRead:
+    def test_raw_audit_metadata_helpers_redact_values(self):
+        """Raw audit helpers preserve correlation data without raw secrets or paths."""
+        import backend.security as sec
+
+        details = sec.audit_error_details(
+            RuntimeError("failed C:\\Users\\admin\\secret.txt token=supersecretvalue"),
+            source="chat stream/private",
+        )
+        params = sec.audit_param_keys_details({
+            "name": "notepad",
+            "token": "supersecretvalue",
+            "path": "C:\\Users\\admin\\secret.txt",
+        })
+
+        assert "source=chat_stream_private" in details
+        assert "errorType=RuntimeError" in details
+        assert "errorChars=" in details
+        assert "errorHash=" in details
+        assert "C:\\Users\\admin" not in details
+        assert "supersecretvalue" not in details
+        assert "paramCount=3" in params
+        assert "name" in params
+        assert "[sensitive]" in params
+        assert "supersecretvalue" not in params
+        assert "C:\\Users\\admin" not in params
+
     def test_read_recent_audit_entries_parses_latest_first(self, tmp_path, monkeypatch):
         """Recent audit entries are parsed, bounded, and newest-first."""
         import backend.security as sec

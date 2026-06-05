@@ -66,6 +66,67 @@ def test_execute_action_valid_args_still_execute():
     mock_companion.execute.assert_called_once_with("app_open", {"name": "notepad"})
 
 
+def test_execute_action_success_audit_logs_param_keys_not_values():
+    entries = []
+    with patch("backend.action_executor.is_command_allowed", return_value="allowed"), \
+         patch("backend.action_executor.reflect_action", return_value=None), \
+         patch("backend.action_executor.validate_params", side_effect=lambda command, params: params), \
+         patch("backend.action_executor.companion") as mock_companion, \
+         patch("backend.action_executor.audit_log", lambda *args, **_kwargs: entries.append(args)):
+        mock_companion.execute.return_value = {"success": True, "data": "ok"}
+        result = execute_action(
+            {
+                "action": "email_send",
+                "params": {
+                    "to": "alice@example.com",
+                    "subject": "Payroll",
+                    "body": "supersecretvalue",
+                },
+            },
+            source="chat stream/private",
+        )
+
+    assert result["success"] is True
+    executed = next(entry for entry in entries if entry[:2] == ("email_send", "executed"))
+    details = executed[2]
+    assert "source=chat_stream_private" in details
+    assert "paramCount=3" in details
+    assert "body" in details
+    assert "subject" in details
+    assert "to" in details
+    assert "alice@example.com" not in details
+    assert "Payroll" not in details
+    assert "supersecretvalue" not in details
+    assert "params=" not in details
+
+
+def test_execute_action_failure_audit_logs_error_metadata_not_error_text():
+    entries = []
+    with patch("backend.action_executor.is_command_allowed", return_value="allowed"), \
+         patch("backend.action_executor.validate_params", side_effect=lambda command, params: params), \
+         patch("backend.action_executor.companion") as mock_companion, \
+         patch("backend.action_executor.audit_log", lambda *args, **_kwargs: entries.append(args)):
+        mock_companion.execute.return_value = {
+            "success": False,
+            "error": "failed C:\\Users\\admin\\secret.txt token=supersecretvalue",
+        }
+        result = execute_action(
+            {"action": "app_open", "params": {"name": "notepad"}},
+            source="chat_stream",
+        )
+
+    assert result["success"] is False
+    failed = next(entry for entry in entries if entry[:2] == ("app_open", "failed"))
+    details = failed[2]
+    assert "source=chat_stream" in details
+    assert "errorType=message" in details
+    assert "errorChars=" in details
+    assert "errorHash=" in details
+    assert "C:\\Users\\admin" not in details
+    assert "supersecretvalue" not in details
+    assert "error=" not in details
+
+
 def test_execute_action_reflection_can_block_before_companion():
     blocked = ReflectionDecision(
         should_execute=False,

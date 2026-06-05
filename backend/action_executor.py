@@ -14,7 +14,16 @@ import logging
 
 from companion.engine import companion
 from backend.agent_reflection import reflect_action
-from backend.security import check_action_rate_limit, is_command_allowed, validate_params, audit_log
+from backend.security import (
+    audit_error_details,
+    audit_log,
+    audit_param_keys_details,
+    audit_safe_token,
+    audit_value_metadata,
+    check_action_rate_limit,
+    is_command_allowed,
+    validate_params,
+)
 from backend.tool_registry import ToolSchemaValidationError, validate_tool_arguments
 
 logger = logging.getLogger("lexa.executor")
@@ -51,7 +60,7 @@ def execute_action(
         schema_params = validate_tool_arguments(action_name, params)
     except ToolSchemaValidationError as e:
         logger.warning("Rejected invalid action args for %s from %s: %s", action_name, source, e)
-        audit_log(action_name, "tool_schema_invalid", f"source={source} error={str(e)[:200]}")
+        audit_log(action_name, "tool_schema_invalid", audit_error_details(e, source=source))
         return {
             "success": False,
             "error": "Tool-Argumente ungueltig. Aktion wurde nicht ausgefuehrt.",
@@ -69,7 +78,11 @@ def execute_action(
         source=source,
     )
     if reflection is not None and not reflection.should_execute:
-        audit_log(action_name, "reflection_blocked", f"source={source} reason={reflection.reason[:120]}")
+        audit_log(
+            action_name,
+            "reflection_blocked",
+            f"source={audit_safe_token(source)} {audit_value_metadata('reason', reflection.reason)}",
+        )
         return {
             "success": False,
             "error": "Aktion wurde nach Sicherheitsreflexion nicht ausgefuehrt.",
@@ -79,11 +92,11 @@ def execute_action(
         }
 
     if permission == "blocked":
-        audit_log(action_name, "blocked", f"source={source}")
+        audit_log(action_name, "blocked", f"source={audit_safe_token(source)}")
         return {"success": False, "error": f"'{action_name}' ist blockiert.", "executed": False, "requires_confirmation": False}
 
     if permission in ("confirmation_required", "unknown") and not confirmed:
-        audit_log(action_name, "awaiting_confirmation", f"source={source}")
+        audit_log(action_name, "awaiting_confirmation", f"source={audit_safe_token(source)}")
         return {
             "success": False,
             "error": f"'{action_name}' erfordert Bestätigung.",
@@ -95,7 +108,7 @@ def execute_action(
     try:
         safe_params = validate_params(action_name, schema_params)
     except ValueError as e:
-        audit_log(action_name, "param_blocked", str(e))
+        audit_log(action_name, "param_blocked", audit_error_details(e, source=source))
         return {"success": False, "error": str(e), "executed": False, "requires_confirmation": False}
 
     rate_limit = check_action_rate_limit(action_name)
@@ -103,7 +116,7 @@ def execute_action(
         audit_log(
             action_name,
             "risk_rate_limited",
-            f"source={source} used={rate_limit.get('used')} limit={rate_limit.get('limit')}",
+            f"source={audit_safe_token(source)} used={rate_limit.get('used')} limit={rate_limit.get('limit')}",
         )
         return {
             "success": False,
@@ -123,9 +136,9 @@ def execute_action(
         success = bool(result.get("success", False))
 
         if success:
-            audit_log(action_name, "executed", f"source={source} params={list(safe_params.keys())}")
+            audit_log(action_name, "executed", f"source={audit_safe_token(source)} {audit_param_keys_details(safe_params)}")
         else:
-            audit_log(action_name, "failed", f"source={source} error={result.get('error', '')[:100]}")
+            audit_log(action_name, "failed", audit_error_details(result.get("error", ""), source=source))
 
         return {
             "success": success,
@@ -137,7 +150,7 @@ def execute_action(
 
     except Exception as e:
         logger.error(f"Action execution failed: {action_name} — {e}", exc_info=True)
-        audit_log(action_name, "execution_error", f"source={source} error={str(e)[:200]}")
+        audit_log(action_name, "execution_error", audit_error_details(e, source=source))
         return {
             "success": False,
             "error": f"Ausführungsfehler: {str(e)}",
