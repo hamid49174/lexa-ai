@@ -18,6 +18,7 @@ from backend.hermes_adapter import (
     get_hermes_capabilities,
     get_hermes_gateway_log_summary,
     get_hermes_gateway_autostart_status,
+    get_hermes_media_status,
     get_hermes_provider_status,
     get_hermes_status,
     get_hermes_telegram_command_selftest,
@@ -287,6 +288,7 @@ async def build_hermes_overview(include_context: bool = True) -> dict:
     cap_counts = capabilities.get("counts") if isinstance(capabilities.get("counts"), dict) else {}
     cap_gaps = capabilities.get("gaps") if isinstance(capabilities.get("gaps"), list) else []
     provider_status = capabilities.get("providerStatus") if isinstance(capabilities.get("providerStatus"), dict) else {}
+    media_status = capabilities.get("mediaStatus") if isinstance(capabilities.get("mediaStatus"), dict) else {}
 
     backend_ok = True
     hermes_ok = hermes.get("health_state") == "ready"
@@ -327,12 +329,14 @@ async def build_hermes_overview(include_context: bool = True) -> dict:
             "logs": log_counts,
             "contextFiles": len(context_files),
             "capabilities": cap_counts,
+            "media": media_status.get("counts") if isinstance(media_status.get("counts"), dict) else {},
         },
         "capabilities": {
             "backendEndpoints": [
                 "/hermes/status",
                 "/hermes/capabilities",
                 "/hermes/providers",
+                "/hermes/media",
                 "/hermes/overview",
                 "/hermes/context",
                 "/hermes/draft",
@@ -359,6 +363,7 @@ async def build_hermes_overview(include_context: bool = True) -> dict:
             "gaps": cap_gaps,
         },
         "providerStatus": provider_status,
+        "mediaStatus": media_status,
         "contextFiles": [_compact_context_file(file_info) for file_info in context_files[:5] if isinstance(file_info, dict)],
         "nextTasks": next_tasks,
         "safeMode": True,
@@ -477,6 +482,20 @@ async def hermes_providers():
     except Exception as exc:
         logger.exception("Hermes providers failed")
         raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes-Providerstatus konnte nicht gebaut werden", exc)) from exc
+
+
+@router.get("/media")
+async def hermes_media():
+    """Return Hermes STT/TTS/image/video readiness without secrets."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Hermes-Media-Anfragen.")
+
+    audit_log("hermes", "media", "read")
+    try:
+        return await asyncio.to_thread(get_hermes_media_status)
+    except Exception as exc:
+        logger.exception("Hermes media status failed")
+        raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes-Mediastatus konnte nicht gebaut werden", exc)) from exc
 
 
 @router.get("/overview")

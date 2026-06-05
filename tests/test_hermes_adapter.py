@@ -432,6 +432,61 @@ def test_hermes_provider_status_blocks_when_primary_missing(monkeypatch, tmp_pat
     assert "hermes model" in status["nextAction"]
 
 
+def test_hermes_media_status_reads_config_without_leaking_secrets(monkeypatch, tmp_path):
+    import backend.hermes_adapter as hermes
+
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    secret = "fal-secret-value"
+    codex_secret = "codex-secret-token"
+    (hermes_home / ".env").write_text(
+        "\n".join([
+            f'FAL_KEY="{secret}"',
+            'ELEVENLABS_API_KEY="voice-secret"',
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    (hermes_home / "auth.json").write_text(
+        '{"providers":{"openai-codex":{"tokens":{"access_token":"%s"}}}' % codex_secret,
+        encoding="utf-8",
+    )
+    (hermes_home / "config.yaml").write_text(
+        "\n".join([
+            "model:",
+            "  provider: openai-codex",
+            "  default: gpt-5.1-codex",
+            "tts:",
+            "  provider: elevenlabs",
+            "stt:",
+            "  provider: local",
+            "image_gen:",
+            "  provider: fal",
+            "  model: fal-ai/flux-2-pro",
+            "video_gen:",
+            "  provider: fal",
+            "  model: fal-ai/veo3.1/text-to-video",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(hermes, "HERMES_HOME_ROOT", hermes_home)
+    for keys in hermes._HERMES_PROVIDER_ENV_KEYS.values():
+        for key in keys:
+            monkeypatch.delenv(key, raising=False)
+
+    status = hermes.get_hermes_media_status({"available": True})
+
+    assert status["safeMode"] is True
+    assert status["counts"]["total"] == 5
+    assert status["counts"]["ready"] >= 4
+    assert status["areas"][0]["id"] == "tts"
+    assert any(area["id"] == "image-generation" and area["provider"] == "fal" for area in status["areas"])
+    assert secret not in str(status)
+    assert codex_secret not in str(status)
+    assert status["setup"]["secretsRedacted"] is True
+
+
 def test_hermes_prompt_injects_bounded_obsidian_context(monkeypatch):
     import backend.hermes_adapter as hermes
 

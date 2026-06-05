@@ -183,6 +183,7 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("hermesGatewayAutostartSet", "high", "admin", "/hermes/gateway/autostart"),
   bridgePolicy("hermesCapabilities", "low", "read", "/hermes/capabilities", { batch_allowed: true }),
   bridgePolicy("hermesProviders", "low", "read", "/hermes/providers", { batch_allowed: true }),
+  bridgePolicy("hermesMedia", "low", "read", "/hermes/media", { batch_allowed: true }),
   bridgePolicy("hermesOverview", "low", "read", "/hermes/overview", { batch_allowed: true }),
   bridgePolicy("backupCreate", "high", "secret", "/backup"),
   bridgePolicy("backupRestore", "critical", "admin", "/backup/restore"),
@@ -1060,6 +1061,20 @@ if (isLexaSmokeMockAllowed()) {
       setup: { primaryCommand: "hermes model", fallbackAddCommand: "hermes fallback add", secretsRedacted: true },
       safeMode: true,
     }),
+    hermesMedia: async () => ({
+      ok: true,
+      healthState: "attention",
+      summary: "Hermes media readiness: 3/5 areas ready, 2 need attention, 0 blocked.",
+      nextAction: "Set FAL_KEY or choose/configure image_gen.provider.",
+      counts: { total: 5, ready: 3, attention: 2, blocked: 0, configured: 4 },
+      areas: [
+        { id: "tts", label: "Text-to-Speech", healthState: "ready", provider: "edge", toolset: "tts", detail: "Hermes TTS active provider 'edge' looks runnable." },
+        { id: "stt", label: "Speech-to-Text", healthState: "ready", provider: "local", toolset: "stt", detail: "Hermes STT active provider 'local' looks runnable." },
+        { id: "image-generation", label: "Image Generation", healthState: "attention", provider: "fal", toolset: "image_gen", detail: "FAL key missing." },
+      ],
+      setup: { toolsCommand: "hermes tools", secretsRedacted: true },
+      safeMode: true,
+    }),
     hermesOverview: async () => ({
       ok: true,
       healthState: "ready",
@@ -1090,6 +1105,15 @@ if (isLexaSmokeMockAllowed()) {
         primary: { provider: "auto", providerId: "auto", model: "", effectiveProviderHint: "openai" },
         fallbacks: [],
         counts: { configuredProviders: 1, fallbacks: 0, fallbacksReady: 0, fallbacksNotReady: 0 },
+      },
+      mediaStatus: {
+        healthState: "attention",
+        summary: "Hermes media readiness: 3/5 areas ready, 2 need attention, 0 blocked.",
+        counts: { total: 5, ready: 3, attention: 2, blocked: 0 },
+        areas: [
+          { id: "tts", label: "Text-to-Speech", healthState: "ready", provider: "edge", toolset: "tts" },
+          { id: "image-generation", label: "Image Generation", healthState: "attention", provider: "fal", toolset: "image_gen" },
+        ],
       },
       contextFiles: [
         { title: "Current AI Brief", path: "05_Memory/Rollups/Current_AI_Brief.md" },
@@ -2253,6 +2277,22 @@ const lexaBridge = {
         primary: {},
         fallbacks: [],
         error: "Hermes Providerstatus nicht erreichbar",
+      };
+    }
+  },
+  hermesMedia: async () => {
+    try {
+      const res = await fetchWithTimeout(`${API}/hermes/media`);
+      return apiJson(res, "Hermes Mediastatus nicht erreichbar");
+    } catch (e) {
+      console.warn("[Preload] hermesMedia failed:", e.message || e);
+      return {
+        ok: false,
+        healthState: "offline",
+        summary: "Hermes Mediastatus nicht erreichbar",
+        counts: {},
+        areas: [],
+        error: "Hermes Mediastatus nicht erreichbar",
       };
     }
   },

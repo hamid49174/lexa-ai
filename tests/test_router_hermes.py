@@ -69,6 +69,28 @@ def test_hermes_providers_endpoint(monkeypatch):
     assert data["setup"]["secretsRedacted"] is True
 
 
+def test_hermes_media_endpoint(monkeypatch):
+    client, router_hermes = _client(monkeypatch)
+    monkeypatch.setattr(router_hermes, "get_hermes_media_status", lambda: {
+        "ok": True,
+        "healthState": "attention",
+        "summary": "Hermes media readiness: 3/5 areas ready.",
+        "areas": [{"id": "tts", "provider": "edge", "healthState": "ready"}],
+        "counts": {"ready": 3, "total": 5, "attention": 2},
+        "setup": {"secretsRedacted": True},
+        "safeMode": True,
+    })
+
+    res = client.get("/hermes/media")
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["safeMode"] is True
+    assert data["counts"]["total"] == 5
+    assert data["areas"][0]["id"] == "tts"
+    assert data["setup"]["secretsRedacted"] is True
+
+
 def test_hermes_overview_endpoint_returns_compact_system_packet(monkeypatch):
     client, router_hermes = _client(monkeypatch)
     monkeypatch.setattr(router_hermes, "get_hermes_status", lambda: {
@@ -114,6 +136,12 @@ def test_hermes_overview_endpoint_returns_compact_system_packet(monkeypatch):
             "fallbacks": [],
             "counts": {"fallbacks": 0, "fallbacksReady": 0},
         },
+        "mediaStatus": {
+            "healthState": "attention",
+            "summary": "Hermes media readiness: 3/5 areas ready.",
+            "counts": {"ready": 3, "total": 5, "attention": 2},
+            "areas": [{"id": "tts", "provider": "edge", "healthState": "ready"}],
+        },
     })
 
     res = client.get("/hermes/overview")
@@ -125,10 +153,12 @@ def test_hermes_overview_endpoint_returns_compact_system_packet(monkeypatch):
     assert data["nextAction"] == "Build visible OS/Hermes cockpit"
     assert "/hermes/overview" in data["capabilities"]["backendEndpoints"]
     assert "/hermes/capabilities" in data["capabilities"]["backendEndpoints"]
+    assert "/hermes/media" in data["capabilities"]["backendEndpoints"]
     assert "/hermes/telegram/commands/selftest" in data["capabilities"]["backendEndpoints"]
     assert data["capabilities"]["counts"]["missingLexaSurface"] == 2
     assert data["capabilities"]["gaps"][0]["id"] == "tool-platform"
     assert data["providerStatus"]["primary"]["effectiveProviderHint"] == "openai"
+    assert data["mediaStatus"]["counts"]["total"] == 5
     assert "/lexa_overview" in data["capabilities"]["telegramCommands"]
     assert "Drafts 0 pending, 11 approved, 3 rejected" in data["summary"]
     assert data["contextFiles"][0]["path"] == "08_Lexa/Architecture/Hermes_Capabilities.md"

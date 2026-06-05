@@ -95,6 +95,8 @@ _HERMES_PROVIDER_ENV_KEYS = {
     "openai": ("OPENAI_API_KEY",),
     "anthropic": ("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN"),
     "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+    "groq": ("GROQ_API_KEY",),
+    "mistral": ("MISTRAL_API_KEY",),
     "openrouter": ("OPENROUTER_API_KEY",),
     "deepseek": ("DEEPSEEK_API_KEY",),
     "xai": ("XAI_API_KEY", "GROK_API_KEY"),
@@ -107,12 +109,15 @@ _HERMES_PROVIDER_ENV_KEYS = {
     "browser_use": ("BROWSER_USE_API_KEY",),
     "browserbase": ("BROWSERBASE_API_KEY",),
     "fal": ("FAL_KEY", "FAL_API_KEY"),
+    "krea": ("KREA_API_KEY",),
     "elevenlabs": ("ELEVENLABS_API_KEY",),
 }
 _HERMES_PRIMARY_PROVIDER_IDS = {
     "openai",
     "anthropic",
     "google",
+    "groq",
+    "mistral",
     "openrouter",
     "deepseek",
     "xai",
@@ -120,10 +125,14 @@ _HERMES_PRIMARY_PROVIDER_IDS = {
     "zai",
     "minimax",
     "nvidia",
+    "openai-codex",
 }
 _HERMES_MEDIA_PROVIDER_IDS = {
     "elevenlabs",
     "fal",
+    "groq",
+    "krea",
+    "mistral",
     "tavily",
     "firecrawl",
     "browser_use",
@@ -137,7 +146,8 @@ _HERMES_PROVIDER_ALIASES = {
     "moonshot": "kimi",
     "kimi": "kimi",
     "minimax-cn": "minimax",
-    "openai-codex": "openai",
+    "openai-codex": "openai-codex",
+    "openai_codex": "openai-codex",
     "codex": "openai",
     "grok": "xai",
     "xai-oauth": "xai",
@@ -176,6 +186,7 @@ _LEXA_HERMES_BACKEND_ENDPOINTS = (
     "/hermes/status",
     "/hermes/capabilities",
     "/hermes/providers",
+    "/hermes/media",
     "/hermes/overview",
     "/hermes/context",
     "/hermes/draft",
@@ -617,11 +628,15 @@ def _provider_configured(env_values: dict[str, str], provider_id: str) -> bool:
 
 
 def _configured_provider_ids(env_values: dict[str, str]) -> list[str]:
-    return sorted(
+    provider_ids = {
         provider_id
         for provider_id in _HERMES_PROVIDER_ENV_KEYS
         if _provider_configured(env_values, provider_id)
-    )
+    }
+    for provider_id in ("openai-codex", "xai"):
+        if _hermes_auth_provider_configured(provider_id):
+            provider_ids.add(provider_id)
+    return sorted(provider_ids)
 
 
 def _canonical_provider_id(provider: Any) -> str:
@@ -654,6 +669,69 @@ def _read_hermes_config_file() -> tuple[dict[str, Any], dict[str, Any]]:
         return {}, meta
     meta["loaded"] = True
     return raw, meta
+
+
+def _read_hermes_auth_file() -> tuple[dict[str, Any], dict[str, Any]]:
+    path = HERMES_HOME_ROOT / "auth.json"
+    meta = {
+        "path": str(path),
+        "exists": path.exists(),
+        "loaded": False,
+        "error": "",
+    }
+    if not path.exists():
+        return {}, meta
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8", errors="replace") or "{}")
+    except Exception as exc:
+        meta["error"] = f"auth parse failed: {exc}"
+        return {}, meta
+    if not isinstance(raw, dict):
+        meta["error"] = "auth root is not an object"
+        return {}, meta
+    meta["loaded"] = True
+    return raw, meta
+
+
+def _has_secret_marker(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        secret_keys = {
+            "access_token",
+            "agent_key",
+            "api_key",
+            "refresh_token",
+            "runtime_api_key",
+            "token",
+        }
+        return any(_has_secret_marker(value.get(key)) for key in secret_keys)
+    if isinstance(value, list):
+        return any(_has_secret_marker(item) for item in value)
+    return False
+
+
+def _hermes_auth_provider_configured(provider_id: str) -> bool:
+    canonical = _canonical_provider_id(provider_id)
+    auth, _meta = _read_hermes_auth_file()
+    if not auth:
+        return False
+
+    provider_ids = {canonical}
+    if canonical == "xai":
+        provider_ids.add("xai-oauth")
+
+    providers = auth.get("providers") if isinstance(auth.get("providers"), dict) else {}
+    for provider in provider_ids:
+        if _has_secret_marker(providers.get(provider)):
+            return True
+
+    pool = auth.get("credential_pool") if isinstance(auth.get("credential_pool"), dict) else {}
+    for provider in provider_ids:
+        if _has_secret_marker(pool.get(provider)):
+            return True
+
+    return False
 
 
 def _safe_model_label(value: Any) -> str:
@@ -740,8 +818,12 @@ def _provider_is_ready(provider_id: str, env_values: dict[str, str], *, base_url
         return False
     if canonical in _HERMES_LOCAL_PROVIDER_IDS:
         return bool(base_url_configured or canonical == "lmstudio")
+    if canonical == "openai-codex":
+        return _hermes_auth_provider_configured("openai-codex")
     if canonical in _HERMES_PROVIDER_ENV_KEYS:
-        return _provider_configured(env_values, canonical)
+        return _provider_configured(env_values, canonical) or (
+            canonical == "xai" and _hermes_auth_provider_configured("xai")
+        )
     return bool(base_url_configured)
 
 
@@ -824,6 +906,362 @@ def get_hermes_provider_status(status_info: dict[str, Any] | None = None) -> dic
     }
 
 
+def _config_section(config: dict[str, Any], name: str) -> dict[str, Any]:
+    section = config.get(name)
+    return section if isinstance(section, dict) else {}
+
+
+def _config_text(section: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = section.get(key)
+        if isinstance(value, str) and value.strip():
+            return _safe_model_label(value)
+    return ""
+
+
+def _config_bool(value: Any, *, default: bool = True) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _configured_media_provider(section: dict[str, Any], default: str = "") -> str:
+    value = str(section.get("provider") or default or "").strip().lower()
+    return value
+
+
+def _provider_section(section: dict[str, Any], provider: str) -> dict[str, Any]:
+    nested = section.get(provider)
+    return nested if isinstance(nested, dict) else {}
+
+
+def _named_command_provider(section: dict[str, Any], provider: str) -> dict[str, Any]:
+    providers = _provider_section(section, "providers")
+    nested = providers.get(provider) if isinstance(providers, dict) else None
+    if isinstance(nested, dict):
+        return nested
+    legacy = _provider_section(section, provider)
+    return legacy if legacy else {}
+
+
+def _has_command_provider(section: dict[str, Any], provider: str) -> bool:
+    config = _named_command_provider(section, provider)
+    command = config.get("command") if isinstance(config, dict) else None
+    ptype = str(config.get("type") or "").strip().lower() if isinstance(config, dict) else ""
+    return isinstance(command, str) and bool(command.strip()) and ptype in {"", "command"}
+
+
+def _env_keys_ready(env_values: dict[str, str], keys: tuple[str, ...]) -> bool:
+    return any(os.environ.get(key, "").strip() or env_values.get(key, "").strip() for key in keys)
+
+
+def _media_provider_ready(provider: str, env_values: dict[str, str]) -> bool:
+    canonical = provider.strip().lower()
+    if canonical == "openai-codex":
+        return _hermes_auth_provider_configured("openai-codex")
+    if canonical == "xai":
+        return _env_keys_ready(env_values, _HERMES_PROVIDER_ENV_KEYS["xai"]) or _hermes_auth_provider_configured("xai")
+    if canonical == "openai-audio":
+        return _env_keys_ready(env_values, ("VOICE_TOOLS_OPENAI_KEY", "OPENAI_API_KEY"))
+    return _env_keys_ready(env_values, _HERMES_PROVIDER_ENV_KEYS.get(canonical, ()))
+
+
+def _media_option(
+    provider: str,
+    label: str,
+    ready: bool,
+    *,
+    mode: str,
+    configured: bool = False,
+    requires: tuple[str, ...] = (),
+    detail: str = "",
+) -> dict[str, Any]:
+    return {
+        "provider": provider,
+        "label": label,
+        "mode": mode,
+        "configured": configured,
+        "credentialReady": bool(ready),
+        "requires": list(requires),
+        "detail": detail,
+    }
+
+
+def _media_area(
+    area_id: str,
+    label: str,
+    provider: str,
+    provider_ready: bool,
+    *,
+    command_available: bool,
+    toolset: str,
+    model: str = "",
+    detail_ready: str,
+    detail_missing: str,
+    next_action: str,
+    options: list[dict[str, Any]],
+    disabled: bool = False,
+) -> dict[str, Any]:
+    if not command_available:
+        state = "blocked"
+        detail = "Hermes command is not available, so this media toolset cannot run."
+    elif disabled:
+        state = "attention"
+        detail = detail_missing
+    elif provider_ready:
+        state = "ready"
+        detail = detail_ready
+    else:
+        state = "attention"
+        detail = detail_missing
+    return {
+        "id": area_id,
+        "label": label,
+        "toolset": toolset,
+        "healthState": state,
+        "provider": provider or "not-configured",
+        "model": model,
+        "ready": state == "ready",
+        "detail": detail,
+        "nextAction": "" if state == "ready" else next_action,
+        "options": options,
+    }
+
+
+def get_hermes_media_status(status_info: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return read-only Hermes STT/TTS/image/video readiness without secrets."""
+    status_info = status_info or get_hermes_status()
+    env_values = _read_hermes_env_file()
+    config, config_meta = _read_hermes_config_file()
+    _auth, auth_meta = _read_hermes_auth_file()
+    command_available = bool(status_info.get("available"))
+    provider_status = get_hermes_provider_status(status_info)
+    primary_ready = provider_status.get("healthState") != "blocked"
+
+    tts_cfg = _config_section(config, "tts")
+    tts_provider = _configured_media_provider(tts_cfg, "edge")
+    tts_provider_cfg = _provider_section(tts_cfg, tts_provider)
+    tts_model = _config_text(tts_provider_cfg, "model", "model_id", "voice", "voice_id")
+    tts_keyless = {"edge", "neutts", "kittentts", "piper"}
+    tts_cloud_keys = {
+        "elevenlabs": ("ELEVENLABS_API_KEY",),
+        "openai": ("VOICE_TOOLS_OPENAI_KEY", "OPENAI_API_KEY"),
+        "minimax": ("MINIMAX_API_KEY", "MINIMAX_CN_API_KEY"),
+        "xai": ("XAI_API_KEY", "GROK_API_KEY"),
+        "mistral": ("MISTRAL_API_KEY",),
+        "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    }
+    tts_custom_ready = tts_provider not in tts_keyless and tts_provider not in tts_cloud_keys and _has_command_provider(tts_cfg, tts_provider)
+    tts_ready = tts_provider in tts_keyless or tts_custom_ready or _media_provider_ready(
+        "openai-audio" if tts_provider == "openai" else _canonical_provider_id(tts_provider),
+        env_values,
+    )
+    tts_options = [
+        _media_option("edge", "Edge TTS", True, mode="local", configured=tts_provider == "edge", detail="Free default provider; no API key."),
+        _media_option("elevenlabs", "ElevenLabs", _media_provider_ready("elevenlabs", env_values), mode="cloud", configured=tts_provider == "elevenlabs", requires=tts_cloud_keys["elevenlabs"]),
+        _media_option("openai", "OpenAI Audio", _media_provider_ready("openai-audio", env_values), mode="cloud", configured=tts_provider == "openai", requires=tts_cloud_keys["openai"]),
+        _media_option("minimax", "MiniMax", _media_provider_ready("minimax", env_values), mode="cloud", configured=tts_provider == "minimax", requires=tts_cloud_keys["minimax"]),
+        _media_option("mistral", "Mistral Voxtral", _media_provider_ready("mistral", env_values), mode="cloud", configured=tts_provider == "mistral", requires=tts_cloud_keys["mistral"]),
+        _media_option("gemini", "Gemini TTS", _media_provider_ready("google", env_values), mode="cloud", configured=tts_provider == "gemini", requires=tts_cloud_keys["gemini"]),
+        _media_option("xai", "xAI", _media_provider_ready("xai", env_values), mode="cloud-or-oauth", configured=tts_provider == "xai", requires=tts_cloud_keys["xai"]),
+    ]
+    if tts_custom_ready or (tts_provider and tts_provider not in tts_keyless and tts_provider not in tts_cloud_keys):
+        tts_options.insert(0, _media_option(tts_provider, tts_provider, tts_custom_ready, mode="command-or-plugin", configured=True, detail="Configured under tts.providers.<name>."))
+
+    stt_cfg = _config_section(config, "stt")
+    stt_enabled = _config_bool(stt_cfg.get("enabled"), default=True)
+    stt_provider = _configured_media_provider(stt_cfg, "local")
+    stt_provider_cfg = _provider_section(stt_cfg, stt_provider)
+    stt_model = _config_text(stt_provider_cfg, "model", "model_id") or _config_text(stt_cfg, "model")
+    local_stt_command_ready = bool(_env_or_file_value(env_values, "HERMES_LOCAL_STT_COMMAND") or shutil.which("whisper"))
+    stt_command_ready = _has_command_provider(stt_cfg, stt_provider)
+    stt_cloud_keys = {
+        "groq": ("GROQ_API_KEY",),
+        "openai": ("VOICE_TOOLS_OPENAI_KEY", "OPENAI_API_KEY"),
+        "mistral": ("MISTRAL_API_KEY",),
+        "xai": ("XAI_API_KEY", "GROK_API_KEY"),
+        "elevenlabs": ("ELEVENLABS_API_KEY",),
+    }
+    if stt_provider == "local":
+        stt_ready = True
+    elif stt_provider == "local_command":
+        stt_ready = local_stt_command_ready
+    elif stt_provider == "openai":
+        stt_ready = _media_provider_ready("openai-audio", env_values)
+    elif stt_provider in stt_cloud_keys:
+        stt_ready = _media_provider_ready(_canonical_provider_id(stt_provider), env_values)
+    else:
+        stt_ready = stt_command_ready
+    stt_options = [
+        _media_option("local", "Local faster-whisper", True, mode="local", configured=stt_provider == "local", detail="Default local STT; model downloads on first use."),
+        _media_option("local_command", "Local command", local_stt_command_ready, mode="command", configured=stt_provider == "local_command", requires=("HERMES_LOCAL_STT_COMMAND",), detail="Uses a local whisper-compatible CLI command."),
+        _media_option("groq", "Groq Whisper", _media_provider_ready("groq", env_values), mode="cloud", configured=stt_provider == "groq", requires=stt_cloud_keys["groq"]),
+        _media_option("openai", "OpenAI Whisper", _media_provider_ready("openai-audio", env_values), mode="cloud", configured=stt_provider == "openai", requires=stt_cloud_keys["openai"]),
+        _media_option("mistral", "Mistral Voxtral", _media_provider_ready("mistral", env_values), mode="cloud", configured=stt_provider == "mistral", requires=stt_cloud_keys["mistral"]),
+        _media_option("xai", "xAI Grok STT", _media_provider_ready("xai", env_values), mode="cloud-or-oauth", configured=stt_provider == "xai", requires=stt_cloud_keys["xai"]),
+        _media_option("elevenlabs", "ElevenLabs Scribe", _media_provider_ready("elevenlabs", env_values), mode="cloud", configured=stt_provider == "elevenlabs", requires=stt_cloud_keys["elevenlabs"]),
+    ]
+    if stt_command_ready or (stt_provider and stt_provider not in {"local", "local_command", *stt_cloud_keys}):
+        stt_options.insert(0, _media_option(stt_provider, stt_provider, stt_command_ready, mode="command-or-plugin", configured=True, detail="Configured under stt.providers.<name>."))
+
+    image_cfg = _config_section(config, "image_gen")
+    image_provider = _configured_media_provider(image_cfg, "fal")
+    image_model = _config_text(image_cfg, "model") or "fal-ai/flux-2/klein/9b"
+    image_keys = {
+        "fal": ("FAL_KEY", "FAL_API_KEY"),
+        "openai": ("OPENAI_API_KEY",),
+        "krea": ("KREA_API_KEY",),
+        "xai": ("XAI_API_KEY", "GROK_API_KEY"),
+        "openai-codex": (),
+    }
+    image_ready = _media_provider_ready(image_provider, env_values)
+    image_options = [
+        _media_option("fal", "FAL", _media_provider_ready("fal", env_values), mode="cloud-or-managed", configured=image_provider == "fal", requires=image_keys["fal"]),
+        _media_option("openai", "OpenAI Images", _media_provider_ready("openai", env_values), mode="cloud", configured=image_provider == "openai", requires=image_keys["openai"]),
+        _media_option("krea", "Krea", _media_provider_ready("krea", env_values), mode="cloud", configured=image_provider == "krea", requires=image_keys["krea"]),
+        _media_option("xai", "xAI Grok Imagine", _media_provider_ready("xai", env_values), mode="cloud-or-oauth", configured=image_provider == "xai", requires=image_keys["xai"]),
+        _media_option("openai-codex", "OpenAI Codex Auth", _media_provider_ready("openai-codex", env_values), mode="oauth", configured=image_provider == "openai-codex", detail="Requires Hermes Codex auth, not OPENAI_API_KEY."),
+    ]
+
+    video_cfg = _config_section(config, "video_gen")
+    video_provider = _configured_media_provider(video_cfg, "")
+    video_model = _config_text(video_cfg, "model")
+    video_keys = {
+        "fal": ("FAL_KEY", "FAL_API_KEY"),
+        "xai": ("XAI_API_KEY", "GROK_API_KEY"),
+    }
+    video_ready = bool(video_provider and _media_provider_ready(video_provider, env_values))
+    video_options = [
+        _media_option("fal", "FAL Video", _media_provider_ready("fal", env_values), mode="cloud-or-managed", configured=video_provider == "fal", requires=video_keys["fal"]),
+        _media_option("xai", "xAI Video", _media_provider_ready("xai", env_values), mode="cloud-or-oauth", configured=video_provider == "xai", requires=video_keys["xai"]),
+    ]
+
+    vision_provider = str((provider_status.get("primary") or {}).get("effectiveProviderHint") or "primary-model")
+    areas = [
+        _media_area(
+            "tts",
+            "Text-to-Speech",
+            tts_provider,
+            bool(tts_ready),
+            command_available=command_available,
+            toolset="tts",
+            model=tts_model,
+            detail_ready=f"Hermes TTS active provider '{tts_provider}' looks runnable.",
+            detail_missing=f"Hermes TTS provider '{tts_provider}' is selected but its credential/command proof is missing.",
+            next_action="Switch to edge/piper local TTS or configure the selected TTS provider credentials.",
+            options=tts_options,
+        ),
+        _media_area(
+            "stt",
+            "Speech-to-Text",
+            stt_provider,
+            bool(stt_ready and stt_enabled),
+            command_available=command_available,
+            toolset="stt",
+            model=stt_model,
+            detail_ready=f"Hermes STT active provider '{stt_provider}' looks runnable.",
+            detail_missing="Hermes STT is disabled or the selected provider is missing credentials/command setup.",
+            next_action="Enable stt.enabled or configure the selected STT provider.",
+            options=stt_options,
+            disabled=not stt_enabled,
+        ),
+        _media_area(
+            "image-generation",
+            "Image Generation",
+            image_provider,
+            bool(image_ready),
+            command_available=command_available,
+            toolset="image_gen",
+            model=image_model,
+            detail_ready=f"Hermes image generation provider '{image_provider}' looks runnable.",
+            detail_missing=f"Hermes image generation defaults to '{image_provider}', but no usable credential/auth marker is present.",
+            next_action="Set FAL_KEY or choose/configure image_gen.provider as openai, krea, xai or openai-codex.",
+            options=image_options,
+        ),
+        _media_area(
+            "video-generation",
+            "Video Generation",
+            video_provider or "not-configured",
+            bool(video_ready),
+            command_available=command_available,
+            toolset="video_gen",
+            model=video_model,
+            detail_ready=f"Hermes video generation provider '{video_provider}' looks runnable.",
+            detail_missing="No Hermes video generation backend is configured or credential-ready.",
+            next_action="Choose video_gen.provider via `hermes tools` -> Video Generation and configure FAL_KEY or xAI auth.",
+            options=video_options,
+        ),
+        _media_area(
+            "vision-analysis",
+            "Vision Analysis",
+            vision_provider,
+            bool(primary_ready),
+            command_available=command_available,
+            toolset="vision",
+            detail_ready="Hermes can use the primary model path for image/screen analysis.",
+            detail_missing="Hermes primary model/provider is not ready, so vision calls are not reliable.",
+            next_action=provider_status.get("nextAction") or "Configure the Hermes primary model/provider.",
+            options=[],
+        ),
+    ]
+
+    counts = {
+        "total": len(areas),
+        "ready": sum(1 for area in areas if area["healthState"] == "ready"),
+        "attention": sum(1 for area in areas if area["healthState"] == "attention"),
+        "blocked": sum(1 for area in areas if area["healthState"] == "blocked"),
+        "configured": sum(1 for area in areas if area["provider"] != "not-configured"),
+        "credentialReadyOptions": sum(1 for area in areas for option in area.get("options", []) if option.get("credentialReady")),
+    }
+    if counts["blocked"]:
+        health_state = "blocked"
+        next_action = "Install or configure the Hermes command before media tools can run."
+    elif counts["attention"]:
+        health_state = "attention"
+        first_attention = next((area for area in areas if area["healthState"] == "attention"), {})
+        next_action = str(first_attention.get("nextAction") or "Finish Hermes media provider setup.")
+    else:
+        health_state = "ready"
+        next_action = "Hermes media readiness is visible; add generation actions behind explicit UX next."
+
+    summary = (
+        f"Hermes media readiness: {counts['ready']}/{counts['total']} areas ready, "
+        f"{counts['attention']} need attention, {counts['blocked']} blocked."
+    )
+    return {
+        "ok": health_state != "blocked",
+        "status": "ok",
+        "healthState": health_state,
+        "summary": summary,
+        "nextAction": next_action,
+        "counts": counts,
+        "areas": areas,
+        "config": config_meta,
+        "auth": {
+            "exists": auth_meta.get("exists"),
+            "loaded": auth_meta.get("loaded"),
+            "error": auth_meta.get("error"),
+            "secretsRedacted": True,
+        },
+        "setup": {
+            "toolsCommand": "hermes tools",
+            "ttsConfigKey": "tts.provider",
+            "sttConfigKey": "stt.provider",
+            "imageConfigKey": "image_gen.provider",
+            "videoConfigKey": "video_gen.provider",
+            "secretsRedacted": True,
+        },
+        "safeMode": True,
+    }
+
+
 def _capability_state(
     *,
     command_available: bool,
@@ -883,15 +1321,19 @@ def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[s
     media_providers = [provider for provider in configured_providers if provider in _HERMES_MEDIA_PROVIDER_IDS]
     command_available = bool(status_info.get("available"))
     source_available = bool(status_info.get("source_available"))
-    primary_model_ready = bool(primary_providers)
     telegram_configured = bool((status_info.get("gateway") or {}).get("configured"))
     personal_os_available = bool(status_info.get("personal_os_available"))
     provider_status = get_hermes_provider_status(status_info)
+    media_status = get_hermes_media_status(status_info)
+    media_counts = media_status.get("counts") if isinstance(media_status.get("counts"), dict) else {}
     fallback_count = int((provider_status.get("counts") or {}).get("fallbacks") or 0)
     fallback_ready_count = int((provider_status.get("counts") or {}).get("fallbacksReady") or 0)
+    primary_model_ready = provider_status.get("healthState") != "blocked"
+    primary = provider_status.get("primary") if isinstance(provider_status.get("primary"), dict) else {}
+    primary_label = str(primary.get("effectiveProviderHint") or primary.get("providerId") or "").strip()
 
     provider_detail = (
-        f"{len(primary_providers)} primary provider(s) configured."
+        f"Primary provider '{primary_label or 'auto'}' is ready."
         if primary_model_ready else
         "No Hermes primary model provider detected in Lexa-local env/config."
     )
@@ -984,12 +1426,12 @@ def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[s
         _capability_group(
             "media-generation",
             "Voice, Image & Video Media",
-            "ready" if primary_model_ready and media_providers else ("attention" if command_available else "blocked"),
-            "Hermes has TTS, transcription, vision, image generation and video generation code paths. Lexa has its own STT/TTS, but Hermes media providers are not fully bridged.",
-            "Bridge Hermes image/TTS/transcription provider status before adding generation buttons.",
-            lexa_surface="weak",
+            "ready" if media_status.get("healthState") == "ready" else ("attention" if command_available else "blocked"),
+            f"Hermes media status is surfaced in Lexa: {media_counts.get('ready', 0)}/{media_counts.get('total', 0)} area(s) ready.",
+            media_status.get("nextAction") or "Bridge Hermes image/TTS/transcription provider status before adding generation buttons.",
+            lexa_surface="partial",
             toolsets=["tts", "vision", "image_gen", "video", "video_gen"],
-            surfaces=["Lexa voice routes", "Hermes media toolsets"],
+            surfaces=["/hermes/media", "Lexa voice routes", "Hermes media toolsets"],
             priority=18,
         ),
         _capability_group(
@@ -1040,7 +1482,8 @@ def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[s
         "enabledDefaultToolsets": sum(1 for item in _HERMES_DEFAULT_TOOLSETS if item["default"] == "enabled"),
         "configuredProviders": len(configured_providers),
         "primaryProviders": len(primary_providers),
-        "mediaProviders": len(media_providers),
+        "mediaProviders": int(media_counts.get("credentialReadyOptions") or len(media_providers)),
+        "mediaAreasReady": int(media_counts.get("ready") or 0),
     }
     gaps = sorted(
         [
@@ -1093,6 +1536,7 @@ def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[s
             "secretsRedacted": True,
         },
         "providerStatus": provider_status,
+        "mediaStatus": media_status,
         "toolsets": list(_HERMES_DEFAULT_TOOLSETS),
         "groups": groups,
         "gaps": gaps,

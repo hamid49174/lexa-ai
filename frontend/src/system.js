@@ -465,6 +465,13 @@ function hermesProviderMetric(providerCounts) {
   return `${ready}/${total} fallbacks`;
 }
 
+function hermesMediaMetric(mediaCounts) {
+  const ready = systemDisplayCount(mediaCounts?.ready);
+  const total = systemDisplayCount(mediaCounts?.total);
+  const attention = systemDisplayCount(mediaCounts?.attention);
+  return `${ready}/${total} ready, ${attention} setup`;
+}
+
 function createHermesProviderRows(providerStatus) {
   if (!providerStatus || typeof providerStatus !== "object") {
     return [createSystemOverviewMuted(t("system.hermesNoProviderStatus"))];
@@ -489,6 +496,22 @@ function createHermesProviderRows(providerStatus) {
   return rows;
 }
 
+function createHermesMediaRows(mediaStatus) {
+  if (!mediaStatus || typeof mediaStatus !== "object") {
+    return [createSystemOverviewMuted(t("system.hermesNoMediaStatus"))];
+  }
+  const areas = Array.isArray(mediaStatus.areas) ? mediaStatus.areas.slice(0, 5) : [];
+  if (!areas.length) {
+    return [createSystemOverviewMuted(mediaStatus.nextAction || t("system.hermesNoMediaStatus"))];
+  }
+  return areas.map((area) => {
+    const state = area.healthState || (area.ready ? "ready" : "attention");
+    const provider = area.provider || "provider";
+    const model = area.model ? ` · ${area.model}` : "";
+    return createSystemOverviewFileRow(area.label || area.id || "Media", `${provider}${model} (${state})`);
+  });
+}
+
 function renderHermesOverview(payload) {
   const target = document.getElementById("hermes-overview-content");
   if (!target) return;
@@ -506,6 +529,8 @@ function renderHermesOverview(payload) {
   const capGaps = Array.isArray(capabilityPayload.gaps) ? capabilityPayload.gaps.slice(0, 4) : [];
   const providerStatus = payload.providerStatus || {};
   const providerCounts = providerStatus.counts || {};
+  const mediaStatus = payload.mediaStatus || capabilityPayload.mediaStatus || {};
+  const mediaCounts = counts.media || mediaStatus.counts || {};
   const stateTone = hermesOverviewTone(payload.healthState);
   const contextCount = systemDisplayCount(counts.contextFiles ?? files.length ?? 0);
 
@@ -517,7 +542,8 @@ function renderHermesOverview(payload) {
     createSystemOverviewMetric(t("system.hermesMetricContext"), contextCount),
     createSystemOverviewMetric(t("system.hermesMetricSafeMode"), payload.safeMode ? t("common.yes") : t("common.no")),
     createSystemOverviewMetric(t("system.hermesMetricCapabilities"), hermesCapabilityMetric(capCounts)),
-    createSystemOverviewMetric(t("system.hermesMetricFallbacks"), hermesProviderMetric(providerCounts))
+    createSystemOverviewMetric(t("system.hermesMetricFallbacks"), hermesProviderMetric(providerCounts)),
+    createSystemOverviewMetric(t("system.hermesMetricMedia"), hermesMediaMetric(mediaCounts))
   );
 
   const checkRows = checks.length
@@ -530,6 +556,7 @@ function renderHermesOverview(payload) {
     ? capGaps.map((gap) => createSystemOverviewCapabilityGapRow(gap))
     : [createSystemOverviewMuted(t("system.hermesNoCapabilityGaps"))];
   const providerRows = createHermesProviderRows(providerStatus);
+  const mediaRows = createHermesMediaRows(mediaStatus);
   const nextText = document.createTextNode(String(payload.nextAction || t("system.hermesNoNextTask")));
   const taskList = createSystemOverviewTaskList(tasks, payload.nextAction || t("system.hermesNoNextTask"));
 
@@ -539,6 +566,7 @@ function renderHermesOverview(payload) {
     createSystemOverviewSection(t("system.hermesChecks"), "system-overview-checks", checkRows),
     createSystemOverviewSection(t("system.hermesContextFiles"), "system-overview-files", fileRows),
     createSystemOverviewSection(t("system.hermesProviders"), "system-overview-files", providerRows),
+    createSystemOverviewSection(t("system.hermesMedia"), "system-overview-files", mediaRows),
     createSystemOverviewSection(t("system.hermesCapabilityGaps"), "system-overview-checks", gapRows),
     createSystemOverviewSection(t("system.hermesNextAction"), "system-overview-next", [nextText, taskList])
   );
