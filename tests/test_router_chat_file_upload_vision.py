@@ -45,6 +45,24 @@ def test_image_upload_without_provider_returns_honest_fallback(chat_file_client,
     assert "screen.png" in payload["file_info"]["filename"]
 
 
+def test_image_upload_uses_reported_mime_when_filename_has_no_image_suffix(chat_file_client, monkeypatch):
+    monkeypatch.setattr(router_chat, "chat_file_vision_available", lambda: False)
+
+    def fail_chat(*_args, **_kwargs):
+        raise AssertionError("image uploads classified by MIME must not be routed to text chat")
+
+    monkeypatch.setattr(router_chat, "chat", fail_chat)
+
+    response = _post_image(chat_file_client, name="screen.bin")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["analysis_kind"] == "image"
+    assert payload["analysis_status"] == "vision_provider_required"
+    assert payload["file_info"]["mime"] == "image/png"
+    assert payload["file_info"]["filename"] == "screen.bin"
+
+
 def test_image_upload_with_provider_uses_vision_pipeline(chat_file_client, monkeypatch):
     monkeypatch.setattr(router_chat, "chat_file_vision_available", lambda: True)
 
@@ -89,6 +107,22 @@ def test_spoofed_image_upload_is_rejected_before_analysis(chat_file_client, monk
     assert "kein unterstuetztes Bild" in response.json()["detail"]
 
 
+def test_reported_text_mime_does_not_bypass_image_suffix_validation(chat_file_client, monkeypatch):
+    def fail_chat(*_args, **_kwargs):
+        raise AssertionError("image-like uploads must not be downgraded to text chat")
+
+    monkeypatch.setattr(router_chat, "chat", fail_chat)
+
+    response = chat_file_client.post(
+        "/chat/file",
+        files={"file": ("screen.png", b"not actually an image", "text/plain")},
+        data={"message": "Bitte pruefen."},
+    )
+
+    assert response.status_code == 400
+    assert "kein unterstuetztes Bild" in response.json()["detail"]
+
+
 def test_text_upload_still_uses_existing_chat_analysis(chat_file_client, monkeypatch):
     def fake_chat(prompt, history):
         assert "notes.txt" in prompt
@@ -109,6 +143,28 @@ def test_text_upload_still_uses_existing_chat_analysis(chat_file_client, monkeyp
     assert payload["reply"] == "Text file analysis"
     assert payload["analysis_status"] == "text_analyzed"
     assert payload["file_info"]["analysis_status"] == "text_analyzed"
+
+
+def test_text_upload_uses_reported_mime_when_filename_has_no_suffix(chat_file_client, monkeypatch):
+    def fake_chat(prompt, history):
+        assert "README" in prompt
+        assert "plain file content" in prompt
+        assert history == []
+        return {"type": "text", "content": "Extensionless text analysis"}
+
+    monkeypatch.setattr(router_chat, "chat", fake_chat)
+
+    response = chat_file_client.post(
+        "/chat/file",
+        files={"file": ("README", b"plain file content", "text/plain")},
+        data={"message": "Bitte zusammenfassen."},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reply"] == "Extensionless text analysis"
+    assert payload["analysis_status"] == "text_analyzed"
+    assert payload["file_info"]["mime"] == "text/plain"
 
 
 def test_file_upload_audit_uses_metadata_not_filename(monkeypatch):
@@ -153,6 +209,21 @@ def test_text_upload_read_error_preview_is_client_safe(monkeypatch, tmp_path):
     assert "[local-path-redacted]" in file_info["preview"]
     assert "C:\\Users\\admin" not in file_info["preview"]
     assert "supersecretvalue" not in file_info["preview"]
+
+
+def test_generic_upload_mime_keeps_useful_filename_metadata(tmp_path):
+    upload_path = tmp_path / "notes.txt"
+    upload_path.write_text("plain file content", encoding="utf-8")
+
+    file_info = router_chat.extract_file_content(
+        upload_path,
+        "notes.txt",
+        "application/octet-stream",
+    )
+
+    assert file_info["type"] == "text"
+    assert file_info["mime"] == "text/plain"
+    assert file_info["content"] == "plain file content"
 
 
 def test_blocked_extension_is_rejected_before_chat_analysis(chat_file_client, monkeypatch):

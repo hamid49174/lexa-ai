@@ -43,7 +43,11 @@ from backend.intent_engine import build_conversation_intent_context, try_local_i
 from backend.lexa_system_answer import try_lexa_system_answer
 from backend.lexa_voice import lexa_user_error
 from backend.response_cache import get_cached_chat_response, remember_chat_response
-from backend.vision_uploads import invalid_image_upload_error, supported_image_signature
+from backend.vision_uploads import (
+    invalid_image_upload_error,
+    normalized_upload_content_type,
+    supported_image_signature,
+)
 from backend.security import (
     sanitize_input,
     check_rate_limit,
@@ -65,6 +69,7 @@ _PENDING_CANCEL_WORDS = frozenset({
 _LOCAL_PATH_RE = re.compile(
     r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
 )
+_GENERIC_UPLOAD_MIME_TYPES = frozenset({"application/octet-stream", "binary/octet-stream"})
 
 
 _CONFIRMATION_WORDS = frozenset(_CONFIRMATION_WORDS | {
@@ -798,12 +803,15 @@ def try_contextual_followup(user_message: str, history: list[dict]) -> str | Non
 #  FILE UPLOAD HELPERS
 # ══════════════════════════════════════════════════
 
-def extract_file_content(filepath: Path, original_name: str) -> dict:
+def extract_file_content(filepath: Path, original_name: str, content_type: str | None = None) -> dict:
     """Extract content and metadata from uploaded file."""
     stat = filepath.stat()
     size_kb = round(stat.st_size / 1024, 1)
     ext = Path(original_name).suffix.lower()
-    mime = mimetypes.guess_type(original_name)[0] or "application/octet-stream"
+    reported_mime = normalized_upload_content_type(content_type)
+    guessed_mime = mimetypes.guess_type(original_name)[0] or ""
+    display_reported_mime = "" if reported_mime in _GENERIC_UPLOAD_MIME_TYPES else reported_mime
+    mime = display_reported_mime or guessed_mime or reported_mime or "application/octet-stream"
 
     result = {
         "filename": original_name,
@@ -815,7 +823,10 @@ def extract_file_content(filepath: Path, original_name: str) -> dict:
         "preview": None,
     }
 
-    if ext in TEXT_EXTENSIONS or mime.startswith("text/"):
+    if reported_mime.startswith("image/") or guessed_mime.startswith("image/"):
+        result["type"] = "image"
+        result["preview"] = f"Bild: {original_name} ({size_kb} KB)"
+    elif ext in TEXT_EXTENSIONS or reported_mime.startswith("text/") or guessed_mime.startswith("text/"):
         result["type"] = "text"
         try:
             raw_bytes = filepath.read_bytes()
@@ -831,9 +842,6 @@ def extract_file_content(filepath: Path, original_name: str) -> dict:
         except Exception as e:
             result["content"] = None
             result["preview"] = t("error.readFile", error=_client_safe_chat_error(e))
-    elif mime and mime.startswith("image/"):
-        result["type"] = "image"
-        result["preview"] = f"Bild: {original_name} ({size_kb} KB)"
     elif ext == ".pdf":
         result["type"] = "pdf"
         result["preview"] = f"PDF: {original_name} ({size_kb} KB)"
@@ -1101,7 +1109,7 @@ async def chat_file_endpoint(
 
     # Analyze the already validated temporary upload.
     try:
-        file_info = extract_file_content(tmp_path, safe_filename)
+        file_info = extract_file_content(tmp_path, safe_filename, file.content_type)
         user_msg = sanitize_input(message) if message else "Analysiere diese Datei."
 
         if file_info["type"] == "image":
