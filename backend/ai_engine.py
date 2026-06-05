@@ -3864,11 +3864,12 @@ def chat_stream(
                         tc_id = getattr(tc_delta, "id", None)
                         if tc_id and not tool_call_chunks[idx]["id"]:
                             tool_call_chunks[idx]["id"] = tc_id
-                        if getattr(tc_delta.function, "name", None):
-                            tool_call_chunks[idx]["name"] = tc_delta.function.name
-                        if getattr(tc_delta.function, "arguments", None):
+                        function_delta = getattr(tc_delta, "function", None)
+                        if getattr(function_delta, "name", None):
+                            tool_call_chunks[idx]["name"] = function_delta.name
+                        if getattr(function_delta, "arguments", None):
                             tool_call_chunks[idx]["arguments_parts"].append(
-                                tc_delta.function.arguments
+                                function_delta.arguments
                             )
                     continue
 

@@ -2001,6 +2001,74 @@ class TestProviderFallback:
             ("fallback", "gemini:gemini-2.5-flash", None),
         ]
 
+    def test_chat_stream_accepts_tool_delta_without_function_payload(self, monkeypatch):
+        from backend import ai_engine
+        import backend.config as config
+
+        class Delta:
+            content = None
+
+            def __init__(self, tool_calls):
+                self.tool_calls = tool_calls
+
+        class Choice:
+            def __init__(self, tool_calls):
+                self.delta = Delta(tool_calls)
+
+        class Chunk:
+            def __init__(self, tool_calls):
+                self.choices = [Choice(tool_calls)]
+
+        class IdOnlyToolDelta:
+            index = 0
+            id = "call-1"
+
+        class FunctionPayload:
+            name = "timer_set"
+            arguments = '{"minutes": 5}'
+
+        class FunctionToolDelta:
+            index = 0
+            id = None
+            function = FunctionPayload()
+
+        selected = ai_engine.AI_MODEL_REGISTRY["groq:llama-3.3-70b-versatile"]
+
+        monkeypatch.setattr(config, "TOOL_USE_ENABLED", False)
+        monkeypatch.setattr(ai_engine, "_get_selected_model_meta", lambda: selected)
+        monkeypatch.setattr(
+            ai_engine,
+            "_build_messages",
+            lambda user_message, conversation_history=None: [
+                {"role": "user", "content": user_message or ""}
+            ],
+        )
+        monkeypatch.setattr(ai_engine, "_save_interaction", lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            ai_engine,
+            "_stream_with_selected_provider",
+            lambda messages, selected_model=None, tools=None: iter([
+                Chunk([IdOnlyToolDelta()]),
+                Chunk([FunctionToolDelta()]),
+            ]),
+        )
+        monkeypatch.setattr(
+            ai_engine,
+            "_stream_with_provider_fallbacks",
+            lambda messages, selected_model=None, tools=None: (None, None),
+        )
+
+        result = list(ai_engine.chat_stream("stelle einen Timer auf 5 Minuten"))
+
+        assert result == [{
+            "type": "tool_call",
+            "tool_calls": [{
+                "id": "call-1",
+                "name": "timer_set",
+                "arguments": {"minutes": 5},
+            }],
+        }]
+
 
 class TestAnthropicProvider:
     def test_anthropic_message_conversion_splits_system_and_messages(self):
