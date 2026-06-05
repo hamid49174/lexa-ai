@@ -82,17 +82,10 @@ def _get_groq_client():
     if _Groq is None:
         logger.warning("groq package nicht installiert. Installiere: pip install groq")
         return None
-    if keyring is None:
-        logger.warning("keyring nicht installiert — Groq API-Key nicht abrufbar. Installiere: pip install keyring")
-        return None
     with _groq_client_lock:
-        try:
-            api_key = keyring.get_password("lexa-ai", "groq_api_key")
-        except Exception as e:
-            logger.error(t("error.keyringReadError", error=str(e)))
-            return None
+        api_key = _get_keyring_secret("groq_api_key", "Groq", "GROQ_API_KEY")
         if not api_key:
-            logger.debug("Kein Groq API-Key in Keyring gespeichert.")
+            logger.debug("Kein Groq API-Key in Keyring oder Environment gespeichert.")
             return None
         key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:16]
         if _groq_client is not None and _groq_client_key_hash == key_hash:

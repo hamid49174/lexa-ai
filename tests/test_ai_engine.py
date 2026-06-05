@@ -1824,6 +1824,53 @@ class TestModelSelection:
 
 
 class TestProviderStatus:
+    def test_groq_client_uses_env_key_without_keyring(self, monkeypatch):
+        from backend import ai_engine
+
+        created_keys = []
+
+        class FakeGroq:
+            def __init__(self, api_key):
+                self.api_key = api_key
+                created_keys.append(api_key)
+
+        monkeypatch.setattr(ai_engine, "_Groq", FakeGroq)
+        monkeypatch.setattr(ai_engine, "keyring", None)
+        monkeypatch.setattr(ai_engine, "_groq_client", None)
+        monkeypatch.setattr(ai_engine, "_groq_client_key_hash", None)
+        monkeypatch.setenv("GROQ_API_KEY", "env-groq-key")
+
+        client = ai_engine._get_groq_client()
+
+        assert isinstance(client, FakeGroq)
+        assert client.api_key == "env-groq-key"
+        assert created_keys == ["env-groq-key"]
+
+    def test_groq_client_prefers_keyring_over_env_key(self, monkeypatch):
+        from backend import ai_engine
+
+        class FakeKeyring:
+            @staticmethod
+            def get_password(service_name, secret_name):
+                assert service_name == "lexa-ai"
+                assert secret_name == "groq_api_key"
+                return "keyring-groq-key"
+
+        class FakeGroq:
+            def __init__(self, api_key):
+                self.api_key = api_key
+
+        monkeypatch.setattr(ai_engine, "_Groq", FakeGroq)
+        monkeypatch.setattr(ai_engine, "keyring", FakeKeyring())
+        monkeypatch.setattr(ai_engine, "_groq_client", None)
+        monkeypatch.setattr(ai_engine, "_groq_client_key_hash", None)
+        monkeypatch.setenv("GROQ_API_KEY", "env-groq-key")
+
+        client = ai_engine._get_groq_client()
+
+        assert isinstance(client, FakeGroq)
+        assert client.api_key == "keyring-groq-key"
+
     def test_get_ai_status_reports_all_providers(self, monkeypatch):
         from backend import ai_engine
 
