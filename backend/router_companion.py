@@ -15,7 +15,10 @@ from backend.companion_confirmation import (
     create_confirmation,
 )
 from backend.security import (
+    audit_error_details,
     audit_log,
+    audit_safe_token,
+    audit_value_metadata,
     check_action_rate_limit,
     check_rate_limit,
     is_command_allowed,
@@ -73,7 +76,7 @@ def _permission_scope(permission: str) -> str:
 
 
 def _raise_confirmation_error(command: str, exc: ConfirmationError) -> None:
-    audit_log(command, "confirmation_denied", f"reason={exc.code}")
+    audit_log(command, "confirmation_denied", f"confirmationCode={audit_safe_token(exc.code)}")
     raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)})
 
 
@@ -101,7 +104,7 @@ def _validate_registry_params(command: str, params: dict, status: str) -> tuple[
         return validate_tool_arguments(command, params), None
     except ToolSchemaValidationError as exc:
         logger.warning("Rejected invalid tool args for %s: %s", command, exc)
-        audit_log(command, status, str(exc)[:200])
+        audit_log(command, status, audit_error_details(exc))
         return None, str(exc)
 
 
@@ -130,7 +133,7 @@ async def prepare_command(req: PrepareCommandRequest):
     try:
         safe_params = validate_params(command, schema_params)
     except ValueError as e:
-        audit_log(command, "prepare_param_blocked", str(e))
+        audit_log(command, "prepare_param_blocked", audit_error_details(e))
         raise HTTPException(status_code=400, detail={"code": "invalid_params", "message": str(e)})
 
     action_scope = _permission_scope(permission)
@@ -169,7 +172,11 @@ async def execute_command(req: CommandRequest):
         source="companion_execute",
     )
     if reflection is not None and not reflection.should_execute:
-        audit_log(command, "reflection_blocked", f"source=companion_execute reason={reflection.reason[:120]}")
+        audit_log(
+            command,
+            "reflection_blocked",
+            f"source=companion_execute {audit_value_metadata('reason', reflection.reason)}",
+        )
         return CommandResponse(
             success=False,
             error="Action was blocked by safety reflection.",
@@ -180,7 +187,7 @@ async def execute_command(req: CommandRequest):
     try:
         safe_params = validate_params(command, schema_params)
     except ValueError as e:
-        audit_log(command, "param_blocked", str(e))
+        audit_log(command, "param_blocked", audit_error_details(e, source="companion_execute"))
         return CommandResponse(success=False, error=str(e))
 
     if permission == "confirmation_required":
@@ -210,7 +217,7 @@ async def execute_command(req: CommandRequest):
         audit_log(
             command,
             "risk_rate_limited",
-            f"source=companion_execute used={action_budget.get('used')} limit={action_budget.get('limit')}",
+            f"source={audit_safe_token('companion_execute')} used={action_budget.get('used')} limit={action_budget.get('limit')}",
         )
         return CommandResponse(
             success=False,
@@ -229,7 +236,7 @@ async def execute_command(req: CommandRequest):
         return CommandResponse(**validated, dry_run=False)
     except Exception as e:
         logger.error(f"companion.execute() failed for '{command}': {e}", exc_info=True)
-        audit_log(command, "execution_error", str(e))
+        audit_log(command, "execution_error", audit_error_details(e, source="companion_execute"))
         return CommandResponse(success=False, error=GENERIC_EXECUTION_ERROR)
 
 
@@ -369,7 +376,11 @@ async def execute_batch(req: BatchCommandRequest):
             plan_length=len(req.commands),
         )
         if reflection is not None and not reflection.should_execute:
-            audit_log(cmd.command, "reflection_blocked", f"source=companion_batch reason={reflection.reason[:120]}")
+            audit_log(
+                cmd.command,
+                "reflection_blocked",
+                f"source=companion_batch {audit_value_metadata('reason', reflection.reason)}",
+            )
             entry = {"command": cmd.command, "success": False, "error": "Action was blocked by safety reflection."}
             results.append(entry)
             all_ok = False
@@ -380,7 +391,7 @@ async def execute_batch(req: BatchCommandRequest):
         try:
             safe_params = validate_params(cmd.command, schema_params)
         except ValueError as e:
-            audit_log(cmd.command, "param_blocked", str(e))
+            audit_log(cmd.command, "param_blocked", audit_error_details(e, source="companion_batch"))
             entry = {"command": cmd.command, "success": False, "error": str(e)}
             results.append(entry)
             all_ok = False
@@ -403,7 +414,7 @@ async def execute_batch(req: BatchCommandRequest):
             entry = {"command": cmd.command, **validated}
         except Exception as e:
             logger.error(f"Batch command '{cmd.command}' failed: {e}", exc_info=True)
-            audit_log(cmd.command, "execution_error", str(e))
+            audit_log(cmd.command, "execution_error", audit_error_details(e, source="companion_batch"))
             entry = {"command": cmd.command, "success": False, "error": GENERIC_EXECUTION_ERROR}
 
         results.append(entry)

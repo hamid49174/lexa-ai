@@ -308,6 +308,78 @@ class TestExecuteCommand:
         assert data["error"] == "Command execution failed. Details were logged locally."
         assert "Kaboom" not in data["error"]
 
+    def test_execute_exception_audit_redacts_internal_error(self, mock_companion, disable_rate_limit):
+        entries = []
+        mock_companion.execute.side_effect = RuntimeError(
+            "Kaboom C:\\Users\\admin\\secret.txt token=supersecretvalue"
+        )
+        with patch("backend.router_companion.companion", mock_companion), \
+             patch("backend.router_companion.is_command_allowed", return_value="always_allowed"), \
+             patch("backend.router_companion.check_rate_limit", lambda *a, **kw: True), \
+             patch("backend.router_companion.check_action_rate_limit", lambda *a, **kw: {"allowed": True}), \
+             patch("backend.router_companion.reflect_action", return_value=None), \
+             patch("backend.router_companion.audit_log", lambda *args, **_kwargs: entries.append(args)), \
+             patch("backend.router_companion.validate_params", side_effect=lambda cmd, params: params):
+            from backend.router_companion import router
+            app = FastAPI()
+            app.include_router(router)
+            tc = TestClient(app)
+            res = tc.post("/companion/execute", json={"command": "system_info"})
+
+        assert res.status_code == 200
+        assert res.json()["error"] == "Command execution failed. Details were logged locally."
+        error_entry = next(entry for entry in entries if entry[:2] == ("system_info", "execution_error"))
+        details = error_entry[2]
+        assert "source=companion_execute" in details
+        assert "errorType=RuntimeError" in details
+        assert "errorChars=" in details
+        assert "errorHash=" in details
+        assert "C:\\Users\\admin" not in details
+        assert "supersecretvalue" not in details
+        assert "Kaboom" not in details
+
+    def test_execute_reflection_audit_redacts_block_reason(self, mock_companion, disable_rate_limit):
+        from backend.agent_reflection import ReflectionDecision
+
+        entries = []
+        blocked = ReflectionDecision(
+            should_execute=False,
+            risk_level="medium",
+            confidence=0.2,
+            concerns=["unit"],
+            safer_alternative={"mode": "read_only"},
+            requires_confirmation=False,
+            verification_step="verify first",
+            reason="blocked C:\\Users\\admin\\secret.txt token=supersecretvalue",
+        )
+        with patch("backend.router_companion.companion", mock_companion), \
+             patch("backend.router_companion.is_command_allowed", return_value="always_allowed"), \
+             patch("backend.router_companion.check_rate_limit", lambda *a, **kw: True), \
+             patch("backend.router_companion.check_action_rate_limit", lambda *a, **kw: {"allowed": True}), \
+             patch("backend.router_companion.reflect_action", return_value=blocked), \
+             patch("backend.router_companion.audit_log", lambda *args, **_kwargs: entries.append(args)), \
+             patch("backend.router_companion.validate_params", side_effect=lambda cmd, params: params):
+            from backend.router_companion import router
+            app = FastAPI()
+            app.include_router(router)
+            tc = TestClient(app)
+            res = tc.post("/companion/execute", json={
+                "command": "app_open",
+                "params": {"name": "notepad"},
+            })
+
+        assert res.status_code == 200
+        assert res.json()["error"] == "Action was blocked by safety reflection."
+        mock_companion.execute.assert_not_called()
+        blocked_entry = next(entry for entry in entries if entry[:2] == ("app_open", "reflection_blocked"))
+        details = blocked_entry[2]
+        assert "source=companion_execute" in details
+        assert "reasonChars=" in details
+        assert "reasonHash=" in details
+        assert "C:\\Users\\admin" not in details
+        assert "supersecretvalue" not in details
+        assert "reason=" not in details
+
 
 # ══════════════════════════════════════════════════
 #  COMMANDS LIST
@@ -527,6 +599,38 @@ class TestBatchExecution:
         assert data["success"] is False
         assert data["results"][0]["error"] == "Command execution failed. Details were logged locally."
         assert "Sensitive local path" not in data["results"][0]["error"]
+
+    def test_batch_exception_audit_redacts_internal_error(self, mock_companion, disable_rate_limit):
+        entries = []
+        mock_companion.execute.side_effect = RuntimeError(
+            "Sensitive local path C:\\Users\\admin\\secret.txt token=supersecretvalue"
+        )
+        with patch("backend.router_companion.companion", mock_companion), \
+             patch("backend.router_companion.is_command_allowed", return_value="always_allowed"), \
+             patch("backend.router_companion.check_rate_limit", lambda *a, **kw: True), \
+             patch("backend.router_companion.check_action_rate_limit", lambda *a, **kw: {"allowed": True}), \
+             patch("backend.router_companion.reflect_action", return_value=None), \
+             patch("backend.router_companion.audit_log", lambda *args, **_kwargs: entries.append(args)), \
+             patch("backend.router_companion.validate_params", side_effect=lambda cmd, params: params):
+            from backend.router_companion import router
+            app = FastAPI()
+            app.include_router(router)
+            tc = TestClient(app)
+            res = tc.post("/companion/execute/batch", json={
+                "commands": [{"command": "system_info"}],
+            })
+
+        assert res.status_code == 200
+        assert res.json()["results"][0]["error"] == "Command execution failed. Details were logged locally."
+        error_entry = next(entry for entry in entries if entry[:2] == ("system_info", "execution_error"))
+        details = error_entry[2]
+        assert "source=companion_batch" in details
+        assert "errorType=RuntimeError" in details
+        assert "errorChars=" in details
+        assert "errorHash=" in details
+        assert "C:\\Users\\admin" not in details
+        assert "supersecretvalue" not in details
+        assert "Sensitive local path" not in details
 
     def test_batch_rejects_malformed_args_before_reflection_or_execution(self, client, monkeypatch):
         tc, mock_comp, _ = client
