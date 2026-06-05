@@ -51,6 +51,14 @@ assert(
     && helperSrc.includes("levelMap")
 );
 assert(
+  "safe IO helper disables fragile GPU paths before smoke windows load",
+  helperSrc.includes("function hardenElectronSmokeRuntime")
+    && helperSrc.includes("app.disableHardwareAcceleration")
+    && helperSrc.includes('appendSwitch("disable-gpu")')
+    && helperSrc.includes('appendSwitch("disable-gpu-compositing")')
+    && helperSrc.includes("hardenElectronSmokeRuntime();")
+);
+assert(
   "safe IO helper loads local HTML through encoded file URLs",
   helperSrc.includes("pathToFileURL")
     && helperSrc.includes("function electronSmokeFileUrl")

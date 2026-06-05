@@ -1090,12 +1090,14 @@ if (isLexaSmokeMockAllowed()) {
     personalOsRawStatus: async () => emptyPersonalOs(),
     personalOsRawSubmit: async () => emptyPersonalOs(),
     personalOsCodeLoop: async () => emptyPersonalOs(),
-    agentRun: async () => ({
+    agentRun: async (message = "", options = {}) => runSmokeMock("agentRun", [message, options], async () => ({
       ok: true,
       summary: "Smoke mock completed",
       steps: [],
       counts: { found: 0, changed: 0, done: 1, blocked: 0, failed: 0 },
-    }),
+    })),
+    agentStreamRead: async (streamId) => runSmokeMock("agentStreamRead", [streamId], async () => ({ done: true, value: [] })),
+    agentStreamCancel: async (streamId) => runSmokeMock("agentStreamCancel", [streamId], async () => ({ ok: true, cancelled: false })),
   };
   contextBridge.exposeInMainWorld("lexa", createGuardedBridge(smokeBridge, { disablePresenceChallenge: true }));
   contextBridge.exposeInMainWorld("lexaSmoke", smokeControlBridge);

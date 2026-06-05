@@ -1963,6 +1963,168 @@ async function sendAgentMessage(text, options) {
     const agentStreamStartedAt = Date.now();
     const agentOutcomeCounts = createAgentOutcomeCounts();
     const agentStepOutcomes = new Map();
+    const agentRunDomId = `agent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const normalizeAgentStepIndex = (step, fallbackIndex = 0) => {
+      const rawIndex = step?.index;
+      const numeric = Number(rawIndex);
+      return Number.isFinite(numeric) ? numeric : fallbackIndex;
+    };
+
+    const ensureAgentStepElement = (step, fallbackIndex = 0) => {
+      const normalizedStep = { ...(step || {}), index: normalizeAgentStepIndex(step, fallbackIndex) };
+      let stepEl = Array.from(stepsContainer.querySelectorAll(".agent-step"))
+        .find((el) => el.dataset.agentStepIndex === String(normalizedStep.index));
+      if (stepEl) return { stepEl, step: normalizedStep };
+
+      stepEl = document.createElement("div");
+      stepEl.className = "agent-step running";
+      stepEl.id = `agent-step-${agentRunDomId}-${normalizedStep.index}`;
+      stepEl.dataset.agentStepIndex = String(normalizedStep.index);
+      stepEl.setAttribute("role", "listitem");
+      const readableLabel = agentStepDisplayLabel(normalizedStep);
+      const technicalLabel = agentStepTechnicalLabel(normalizedStep);
+      const icon = document.createElement("span");
+      icon.className = "agent-step-icon";
+      icon.textContent = "\u23F3"; // hourglass
+      const label = document.createElement("span");
+      label.className = "agent-step-label";
+      label.textContent = readableLabel;
+      stepEl.dataset.technicalLabel = technicalLabel;
+      stepEl.title = readableLabel;
+      stepEl.setAttribute("aria-label", readableLabel);
+      stepEl.appendChild(icon);
+      stepEl.appendChild(label);
+      stepsContainer.appendChild(stepEl);
+      return { stepEl, step: normalizedStep };
+    };
+
+    const markAgentStepFinished = (step, fallbackIndex = 0) => {
+      const ensured = ensureAgentStepElement(step, fallbackIndex);
+      const stepEl = ensured.stepEl;
+      const normalizedStep = ensured.step;
+      const blocked = normalizedStep.status === "blocked";
+      const success = normalizedStep.status === "success";
+      stepEl.className = `agent-step ${blocked ? "blocked" : (success ? "success" : "failed")}`;
+      const icon = stepEl.querySelector(".agent-step-icon");
+      if (icon) icon.textContent = blocked ? "\u26A0\uFE0F" : (success ? "\u2705" : "\u274C");
+      if (blocked && !stepEl.querySelector(".agent-step-note")) {
+        const note = document.createElement("span");
+        note.className = "agent-step-note";
+        note.textContent = t("chat.agentNeedsConfirmation");
+        stepEl.appendChild(note);
+      }
+      if (normalizedStep.duration_ms && !stepEl.querySelector(".agent-step-duration")) {
+        const dur = document.createElement("span");
+        dur.className = "agent-step-duration";
+        dur.textContent = `${Math.round(normalizedStep.duration_ms)}ms`;
+        stepEl.appendChild(dur);
+      }
+      renderAgentStepOutcome(stepEl, normalizedStep);
+      return normalizedStep;
+    };
+
+    const handleAgentStreamEvent = (event) => {
+      if (!event || typeof event !== "object") return;
+
+      if (event.type === "thinking") {
+        if (event.message) {
+          summaryEl.classList.remove("agent-status");
+          renderFormattedMessage(summaryEl, event.message);
+        } else {
+          summaryEl.classList.add("agent-status");
+          summaryEl.textContent = t("chat.agentWorking");
+        }
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+
+      if (event.type === "step_start") {
+        summaryEl.classList.add("agent-status");
+        summaryEl.textContent = t("chat.agentWorking");
+        ensureAgentStepElement(event.step || {});
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+
+      if (event.type === "step_done") {
+        const step = markAgentStepFinished(event.step || {});
+        recordAgentStepOutcome(step, agentOutcomeCounts, agentStepOutcomes);
+        renderAgentOutcomeSummary(outcomeSummaryEl, agentOutcomeCounts);
+      }
+
+      if (event.type === "step_blocked") {
+        const step = markAgentStepFinished({ ...(event.step || {}), status: "blocked" });
+        recordAgentStepOutcome(step, agentOutcomeCounts, agentStepOutcomes);
+        renderAgentOutcomeSummary(outcomeSummaryEl, agentOutcomeCounts);
+      }
+
+      if (event.type === "done") {
+        const run = event.run || {};
+        let finalSteps = Array.isArray(run.steps) ? run.steps : [];
+        let finalSummary = run.summary || "";
+        if (hermesSystemStatusGuard && finalSteps.length === 0) {
+          finalSummary = t("chat.hermesSystemStatusNoTool");
+          finalSteps = [{
+            index: 0,
+            action: "system_info",
+            status: "failed",
+            error: finalSummary,
+            result: finalSummary,
+          }];
+        }
+        const finalOutcomeCounts = finalSteps.length
+          ? agentRunOutcomeCounts(finalSteps)
+          : agentOutcomeCounts;
+        finalSteps.forEach((step, index) => markAgentStepFinished(step, index));
+        renderAgentOutcomeSummary(outcomeSummaryEl, finalOutcomeCounts);
+        setMessageAgentRunMeta(msgEl, {
+          summary: finalSummary || t("chat.agentCompleted"),
+          steps: finalSteps,
+          counts: finalOutcomeCounts,
+          total_duration_ms: run.total_duration_ms,
+        });
+        renderAgentCompletionPanel(completionEl, finalOutcomeCounts, {
+          continuePrompt: agentCompletionContinuePrompt({ ...run, steps: finalSteps, summary: finalSummary }, finalOutcomeCounts, finalSummary || summaryEl.textContent),
+        });
+        if (finalSummary) {
+          summaryEl.classList.remove("agent-status");
+          renderFormattedMessage(summaryEl, finalSummary);
+          setMessagePersistText(msgEl, finalSummary);
+        } else {
+          summaryEl.classList.remove("agent-status");
+          summaryEl.textContent = t("chat.agentCompleted");
+          setMessagePersistText(msgEl, summaryEl.textContent);
+        }
+        msgEl.removeAttribute("aria-busy");
+        copyBtn.disabled = false;
+        memoryBtn.disabled = false;
+        workspaceBtn.disabled = false;
+        continueBtn.disabled = false;
+        verifyBtn.disabled = false;
+        exportBtn.disabled = false;
+        const durEl = document.createElement("div");
+        durEl.className = "agent-duration";
+        durEl.textContent = t("chat.agentSteps", {count: finalSteps.length, ms: Math.round(run.total_duration_ms || 0)});
+        body.appendChild(durEl);
+      }
+
+      if (event.type === "error") {
+        summaryEl.classList.remove("agent-status");
+        summaryEl.textContent = agentUserFacingError(event.message);
+        setMessagePersistText(msgEl, summaryEl.textContent);
+        msgEl.removeAttribute("aria-busy");
+      }
+    };
+
+    const processAgentStreamLines = (lines) => {
+      for (const line of lines) {
+        const event = parseChatStreamDataLine(line);
+        try {
+          handleAgentStreamEvent(event);
+        } catch (e) {
+          console.warn("[Agent] SSE event error:", e?.message || e);
+        }
+      }
+    };
 
     while (true) {
       const remainingMs = AGENT_STREAM_TIMEOUT_MS - (Date.now() - agentStreamStartedAt);
@@ -1981,151 +2143,14 @@ async function sendAgentMessage(text, options) {
       const { done, value } = readResult;
       if (done) break;
       buffer += decoder.decode(normalizeAgentStreamChunk(value), { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const raw = line.slice(6).trim();
-        if (!raw) continue;
-
-        try {
-          const event = JSON.parse(raw);
-
-          if (event.type === "thinking") {
-            if (event.message) {
-              summaryEl.classList.remove("agent-status");
-              renderFormattedMessage(summaryEl, event.message);
-            } else {
-              summaryEl.classList.add("agent-status");
-              summaryEl.textContent = t("chat.agentWorking");
-            }
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-          }
-
-          if (event.type === "step_start") {
-            summaryEl.classList.add("agent-status");
-            summaryEl.textContent = t("chat.agentWorking");
-            const step = event.step || {};
-            const stepEl = document.createElement("div");
-            stepEl.className = "agent-step running";
-            stepEl.id = `agent-step-${step.index}`;
-            stepEl.setAttribute("role", "listitem");
-            const readableLabel = agentStepDisplayLabel(step);
-            const technicalLabel = agentStepTechnicalLabel(step);
-            const icon = document.createElement("span");
-            icon.className = "agent-step-icon";
-            icon.textContent = "\u23F3"; // hourglass
-            const label = document.createElement("span");
-            label.className = "agent-step-label";
-            label.textContent = readableLabel;
-            stepEl.dataset.technicalLabel = technicalLabel;
-            stepEl.title = readableLabel;
-            stepEl.setAttribute("aria-label", readableLabel);
-            stepEl.appendChild(icon);
-            stepEl.appendChild(label);
-            stepsContainer.appendChild(stepEl);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-          }
-
-          if (event.type === "step_done") {
-            const step = event.step || {};
-            const stepEl = document.getElementById(`agent-step-${step.index}`);
-            if (stepEl) {
-              stepEl.className = `agent-step ${step.status === "success" ? "success" : "failed"}`;
-              const icon = stepEl.querySelector(".agent-step-icon");
-              if (icon) icon.textContent = step.status === "success" ? "\u2705" : "\u274C";
-              renderAgentStepOutcome(stepEl, step);
-              // Add duration
-              if (step.duration_ms) {
-                const dur = document.createElement("span");
-                dur.className = "agent-step-duration";
-                dur.textContent = `${Math.round(step.duration_ms)}ms`;
-                stepEl.appendChild(dur);
-                renderAgentStepOutcome(stepEl, step);
-              }
-              recordAgentStepOutcome(step, agentOutcomeCounts, agentStepOutcomes);
-              renderAgentOutcomeSummary(outcomeSummaryEl, agentOutcomeCounts);
-            }
-          }
-
-          if (event.type === "step_blocked") {
-            const step = event.step || {};
-            const stepEl = document.getElementById(`agent-step-${step.index}`);
-            if (stepEl) {
-              stepEl.className = "agent-step blocked";
-              const icon = stepEl.querySelector(".agent-step-icon");
-              if (icon) icon.textContent = "\u26A0\uFE0F";
-              const note = document.createElement("span");
-              note.className = "agent-step-note";
-              note.textContent = t("chat.agentNeedsConfirmation");
-              stepEl.appendChild(note);
-              renderAgentStepOutcome(stepEl, step);
-              recordAgentStepOutcome(step, agentOutcomeCounts, agentStepOutcomes);
-              renderAgentOutcomeSummary(outcomeSummaryEl, agentOutcomeCounts);
-            }
-          }
-
-          if (event.type === "done") {
-            const run = event.run || {};
-            let finalSteps = Array.isArray(run.steps) ? run.steps : [];
-            let finalSummary = run.summary || "";
-            if (hermesSystemStatusGuard && finalSteps.length === 0) {
-              finalSummary = t("chat.hermesSystemStatusNoTool");
-              finalSteps = [{
-                index: 0,
-                action: "system_info",
-                status: "failed",
-                error: finalSummary,
-                result: finalSummary,
-              }];
-            }
-            const finalOutcomeCounts = finalSteps.length
-              ? agentRunOutcomeCounts(finalSteps)
-              : agentOutcomeCounts;
-            renderAgentOutcomeSummary(outcomeSummaryEl, finalOutcomeCounts);
-            setMessageAgentRunMeta(msgEl, {
-              summary: finalSummary || t("chat.agentCompleted"),
-              steps: finalSteps,
-              counts: finalOutcomeCounts,
-              total_duration_ms: run.total_duration_ms,
-            });
-            renderAgentCompletionPanel(completionEl, finalOutcomeCounts, {
-              continuePrompt: agentCompletionContinuePrompt({ ...run, steps: finalSteps, summary: finalSummary }, finalOutcomeCounts, finalSummary || summaryEl.textContent),
-            });
-            if (finalSummary) {
-              summaryEl.classList.remove("agent-status");
-              renderFormattedMessage(summaryEl, finalSummary);
-              setMessagePersistText(msgEl, finalSummary);
-            } else {
-              summaryEl.classList.remove("agent-status");
-              summaryEl.textContent = t("chat.agentCompleted");
-              setMessagePersistText(msgEl, summaryEl.textContent);
-            }
-            msgEl.removeAttribute("aria-busy");
-            copyBtn.disabled = false;
-            memoryBtn.disabled = false;
-            workspaceBtn.disabled = false;
-            continueBtn.disabled = false;
-            verifyBtn.disabled = false;
-            exportBtn.disabled = false;
-            const durEl = document.createElement("div");
-            durEl.className = "agent-duration";
-            durEl.textContent = t("chat.agentSteps", {count: finalSteps.length, ms: Math.round(run.total_duration_ms || 0)});
-            body.appendChild(durEl);
-          }
-
-          if (event.type === "error") {
-            summaryEl.classList.remove("agent-status");
-            summaryEl.textContent = agentUserFacingError(event.message);
-            setMessagePersistText(msgEl, summaryEl.textContent);
-            msgEl.removeAttribute("aria-busy");
-          }
-        } catch (e) {
-          console.warn("[Agent] SSE parse error:", e);
-        }
-      }
+      const parsedBuffer = chatStreamBufferedLines(buffer);
+      buffer = parsedBuffer.buffer;
+      processAgentStreamLines(parsedBuffer.lines);
     }
+
+    buffer += decoder.decode();
+    processAgentStreamLines(chatStreamFinalLines(buffer));
+    buffer = "";
   } catch (err) {
     const timedOut = err?.message === "agent_stream_timeout";
     const stopped = err?.message === "agent_stream_stopped" || agentStoppedByUser;

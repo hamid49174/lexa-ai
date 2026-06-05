@@ -107,6 +107,23 @@ function installElectronSmokeSafeIo() {
   installSafeProcessEmit();
 }
 
+function hardenElectronSmokeRuntime() {
+  if (!process.versions?.electron || process.__lexaSmokeRuntimeHardened) return;
+  Object.defineProperty(process, "__lexaSmokeRuntimeHardened", {
+    value: true,
+    configurable: true,
+  });
+  try {
+    const { app } = require("electron");
+    app.disableHardwareAcceleration?.();
+    app.commandLine?.appendSwitch("disable-gpu");
+    app.commandLine?.appendSwitch("disable-gpu-compositing");
+    app.commandLine?.appendSwitch("disable-gpu-cache");
+  } catch (_) {
+    // Best-effort only: individual smoke tests still report real launch/load failures.
+  }
+}
+
 function normalizeElectronConsoleMessage(event, legacyLevel, legacyMessage, legacyLine, legacySourceId) {
   const details = event && typeof event === "object" ? event : {};
   const rawLevel = legacyLevel ?? details.level ?? "info";
@@ -130,9 +147,11 @@ function loadElectronSmokeFile(win, filePath) {
 }
 
 installElectronSmokeSafeIo();
+hardenElectronSmokeRuntime();
 
 module.exports = {
   electronSmokeFileUrl,
+  hardenElectronSmokeRuntime,
   installElectronSmokeSafeIo,
   isBrokenPipeError,
   loadElectronSmokeFile,
