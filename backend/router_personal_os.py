@@ -24,7 +24,7 @@ from backend.config import MAX_TEXT_CHARS, MCP_CALL_TIMEOUT, MCP_ENABLED
 from backend.context_bus import get_shared_context_snapshot, suggest_personal_os_topic
 from backend.mcp_registry import MCPError, mcp_registry
 from backend.obsidian_context import build_obsidian_context_payload
-from backend.security import audit_log, check_rate_limit
+from backend.security import audit_log, audit_safe_token, audit_value_metadata, check_rate_limit
 
 logger = logging.getLogger("lexa.router_personal_os")
 
@@ -265,6 +265,14 @@ def _raw_inbox_title(req: RawInboxSubmitRequest) -> str:
     return (first_line or "Lexa raw inbox note")[:120]
 
 
+def _audit_details(*metadata: str, **tokens: object) -> str:
+    parts = [part for part in metadata if part]
+    for key, value in tokens.items():
+        safe_key = audit_safe_token(key, fallback="field", max_chars=40)
+        parts.append(f"{safe_key}={audit_safe_token(value)}")
+    return " ".join(parts)
+
+
 async def _write_raw_inbox_file(req: RawInboxSubmitRequest) -> dict:
     os_root = _personal_os_root()
     raw_dir = os_root / "06_Inbox" / "Raw"
@@ -278,7 +286,11 @@ async def _write_raw_inbox_file(req: RawInboxSubmitRequest) -> dict:
 
     await asyncio.to_thread(raw_dir.mkdir, parents=True, exist_ok=True)
     await asyncio.to_thread(absolute.write_text, body, "utf-8")
-    audit_log("personal_os", "raw_inbox_submitted", f"path={relative} processor={req.processor}")
+    audit_log(
+        "personal_os",
+        "raw_inbox_submitted",
+        _audit_details(audit_value_metadata("path", relative), processor=req.processor),
+    )
     return {
         "path": relative,
         "filename": filename,
@@ -1372,7 +1384,15 @@ async def query_os(
     normalized_area = _validate_os_relative_path(areaPath)
     normalized_tag = _normalize_tag_filter(tag)
 
-    audit_log("personal_os", "query", f"area={normalized_area} tag={normalized_tag or ''}")
+    audit_log(
+        "personal_os",
+        "query",
+        _audit_details(
+            audit_value_metadata("area", normalized_area),
+            audit_value_metadata("tag", normalized_tag or ""),
+            maxMatches=maxMatches,
+        ),
+    )
     arguments = {
         "areaPath": normalized_area,
         "maxMatches": maxMatches,
@@ -1391,7 +1411,7 @@ async def read_os_file(filepath: str = Query(..., min_length=1, max_length=300))
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
 
     normalized = _validate_os_relative_path(filepath, require_markdown=True)
-    audit_log("personal_os", "file_read", f"path={normalized}")
+    audit_log("personal_os", "file_read", audit_value_metadata("path", normalized))
     return await _call_personal_os_tool("os_read_file", {
         "filepath": normalized,
         "agentName": "LexaPersonalOS",
@@ -1411,7 +1431,11 @@ async def graph_os(
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
 
     normalized_area = _validate_os_relative_path(areaPath)
-    audit_log("personal_os", "graph", f"area={normalized_area} maxFiles={maxFiles}")
+    audit_log(
+        "personal_os",
+        "graph",
+        _audit_details(audit_value_metadata("area", normalized_area), maxFiles=maxFiles),
+    )
     return await _call_personal_os_tool("os_graph_index", {
         "areaPath": normalized_area,
         "maxFiles": maxFiles,
@@ -1435,7 +1459,15 @@ async def context_pack_os(
     if not check_rate_limit("execute"):
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
 
-    audit_log("personal_os", "context_pack", f"area={areaPath} tag={(tag or '').strip()}")
+    audit_log(
+        "personal_os",
+        "context_pack",
+        _audit_details(
+            audit_value_metadata("area", areaPath),
+            audit_value_metadata("tag", (tag or "").strip()),
+            maxFiles=maxFiles,
+        ),
+    )
     return await _build_context_pack_payload(
         area_path=areaPath,
         tag=tag,
@@ -1461,7 +1493,15 @@ async def lexa_code_loop_os(
     if not check_rate_limit("execute"):
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
 
-    audit_log("personal_os", "lexa_code_loop", f"area={areaPath} tag={(tag or '').strip()}")
+    audit_log(
+        "personal_os",
+        "lexa_code_loop",
+        _audit_details(
+            audit_value_metadata("area", areaPath),
+            audit_value_metadata("tag", (tag or "").strip()),
+            maxFiles=maxFiles,
+        ),
+    )
     return await _build_lexa_code_loop_payload(
         area_path=areaPath,
         tag=tag,
@@ -1486,7 +1526,11 @@ async def obsidian_context_os(
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
 
     resolved_topic = topic.strip() or suggest_personal_os_topic()
-    audit_log("personal_os", "obsidian_context", f"topic={resolved_topic[:120]}")
+    audit_log(
+        "personal_os",
+        "obsidian_context",
+        _audit_details(audit_value_metadata("topic", resolved_topic), maxFiles=maxFiles),
+    )
     return await asyncio.to_thread(
         build_obsidian_context_payload,
         topic=resolved_topic,
@@ -1549,7 +1593,11 @@ async def list_drafts(
             raise HTTPException(status_code=400, detail="Invalid draft approval filter")
         approvals = [approval]
 
-    audit_log("personal_os", "drafts_list", f"approval={approval or 'all'} hideSmoke={hideSmoke}")
+    audit_log(
+        "personal_os",
+        "drafts_list",
+        _audit_details(approval=approval or "all", hideSmoke=hideSmoke, maxDrafts=maxDrafts),
+    )
     arguments = {
         "hideSmoke": hideSmoke,
         "maxDrafts": maxDrafts,
@@ -1568,7 +1616,7 @@ async def view_draft(draftPath: str = Query(..., min_length=1, max_length=300)):
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
 
     draft_path = _validate_draft_path(draftPath)
-    audit_log("personal_os", "draft_view", f"path={draft_path}")
+    audit_log("personal_os", "draft_view", audit_value_metadata("path", draft_path))
     return await _call_personal_os_tool("os_view_draft", {
         "draftPath": draft_path,
         "agentName": "LexaPersonalOS",
@@ -1583,7 +1631,7 @@ async def review_draft(draftPath: str = Query(..., min_length=1, max_length=300)
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
 
     draft_path = _validate_draft_path(draftPath)
-    audit_log("personal_os", "draft_review_packet", f"path={draft_path}")
+    audit_log("personal_os", "draft_review_packet", audit_value_metadata("path", draft_path))
     return await _build_draft_review_payload(
         draft_path,
         agent_name="LexaPersonalOS",
@@ -1598,7 +1646,7 @@ async def decide_draft(req: DraftDecisionRequest):
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
 
     draft_path = _validate_draft_path(req.draftPath)
-    audit_log("personal_os", f"draft_{req.decision}", f"path={draft_path}")
+    audit_log("personal_os", f"draft_{req.decision}", audit_value_metadata("path", draft_path))
     await _ensure_approval_guard(req, draft_path)
     return await _run_draft_decision_cli(req)
 
@@ -1610,7 +1658,7 @@ async def apply_draft(req: DraftApplyRequest):
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
 
     draft_path = _validate_draft_path(req.draftPath)
-    audit_log("personal_os", "draft_apply", f"path={draft_path}")
+    audit_log("personal_os", "draft_apply", audit_value_metadata("path", draft_path))
     return await _run_draft_apply_cli(req)
 
 
@@ -1646,7 +1694,7 @@ async def raw_inbox_extract(req: RawInboxExtractRequest):
     if not check_rate_limit("chat"):
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
 
-    audit_log("personal_os", "raw_inbox_extract", f"SOURCE={req.sourcePath[:120]}")
+    audit_log("personal_os", "raw_inbox_extract", audit_value_metadata("source", req.sourcePath))
 
     try:
         from backend.ai_engine import _chat_with_selected_provider, _get_selected_model_meta

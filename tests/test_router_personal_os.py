@@ -18,6 +18,11 @@ def _client(monkeypatch):
     return TestClient(app, raise_server_exceptions=False)
 
 
+def _assert_no_raw_audit_values(details: str, *forbidden: str):
+    for value in forbidden:
+        assert value not in details
+
+
 def test_raw_inbox_extract_returns_summary_and_tags(monkeypatch):
     from backend import ai_engine
 
@@ -86,6 +91,137 @@ def test_raw_inbox_submit_writes_raw_and_runs_worker(monkeypatch):
         ("write", "Test Note", "Raw text for intake", "deterministic"),
         ("worker", "2026-05-15_test-note.txt", "deterministic"),
     ]
+
+
+def test_raw_inbox_write_audit_redacts_generated_path(monkeypatch, tmp_path):
+    import backend.router_personal_os as router_personal_os
+
+    entries = []
+    monkeypatch.setenv("PERSONAL_OS_ROOT", str(tmp_path))
+    monkeypatch.setattr(router_personal_os, "audit_log", lambda *args, **kwargs: entries.append(args))
+
+    data = asyncio.run(router_personal_os._write_raw_inbox_file(
+        router_personal_os.RawInboxSubmitRequest(
+            title="Secret token supersecretvalue",
+            body="Raw text for intake",
+            processor="deterministic",
+        )
+    ))
+
+    assert data["path"].startswith("06_Inbox/Raw/")
+    entry = next(item for item in entries if item[:2] == ("personal_os", "raw_inbox_submitted"))
+    details = entry[2]
+    assert "pathChars=" in details
+    assert "pathHash=" in details
+    assert "processor=deterministic" in details
+    _assert_no_raw_audit_values(details, "path=", "06_Inbox", "supersecretvalue")
+
+
+def test_personal_os_route_audits_redact_dynamic_inputs(monkeypatch):
+    import backend.router_personal_os as router_personal_os
+    from backend import ai_engine
+
+    entries = []
+
+    async def fake_call(tool, arguments):
+        if tool == "os_list_drafts":
+            return {"ok": True, "counts": {"pending": 0}, "drafts": [], "errors": []}
+        return {"ok": True, "tool": tool, "arguments": arguments}
+
+    async def fake_context_pack(**kwargs):
+        return {"ok": True, "kind": "context-pack"}
+
+    async def fake_code_loop(**kwargs):
+        return {"ok": True, "kind": "code-loop"}
+
+    async def fake_review(*args, **kwargs):
+        return {"ok": True, "kind": "review"}
+
+    async def fake_guard(req, draft_path):
+        return {"blocked": False, "checks": []}
+
+    async def fake_decision(req):
+        return {"ok": True, "decision": req.decision}
+
+    async def fake_apply(req):
+        return {"ok": True, "draft": req.draftPath}
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(router_personal_os, "audit_log", lambda *args, **kwargs: entries.append(args))
+    monkeypatch.setattr(router_personal_os, "_call_personal_os_tool", fake_call)
+    monkeypatch.setattr(router_personal_os, "_build_context_pack_payload", fake_context_pack)
+    monkeypatch.setattr(router_personal_os, "_build_lexa_code_loop_payload", fake_code_loop)
+    monkeypatch.setattr(router_personal_os, "_build_draft_review_payload", fake_review)
+    monkeypatch.setattr(router_personal_os, "_ensure_approval_guard", fake_guard)
+    monkeypatch.setattr(router_personal_os, "_run_draft_decision_cli", fake_decision)
+    monkeypatch.setattr(router_personal_os, "_run_draft_apply_cli", fake_apply)
+    monkeypatch.setattr(router_personal_os, "build_obsidian_context_payload", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(ai_engine, "_get_selected_model_meta", lambda: {"provider": "mock", "model": "mock-model"})
+    monkeypatch.setattr(ai_engine, "_chat_with_selected_provider", lambda *args, **kwargs: {
+        "type": "text",
+        "content": '{"summary":"ok","tags":["secret"]}',
+    })
+
+    requests = [
+        client.get("/personal-os/query", params={
+            "areaPath": "00_System/Private-supersecretvalue",
+            "tag": "tag:SecretToken",
+        }),
+        client.get("/personal-os/files/read", params={"filepath": "05_Memory/supersecretvalue.md"}),
+        client.get("/personal-os/graph", params={"areaPath": "00_System/Private-supersecretvalue"}),
+        client.get("/personal-os/context-pack", params={
+            "areaPath": "00_System/Private-supersecretvalue",
+            "tag": "SecretToken",
+        }),
+        client.get("/personal-os/lexa-code-loop", params={
+            "areaPath": "00_System/Private-supersecretvalue",
+            "tag": "SecretToken",
+        }),
+        client.get("/personal-os/obsidian-context", params={"topic": "Secret topic supersecretvalue"}),
+        client.get("/personal-os/drafts", params={"approval": "pending"}),
+        client.get("/personal-os/drafts/view", params={
+            "draftPath": "06_Inbox/Drafts/supersecretvalue.md",
+        }),
+        client.get("/personal-os/drafts/review", params={
+            "draftPath": "06_Inbox/Drafts/supersecretvalue.md",
+        }),
+        client.post("/personal-os/drafts/decision", json={
+            "draftPath": "06_Inbox/Drafts/supersecretvalue.md",
+            "decision": "approve",
+            "reason": "Reviewed",
+            "agentName": "LexaHumanReview",
+        }),
+        client.post("/personal-os/drafts/apply", json={
+            "draftPath": "06_Inbox/Drafts/supersecretvalue.md",
+            "reason": "Apply",
+            "agentName": "LexaHumanReview",
+        }),
+        client.post("/personal-os/raw-inbox/extract", json={
+            "sourcePath": r"C:\Users\admin\supersecretvalue.txt",
+            "body": "Raw body",
+        }),
+    ]
+
+    assert all(res.status_code == 200 for res in requests)
+    audit_text = "\n".join(str(entry[2]) for entry in entries)
+    assert "pathChars=" in audit_text
+    assert "areaChars=" in audit_text
+    assert "tagChars=" in audit_text
+    assert "topicChars=" in audit_text
+    assert "sourceChars=" in audit_text
+    _assert_no_raw_audit_values(
+        audit_text,
+        "path=",
+        "area=",
+        "tag=",
+        "topic=",
+        "SOURCE=",
+        r"C:\Users\admin",
+        "06_Inbox/Drafts",
+        "00_System/Private",
+        "SecretToken",
+        "supersecretvalue",
+    )
 
 
 def test_raw_inbox_status_returns_worker_processors(monkeypatch):
