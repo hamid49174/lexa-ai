@@ -12,7 +12,7 @@ from pathlib import Path
 VOICE_DIR = Path(__file__).resolve().parent
 _DATA_DIR = os.environ.get("LEXA_DATA_DIR", str(VOICE_DIR.parent))
 AUDIO_CACHE_DIR = (Path(_DATA_DIR) / "audio_cache").resolve()
-AUDIO_CACHE_DIR.mkdir(exist_ok=True)
+AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # ══════════════════════════════════════════════════
 #  AUDIO
@@ -147,3 +147,6 @@ CB_MAX_FAILURES = 3              # Failures before circuit opens
 
 MAX_TTS_CHUNK_CHARS = 500        # Cartesia max per request
 MAX_TTS_TEXT_CHARS = 2000        # Safety cap
+TTS_CACHE_MAX_FILES = int(os.environ.get("LEXA_TTS_CACHE_MAX_FILES", "512"))
+TTS_CACHE_MAX_MB = int(os.environ.get("LEXA_TTS_CACHE_MAX_MB", "256"))
+TTS_CACHE_MAX_AGE_DAYS = int(os.environ.get("LEXA_TTS_CACHE_MAX_AGE_DAYS", "14"))

@@ -9,6 +9,7 @@ Text chunking at sentence boundaries for long responses.
 """
 
 import re
+import time
 import logging
 import hashlib
 import asyncio
@@ -22,6 +23,7 @@ from voice.config import (
     ELEVENLABS_API_BASE, ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL,
     ELEVENLABS_STABILITY, ELEVENLABS_SIMILARITY, ELEVENLABS_STYLE,
     MAX_TTS_CHUNK_CHARS, MAX_TTS_TEXT_CHARS, TTS_PROVIDER_ORDER,
+    TTS_CACHE_MAX_AGE_DAYS, TTS_CACHE_MAX_FILES, TTS_CACHE_MAX_MB,
 )
 
 logger = logging.getLogger("lexa.tts")
@@ -155,6 +157,113 @@ def _provider_cache_path(text: str, provider: str) -> tuple[str, str]:
     cache_input = f"{text}|{_provider_cache_signature(provider)}".encode()
     text_hash = hashlib.sha256(cache_input).hexdigest()[:24]
     return text_hash, str(AUDIO_CACHE_DIR / f"tts_{text_hash}{ext}")
+
+
+def _cache_files() -> list[Path]:
+    try:
+        AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        return [path for path in AUDIO_CACHE_DIR.glob("tts_*.*") if path.is_file()]
+    except OSError as exc:
+        logger.warning(f"TTS cache scan failed: {exc}")
+        return []
+
+
+def _cache_entries(files: list[Path] | None = None) -> list[tuple[Path, float, int]]:
+    entries: list[tuple[Path, float, int]] = []
+    source = files if files is not None else _cache_files()
+    for path in source:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        entries.append((path, stat.st_mtime, stat.st_size))
+    return entries
+
+
+def _normalize_protected_paths(paths: set[str | Path] | None) -> set[Path]:
+    return {Path(path).resolve() for path in (paths or ())}
+
+
+def _unlink_cache_file(path: Path, protected: set[Path] | None = None) -> bool:
+    if protected and path.resolve() in protected:
+        return False
+    try:
+        path.unlink()
+        return True
+    except OSError as exc:
+        logger.warning(f"TTS cache delete failed for {path}: {exc}")
+        return False
+
+
+def _cache_summary_from_entries(entries: list[tuple[Path, float, int]]) -> dict:
+    total_bytes = sum(size for _, _, size in entries)
+    oldest_mtime = min((mtime for _, mtime, _ in entries), default=None)
+    oldest_age_days = 0.0
+    if oldest_mtime is not None:
+        oldest_age_days = round(max(0.0, time.time() - oldest_mtime) / 86400, 2)
+    return {
+        "files": len(entries),
+        "bytes": total_bytes,
+        "mb": round(total_bytes / (1024 * 1024), 2),
+        "oldest_age_days": oldest_age_days,
+        "max_files": TTS_CACHE_MAX_FILES,
+        "max_mb": TTS_CACHE_MAX_MB,
+        "max_age_days": TTS_CACHE_MAX_AGE_DAYS,
+    }
+
+
+def _cache_summary() -> dict:
+    return _cache_summary_from_entries(_cache_entries())
+
+
+def _prune_cache(
+    *,
+    max_files: int = TTS_CACHE_MAX_FILES,
+    max_age_days: int = TTS_CACHE_MAX_AGE_DAYS,
+    max_mb: int = TTS_CACHE_MAX_MB,
+    protected: set[str | Path] | None = None,
+) -> dict:
+    protected_paths = _normalize_protected_paths(protected)
+    entries = _cache_entries()
+    removed = 0
+    now = time.time()
+
+    if max_age_days > 0:
+        max_age_s = max_age_days * 86400
+        kept: list[tuple[Path, float, int]] = []
+        for entry in entries:
+            path, mtime, _ = entry
+            if now - mtime > max_age_s and _unlink_cache_file(path, protected_paths):
+                removed += 1
+            else:
+                kept.append(entry)
+        entries = kept
+
+    max_bytes = max_mb * 1024 * 1024 if max_mb > 0 else 0
+    total_bytes = sum(size for _, _, size in entries)
+    remaining = sorted(entries, key=lambda item: item[1])
+
+    while remaining:
+        over_file_limit = max_files > 0 and len(remaining) > max_files
+        over_size_limit = max_bytes > 0 and total_bytes > max_bytes
+        if not over_file_limit and not over_size_limit:
+            break
+
+        deleted_index = None
+        for index, (path, _, size) in enumerate(remaining):
+            if _unlink_cache_file(path, protected_paths):
+                removed += 1
+                total_bytes -= size
+                deleted_index = index
+                break
+
+        if deleted_index is None:
+            break
+        remaining.pop(deleted_index)
+
+    summary = _cache_summary_from_entries(remaining)
+    summary["removed_files"] = removed
+    return summary
 
 
 async def _speak_with_provider(provider: str, text: str, target: str) -> str:
@@ -396,11 +505,15 @@ async def speak_async(text: str, output_path: str = "") -> str:
     Fallback chain is provider-locked per response to avoid mixed voices."""
     if not text or not text.strip():
         raise ValueError("Text darf nicht leer sein.")
+    text = text.strip()
+    if len(text) > MAX_TTS_TEXT_CHARS:
+        raise ValueError(f"Text darf maximal {MAX_TTS_TEXT_CHARS} Zeichen lang sein.")
 
     providers = _ordered_tts_providers()
     if not providers:
         raise RuntimeError("No TTS provider available")
 
+    _prune_cache()
     chunks = _chunk_text(text)
     errors: list[str] = []
 
@@ -413,8 +526,12 @@ async def speak_async(text: str, output_path: str = "") -> str:
 
         try:
             if len(chunks) == 1 or provider == "sapi":
-                return await _speak_single(text if provider == "sapi" else chunks[0], target, provider)
-            return await _speak_multi(chunks, text_hash, target, text, provider)
+                result = await _speak_single(text if provider == "sapi" else chunks[0], target, provider)
+            else:
+                result = await _speak_multi(chunks, text_hash, target, text, provider)
+            if not output_path:
+                _prune_cache(protected={result})
+            return result
         except Exception as e:
             errors.append(f"{provider}: {e}")
             logger.warning(f"TTS provider {provider} failed for full response: {e}")
@@ -656,6 +773,7 @@ def get_tts_status() -> dict:
     el_key = _get_key("elevenlabs")
     sapi_available = _sapi_available()
     provider_order = _ordered_tts_providers()
+    cache = _cache_summary()
 
     # ElevenLabs is primary when enabled + key available (matches _speak_single order)
     primary = provider_order[0] if provider_order else "none"
@@ -680,12 +798,15 @@ def get_tts_status() -> dict:
         "ready": bool(openai_key) or bool(cartesia_key) or bool(el_key) or sapi_available,
         "voice_consistency": "provider_locked_per_response",
         "cache_dir": str(AUDIO_CACHE_DIR),
+        "cache": cache,
+        "cache_files": cache["files"],
+        "cache_mb": cache["mb"],
     }
 
 
 def clear_cache():
     count = 0
-    for f in AUDIO_CACHE_DIR.glob("tts_*.*"):
-        f.unlink()
-        count += 1
+    for f in _cache_files():
+        if _unlink_cache_file(f):
+            count += 1
     logger.info(f"TTS cache cleared ({count} files)")
