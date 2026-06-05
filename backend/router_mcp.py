@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.agent_protocol import redacted_summary
 from backend.config import MCP_ENABLED, MCP_CALL_TIMEOUT
-from backend.security import check_rate_limit, audit_log
+from backend.security import audit_error_details, check_rate_limit, audit_log
 from backend.mcp_registry import mcp_registry, MCPError
 
 logger = logging.getLogger("lexa.router_mcp")
@@ -26,6 +28,15 @@ router = APIRouter(prefix="/mcp", tags=["mcp"])
 
 # Allowed server name pattern (alphanumeric + hyphens + underscores)
 _VALID_NAME_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+_LOCAL_PATH_RE = re.compile(
+    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
+)
+
+
+def _client_safe_mcp_error(value: object, *, max_chars: int = 220) -> str:
+    text = redacted_summary(str(value or ""), max_chars=max_chars)
+    text = _LOCAL_PATH_RE.sub("[local-path-redacted]", text)
+    return text or "MCP request failed"
 
 
 def _validate_server_name(name: str) -> str:
@@ -84,8 +95,8 @@ async def connect_server(name: str):
         }
     except MCPError as e:
         logger.warning(f"MCP connect failed for '{name}': {e}")
-        audit_log("mcp", "connect_error", f"server={name} error={e}")
-        raise HTTPException(status_code=502, detail=str(e))
+        audit_log("mcp", "connect_error", f"server={name} {audit_error_details(e)}")
+        raise HTTPException(status_code=502, detail=_client_safe_mcp_error(e))
     except Exception as e:
         logger.error(f"MCP connect unexpected error for '{name}': {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="MCP connection failed")
@@ -180,8 +191,8 @@ async def call_server_tool(name: str, req: ToolCallRequest):
 
     except MCPError as e:
         logger.warning(f"MCP tool call failed: {name}/{req.tool}: {e}")
-        audit_log("mcp", "call_tool_error", f"server={name} tool={req.tool} error={e}")
-        raise HTTPException(status_code=502, detail=str(e))
+        audit_log("mcp", "call_tool_error", f"server={name} tool={req.tool} {audit_error_details(e)}")
+        raise HTTPException(status_code=502, detail=_client_safe_mcp_error(e))
     except asyncio.TimeoutError:
         audit_log("mcp", "call_tool_timeout", f"server={name} tool={req.tool}")
         raise HTTPException(
