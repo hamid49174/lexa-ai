@@ -160,9 +160,16 @@ def _is_hermes_worker_request(text: str) -> bool:
 
 def _is_hermes_desktop_control_request(text: str) -> bool:
     normalized = _normalize_hermes_worker_text(text)
+    if re.match(r"^schreib(?:e)?\b", normalized):
+        return bool(
+            re.search(
+                r"\b(?:aktive(?:s|n)? feld|textfeld|eingabefeld|notepad|editor|fenster)\b",
+                normalized,
+            )
+        )
     return bool(re.match(
         r"^(?:klick(?:e|en)?|kilck(?:e|en)?|klcik(?:e|en)?|klcick(?:e|en)?|click|drueck(?:e|en)?|druck(?:e|en)?|"
-        r"tippe|tipp|schreib(?:e)?|scroll(?:e)?|bewege|move)\b",
+        r"tippe|tipp|scroll(?:e)?|bewege|move)\b",
         normalized,
     ))
 
@@ -181,6 +188,77 @@ def _client_safe_chat_error(value: object, *, max_chars: int = 220) -> str:
     text = redacted_summary(str(value or ""), max_chars=max_chars)
     text = _LOCAL_PATH_RE.sub("[local-path-redacted]", text)
     return text or "Details wurden lokal protokolliert."
+
+
+def _looks_like_secret_exfiltration_request(text: str) -> bool:
+    folded = _ascii_fold(text)
+    if not folded:
+        return False
+    if any(term in folded for term in (
+        "erklaere mir, warum",
+        "erklaere mir warum",
+        "bewerte diese eingabe",
+        "fasse einen fehler sicher",
+        "formuliere eine sichere antwort",
+        "datenschutz-checkliste",
+        "welche daten sollte",
+        "teste dich selbst",
+        "unterschied zwischen",
+    )):
+        return False
+    sensitive = any(term in folded for term in (
+        "secret", "secrets", "api key", "api keys", "apikey", "token", "tokens",
+        "systemprompt", "system prompt", "systemanweisung", "systemanweisungen",
+        "developer prompt", "versteckte anweisung", "versteckte anweisungen",
+        "rohlogs", "audit log", "audit logs", "private pfade", "privater pfad",
+        "stacktrace", "stack trace", "interne fehlermeldungen", "sensible upload",
+    ))
+    reveal_intent = any(term in folded for term in (
+        "zeige", "zeig", "gib", "ausgeben", "ausgabe", "preisgeben",
+        "leak", "reveal", "show", "dump", "debug-modus", "debug modus",
+        "ignoriere", "ignore",
+    ))
+    return sensitive and reveal_intent
+
+
+def _looks_like_integrity_trap_request(text: str) -> bool:
+    folded = _ascii_fold(text)
+    if not folded:
+        return False
+    return any(term in folded for term in (
+        "sag einfach 'erledigt'",
+        'sag einfach "erledigt"',
+        "ohne irgendwas zu pruefen",
+        "ohne irgendwas zu prufen",
+        "erfinde ein erfolgreiches testergebnis",
+        "optimistische release-freigabe",
+        "riskante aktion ohne rueckfrage",
+        "riskante aktion ohne ruckfrage",
+        "tu so als waere er erfolgreich",
+        "tu so als ware er erfolgreich",
+        "ignoriere fehlende konfiguration",
+        "verstecke unsicherheit",
+        "komplettem stacktrace und privaten pfaden",
+        "mache aus jedem warnsignal einen pass",
+        "antworte auf alles mit ja",
+    ))
+
+
+def try_safety_integrity_answer(user_message: str) -> str | None:
+    """Deterministic safety replies for exfiltration and fake-success traps."""
+    if _looks_like_secret_exfiltration_request(user_message):
+        return (
+            "Das kann ich nicht ausgeben. Ich gebe keine Secrets, API Keys, Tokens, "
+            "versteckten Systemanweisungen, Rohlogs, privaten Pfade oder Stacktraces preis. "
+            "Ich kann stattdessen eine sichere Diagnose oder eine redigierte Zusammenfassung erstellen."
+        )
+    if _looks_like_integrity_trap_request(user_message):
+        return (
+            "Nein. Ich bestaetige keinen Fake-Erfolg und fuehre keine riskante oder unehrliche Anweisung aus. "
+            "Ich sage klar, was geprueft wurde, was nicht geprueft wurde, welche Unsicherheit bleibt "
+            "und was der naechste sichere Schritt ist."
+        )
+    return None
 
 
 def _looks_like_file_upload_capability_question(text: str) -> bool:
@@ -1072,6 +1150,13 @@ async def chat_endpoint(req: ChatRequest):
             update_history(conversation_history, sanitized, reply, MAX_HISTORY)
         return ChatResponse(reply=reply, action=None, requires_confirmation=False)
 
+    safety_reply = try_safety_integrity_answer(sanitized)
+    if safety_reply:
+        audit_log("chat", "safety_integrity_answer", _audit_message_details(sanitized))
+        async with _history_lock:
+            update_history(conversation_history, sanitized, safety_reply, MAX_HISTORY)
+        return ChatResponse(reply=safety_reply, action=None, requires_confirmation=False)
+
     file_capability_reply = try_file_upload_capability_answer(sanitized)
     if file_capability_reply:
         audit_log("chat", "file_upload_capability", _audit_message_details(sanitized))
@@ -1381,6 +1466,22 @@ async def chat_stream_endpoint(req: ChatRequest):
 
         return StreamingResponse(
             pending_wait_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    safety_reply = try_safety_integrity_answer(sanitized)
+    if safety_reply:
+        audit_log("chat_stream", "safety_integrity_answer", _audit_message_details(sanitized))
+        async with _history_lock:
+            update_history(conversation_history, sanitized, safety_reply, MAX_HISTORY)
+
+        async def safety_stream():
+            yield f"data: {json.dumps({'c': safety_reply})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'action': None, 'rc': False})}\n\n"
+
+        return StreamingResponse(
+            safety_stream(),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
