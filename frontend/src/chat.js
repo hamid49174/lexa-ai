@@ -1583,6 +1583,7 @@ async function sendMessage() {
     const decoder = new TextDecoder();
     let buffer = "";
     let streamError = null;
+    let streamEventError = "";
     let streamStoppedByUser = false;
     let streamTimedOut = false;
     const streamStart = Date.now();
@@ -1590,11 +1591,15 @@ async function sendMessage() {
     const handleStreamData = (data) => {
       if (!data) return;
       if (data.c) { fullText += data.c; scheduleStreamRender(); }
+      if (data.error) {
+        streamEventError = chatStreamClientErrorText(data.error, t("chat.connectionLostRetry"));
+        streamError = streamError || new Error("backend_stream_error_event");
+      }
       if (data.done) {
         actionData = data.action;
         requiresConfirmation = data.rc;
         if (data.reply && !fullText) fullText = data.reply;
-        streamError = null;
+        if (!streamEventError) streamError = null;
       }
     };
     try {
@@ -1643,13 +1648,16 @@ async function sendMessage() {
       if (streamStoppedByUser || streamTimedOut || streamError) {
         const warn = document.createElement("span");
         warn.className = "stream-warning";
-        warn.textContent = streamStoppedByUser ? t("chat.responseStopped") : "\u26A0 " + t("chat.connectionInterrupted");
+        warn.textContent = streamStoppedByUser ? t("chat.responseStopped") : "\u26A0 " + (streamEventError || t("chat.connectionInterrupted"));
         textEl.appendChild(warn);
       }
     } else if (streamStoppedByUser) {
       textEl.textContent = t("chat.responseStopped");
     } else if (streamTimedOut) {
       textEl.textContent = t("chat.connectionTimeout");
+    } else if (streamEventError) {
+      fullText = streamEventError;
+      renderFormattedMessage(textEl, fullText);
     } else if (streamError) {
       textEl.textContent = t("chat.connectionLostRetry");
     } else {

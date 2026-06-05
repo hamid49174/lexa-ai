@@ -31,3 +31,14 @@ function parseChatStreamDataLine(line) {
     return null;
   }
 }
+
+function chatStreamClientErrorText(value, fallback = "") {
+  const raw = String(value || "").replace(/\s+/g, " ").trim();
+  const base = raw || String(fallback || "").replace(/\s+/g, " ").trim();
+  if (!base) return "";
+  const redacted = base
+    .replace(/[A-Za-z]:[\\/][^\s"'<>|)]+/g, "[local-path-redacted]")
+    .replace(/(^|\s)\/(?:Users|home|tmp|var|etc)\/[^\s"'<>|)]+/g, "$1[local-path-redacted]");
+  if (redacted.length <= 220) return redacted;
+  return redacted.slice(0, 217).trimEnd() + "...";
+}

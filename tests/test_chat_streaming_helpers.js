@@ -59,5 +59,17 @@ assert("data parser logs malformed JSON without throwing", warnings.length === 1
 assert("data parser redacts malformed raw stream content by default", warnings[0][2]?.rawLength === "{not-json}".length && !JSON.stringify(warnings).includes("not-json"), JSON.stringify(warnings));
 assert("stream debug raw preview is opt-in", helperSrc.includes("function chatStreamDebugEnabled") && helperSrc.includes("LEXA_DEBUG_STREAM") && helperSrc.includes("rawPreview") && !helperSrc.includes('console.warn("SSE parse error:", e, "raw:", raw)'));
 
+const winPathError = context.chatStreamClientErrorText("Provider failed at C:\\Users\\admin\\secret\\trace.log");
+assert("client stream error redacts Windows local paths", winPathError === "Provider failed at [local-path-redacted]", winPathError);
+
+const unixPathError = context.chatStreamClientErrorText("Provider failed at /Users/admin/private/key.pem");
+assert("client stream error redacts Unix local paths", unixPathError === "Provider failed at [local-path-redacted]", unixPathError);
+
+const fallbackError = context.chatStreamClientErrorText("", "Backend nicht erreichbar");
+assert("client stream error uses compact fallback", fallbackError === "Backend nicht erreichbar", fallbackError);
+
+const longError = context.chatStreamClientErrorText("x".repeat(260));
+assert("client stream error caps long messages", longError.length === 220 && longError.endsWith("..."), String(longError.length));
+
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

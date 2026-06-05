@@ -280,6 +280,24 @@ async function main() {
         })),
       );
 
+      const backendErrorEvent = await submitScenario(
+        "backend-error-event",
+        "Backend SSE error smoke",
+        () => responseForStream(streamFromParts(splitEvery(
+          sse({ error: "Provider nicht erreichbar in C:\\\\Users\\\\admin\\\\secret\\\\trace.log" }),
+          [4, 7, 2, 13],
+        ))),
+      );
+
+      const backendPartialErrorEvent = await submitScenario(
+        "backend-partial-error-event",
+        "Backend partial SSE error smoke",
+        () => responseForStream(streamFromParts(splitEvery(
+          sse({ c: "Partial backend answer" }) + sse({ error: "Provider stream failed at /Users/admin/private/key.pem" }),
+          [8, 3, 19, 1],
+        ))),
+      );
+
       const userAbort = await submitScenario(
         "user-abort",
         "Abort stream smoke",
@@ -313,7 +331,7 @@ async function main() {
 
       window.fetch = originalFetch;
       window.playTTS = originalTts;
-      return { chunkBoundary, malformedNoFinal, finalNoNewline, streamError, userAbort, timeoutBeforeResponse };
+      return { chunkBoundary, malformedNoFinal, finalNoNewline, streamError, backendErrorEvent, backendPartialErrorEvent, userAbort, timeoutBeforeResponse };
     })();
   `);
 
@@ -340,6 +358,16 @@ async function main() {
   console.log("\nStreaming error recovery:");
   assert("stream read error keeps partial answer and adds safe warning", interrupted.waitOk === true && /Partial answer before stream failure/.test(interrupted.text || "") && /simulated_stream_failure_secret_detail/.test(interrupted.text || "") === false && /simulated_stream_failure_secret_detail/.test(interrupted.html || "") === false && (interrupted.warningText || "").includes(interrupted.expected?.interrupted || "__missing__"), JSON.stringify(interrupted));
   assert("stream read error recovers controls without duplicate assistant messages", interrupted.sendEnabled === true && interrupted.inputCleared === true && interrupted.loading === false && interrupted.systemMessageCount === 1, JSON.stringify(interrupted));
+
+  const backendError = result.backendErrorEvent || {};
+  console.log("\nBackend SSE error events:");
+  assert("backend SSE error event is surfaced to the user", backendError.waitOk === true && /Provider nicht erreichbar/.test(backendError.text || ""), JSON.stringify(backendError));
+  assert("backend SSE error event redacts local paths", !/Users[\\/]admin|secret|trace\.log/i.test(backendError.text || "") && !/Users[\\/]admin|secret|trace\.log/i.test(backendError.html || ""), JSON.stringify(backendError));
+  assert("backend SSE error event recovers composer controls", backendError.sendEnabled === true && backendError.inputCleared === true && backendError.loading === false && backendError.systemMessageCount === 1, JSON.stringify(backendError));
+
+  const partialBackendError = result.backendPartialErrorEvent || {};
+  assert("backend SSE error after partial text keeps answer and warning", partialBackendError.waitOk === true && /Partial backend answer/.test(partialBackendError.text || "") && /Provider stream failed/.test(partialBackendError.warningText || ""), JSON.stringify(partialBackendError));
+  assert("backend SSE partial error redacts local paths", !/Users[\\/]admin|private|key\.pem/i.test(partialBackendError.text || "") && !/Users[\\/]admin|private|key\.pem/i.test(partialBackendError.html || ""), JSON.stringify(partialBackendError));
 
   const aborted = result.userAbort || {};
   console.log("\nStreaming user abort:");
