@@ -54,6 +54,7 @@ assert(
   "safe IO helper disables fragile GPU paths before smoke windows load",
   helperSrc.includes("function hardenElectronSmokeRuntime")
     && helperSrc.includes("app.disableHardwareAcceleration")
+    && helperSrc.includes('appendSwitch("no-sandbox")')
     && helperSrc.includes('appendSwitch("disable-gpu")')
     && helperSrc.includes('appendSwitch("disable-gpu-compositing")')
     && helperSrc.includes("hardenElectronSmokeRuntime();")

@@ -116,6 +116,9 @@ function hardenElectronSmokeRuntime() {
   try {
     const { app } = require("electron");
     app.disableHardwareAcceleration?.();
+    // Smoke-only: some Windows CI/local hosts fail file:// renderer loads inside
+    // Chromium's process sandbox before the app code runs.
+    app.commandLine?.appendSwitch("no-sandbox");
     app.commandLine?.appendSwitch("disable-gpu");
     app.commandLine?.appendSwitch("disable-gpu-compositing");
     app.commandLine?.appendSwitch("disable-gpu-cache");
