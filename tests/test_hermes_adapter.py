@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import sys
 
 
@@ -495,6 +496,10 @@ def test_hermes_extension_status_reads_local_surfaces(monkeypatch, tmp_path):
     hermes_home = tmp_path / ".hermes"
     vendor_root = tmp_path / "vendor" / "hermes-agent"
     project_root = tmp_path / "project"
+    os_root = tmp_path / "OS"
+    mcp_index = os_root / "11_Integrations" / "MCP" / "os-mcp-server" / "dist" / "index.js"
+    mcp_index.parent.mkdir(parents=True)
+    mcp_index.write_text("console.log('mcp')", encoding="utf-8")
     (hermes_home / "skills" / "local-demo").mkdir(parents=True)
     (hermes_home / "skills" / "local-demo" / "SKILL.md").write_text("# Local Demo", encoding="utf-8")
     (hermes_home / "skills" / ".usage.json").write_text('{"local-demo":{"use_count":1}}', encoding="utf-8")
@@ -514,7 +519,18 @@ def test_hermes_extension_status_reads_local_surfaces(monkeypatch, tmp_path):
     (vendor_root / "plugins" / "memory" / "honcho" / "plugin.yaml").write_text("name: honcho\n", encoding="utf-8")
     project_root.mkdir()
     (project_root / "mcp_servers.json").write_text(
-        '{"servers":{"personal_os":{"command":"node","enabled":true}}}',
+        json.dumps({
+            "servers": {
+                "personal_os": {
+                    "command": sys.executable,
+                    "args": [str(mcp_index)],
+                    "env": {
+                        "PERSONAL_OS_ROOT": str(os_root),
+                    },
+                    "enabled": True,
+                }
+            }
+        }),
         encoding="utf-8",
     )
     (hermes_home / "config.yaml").write_text(
@@ -545,9 +561,68 @@ def test_hermes_extension_status_reads_local_surfaces(monkeypatch, tmp_path):
     assert status["counts"]["optionalSkills"] == 1
     assert status["counts"]["hermesMcpServers"] == 1
     assert status["counts"]["lexaMcpEnabled"] == 1
+    assert status["counts"]["lexaMcpReady"] >= 1
     assert status["counts"]["enabledPlugins"] == 1
     assert status["counts"]["cronJobs"] == 1
     assert status["setup"]["secretsRedacted"] is True
+
+
+def test_hermes_extension_status_uses_lexa_memory_and_mcp_bridge(monkeypatch, tmp_path):
+    import backend.hermes_adapter as hermes
+
+    hermes_home = tmp_path / ".hermes"
+    project_root = tmp_path / "project"
+    data_dir = tmp_path / "data"
+    os_root = tmp_path / "OS"
+    mcp_index = os_root / "11_Integrations" / "MCP" / "os-mcp-server" / "dist" / "index.js"
+    mcp_index.parent.mkdir(parents=True)
+    mcp_index.write_text("console.log('mcp')", encoding="utf-8")
+    hermes_home.mkdir()
+    project_root.mkdir()
+    data_dir.mkdir()
+    (hermes_home / "config.yaml").write_text(
+        "memory:\n  memory_enabled: true\n  user_profile_enabled: true\n",
+        encoding="utf-8",
+    )
+    (project_root / "mcp_servers.json").write_text(
+        json.dumps({
+            "servers": {
+                "personal_os": {
+                    "command": sys.executable,
+                    "args": [str(mcp_index)],
+                    "env": {
+                        "PERSONAL_OS_ROOT": str(os_root),
+                        "PERSONAL_OS_SDK_ROOT": str(os_root),
+                    },
+                    "enabled": True,
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+    db_path = data_dir / "lexa_memory.db"
+    with sqlite3.connect(db_path) as db:
+        for table in hermes._LEXA_MEMORY_TABLES:
+            db.execute(f"CREATE TABLE {table} (id INTEGER)")
+        db.execute("INSERT INTO memories (id) VALUES (1)")
+        db.execute("INSERT INTO conversations (id) VALUES (1)")
+        db.execute("INSERT INTO interactions (id) VALUES (1)")
+
+    monkeypatch.setattr(hermes, "HERMES_HOME_ROOT", hermes_home)
+    monkeypatch.setattr(hermes, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(hermes, "LEXA_DATA_DIR", data_dir)
+
+    status = hermes.get_hermes_extension_status({"available": True})
+    memory_area = next(area for area in status["areas"] if area["id"] == "memory")
+    mcp_area = next(area for area in status["areas"] if area["id"] == "mcp")
+
+    assert memory_area["healthState"] == "ready"
+    assert mcp_area["healthState"] == "ready"
+    assert memory_area["counts"]["lexaMemoryBridge"] == 1
+    assert memory_area["counts"]["lexaDurableRecords"] == 2
+    assert status["counts"]["lexaMemoryRecords"] == 3
+    assert status["counts"]["lexaMcpReady"] == 1
+    assert "console.log" not in str(status)
 
 
 def test_hermes_prompt_injects_bounded_obsidian_context(monkeypatch):

@@ -14,12 +14,14 @@ import json
 import importlib.util
 import shlex
 import shutil
+import sqlite3
 import subprocess
 import time
 import logging
 from pathlib import Path
 from typing import Any
 
+from backend.config import LEXA_DATA_DIR
 from backend.lexa_voice import LEXA_WORKER_VOICE_RULES
 from backend.obsidian_context import (
     build_obsidian_context_payload,
@@ -207,6 +209,15 @@ _LEXA_HERMES_CHAT_SURFACES = (
     "Lexa System Cockpit",
     "Telegram Lexa status commands",
 )
+_LEXA_MEMORY_TABLES = (
+    "notes",
+    "memories",
+    "interactions",
+    "routines",
+    "conversations",
+    "clipboard_entries",
+)
+_PERSONAL_OS_MCP_INDEX = Path("11_Integrations") / "MCP" / "os-mcp-server" / "dist" / "index.js"
 
 logger = logging.getLogger("lexa.hermes_adapter")
 
@@ -1300,6 +1311,60 @@ def _safe_json_file(path: Path) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def _lexa_memory_db_candidates() -> list[Path]:
+    candidates = [Path(LEXA_DATA_DIR) / "lexa_memory.db", PROJECT_ROOT / "lexa_memory.db"]
+    seen: set[str] = set()
+    result: list[Path] = []
+    for path in candidates:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
+
+
+def _safe_lexa_memory_snapshot() -> dict[str, Any]:
+    path = next((candidate for candidate in _lexa_memory_db_candidates() if candidate.exists()), _lexa_memory_db_candidates()[0])
+    snapshot = {
+        "path": str(path),
+        "exists": path.exists(),
+        "loaded": False,
+        "error": "",
+        "counts": {table: 0 for table in _LEXA_MEMORY_TABLES},
+        "totalRecords": 0,
+        "durableRecords": 0,
+    }
+    if not path.exists():
+        snapshot["error"] = "lexa_memory.db missing"
+        return snapshot
+
+    try:
+        uri = f"file:{path.resolve().as_posix()}?mode=ro"
+        with sqlite3.connect(uri, uri=True, timeout=0.25) as db:
+            for table in _LEXA_MEMORY_TABLES:
+                try:
+                    row = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                except sqlite3.Error:
+                    continue
+                snapshot["counts"][table] = int(row[0] or 0) if row else 0
+    except sqlite3.Error as exc:
+        snapshot["error"] = f"read-only sqlite failed: {exc}"
+        return snapshot
+    except OSError as exc:
+        snapshot["error"] = f"memory db path failed: {exc}"
+        return snapshot
+
+    snapshot["loaded"] = True
+    snapshot["totalRecords"] = sum(int(value or 0) for value in snapshot["counts"].values())
+    snapshot["durableRecords"] = (
+        int(snapshot["counts"].get("notes") or 0)
+        + int(snapshot["counts"].get("memories") or 0)
+        + int(snapshot["counts"].get("conversations") or 0)
+    )
+    return snapshot
+
+
 def _expand_hermes_path(value: Any) -> Path:
     text = str(value or "").strip()
     text = text.replace("${HERMES_HOME}", str(HERMES_HOME_ROOT))
@@ -1307,16 +1372,109 @@ def _expand_hermes_path(value: Any) -> Path:
     return Path(text)
 
 
-def _enabled_lexa_mcp_servers() -> tuple[int, int]:
+def _path_like_arg_exists(value: Any) -> bool | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    normalized = text.replace("\\", "/")
+    looks_like_path = (
+        "/" in normalized
+        or normalized.startswith(".")
+        or normalized.lower().endswith((".js", ".mjs", ".cjs", ".py", ".exe", ".cmd", ".ps1"))
+    )
+    if not looks_like_path:
+        return None
+    path = Path(text)
+    candidates = [path]
+    if not path.is_absolute():
+        candidates.append(PROJECT_ROOT / path)
+    return any(candidate.exists() for candidate in candidates)
+
+
+def _personal_os_mcp_index_ready(config: dict[str, Any]) -> bool:
+    args = config.get("args") if isinstance(config.get("args"), list) else []
+    for raw_arg in args:
+        text = str(raw_arg or "")
+        if text.replace("\\", "/").lower().endswith(str(_PERSONAL_OS_MCP_INDEX).replace("\\", "/").lower()):
+            path = Path(text)
+            if path.exists() or (not path.is_absolute() and (PROJECT_ROOT / path).exists()):
+                return True
+
+    env = config.get("env") if isinstance(config.get("env"), dict) else {}
+    for key in ("PERSONAL_OS_ROOT", "PERSONAL_OS_SDK_ROOT"):
+        root_text = str(env.get(key) or "").strip()
+        if root_text and (Path(root_text) / _PERSONAL_OS_MCP_INDEX).exists():
+            return True
+
+    root = _mcp_personal_os_root_candidate()
+    return bool(root and (root / _PERSONAL_OS_MCP_INDEX).exists())
+
+
+def _lexa_mcp_command_ready(name: str, config: dict[str, Any]) -> tuple[bool, str]:
+    command = str(config.get("command") or "").strip()
+    if not command:
+        return False, "missing command"
+
+    command_path = Path(command)
+    command_ready = command_path.exists() if command_path.is_absolute() else bool(shutil.which(command) or command_path.exists())
+    if not command_ready:
+        return False, "command not found"
+
+    if name == "personal_os":
+        if _personal_os_mcp_index_ready(config):
+            return True, "personal_os MCP index reachable"
+        return False, "personal_os MCP index missing"
+
+    args = config.get("args") if isinstance(config.get("args"), list) else []
+    path_checks = [_path_like_arg_exists(arg) for arg in args[:4]]
+    path_checks = [check for check in path_checks if check is not None]
+    if any(check is False for check in path_checks):
+        return False, "configured path arg missing"
+    return True, "command looks reachable"
+
+
+def _lexa_mcp_inventory() -> dict[str, Any]:
     config_path = PROJECT_ROOT / "mcp_servers.json"
+    inventory = {
+        "path": str(config_path),
+        "exists": config_path.exists(),
+        "loaded": False,
+        "total": 0,
+        "enabled": 0,
+        "ready": 0,
+        "servers": [],
+        "error": "",
+    }
     try:
         config = json.loads(config_path.read_text(encoding="utf-8", errors="replace"))
-    except (OSError, json.JSONDecodeError):
-        return 0, 0
+    except OSError as exc:
+        inventory["error"] = str(exc)
+        return inventory
+    except json.JSONDecodeError as exc:
+        inventory["error"] = f"json parse failed: {exc}"
+        return inventory
+
     servers = config.get("servers") if isinstance(config.get("servers"), dict) else {}
-    total = len(servers)
-    enabled = sum(1 for server in servers.values() if isinstance(server, dict) and server.get("enabled", True))
-    return enabled, total
+    inventory["loaded"] = True
+    inventory["total"] = len(servers)
+    for name, server in servers.items():
+        if not isinstance(server, dict):
+            continue
+        enabled = bool(server.get("enabled", True))
+        ready, detail = _lexa_mcp_command_ready(str(name), server) if enabled else (False, "disabled")
+        if enabled:
+            inventory["enabled"] += 1
+        if enabled and ready:
+            inventory["ready"] += 1
+        inventory["servers"].append({
+            "id": str(name),
+            "label": str(name),
+            "enabled": enabled,
+            "bridgeReady": bool(enabled and ready),
+            "detail": detail,
+            "mode": "http" if str(server.get("url") or "").strip() else "stdio",
+        })
+    return inventory
 
 
 def _known_plugin_keys(root: Path) -> set[str]:
@@ -1413,11 +1571,15 @@ def get_hermes_extension_status(status_info: dict[str, Any] | None = None) -> di
     memory_file_ready = _safe_file_size(memory_file) > 0
     user_file_ready = _safe_file_size(user_file) > 0
     memory_provider_count = len(_safe_dir_names(HERMES_VENDOR_ROOT / "plugins" / "memory"))
+    lexa_memory = _safe_lexa_memory_snapshot()
+    lexa_memory_bridge_ready = bool(lexa_memory.get("loaded") and int(lexa_memory.get("durableRecords") or 0) > 0)
     if not command_available:
         memory_state = "blocked"
     elif not memory_enabled and not user_profile_enabled:
         memory_state = "attention"
     elif memory_file_ready and (user_file_ready or not user_profile_enabled):
+        memory_state = "ready"
+    elif lexa_memory_bridge_ready:
         memory_state = "ready"
     elif user_file_ready:
         memory_state = "attention"
@@ -1430,47 +1592,66 @@ def get_hermes_extension_status(status_info: dict[str, Any] | None = None) -> di
         (
             f"Memory enabled={memory_enabled}, user profile enabled={user_profile_enabled}, "
             f"provider={memory_provider}, MEMORY.md={'present' if memory_file_ready else 'missing/empty'}, "
-            f"USER.md={'present' if user_file_ready else 'missing/empty'}."
+            f"USER.md={'present' if user_file_ready else 'missing/empty'}, "
+            f"Lexa memory bridge={'ready' if lexa_memory_bridge_ready else 'not ready'} "
+            f"({int(lexa_memory.get('durableRecords') or 0)} durable records)."
         ),
-        "Let Hermes create or import MEMORY.md, or configure an external memory provider if you want long-term recall.",
+        "Let Hermes create/import MEMORY.md or make sure Lexa memory has durable notes, memories or conversations.",
         counts={
             "localFiles": sum(1 for ready in (memory_file_ready, user_file_ready) if ready),
             "memoryProvidersBundled": memory_provider_count,
             "memoryBytes": _safe_file_size(memory_file),
             "userBytes": _safe_file_size(user_file),
+            "lexaMemoryBridge": 1 if lexa_memory_bridge_ready else 0,
+            "lexaMemoryRecords": int(lexa_memory.get("totalRecords") or 0),
+            "lexaDurableRecords": int(lexa_memory.get("durableRecords") or 0),
         },
         items=[
             {"id": "memory", "label": "MEMORY.md", "exists": memory_file.exists(), "bytes": _safe_file_size(memory_file)},
             {"id": "user", "label": "USER.md", "exists": user_file.exists(), "bytes": _safe_file_size(user_file)},
+            {
+                "id": "lexa-memory",
+                "label": "Lexa memory bridge",
+                "exists": bool(lexa_memory.get("exists")),
+                "ready": lexa_memory_bridge_ready,
+                "records": int(lexa_memory.get("totalRecords") or 0),
+                "durableRecords": int(lexa_memory.get("durableRecords") or 0),
+            },
         ],
     )
 
     hermes_mcp = config.get("mcp_servers") if isinstance(config.get("mcp_servers"), dict) else {}
-    lexa_mcp_enabled, lexa_mcp_total = _enabled_lexa_mcp_servers()
+    lexa_mcp = _lexa_mcp_inventory()
+    lexa_mcp_enabled = int(lexa_mcp.get("enabled") or 0)
+    lexa_mcp_total = int(lexa_mcp.get("total") or 0)
+    lexa_mcp_ready = int(lexa_mcp.get("ready") or 0)
     hermes_mcp_total = len(hermes_mcp)
     hermes_mcp_http = sum(1 for server in hermes_mcp.values() if isinstance(server, dict) and str(server.get("url") or "").strip())
     hermes_mcp_stdio = sum(1 for server in hermes_mcp.values() if isinstance(server, dict) and str(server.get("command") or "").strip())
-    mcp_state = "blocked" if not command_available else ("ready" if hermes_mcp_total else ("attention" if lexa_mcp_enabled else "attention"))
+    mcp_bridge_ready = lexa_mcp_ready > 0
+    mcp_state = "blocked" if not command_available else ("ready" if hermes_mcp_total or mcp_bridge_ready else "attention")
     mcp_area = _extension_area(
         "mcp",
         "MCP Servers",
         mcp_state,
         (
             f"Hermes MCP servers: {hermes_mcp_total} ({hermes_mcp_stdio} stdio, {hermes_mcp_http} HTTP). "
-            f"Lexa MCP servers: {lexa_mcp_enabled}/{lexa_mcp_total} enabled."
+            f"Lexa MCP bridge: {lexa_mcp_ready}/{lexa_mcp_enabled} enabled ready, {lexa_mcp_total} configured."
         ),
-        "Mirror the important Lexa MCP servers into Hermes config or expose a unified MCP bridge.",
+        "Mirror the important Lexa MCP servers into Hermes config or repair the Lexa MCP bridge.",
         counts={
             "hermesServers": hermes_mcp_total,
             "hermesStdio": hermes_mcp_stdio,
             "hermesHttp": hermes_mcp_http,
             "lexaServers": lexa_mcp_total,
             "lexaEnabled": lexa_mcp_enabled,
+            "lexaReady": lexa_mcp_ready,
+            "lexaBridge": 1 if mcp_bridge_ready else 0,
         },
         items=[
             {"id": name, "label": name, "mode": "http" if isinstance(server, dict) and server.get("url") else "stdio"}
             for name, server in list(hermes_mcp.items())[:8]
-        ],
+        ] + list(lexa_mcp.get("servers") or [])[:8],
     )
 
     plugins_cfg = _config_section(config, "plugins")
@@ -1538,6 +1719,10 @@ def get_hermes_extension_status(status_info: dict[str, Any] | None = None) -> di
         "optionalSkills": optional_skill_count,
         "hermesMcpServers": hermes_mcp_total,
         "lexaMcpEnabled": lexa_mcp_enabled,
+        "lexaMcpReady": lexa_mcp_ready,
+        "lexaMemoryBridge": 1 if lexa_memory_bridge_ready else 0,
+        "lexaMemoryRecords": int(lexa_memory.get("totalRecords") or 0),
+        "lexaDurableRecords": int(lexa_memory.get("durableRecords") or 0),
         "enabledPlugins": len(enabled_plugins),
         "cronJobs": cron_job_count,
         "kanbanReady": 1 if kanban_ready else 0,
