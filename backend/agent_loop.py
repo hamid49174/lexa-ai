@@ -432,13 +432,24 @@ _ORIGINAL_EXECUTE_TOOL = _execute_tool
 _EXECUTE_TOOL_ACCEPTS_PLAN_LENGTH = "plan_length" in inspect.signature(_execute_tool).parameters
 
 
+def _callable_accepts_plan_length(fn) -> bool:
+    try:
+        parameters = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return "plan_length" in parameters or any(
+        param.kind == inspect.Parameter.VAR_KEYWORD
+        for param in parameters.values()
+    )
+
+
 def _execute_tool_supports_plan_length(execute_tool) -> bool:
     if execute_tool is _ORIGINAL_EXECUTE_TOOL:
         return _EXECUTE_TOOL_ACCEPTS_PLAN_LENGTH
-    try:
-        return "plan_length" in inspect.signature(execute_tool).parameters
-    except (TypeError, ValueError):
-        return False
+    side_effect = getattr(execute_tool, "side_effect", None)
+    if side_effect is not None:
+        return _callable_accepts_plan_length(side_effect)
+    return _callable_accepts_plan_length(execute_tool)
 
 
 def _format_metric(value, suffix: str = "") -> str:
@@ -1138,63 +1149,99 @@ async def run_agent(
             started_at=time.time(),
         )
         run.steps.append(step)
-        yield {"type": "step_start", "step": step.to_dict()}
-        try:
-            exec_result = await asyncio.wait_for(
-                _execute_tool(action_name, params, plan_length=1),
-                timeout=AGENT_STEP_TIMEOUT,
+        ledger_action_id = f"step-{step_count}"
+        permission_for_step = is_command_allowed(action_name)
+        forced_step_blocked = False
+        if run.ledger is not None:
+            _append_ledger_action(
+                run.ledger,
+                action_id=ledger_action_id,
+                action_name=action_name,
+                params=params,
+                permission=permission_for_step,
             )
-        except asyncio.TimeoutError:
-            exec_result = {"success": False, "error": f"Timeout nach {AGENT_STEP_TIMEOUT}s"}
-            step.duration_ms = AGENT_STEP_TIMEOUT * 1000
-        else:
-            step.duration_ms = (time.time() - step.started_at) * 1000
+            if _agent_policy_enforce_enabled():
+                from backend.agent_protocol import validate_action_against_plan
 
-        if exec_result.get("needs_confirmation"):
-            step.status = StepStatus.NEEDS_CONFIRMATION
-            step.error = exec_result.get("error", "Bestaetigung noetig")
-            step.result = _format_tool_result(action_name, exec_result)
-            yield {"type": "step_blocked", "step": step.to_dict()}
-            run.status = "completed"
-            run.summary = (
-                f"Bestaetigung noetig fuer {action_name}. "
-                "Antworte kurz mit 'ja', wenn Lexa diese vorbereitete Aktion wirklich ausfuehren soll."
-            )
-            agent_messages.append({
-                "role": "user",
-                "content": f"[TOOL ERGEBNIS] {step.result}",
-            })
-        else:
-            if exec_result.get("success"):
-                step.status = StepStatus.SUCCESS
+                decision = validate_action_against_plan(run.ledger.actions[-1], run.ledger.plan, step_index=step_count)
+                if not decision.allowed:
+                    step.status = StepStatus.BLOCKED
+                    step.error = "Agent policy review required: " + "; ".join(decision.reasons)
+                    step.duration_ms = (time.time() - step.started_at) * 1000
+                    _append_ledger_verification(run.ledger, action_id=ledger_action_id, step=step)
+                    yield {"type": "step_blocked", "step": step.to_dict()}
+                    agent_messages.append({
+                        "role": "user",
+                        "content": f"[TOOL ERGEBNIS] {action_name}: Agent policy requires review.",
+                    })
+                    forced_step_blocked = True
+                    step_count += 1
+        if not forced_step_blocked:
+            yield {"type": "step_start", "step": step.to_dict()}
+            try:
+                execute_kwargs = {}
+                execute_tool = _execute_tool
+                if _execute_tool_supports_plan_length(execute_tool):
+                    execute_kwargs["plan_length"] = 1
+                exec_result = await asyncio.wait_for(
+                    execute_tool(action_name, params, **execute_kwargs),
+                    timeout=AGENT_STEP_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                exec_result = {"success": False, "error": f"Timeout nach {AGENT_STEP_TIMEOUT}s"}
+                step.duration_ms = AGENT_STEP_TIMEOUT * 1000
             else:
-                step.status = StepStatus.FAILED
-                step.error = exec_result.get("error", "Unbekannter Fehler")
-            step.result = _format_tool_result(action_name, exec_result)
-            yield {"type": "step_done", "step": step.to_dict()}
-            agent_messages.append({
-                "role": "user",
-                "content": f"[TOOL ERGEBNIS] {step.result}",
-            })
-            if action_name == "desktop_position" and exec_result.get("success"):
-                forced_direct_summary = _format_desktop_position_user_summary(exec_result.get("data", {}))
-            elif action_name == "desktop_engine_status" and exec_result.get("success"):
-                forced_direct_summary = _format_desktop_engine_status_user_summary(exec_result.get("data", {}))
-            elif action_name == "desktop_engine_observe" and exec_result.get("success"):
-                forced_direct_summary = _format_desktop_engine_observe_user_summary(exec_result.get("data", {}))
-            elif action_name == "ui_tree" and exec_result.get("success"):
-                forced_direct_summary = _format_ui_tree_user_summary(exec_result.get("data", {}))
-            elif action_name == "ui_find" and exec_result.get("success"):
-                forced_direct_summary = _format_ui_find_user_summary(exec_result.get("data", {}))
-            elif action_name == "hermes_desktop_task" and exec_result.get("success"):
-                forced_direct_summary = _format_hermes_desktop_task_user_summary(exec_result.get("data", {}))
-            elif (
-                action_name == "screen_read_text"
-                and exec_result.get("success")
-                and not _hermes_screen_text_needs_llm_followup(user_message)
-            ):
-                forced_direct_summary = _format_screen_read_text_user_summary(exec_result.get("data", {}))
-        step_count += 1
+                step.duration_ms = (time.time() - step.started_at) * 1000
+
+            if exec_result.get("needs_confirmation"):
+                step.status = StepStatus.NEEDS_CONFIRMATION
+                step.error = exec_result.get("error", "Bestaetigung noetig")
+                step.result = _format_tool_result(action_name, exec_result)
+                if run.ledger is not None:
+                    _append_ledger_verification(run.ledger, action_id=ledger_action_id, step=step)
+                yield {"type": "step_blocked", "step": step.to_dict()}
+                run.status = "completed"
+                run.summary = (
+                    f"Bestaetigung noetig fuer {action_name}. "
+                    "Antworte kurz mit 'ja', wenn Lexa diese vorbereitete Aktion wirklich ausfuehren soll."
+                )
+                agent_messages.append({
+                    "role": "user",
+                    "content": f"[TOOL ERGEBNIS] {step.result}",
+                })
+            else:
+                if exec_result.get("success"):
+                    step.status = StepStatus.SUCCESS
+                else:
+                    step.status = StepStatus.FAILED
+                    step.error = exec_result.get("error", "Unbekannter Fehler")
+                step.result = _format_tool_result(action_name, exec_result)
+                if run.ledger is not None:
+                    _append_ledger_verification(run.ledger, action_id=ledger_action_id, step=step)
+                yield {"type": "step_done", "step": step.to_dict()}
+                agent_messages.append({
+                    "role": "user",
+                    "content": f"[TOOL ERGEBNIS] {step.result}",
+                })
+                if action_name == "desktop_position" and exec_result.get("success"):
+                    forced_direct_summary = _format_desktop_position_user_summary(exec_result.get("data", {}))
+                elif action_name == "desktop_engine_status" and exec_result.get("success"):
+                    forced_direct_summary = _format_desktop_engine_status_user_summary(exec_result.get("data", {}))
+                elif action_name == "desktop_engine_observe" and exec_result.get("success"):
+                    forced_direct_summary = _format_desktop_engine_observe_user_summary(exec_result.get("data", {}))
+                elif action_name == "ui_tree" and exec_result.get("success"):
+                    forced_direct_summary = _format_ui_tree_user_summary(exec_result.get("data", {}))
+                elif action_name == "ui_find" and exec_result.get("success"):
+                    forced_direct_summary = _format_ui_find_user_summary(exec_result.get("data", {}))
+                elif action_name == "hermes_desktop_task" and exec_result.get("success"):
+                    forced_direct_summary = _format_hermes_desktop_task_user_summary(exec_result.get("data", {}))
+                elif (
+                    action_name == "screen_read_text"
+                    and exec_result.get("success")
+                    and not _hermes_screen_text_needs_llm_followup(user_message)
+                ):
+                    forced_direct_summary = _format_screen_read_text_user_summary(exec_result.get("data", {}))
+            step_count += 1
 
     if forced_direct_summary:
         run.status = "completed"

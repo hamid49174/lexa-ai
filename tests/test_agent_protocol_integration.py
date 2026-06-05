@@ -88,6 +88,46 @@ def test_agent_ledger_records_tool_action_and_verification(monkeypatch):
     assert "supersecretvalue" not in ledger_json
 
 
+def test_agent_ledger_records_forced_first_hermes_tool(monkeypatch):
+    import backend.ai_engine as ai_engine
+    import backend.agent_loop as agent_loop
+
+    monkeypatch.setenv("LEXA_AGENT_LEDGER", "1")
+
+    async def fake_execute_tool(action_name, params):
+        return {
+            "success": True,
+            "data": {
+                "x": 100,
+                "y": 200,
+                "screen_width": 1920,
+                "screen_height": 1080,
+            },
+        }
+
+    def forbidden_chat(*args, **kwargs):
+        raise AssertionError("desktop_position forced summary should not need LLM")
+
+    monkeypatch.setattr(agent_loop, "_execute_tool", fake_execute_tool)
+    monkeypatch.setattr(agent_loop, "is_command_allowed", lambda action_name: "allowed")
+    monkeypatch.setattr(ai_engine, "chat", forbidden_chat)
+
+    events = collect_agent_events(agent_loop.run_agent(
+        "/hermes zeig mir die aktuelle Mausposition und Bildschirmgroesse, aendere nichts.",
+        [],
+        worker="hermes",
+    ))
+    ledger = events[-1]["run"]["ledger"]
+
+    assert ledger["status"] == "completed"
+    assert ledger["actions"][0]["tool_name"] == "desktop_position"
+    assert ledger["actions"][0]["policy"]["selected_tool"] == "desktop_position"
+    assert ledger["actions"][0]["policy"]["arg_keys"] == []
+    assert ledger["verifications"][0]["action_id"] == ledger["actions"][0]["action_id"]
+    assert ledger["verifications"][0]["passed"] is True
+    assert events[-1]["run"]["summary"].startswith("Aktuelle Mausposition: X=100, Y=200")
+
+
 def test_agent_ledger_marks_high_risk_actions_as_confirmation_required():
     from backend.agent_loop import AgentRun, _append_ledger_action, _build_agent_run_ledger
 
