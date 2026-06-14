@@ -221,16 +221,32 @@ async function startVerifyAnswerFromMessage(btn) {
   if (btn?.disabled) return;
   if (LexaState.get("isLoading")) { showToast(t("chat.uploadBusy"), "warning"); return; }
   if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
-  const prompt = verifyAnswerPromptFromText(getMessagePersistText(btn?.closest(".message")));
-  if (!prompt) { showToast(t("chat.verifyAnswerEmpty"), "warning", 2000); return; }
+  const messageEl = btn?.closest(".message");
+  const answer = String(getMessagePersistText(messageEl) || "").trim();
+  if (!answer) { showToast(t("chat.verifyAnswerEmpty"), "warning", 2000); return; }
+  // Originalfrage als Suchquery (bessere Treffer); Backend faellt sonst auf den Antworttext zurueck.
+  const question = String(previousUserPromptForMessage(messageEl) || "").slice(0, 2000);
   showToast(t("chat.verifyAnswerStarted"), "info", 1800);
-  flashIconButton(btn, "\u2713", "?", 1800, t("chat.verifyAnswerStarted"));
   if (btn) {
     btn.disabled = true;
     btn.setAttribute("aria-busy", "true");
   }
+  addMessage(t("chat.verifyAnswerUserMessage"), "user");
   try {
-    await sendAgentMessage(prompt, { displayText: t("chat.verifyAnswerUserMessage") });
+    // Echte Quellen-Recherche ueber das Backend (Suche + Fetch + LLM-Pruefung).
+    const res = await window.lexa.verifyWithSources(answer, question);
+    let out = (res && res.brief) ? String(res.brief) : t("chat.verifyAnswerEmpty");
+    const sources = (res && Array.isArray(res.sources)) ? res.sources : [];
+    if (sources.length) {
+      // Kanonische Quellenliste aus den ECHTEN Daten (nicht aus Modell-URLs) als klickbare Links.
+      out += "\n\n**Quellen:**\n" + sources
+        .map((s, i) => `${i + 1}. [${String(s.title || s.url || "Quelle").slice(0, 120)}](${s.url})`)
+        .join("\n");
+    }
+    addMessage(out, "assistant");
+  } catch (e) {
+    console.warn("[Chat] verify-with-sources failed:", e?.message || e);
+    addMessage(t("chat.verifyAnswerEmpty"), "assistant");
   } finally {
     if (btn) {
       btn.disabled = false;

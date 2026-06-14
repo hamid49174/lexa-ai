@@ -906,6 +906,7 @@ if (isLexaSmokeMockAllowed()) {
     chat: async (message) => ({ response: `Mock: ${message || ""}`.trim() }),
     chatFile: async () => ({ response: "Mock file response" }),
     generateTitle: async (message = "") => runSmokeMock("generateTitle", [message], async () => ({ title: String(message || "Smoke Test").slice(0, 40) })),
+    verifyWithSources: async (answer = "", question = "") => runSmokeMock("verifyWithSources", [answer, question], async () => ({ brief: "Smoke: Pruefbericht (keine echte Recherche).", sources: [] })),
     aiStatus: async () => ({
       active_provider: "groq",
       groq: { available: true },
@@ -1945,6 +1946,21 @@ const lexaBridge = {
     } catch (e) {
       console.warn("[Preload] conversationExport failed:", e.message || e);
       return { text: null };
+    }
+  },
+
+  // Verify a Lexa answer against real web sources (search + fetch + LLM verification)
+  verifyWithSources: async (answer, question = "") => {
+    try {
+      const res = await fetchWithTimeout(`${API}/chat/verify-with-sources`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answer, question }),
+      }, 90000);
+      return res.json();
+    } catch (e) {
+      console.warn("[Preload] verifyWithSources failed:", e.message || e);
+      return { brief: "", sources: [], error: String(e.message || e) };
     }
   },
 
