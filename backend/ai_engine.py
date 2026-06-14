@@ -3882,6 +3882,8 @@ def chat(
 def chat_stream(
     user_message: str,
     conversation_history: Optional[list] = None,
+    system_extra: Optional[str] = None,
+    disable_tools: bool = False,
 ) -> Generator[str | dict, None, None]:
     """Yield text chunks OR a tool_call dict from streaming providers.
 
@@ -3891,23 +3893,30 @@ def chat_stream(
 
     For plain text responses, we yield string chunks as before.
     Uses shared retry logic with exponential backoff and model fallback.
+
+    system_extra: appended to the system prompt (e.g. live web sources for a
+      grounded answer). disable_tools: skip native function calling entirely
+      (used when the answer is already grounded and should be plain text).
     """
     selected_model = _get_selected_model_meta()
-    messages = _build_messages(user_message, conversation_history)
+    messages = _build_messages(user_message, conversation_history, system_extra=system_extra)
 
     # Get tools for native function calling
     tools = None
-    try:
-        from backend.config import TOOL_USE_ENABLED
-        if TOOL_USE_ENABLED:
-            from backend.tool_registry import get_tools_for_context
-            tool_context = _latest_user_context(user_message, conversation_history)
-            if _should_disable_tools_for_text_generation(tool_context):
-                logger.debug("Skipping stream tools for direct text/code generation request")
-            else:
-                tools = get_tools_for_context(tool_context, max_tools=20)
-    except Exception as e:
-        logger.warning(f"Tool registry unavailable for stream: {e}")
+    if disable_tools:
+        logger.debug("Stream tools disabled (web-grounded / forced text answer)")
+    else:
+        try:
+            from backend.config import TOOL_USE_ENABLED
+            if TOOL_USE_ENABLED:
+                from backend.tool_registry import get_tools_for_context
+                tool_context = _latest_user_context(user_message, conversation_history)
+                if _should_disable_tools_for_text_generation(tool_context):
+                    logger.debug("Skipping stream tools for direct text/code generation request")
+                else:
+                    tools = get_tools_for_context(tool_context, max_tools=20)
+        except Exception as e:
+            logger.warning(f"Tool registry unavailable for stream: {e}")
 
     full_text_parts: list[str] = []
     streamed = False

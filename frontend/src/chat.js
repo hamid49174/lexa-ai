@@ -1640,10 +1640,18 @@ async function sendMessage() {
     let streamEventError = "";
     let streamStoppedByUser = false;
     let streamTimedOut = false;
+    let webSources = [];
     const streamStart = Date.now();
     const STREAM_TIMEOUT_MS = 45000;
     const handleStreamData = (data) => {
       if (!data) return;
+      if (data.status === "web_search" && !fullText) {
+        textEl.textContent = "🔍 Ich durchsuche das Web …";
+      }
+      if (data.status === "web_search_empty" && !fullText) {
+        textEl.textContent = "🔍 Keine Web-Quellen gefunden – ich antworte aus meinem Wissen …";
+      }
+      if (Array.isArray(data.sources)) { webSources = data.sources; }
       if (data.c) { fullText += data.c; scheduleStreamRender(); }
       if (data.error) {
         streamEventError = chatStreamClientErrorText(data.error, t("chat.connectionLostRetry"));
@@ -1695,6 +1703,14 @@ async function sendMessage() {
     textEl.classList.remove("streaming-text");
     if (actionData && typeof chatActionDisplayReply === "function") {
       fullText = chatActionDisplayReply({ reply: fullText, action: actionData });
+    }
+    // Web-Grounding: echte, live abgerufene Quellen als klickbare Markdown-Liste
+    // anhaengen (rendert via chat_markdown als sichere externe <a>-Links).
+    if (fullText && webSources.length && !streamStoppedByUser && !streamTimedOut && !streamError) {
+      const list = webSources
+        .map((s, i) => `${i + 1}. [${(s.title || "").trim() || s.url}](${s.url})`)
+        .join("\n");
+      fullText += `\n\n---\n**🔍 Quellen (live aus dem Web):**\n${list}`;
     }
     if (fullText) {
       renderFormattedMessage(textEl, fullText);
