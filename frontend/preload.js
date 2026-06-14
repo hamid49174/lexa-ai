@@ -75,6 +75,7 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("chat", "medium", "write", "/chat"),
   bridgePolicy("chatFile", "medium", "write", "/chat/file"),
   bridgePolicy("generateTitle", "medium", "write", "/ai/title"),
+  bridgePolicy("verifyWithSources", "medium", "write", "/chat/verify-with-sources"),
   bridgePolicy("execute", "critical", "execute", "/companion/execute"),
   bridgePolicy("prepareCompanionExecute", "medium", "write", "/companion/execute/prepare", { audit: true }),
   bridgePolicy("executeWithConfirmation", "critical", "execute", "/companion/execute"),
