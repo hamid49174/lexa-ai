@@ -1624,6 +1624,81 @@ async def chat_file_endpoint(
             pass
 
 
+@router.post("/chat/files")
+async def chat_files_endpoint(
+    files: list[UploadFile] = File(...),
+    message: str = Form(""),
+):
+    """Analysiert MEHRERE Bilder zusammen in EINER Nachricht (Vision)."""
+    if not check_rate_limit("chat"):
+        raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
+    incoming = [f for f in (files or []) if f is not None]
+    if not incoming:
+        raise HTTPException(status_code=400, detail="Keine Dateien empfangen.")
+    if len(incoming) > 6:
+        incoming = incoming[:6]
+
+    image_bytes_list: list[bytes] = []
+    names: list[str] = []
+    for f in incoming:
+        safe_filename, _suffix = validate_chat_upload_filename(f.filename)
+        data = bytearray()
+        while True:
+            chunk = await f.read(65536)
+            if not chunk:
+                break
+            data.extend(chunk)
+            if len(data) > MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=413, detail=f"Datei zu gross (max {MAX_FILE_SIZE_MB} MB)."
+                )
+        raw = bytes(data)
+        if supported_image_signature(raw) is None:
+            raise HTTPException(status_code=400, detail="Mehrfach-Upload unterstuetzt nur Bilder.")
+        image_bytes_list.append(raw)
+        names.append(safe_filename)
+
+    user_msg = sanitize_input(message) if message else "Analysiere diese Bilder."
+
+    if not chat_file_vision_available():
+        audit_log("chat_files", "vision_provider_required", f"n={len(names)}")
+        return {
+            "status": "ok",
+            "reply": "Bildanalyse benoetigt einen Vision-Provider (Gemini-API-Key). "
+                     "Bitte Key hinterlegen, dann werte ich die Bilder aus.",
+            "action": None,
+            "requires_confirmation": False,
+            "analysis_status": "vision_provider_required",
+            "count": len(names),
+            "names": names,
+        }
+
+    try:
+        from backend.vision import analyze_images
+        reply = await analyze_images(image_bytes_list, user_msg, quality_mode=False)
+    except RuntimeError as e:
+        logger.warning("Multi-image vision unavailable: %s", e)
+        raise HTTPException(status_code=502, detail="Bildanalyse nicht verfuegbar.")
+    except Exception:
+        logger.exception("Multi-image vision analysis failed")
+        raise HTTPException(status_code=502, detail="Bildanalyse fehlgeschlagen. Bitte erneut versuchen.")
+
+    async with _history_lock:
+        update_history(
+            conversation_history, f"[{len(names)} Bilder] {user_msg}"[:2000], reply, MAX_HISTORY
+        )
+    audit_log("chat_files", "analyzed", f"n={len(names)}")
+    return {
+        "status": "ok",
+        "reply": reply,
+        "action": None,
+        "requires_confirmation": False,
+        "analysis_status": "analyzed",
+        "count": len(names),
+        "names": names,
+    }
+
+
 @router.post("/chat/stream")
 async def chat_stream_endpoint(req: ChatRequest):
     """Stream AI response via Server-Sent Events."""

@@ -475,6 +475,71 @@ def _analyze_image_sync(
     )
 
 
+def _analyze_multi_with_provider(
+    client,
+    model: str,
+    image_b64_urls: list[str],
+    prompt: str,
+    provider_name: str,
+    max_tokens: int = 2048,
+) -> Optional[str]:
+    """Sendet MEHRERE Bilder in einer Nachricht an einen Vision-Provider."""
+    try:
+        content = [{"type": "text", "text": prompt}]
+        for url in image_b64_urls:
+            content.append({"type": "image_url", "image_url": {"url": url}})
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": content}],
+            max_tokens=max_tokens,
+        )
+        if response and response.choices and len(response.choices) > 0:
+            result = response.choices[0].message.content or ""
+            if result:
+                logger.info(
+                    f"Multi-Vision via {provider_name}/{model} erfolgreich "
+                    f"({len(result)} Zeichen, {len(image_b64_urls)} Bilder)"
+                )
+                return result
+        logger.warning(f"Multi-Vision via {provider_name}: Leere Antwort")
+        return None
+    except Exception as e:
+        logger.warning(f"Multi-Vision via {provider_name}/{model} fehlgeschlagen: {e}")
+        return None
+
+
+def _analyze_images_sync(
+    images: list[bytes],
+    prompt: str,
+    quality_mode: bool = False,
+    max_tokens: int = 2048,
+) -> str:
+    """Analysiert MEHRERE Bilder zusammen (Gemini primaer, OpenAI Fallback)."""
+    urls = [_image_to_base64_url(b) for b in images]
+    gemini_model = GEMINI_MODEL_QUALITY if quality_mode else GEMINI_MODEL_FAST
+
+    gemini_client = _get_gemini_vision_client()
+    if gemini_client:
+        result = _analyze_multi_with_provider(
+            gemini_client, gemini_model, urls, prompt, "Gemini", max_tokens
+        )
+        if result:
+            return result
+
+    openai_client = _get_openai_vision_client()
+    if openai_client:
+        result = _analyze_multi_with_provider(
+            openai_client, OPENAI_MODEL_VISION, urls, prompt, "OpenAI", max_tokens
+        )
+        if result:
+            return result
+
+    raise RuntimeError(
+        "Kein Vision-Provider verfuegbar fuer Mehrfach-Bildanalyse. Bitte Gemini- oder "
+        "OpenAI-API-Key im Keyring speichern."
+    )
+
+
 # ══════════════════════════════════════════════════
 #  PUBLIC ASYNC API
 # ══════════════════════════════════════════════════
@@ -500,6 +565,18 @@ async def analyze_image(
     else:
         image_bytes = image_input
     return await asyncio.to_thread(_analyze_image_sync, image_bytes, prompt, quality_mode, max_tokens)
+
+
+async def analyze_images(
+    images: list[bytes],
+    prompt: str,
+    quality_mode: bool = False,
+    max_tokens: int = 2048,
+) -> str:
+    """Analysiert mehrere Bilder (Bytes) zusammen in einer Vision-Anfrage."""
+    return await asyncio.to_thread(
+        _analyze_images_sync, list(images), prompt, quality_mode, max_tokens
+    )
 
 
 async def analyze_screenshot(

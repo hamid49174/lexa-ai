@@ -1381,3 +1381,10 @@
   border-color: var(--accent);
   background: var(--accent);
 }
+
+/* Multiple file cards inside one sent message */
+.file-card-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

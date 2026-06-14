@@ -74,6 +74,7 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
 
   bridgePolicy("chat", "medium", "write", "/chat"),
   bridgePolicy("chatFile", "medium", "write", "/chat/file"),
+  bridgePolicy("chatFiles", "medium", "write", "/chat/files"),
   bridgePolicy("generateTitle", "medium", "write", "/ai/title"),
   bridgePolicy("verifyWithSources", "medium", "write", "/chat/verify-with-sources"),
   bridgePolicy("execute", "critical", "execute", "/companion/execute"),
@@ -906,6 +907,7 @@ if (isLexaSmokeMockAllowed()) {
     pomodoroAcknowledge: async () => ok(),
     chat: async (message) => ({ response: `Mock: ${message || ""}`.trim() }),
     chatFile: async () => ({ response: "Mock file response" }),
+    chatFiles: async () => ({ reply: "Mock files response" }),
     generateTitle: async (message = "") => runSmokeMock("generateTitle", [message], async () => ({ title: String(message || "Smoke Test").slice(0, 40) })),
     verifyWithSources: async (answer = "", question = "") => runSmokeMock("verifyWithSources", [answer, question], async () => ({ brief: "Smoke: Pruefbericht (keine echte Recherche).", sources: [] })),
     aiStatus: async () => ({
@@ -1470,6 +1472,16 @@ const lexaBridge = {
       body: formData,
     });
     return apiJson(res, "Chat file request failed");
+  },
+  chatFiles: async (files, message = "") => {
+    const formData = new FormData();
+    for (const f of files || []) formData.append("files", f);
+    formData.append("message", message);
+    const res = await fetchWithTimeout(`${API}/chat/files`, {
+      method: "POST",
+      body: formData,
+    }, 120000);
+    return apiJson(res, "Chat files request failed");
   },
 
   // Companion API

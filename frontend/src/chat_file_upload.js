@@ -82,64 +82,144 @@ async function handleFileUploadBatch(files) {
   }
 }
 
-// ── Staged attachment (ChatGPT-style): anhaengen -> Vorschau in der Eingabe ->
-// erst beim Senden zusammen mit dem Text abschicken. ────────────────────────────
-let _stagedUploadFile = null;
-function getStagedUploadFile() { return _stagedUploadFile; }
+// ── Staged attachments (ChatGPT-style): anhaengen -> Vorschauen in der Eingabe ->
+// erst beim Senden zusammen mit dem Text abschicken. Mehrere Bilder moeglich. ────
+let _stagedUploads = [];
+const MAX_STAGED_UPLOADS = 6;
+function getStagedUploads() { return _stagedUploads; }
 
 function handleAttachFiles(files) {
   const list = Array.from(files || []);
   if (!list.length) return;
-  if (list.length > 1) showToast("Es kann nur eine Datei angehängt werden — die erste wurde übernommen.", "warning", 2800);
-  stageFileUpload(list[0]);
-}
-
-function stageFileUpload(file) {
-  if (!file) return;
   const maxSize = 2 * 1024 * 1024;
-  if (file.size > maxSize) { showToast(t("toast.fileTooLarge"), "error"); return; }
-  _stagedUploadFile = file;
-  renderStagedUploadPreview(file);
+  let added = 0;
+  for (const file of list) {
+    if (!file) continue;
+    if (_stagedUploads.length >= MAX_STAGED_UPLOADS) {
+      showToast(`Maximal ${MAX_STAGED_UPLOADS} Dateien gleichzeitig.`, "warning", 2500);
+      break;
+    }
+    if (file.size > maxSize) { showToast(`${file.name}: zu groß (max 2 MB).`, "error"); continue; }
+    _stagedUploads.push(file);
+    added++;
+  }
+  if (!added) return;
+  renderStagedUploads();
   const input = document.getElementById("chat-input");
   if (input) input.focus();
   if (sendBtn && !LexaState.get("isLoading")) sendBtn.disabled = false;
 }
 
-function renderStagedUploadPreview(file) {
+function renderStagedUploads() {
   const container = document.querySelector(".sleek-input-container");
   if (!container) return;
   document.getElementById("chat-attachment-preview")?.remove();
+  if (!_stagedUploads.length) return;
   const wrap = document.createElement("div");
   wrap.id = "chat-attachment-preview";
   wrap.className = "chat-attachment-preview";
-  const card = buildFileUploadCard(file);
-  card.classList.add("attachment-staged-card");
-  const removeBtn = document.createElement("button");
-  removeBtn.type = "button";
-  removeBtn.className = "attachment-remove-btn";
-  removeBtn.setAttribute("aria-label", "Anhang entfernen");
-  removeBtn.title = "Anhang entfernen";
-  removeBtn.textContent = "✕";
-  removeBtn.addEventListener("click", clearStagedUpload);
-  card.appendChild(removeBtn);
-  wrap.appendChild(card);
+  _stagedUploads.forEach((file, index) => {
+    let card;
+    try {
+      card = buildFileUploadCard(file);
+    } catch (e) {
+      card = document.createElement("div");
+      card.className = "file-card";
+      card.textContent = file.name || "Datei";
+    }
+    card.classList.add("attachment-staged-card");
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "attachment-remove-btn";
+    removeBtn.setAttribute("aria-label", "Anhang entfernen");
+    removeBtn.title = "Anhang entfernen";
+    removeBtn.textContent = "✕";
+    removeBtn.addEventListener("click", () => removeStagedUpload(index));
+    card.appendChild(removeBtn);
+    wrap.appendChild(card);
+  });
   const pill = container.querySelector(".sleek-pill");
   container.insertBefore(wrap, pill || null);
 }
 
-function clearStagedUpload() {
-  _stagedUploadFile = null;
+function removeStagedUpload(index) {
+  if (index < 0 || index >= _stagedUploads.length) return;
+  _stagedUploads.splice(index, 1);
+  renderStagedUploads();
+}
+
+function clearStagedUploads() {
+  _stagedUploads = [];
   document.getElementById("chat-attachment-preview")?.remove();
 }
 
-// Called by sendMessage() when a file is staged: send the file with the typed
-// text as caption. handleFileUpload() reads chatInput.value and clears it.
-async function sendStagedUpload() {
-  const file = _stagedUploadFile;
-  if (!file) return;
-  _stagedUploadFile = null;
+// Called by sendMessage() when files are staged. One file -> single-upload path;
+// multiple files -> combined multi-image analysis in one turn.
+async function sendStagedUploads() {
+  const files = _stagedUploads.slice();
+  if (!files.length) return;
+  _stagedUploads = [];
   document.getElementById("chat-attachment-preview")?.remove();
-  await handleFileUpload(file);
+  if (files.length === 1) {
+    await handleFileUpload(files[0]);
+  } else {
+    await handleMultiFileUpload(files);
+  }
+}
+
+function addMultiFileUploadMessage(files, userMsg) {
+  addMessage(userMsg || "", "user");
+  const messages = chatMessages.querySelectorAll(".message.user-message");
+  const msg = messages[messages.length - 1];
+  const textEl = msg?.querySelector(".msg-text");
+  if (!textEl) return;
+  const grid = document.createElement("div");
+  grid.className = "file-card-grid";
+  files.forEach((file) => {
+    try { grid.appendChild(buildFileUploadCard(file)); } catch (e) { /* skip card */ }
+  });
+  if (textEl.firstChild) textEl.insertBefore(document.createElement("br"), textEl.firstChild);
+  textEl.insertBefore(grid, textEl.firstChild);
+}
+
+async function handleMultiFileUpload(files) {
+  if (LexaState.get("isLoading")) { showToast(t("chat.uploadBusy"), "warning"); return; }
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  if (!LexaState.get("currentConversationId")) {
+    try {
+      const result = await window.lexa.conversationCreate(t("chat.newChatTitle"));
+      if (!result?.id) { showToast(t("toast.createError"), "error"); return; }
+      LexaState.set("currentConversationId", result.id);
+      chatSetActiveConversationId(result.id);
+      await refreshConversationSidebar();
+    } catch (e) {
+      console.warn("[Chat] Failed to create conversation for multi upload:", e.message || e);
+      showToast(t("toast.createError"), "error");
+      return;
+    }
+  }
+  const userMsg = chatInput.value.trim();
+  if (!window._chatViewOpen && typeof toggleChatView === "function") toggleChatView();
+  addMultiFileUploadMessage(files, userMsg);
+  chatInput.value = ""; syncChatInputSize();
+  const isFirst = chatMessages.querySelectorAll(".user-message").length <= 1;
+  if (isFirst) autoTitleConversation(files[0]?.name || t("chat.newChatTitle"));
+  setFileUploadBusy(true); showTyping();
+  try {
+    const res = await window.lexa.chatFiles(files, userMsg || "");
+    if (res.detail) { addMessage(res.detail, "system"); showToast(t("toast.fileError"), "error"); }
+    else {
+      addMessage(res.reply || "Ich konnte die Bilder leider nicht auswerten.", "system", null, false);
+      playTTS(res.reply || "");
+    }
+  } catch (err) {
+    addMessage(t("chat.uploadErrorMsg", {error: err.message}), "system");
+    showToast(t("toast.uploadError"), "error");
+  } finally {
+    hideTyping();
+    saveFileUploadConversationSnapshot();
+    setFileUploadBusy(false);
+  }
 }
 
 function buildFileUploadIcon(ext) {
