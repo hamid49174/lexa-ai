@@ -573,14 +573,20 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
     editBtn.type = "button";
     editBtn.className = "msg-action-btn msg-edit-btn";
     setIconButton(editBtn, "\u270E", t("chat.editTooltip"));
-    editBtn.addEventListener("click", () => {
+    editBtn.addEventListener("click", async () => {
       const currentText = getMessagePersistText(msg);
+      const allMsgs = Array.from(chatMessages.querySelectorAll(".message"));
+      const idx = allMsgs.indexOf(msg);
+      const hasFollowing = idx >= 0 && allMsgs.slice(idx + 1).some(isPersistableChatMessage);
+      // Nicht-destruktiv: gibt es Nachrichten DANACH, wird in einen neuen Chat geforkt
+      // (Original bleibt vollstaendig erhalten). Letzte Nachricht -> in-place (kein Verlust).
+      if (hasFollowing && typeof forkConversationForEdit === "function") {
+        const forked = await forkConversationForEdit(allMsgs, idx, currentText);
+        if (forked) return;
+      }
       chatInput.value = currentText;
       syncChatInputSize();
       chatInput.focus();
-      // Remove this message and all messages after it
-      const allMsgs = Array.from(chatMessages.querySelectorAll(".message"));
-      const idx = allMsgs.indexOf(msg);
       if (idx >= 0) {
         for (let i = allMsgs.length - 1; i >= idx; i--) {
           allMsgs[i].remove();

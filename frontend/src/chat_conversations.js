@@ -192,6 +192,38 @@ async function newConversation() {
     setNewConversationControlsBusy(false);
   }
 }
+// Nicht-destruktives Bearbeiten: Konversation bis zur bearbeiteten Nachricht (exklusiv)
+// in einen neuen Chat forken; das Original bleibt vollstaendig erhalten.
+async function forkConversationForEdit(allMsgs, idx, editText) {
+  if (!LexaState.get("backendOnline")) return false;
+  const priorMessages = allMsgs.slice(0, idx)
+    .filter(isPersistableChatMessage)
+    .map((m) => ({
+      role: m.classList.contains("user-message") ? "user" : "assistant",
+      content: serializeMessageForStorage(m),
+    }))
+    .filter((m) => m.content);
+  try {
+    const created = await window.lexa.conversationCreate(t("chat.newChatTitle"));
+    if (!created?.id) return false;
+    if (priorMessages.length) {
+      await window.lexa.conversationUpdate(created.id, { messages: priorMessages });
+    }
+    const ok = await switchConversation(created.id, false);
+    if (!ok) return false;
+    if (typeof chatInput !== "undefined" && chatInput) {
+      chatInput.value = editText;
+      if (typeof syncChatInputSize === "function") syncChatInputSize();
+      chatInput.focus();
+    }
+    showToast("Bearbeitung in neuem Chat — Original bleibt erhalten", "info", 2800);
+    return true;
+  } catch (e) {
+    console.warn("[Chat] edit-fork failed:", e.message || e);
+    return false;
+  }
+}
+
 async function switchConversation(convId, notify = true) {
   // Already on this conversation: avoid an unnecessary reload (and the
   // associated backend roundtrips / full DOM rebuild) regardless of the
