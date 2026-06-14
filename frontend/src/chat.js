@@ -676,10 +676,13 @@ function renderStreamingFormatted(target, text) {
   // Live-Markdown waehrend des Streams: voller, sicherer DOM-Render + Cursor.
   // try/catch faengt unvollstaendiges Markdown (offene ```-Codeblocks) waehrend des Tippens ab.
   if (!target) return;
+  if (typeof setStreamingRenderMode === "function") setStreamingRenderMode(true);
   try {
     renderFormattedMessage(target, text, { math: false });
   } catch (e) {
     target.textContent = String(text || "");
+  } finally {
+    if (typeof setStreamingRenderMode === "function") setStreamingRenderMode(false);
   }
   const cursor = document.createElement("span");
   cursor.className = "streaming-cursor";

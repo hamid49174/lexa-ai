@@ -1,5 +1,11 @@
 /* Low-level chat markdown helpers loaded before chat.js. Keep this file free of module syntax. */
 
+// Waehrend des Token-Streams wird pro Tick neu gerendert. hljs.highlightElement ist teuer
+// und wurde so jeder Codeblock dutzendfach neu hervorgehoben (O(n^2)). Im Streaming-Modus
+// ueberspringen wir das Highlighting; der finale Render (Stream-Ende) highlightet einmal.
+let _lexaStreamingRender = false;
+function setStreamingRenderMode(on) { _lexaStreamingRender = !!on; }
+
 function splitChatLinkTarget(rawTarget) {
   // Trennt das CommonMark-Linkziel von einem optionalen Titel:
   // (url "titel") / (url 'titel') / (url (titel)). Ohne diese Trennung
@@ -162,7 +168,7 @@ function appendCodeBlock(parent, lang, codeText) {
   code.textContent = String(codeText || "").trim();
   // Syntax-Highlighting via vendored highlight.js. Arbeitet auf textContent (XSS-sicher);
   // setzt nur Klassen + von hljs erzeugtes, escaptes Markup. Fehler -> roher Code bleibt.
-  if (typeof hljs !== "undefined" && code.textContent) {
+  if (!_lexaStreamingRender && typeof hljs !== "undefined" && code.textContent) {
     try {
       if (safeLang && hljs.getLanguage(safeLang)) {
         code.className = "language-" + safeLang;
