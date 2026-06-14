@@ -1388,3 +1388,27 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* Click an image card to open it full size */
+.file-card-clickable { cursor: zoom-in; }
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.82);
+  opacity: 0;
+  transition: opacity .2s ease;
+  cursor: zoom-out;
+}
+.image-lightbox.open { opacity: 1; }
+.image-lightbox-img {
+  max-width: 92vw;
+  max-height: 92vh;
+  border-radius: 10px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+  object-fit: contain;
+}

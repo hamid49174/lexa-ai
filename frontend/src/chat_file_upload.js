@@ -134,7 +134,7 @@ function renderStagedUploads() {
     removeBtn.setAttribute("aria-label", "Anhang entfernen");
     removeBtn.title = "Anhang entfernen";
     removeBtn.textContent = "✕";
-    removeBtn.addEventListener("click", () => removeStagedUpload(index));
+    removeBtn.addEventListener("click", (e) => { e.stopPropagation(); removeStagedUpload(index); });
     card.appendChild(removeBtn);
     wrap.appendChild(card);
   });
@@ -243,15 +243,12 @@ function buildFileUploadPreview(file, ext) {
   img.alt = "";
   img.decoding = "async";
   img.setAttribute("aria-hidden", "true");
-  const revokePreviewUrl = () => {
-    if (!previewUrl) return;
-    URL.revokeObjectURL(previewUrl);
-    previewUrl = "";
-  };
-  img.addEventListener("load", revokePreviewUrl, { once: true });
+  // Keep the object URL alive so a click can open the full-size lightbox.
+  // (Revoked only on load error; minor per-session memory for a few images.)
+  img.dataset.fullSrc = previewUrl;
   img.addEventListener("error", () => {
-    revokePreviewUrl();
-    img.parentElement?.classList.remove("file-card-with-preview");
+    try { URL.revokeObjectURL(previewUrl); } catch (_) { /* noop */ }
+    img.parentElement?.classList.remove("file-card-with-preview", "file-card-clickable");
     img.replaceWith(buildFileUploadIcon(ext));
   }, { once: true });
   img.src = previewUrl;
@@ -265,8 +262,13 @@ function buildFileUploadCard(file) {
 
   const preview = buildFileUploadPreview(file, ext);
   if (preview) {
-    card.classList.add("file-card-with-preview");
+    card.classList.add("file-card-with-preview", "file-card-clickable");
     card.appendChild(preview);
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".attachment-remove-btn")) return;
+      const src = preview.dataset?.fullSrc || preview.src;
+      if (src) openImageLightbox(src);
+    });
   } else {
     card.appendChild(buildFileUploadIcon(ext));
   }
@@ -377,4 +379,41 @@ async function handleFileUpload(file) {
 function getFileIcon(ext) {
   const icons = { PY: "\u{1F40D}", JS: "\u{1F7E8}", TS: "\u{1F535}", HTML: "\u{1F310}", CSS: "\u{1F3A8}", JSON: "\u{1F4CB}", MD: "\u{1F4DD}", TXT: "\u{1F4C4}", CSV: "\u{1F4CA}", LOG: "\u{1F4DC}", PDF: "\u{1F4D5}", PNG: "\u{1F5BC}", JPG: "\u{1F5BC}", JPEG: "\u{1F5BC}", GIF: "\u{1F5BC}", SVG: "\u{1F5BC}", SQL: "\u{1F5C3}", XML: "\u{1F4C3}", YAML: "\u2699", YML: "\u2699" };
   return icons[ext] || "\u{1F4CE}";
+}
+
+// \u2500\u2500 Image lightbox: click a chat image card to view it full size \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+let _lightboxKeyHandler = null;
+function openImageLightbox(src) {
+  if (!src) return;
+  let overlay = document.getElementById("lexa-image-lightbox");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "lexa-image-lightbox";
+    overlay.className = "image-lightbox";
+    overlay.hidden = true;
+    const img = document.createElement("img");
+    img.className = "image-lightbox-img";
+    img.alt = "";
+    overlay.appendChild(img);
+    overlay.addEventListener("click", closeImageLightbox);
+    document.body.appendChild(overlay);
+  }
+  const img = overlay.querySelector(".image-lightbox-img");
+  if (img) img.src = src;
+  overlay.hidden = false;
+  void overlay.offsetWidth; // reflow so the fade-in transition runs
+  overlay.classList.add("open");
+  _lightboxKeyHandler = (e) => { if (e.key === "Escape") closeImageLightbox(); };
+  document.addEventListener("keydown", _lightboxKeyHandler);
+}
+
+function closeImageLightbox() {
+  const overlay = document.getElementById("lexa-image-lightbox");
+  if (!overlay) return;
+  overlay.classList.remove("open");
+  setTimeout(() => { if (!overlay.classList.contains("open")) overlay.hidden = true; }, 200);
+  if (_lightboxKeyHandler) {
+    document.removeEventListener("keydown", _lightboxKeyHandler);
+    _lightboxKeyHandler = null;
+  }
 }
