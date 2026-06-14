@@ -806,6 +806,7 @@
 
 .sleek-input-container {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   width: 100%;
@@ -1346,8 +1347,10 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  flex: 0 0 100%;
+  order: -1; /* always sit on its own line ABOVE the input pill */
   width: 100%;
-  margin: 0 0 8px;
+  margin: 0 0 4px;
   padding: 0 2px;
 }
 .attachment-staged-card {
