@@ -148,6 +148,9 @@ TOOL_USE_MAX_TOOLS = _env_int("LEXA_TOOL_USE_MAX_TOOLS", 40, minimum=1, maximum=
 AGENT_MAX_STEPS = _env_int("LEXA_AGENT_MAX_STEPS", 10, minimum=1, maximum=50)      # Max tool calls per agent turn
 AGENT_STEP_TIMEOUT = _env_int("LEXA_AGENT_STEP_TIMEOUT", 30, minimum=1, maximum=600)   # Seconds per step execution
 AGENT_CONFIRM_TIMEOUT = _env_int("LEXA_AGENT_CONFIRM_TIMEOUT", 300, minimum=1, maximum=3600)
+# Multi-step server-side read-tool loop in /chat/stream (each hop is a full LLM roundtrip;
+# kept low for free-API rate limits + latency). Lower than AGENT_MAX_STEPS by design.
+AGENT_STREAM_MAX_HOPS = _env_int("LEXA_AGENT_STREAM_MAX_HOPS", 4, minimum=1, maximum=8)
 
 # ── MCP — Model Context Protocol (Phase 47) ───
 MCP_ENABLED = _env_bool("LEXA_MCP_ENABLED", True)            # Enable MCP server integration

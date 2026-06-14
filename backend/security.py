@@ -95,6 +95,12 @@ _READ_ONLY_ACTIONS: frozenset[str] = frozenset({
     "window_list",
     "process_list",
     "memory_search",
+    "file_search",
+    "app_list",
+    "app_search",
+    "app_list_installed",
+    "wifi_status",
+    "brightness_get",
 })
 _READ_ONLY_PREFIXES: tuple[str, ...] = (
     "get_",
