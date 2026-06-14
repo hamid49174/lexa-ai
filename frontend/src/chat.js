@@ -306,9 +306,21 @@ function saveChatHistory() {
   } catch (e) { console.warn("[Chat] Failed to save chat history to volatile cache:", e.message || e); }
 }
 
+// Debounced Konversations-Speicherung: bündelt häufige Auslöser (Stream-Ende,
+// DOM-Mutationen) zu EINER Speicherung statt vieler PUTs. Geht durch die
+// serialisierte saveCurrentConversation-Kette (kein Last-Write-Wins).
+let _convSaveTimer = null;
+function scheduleConversationSave(delay = 1200) {
+  if (_convSaveTimer) clearTimeout(_convSaveTimer);
+  _convSaveTimer = setTimeout(() => {
+    _convSaveTimer = null;
+    if (typeof saveCurrentConversation === "function") saveCurrentConversation();
+  }, delay);
+}
+
 function persistChatAfterDomMutation() {
   saveChatHistory();
-  saveCurrentConversation();
+  scheduleConversationSave();
 }
 
 function clearRenderedChatMessages() {
@@ -316,23 +328,12 @@ function clearRenderedChatMessages() {
   chatMessages.querySelectorAll(".message").forEach((msg) => msg.remove());
 }
 
-// ── AUTO-SAVE CONVERSATION ────────────────────────
+// ── AUTO-SAVE CONVERSATION (Intervall-Sicherheitsnetz) ────────────────────────
+// Delegiert an die serialisierte Save-Kette statt eines eigenen, parallelen PUT.
 async function autoSaveConversation() {
-  const convId = LexaState.get("currentConversationId");
   if (_conversationSwitchInFlight > 0) return;
-  if (!convId || !LexaState.get("backendOnline") || !chatMessages) return;
-  try {
-    saveAgentRunMetaForConversation(convId);
-    const messages = [];
-    chatMessages.querySelectorAll(".message").forEach((msg) => {
-      if (!isPersistableChatMessage(msg)) return;
-      const text = getMessagePersistText(msg);
-      const role = msg.classList.contains("user-message") ? "user" : "assistant";
-      if (text) messages.push({ role, content: serializeMessageForStorage(msg) });
-    });
-    if (messages.length === 0) return;
-    await window.lexa.conversationUpdate(convId, { messages });
-  } catch (e) { console.warn("[Chat] Auto-save conversation failed:", e.message || e); }
+  if (!LexaState.get("currentConversationId") || !LexaState.get("backendOnline")) return;
+  return saveCurrentConversation();
 }
 
 // ── TIMER POLLING ─────────────────────────────────

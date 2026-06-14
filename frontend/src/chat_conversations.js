@@ -240,8 +240,25 @@ async function switchConversation(convId, notify = true) {
     _conversationSwitchInFlight = Math.max(0, _conversationSwitchInFlight - 1);
   }
 }
-async function saveCurrentConversation(options = null) {
+// Alle Speicherungen laufen durch diese Promise-Kette -> strikt serialisiert.
+// Verhindert das fruehere Last-Write-Wins (zwei parallele conversationUpdate-PUTs
+// konnten sich gegenseitig ueberschreiben -> Datenverlust). Awaiten liefert,
+// wenn DIESE Speicherung (und alle davor) durch sind. Sidebar-Refresh wurde
+// entfernt (lief pro Save -> Flackern); new/switch/delete refreshen selbst.
+let _convSaveChain = Promise.resolve();
+
+function saveCurrentConversation(options = null) {
   const opts = options || {};
+  _convSaveChain = _convSaveChain
+    .then(() => _performConversationSave(opts))
+    .catch((e) => {
+      console.warn("[Chat] conversation save chain error:", e?.message || e);
+      return false;
+    });
+  return _convSaveChain;
+}
+
+async function _performConversationSave(opts) {
   const convId = LexaState.get("currentConversationId");
   if (!convId) return true;
   saveAgentRunMetaForConversation(convId);
@@ -252,18 +269,15 @@ async function saveCurrentConversation(options = null) {
     const role = msg.classList.contains("user-message") ? "user" : "assistant";
     if (text) messages.push({ role, content: serializeMessageForStorage(msg) });
   });
+  // Niemals leer ueberschreiben (z.B. waehrend eines DOM-Clears) -> Wipe-Schutz.
+  // Leeren erledigt clearChat() explizit ueber conversationUpdate(messages: []).
+  if (!messages.length) return true;
   try {
     await window.lexa.conversationUpdate(convId, { messages });
   } catch (e) {
     console.warn("[Chat] Failed to save conversation:", e.message || e);
     if (opts.notifyFailure) showToast(t("toast.conversationSaveFailed"), "warning", 3500);
     return false;
-  }
-  try {
-    await refreshConversationSidebar();
-  } catch (e) {
-    console.warn("[Chat] Saved conversation but failed to refresh sidebar:", e.message || e);
-    if (opts.notifyFailure) showToast(t("toast.conversationRefreshFailed"), "warning", 3000);
   }
   return true;
 }
