@@ -272,8 +272,8 @@
     "input input input"
     "attach spacer actions";
   align-items: center;
-  gap: 10px;
-  padding: 12px;
+  gap: 4px;
+  padding: 8px 12px;
   border-radius: 14px;
   border-color: rgba(194, 77, 224, 0.18);
   background:
@@ -293,9 +293,9 @@
 .animated-ai-chat #chat-input {
   grid-area: input;
   width: 100%;
-  min-height: 52px;
+  min-height: 24px;
   max-height: 200px;
-  padding: 2px 2px 8px;
+  padding: 2px 2px 2px;
   font-size: 14px;
   color: rgba(248, 247, 255, 0.92);
 }
