@@ -1415,3 +1415,31 @@
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
   object-fit: contain;
 }
+
+/* Chat tables (had no cell styling -> columns collided) */
+.table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.chat-table {
+  border-collapse: collapse;
+  margin: 2px 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.chat-table th,
+.chat-table td {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.chat-table th {
+  background: var(--accent-soft);
+  font-weight: 600;
+  color: var(--text, #e8e6f0);
+  white-space: nowrap;
+}
+.chat-table tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.025);
+}
