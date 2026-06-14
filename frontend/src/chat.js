@@ -653,11 +653,12 @@ function renderChatMath(target) {
   } catch (e) { /* Mathe-Render fehlgeschlagen -> roher Text bleibt erhalten */ }
 }
 
-function renderFormattedMessage(target, text, options = {}) {
+function renderFormattedMessage(target, text, options) {
   if (!target) return;
+  options = options || {};
   target.replaceChildren();
   appendFormattedMessage(target, String(text || ""));
-  if (options.math !== false) renderChatMath(target);
+  if (options.math !== false && typeof renderChatMath === "function") renderChatMath(target);
 }
 
 function scrollChatMessageIntoCleanView(messageEl, options = {}) {

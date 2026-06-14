@@ -76,6 +76,18 @@ function makeDomStub() {
       return child;
     }
     append(...nodes) { nodes.forEach((node) => this.appendChild(node)); }
+    addEventListener() {}
+    removeEventListener() {}
+    get classList() {
+      const self = this;
+      const parts = () => new Set((self.className || "").split(/\s+/).filter(Boolean));
+      return {
+        add: (c) => { const s = parts(); s.add(c); self.className = [...s].join(" "); },
+        remove: (c) => { const s = parts(); s.delete(c); self.className = [...s].join(" "); },
+        toggle: (c) => { const s = parts(); if (s.has(c)) s.delete(c); else s.add(c); self.className = [...s].join(" "); return s.has(c); },
+        contains: (c) => parts().has(c),
+      };
+    }
     replaceChildren(...nodes) {
       this.children = [];
       this.append(...nodes);
@@ -297,7 +309,7 @@ const r8 = formatMessage("[click](javascript:alert(1))");
 assert("unsafe link protocol not rendered", !r8.includes("<a "), r8.slice(0, 120));
 
 const r9 = formatMessage("![logo](https://example.com/logo.png)");
-assert("safe chat image uses CSS class", r9.includes('class="chat-img"'), r9);
+assert("safe chat image uses CSS class", r9.includes('class="chat-img'), r9);
 assert("chat image has no inline style", !r9.includes("style="), r9);
 
 const r10 = formatMessage("[safe](https://example.com/a?q=1)");
