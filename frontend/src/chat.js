@@ -1671,6 +1671,11 @@ function hideTyping() {
 // ── SEND MESSAGE (streaming) ─────────────────────
 async function sendMessage() {
   if (LexaState.get("isLoading")) return;
+  // Staged attachment: send the file (with the typed text as caption) instead of a text turn.
+  if (typeof getStagedUploadFile === "function" && getStagedUploadFile()) {
+    sendStagedUpload();
+    return;
+  }
   const rawText = chatInput.value.trim();
   const text = expandComposerSlashAlias(rawText) || rawText;
   if (!text) return;

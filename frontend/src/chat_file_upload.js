@@ -37,7 +37,7 @@ function setupDragDrop() {
   chatContainer.addEventListener("dragenter", (e) => { e.preventDefault(); dragCounter++; overlay.classList.add("visible"); });
   chatContainer.addEventListener("dragleave", (e) => { e.preventDefault(); dragCounter--; if (dragCounter <= 0) { dragCounter = 0; overlay.classList.remove("visible"); } });
   chatContainer.addEventListener("dragover", (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; });
-  chatContainer.addEventListener("drop", (e) => { e.preventDefault(); dragCounter = 0; overlay.classList.remove("visible"); const files = e.dataTransfer?.files; if (files && files.length > 0) handleFileUploadBatch(files); });
+  chatContainer.addEventListener("drop", (e) => { e.preventDefault(); dragCounter = 0; overlay.classList.remove("visible"); const files = e.dataTransfer?.files; if (files && files.length > 0) handleAttachFiles(files); });
 
   // Paste-Upload: kopierte Bilder/Dateien direkt aus der Zwischenablage anhaengen.
   const pasteInput = document.getElementById("chat-input");
@@ -54,7 +54,7 @@ function setupDragDrop() {
       }
       if (files.length > 0) {
         e.preventDefault(); // sonst fuegt der Browser den Bild-Pfad als Text ein
-        handleFileUploadBatch(files);
+        handleAttachFiles(files);
       }
     });
   }
@@ -71,7 +71,7 @@ function setupDragDrop() {
   });
 }
 function triggerFileUpload() { document.getElementById("file-input")?.click(); }
-function handleFileSelect(event) { const fileList = Array.from(event.target.files || []); if (fileList.length > 0) handleFileUploadBatch(fileList); event.target.value = ""; }
+function handleFileSelect(event) { const fileList = Array.from(event.target.files || []); if (fileList.length > 0) handleAttachFiles(fileList); event.target.value = ""; }
 
 // Verarbeitet mehrere ausgewählte/gezogene Dateien sequenziell, damit keine
 // Datei stillschweigend verworfen wird. Jeder Upload wird abgewartet, bevor der
@@ -80,6 +80,66 @@ async function handleFileUploadBatch(files) {
   for (const file of Array.from(files)) {
     await handleFileUpload(file);
   }
+}
+
+// ── Staged attachment (ChatGPT-style): anhaengen -> Vorschau in der Eingabe ->
+// erst beim Senden zusammen mit dem Text abschicken. ────────────────────────────
+let _stagedUploadFile = null;
+function getStagedUploadFile() { return _stagedUploadFile; }
+
+function handleAttachFiles(files) {
+  const list = Array.from(files || []);
+  if (!list.length) return;
+  if (list.length > 1) showToast("Es kann nur eine Datei angehängt werden — die erste wurde übernommen.", "warning", 2800);
+  stageFileUpload(list[0]);
+}
+
+function stageFileUpload(file) {
+  if (!file) return;
+  const maxSize = 2 * 1024 * 1024;
+  if (file.size > maxSize) { showToast(t("toast.fileTooLarge"), "error"); return; }
+  _stagedUploadFile = file;
+  renderStagedUploadPreview(file);
+  const input = document.getElementById("chat-input");
+  if (input) input.focus();
+  if (sendBtn && !LexaState.get("isLoading")) sendBtn.disabled = false;
+}
+
+function renderStagedUploadPreview(file) {
+  const container = document.querySelector(".sleek-input-container");
+  if (!container) return;
+  document.getElementById("chat-attachment-preview")?.remove();
+  const wrap = document.createElement("div");
+  wrap.id = "chat-attachment-preview";
+  wrap.className = "chat-attachment-preview";
+  const card = buildFileUploadCard(file);
+  card.classList.add("attachment-staged-card");
+  const removeBtn = document.createElement("button");
+  removeBtn.type = "button";
+  removeBtn.className = "attachment-remove-btn";
+  removeBtn.setAttribute("aria-label", "Anhang entfernen");
+  removeBtn.title = "Anhang entfernen";
+  removeBtn.textContent = "✕";
+  removeBtn.addEventListener("click", clearStagedUpload);
+  card.appendChild(removeBtn);
+  wrap.appendChild(card);
+  const pill = container.querySelector(".sleek-pill");
+  container.insertBefore(wrap, pill || null);
+}
+
+function clearStagedUpload() {
+  _stagedUploadFile = null;
+  document.getElementById("chat-attachment-preview")?.remove();
+}
+
+// Called by sendMessage() when a file is staged: send the file with the typed
+// text as caption. handleFileUpload() reads chatInput.value and clears it.
+async function sendStagedUpload() {
+  const file = _stagedUploadFile;
+  if (!file) return;
+  _stagedUploadFile = null;
+  document.getElementById("chat-attachment-preview")?.remove();
+  await handleFileUpload(file);
 }
 
 function buildFileUploadIcon(ext) {

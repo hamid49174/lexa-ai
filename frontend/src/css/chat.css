@@ -1340,3 +1340,41 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* Staged attachment preview above the composer (ChatGPT-style) */
+.chat-attachment-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 0 2px;
+}
+.attachment-staged-card {
+  position: relative;
+  max-width: 280px;
+}
+.attachment-remove-btn {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--glass-border);
+  border-radius: 50%;
+  background: var(--bg, #14141c);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  transition: color .15s ease, background .15s ease, border-color .15s ease;
+}
+.attachment-remove-btn:hover {
+  color: #fff;
+  border-color: var(--accent);
+  background: var(--accent);
+}
