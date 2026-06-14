@@ -76,14 +76,14 @@ function getMessageSources(msg) {
 function setMessageSources(msg, sources) {
   if (!msg) return;
   const list = Array.isArray(sources) ? sources.filter((s) => s && s.url) : [];
-  if (list.length) msg.dataset.lexaSources = JSON.stringify(list.map((s) => ({ title: s.title || "", url: s.url })));
+  if (list.length) msg.dataset.lexaSources = JSON.stringify(list.map((s) => ({ title: s.title || "", url: s.url, snippet: s.snippet || "" })));
   else delete msg.dataset.lexaSources;
 }
 
 function encodeSourcesBlock(sources) {
   const list = Array.isArray(sources) ? sources.filter((s) => s && s.url) : [];
   if (!list.length) return "";
-  const slim = list.map((s) => ({ title: s.title || "", url: s.url }));
+  const slim = list.map((s) => ({ title: s.title || "", url: s.url, snippet: s.snippet || "" }));
   return "\n\n```lexa-sources\n" + JSON.stringify(slim) + "\n```";
 }
 
@@ -154,7 +154,7 @@ function renderChatSources(bodyEl, sources) {
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "chat-sources-toggle";
-  toggle.setAttribute("aria-expanded", "false");
+  toggle.setAttribute("aria-haspopup", "dialog");
 
   const favRow = document.createElement("span");
   favRow.className = "chat-sources-favicons";
@@ -174,47 +174,111 @@ function renderChatSources(bodyEl, sources) {
   chevron.textContent = "›";
 
   toggle.append(favRow, label, count, chevron);
+  toggle.addEventListener("click", () => openSourcesPanel(list));
 
-  const panel = document.createElement("div");
-  panel.className = "chat-sources-list";
-  panel.hidden = true;
+  wrap.appendChild(toggle);
+  bodyEl.appendChild(wrap);
+}
 
+// ── ChatGPT-style right-side sources panel ───────────────────────────────────
+let _sourcesPanelKeyHandler = null;
+
+function ensureSourcesPanel() {
+  let overlay = document.getElementById("lexa-sources-overlay");
+  if (overlay) return overlay;
+  overlay = document.createElement("div");
+  overlay.id = "lexa-sources-overlay";
+  overlay.className = "sources-overlay";
+  overlay.hidden = true;
+
+  const panel = document.createElement("aside");
+  panel.className = "sources-panel";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-label", "Quellen");
+
+  const head = document.createElement("div");
+  head.className = "sources-panel-head";
+  const title = document.createElement("span");
+  title.className = "sources-panel-title";
+  title.textContent = "Quellen";
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "sources-panel-close";
+  closeBtn.setAttribute("aria-label", "Schliessen");
+  closeBtn.textContent = "✕";
+  closeBtn.addEventListener("click", closeSourcesPanel);
+  head.append(title, closeBtn);
+
+  const listEl = document.createElement("div");
+  listEl.className = "sources-panel-list";
+
+  panel.append(head, listEl);
+  overlay.appendChild(panel);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeSourcesPanel(); });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function closeSourcesPanel() {
+  const overlay = document.getElementById("lexa-sources-overlay");
+  if (!overlay) return;
+  overlay.classList.remove("open");
+  setTimeout(() => { if (!overlay.classList.contains("open")) overlay.hidden = true; }, 240);
+  if (_sourcesPanelKeyHandler) {
+    document.removeEventListener("keydown", _sourcesPanelKeyHandler);
+    _sourcesPanelKeyHandler = null;
+  }
+}
+
+function openSourcesPanel(sources) {
+  const list = Array.isArray(sources) ? sources.filter((s) => s && s.url) : [];
+  if (!list.length) return;
+  const overlay = ensureSourcesPanel();
+  const titleEl = overlay.querySelector(".sources-panel-title");
+  if (titleEl) titleEl.textContent = `Quellen · ${list.length}`;
+
+  const listEl = overlay.querySelector(".sources-panel-list");
+  listEl.replaceChildren();
   list.forEach((s, i) => {
     const card = document.createElement("a");
-    card.className = "chat-source-card";
+    card.className = "sources-panel-card";
     card.href = s.url;
     card.target = "_blank";
     card.rel = "noopener noreferrer";
 
-    const idx = document.createElement("span");
-    idx.className = "src-index";
-    idx.textContent = String(i + 1);
-
-    appendSourceFavicon(card, s, "src-favicon");
-
-    const meta = document.createElement("span");
-    meta.className = "src-meta";
-    const title = document.createElement("span");
-    title.className = "src-title";
-    title.textContent = (s.title || sourceDomain(s.url) || s.url).trim();
+    const top = document.createElement("div");
+    top.className = "sources-panel-card-top";
+    appendSourceFavicon(top, s, "src-favicon");
     const dom = document.createElement("span");
-    dom.className = "src-domain";
+    dom.className = "sources-panel-domain";
     dom.textContent = sourceDomain(s.url);
-    meta.append(title, dom);
+    const idx = document.createElement("span");
+    idx.className = "sources-panel-index";
+    idx.textContent = String(i + 1);
+    top.append(dom, idx);
 
-    card.append(idx, meta);
-    panel.appendChild(card);
+    const title = document.createElement("div");
+    title.className = "sources-panel-card-title";
+    title.textContent = (s.title || sourceDomain(s.url) || s.url).trim();
+
+    card.append(top, title);
+
+    const snip = String(s.snippet || "").trim();
+    if (snip) {
+      const snippet = document.createElement("div");
+      snippet.className = "sources-panel-snippet";
+      snippet.textContent = snip;
+      card.appendChild(snippet);
+    }
+    listEl.appendChild(card);
   });
 
-  toggle.addEventListener("click", () => {
-    const open = panel.hidden;
-    panel.hidden = !open;
-    toggle.setAttribute("aria-expanded", String(open));
-    wrap.classList.toggle("open", open);
-  });
+  overlay.hidden = false;
+  void overlay.offsetWidth; // reflow so the slide-in transition runs
+  overlay.classList.add("open");
 
-  wrap.append(toggle, panel);
-  bodyEl.appendChild(wrap);
+  _sourcesPanelKeyHandler = (e) => { if (e.key === "Escape") closeSourcesPanel(); };
+  document.addEventListener("keydown", _sourcesPanelKeyHandler);
 }
 
 // Agent run metadata and attention helpers live in chat_agent_runs.js.

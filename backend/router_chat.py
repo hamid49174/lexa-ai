@@ -1918,7 +1918,11 @@ async def chat_stream_endpoint(req: ChatRequest):
                     grounding_extra = _build_web_grounding(web_query, web_sources)
                     audit_log("chat_stream", "web_grounded", f"q={web_query[:60]} n={len(web_sources)}")
                     ui_sources = [
-                        {"title": s.get("title", ""), "url": s.get("url", "")}
+                        {
+                            "title": s.get("title", ""),
+                            "url": s.get("url", ""),
+                            "snippet": (s.get("snippet") or "")[:300],
+                        }
                         for s in web_sources
                     ]
                     yield f"data: {json.dumps({'sources': ui_sources}, ensure_ascii=False)}\n\n"
