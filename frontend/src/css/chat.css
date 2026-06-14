@@ -1390,7 +1390,7 @@
 }
 
 /* Click an image card to open it full size */
-.file-card-clickable { cursor: zoom-in; }
+.file-card-clickable { cursor: pointer; }
 .image-lightbox {
   position: fixed;
   inset: 0;
@@ -1401,10 +1401,13 @@
   padding: 24px;
   background: rgba(0, 0, 0, 0.82);
   opacity: 0;
+  pointer-events: none; /* don't block the page when closed */
   transition: opacity .2s ease;
-  cursor: zoom-out;
+  cursor: default;
 }
-.image-lightbox.open { opacity: 1; }
+/* [hidden] must win over display:flex above, or the overlay never disappears */
+.image-lightbox[hidden] { display: none; }
+.image-lightbox.open { opacity: 1; pointer-events: auto; }
 .image-lightbox-img {
   max-width: 92vw;
   max-height: 92vh;
