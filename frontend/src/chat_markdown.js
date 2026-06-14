@@ -36,10 +36,15 @@ function appendInlineMarkdown(parent, source) {
       const safeUrl = normalizeChatUrl(target.url, { image: true });
       if (safeUrl) {
         const img = document.createElement("img");
-        img.className = "chat-img";
+        img.className = "chat-img chat-img-clickable";
         img.src = safeUrl;
         img.alt = match[3] || "";
+        img.loading = "lazy";
+        img.decoding = "async";
         if (target.title) img.title = target.title;
+        img.addEventListener("click", () => {
+          if (typeof openImageLightbox === "function") openImageLightbox(safeUrl);
+        });
         parent.appendChild(img);
       } else if (match[3]) {
         parent.appendChild(document.createTextNode(match[3]));
@@ -137,7 +142,19 @@ function appendCodeBlock(parent, lang, codeText) {
   copyButton.title = copyLabel;
   copyButton.setAttribute("aria-label", copyLabel);
   copyButton.dataset.icon = "\u2398";
-  header.appendChild(copyButton);
+
+  const wrapButton = document.createElement("button");
+  wrapButton.type = "button";
+  wrapButton.className = "code-tool-btn";
+  wrapButton.textContent = "\u21a9";
+  wrapButton.title = "Zeilenumbruch umschalten";
+  wrapButton.setAttribute("aria-label", "Zeilenumbruch umschalten");
+
+  const actions = document.createElement("div");
+  actions.className = "code-actions";
+  actions.appendChild(wrapButton);
+  actions.appendChild(copyButton);
+  header.appendChild(actions);
 
   const pre = document.createElement("pre");
   pre.className = "code-block";
@@ -154,8 +171,26 @@ function appendCodeBlock(parent, lang, codeText) {
     } catch (e) { /* Fallback: nicht-hervorgehobener Code */ }
   }
   pre.appendChild(code);
+  wrapButton.addEventListener("click", () => pre.classList.toggle("code-wrap"));
+
   wrap.appendChild(header);
   wrap.appendChild(pre);
+
+  // Sehr lange Bloecke einklappen (Mehr/Weniger anzeigen).
+  const lineCount = (code.textContent.match(/\n/g) || []).length + 1;
+  if (lineCount > 24) {
+    wrap.classList.add("code-collapsed");
+    const expandBtn = document.createElement("button");
+    expandBtn.type = "button";
+    expandBtn.className = "code-expand-btn";
+    const collapsedLabel = `Mehr anzeigen (${lineCount} Zeilen)`;
+    expandBtn.textContent = collapsedLabel;
+    expandBtn.addEventListener("click", () => {
+      const stillCollapsed = wrap.classList.toggle("code-collapsed");
+      expandBtn.textContent = stillCollapsed ? collapsedLabel : "Weniger anzeigen";
+    });
+    wrap.appendChild(expandBtn);
+  }
   parent.appendChild(wrap);
 }
 

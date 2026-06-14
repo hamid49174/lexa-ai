@@ -1443,3 +1443,61 @@
 .chat-table tr:nth-child(even) td {
   background: rgba(255, 255, 255, 0.025);
 }
+
+/* Code-Block-Werkzeuge: Wrap-Toggle + Einklappen langer Bloecke */
+.code-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.code-tool-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+.code-tool-btn:hover { background: var(--accent-soft); color: var(--accent2); }
+.code-block.code-wrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.code-block-wrap.code-collapsed .code-block {
+  max-height: 360px;
+  overflow: hidden;
+}
+.code-block-wrap.code-collapsed {
+  position: relative;
+}
+.code-block-wrap.code-collapsed .code-block::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 34px;
+  height: 56px;
+  background: linear-gradient(to bottom, transparent, var(--bg));
+  pointer-events: none;
+}
+.code-expand-btn {
+  display: block;
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.code-expand-btn:hover { background: var(--accent-soft); }
+
+/* Bilder im Antwort-Output: klickbar (Lightbox) */
+.chat-img-clickable { cursor: pointer; }
