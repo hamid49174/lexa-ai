@@ -106,6 +106,21 @@ function serializeMessageForStorage(msg) {
   return getMessagePersistText(msg) + encodeSourcesBlock(getMessageSources(msg));
 }
 
+// Einzige Quelle der Wahrheit fuer {role, content}-Serialisierung aus dem DOM
+// (inkl. Quellen-Fence). Optionales msgEls fuer Teilmengen (z.B. Edit-Fork).
+function collectPersistableMessages(msgEls) {
+  const list = msgEls || (chatMessages ? Array.from(chatMessages.querySelectorAll(".message")) : []);
+  const messages = [];
+  for (const msg of list) {
+    if (!isPersistableChatMessage(msg)) continue;
+    const text = getMessagePersistText(msg);
+    if (!text) continue;
+    const role = msg.classList.contains("user-message") ? "user" : "assistant";
+    messages.push({ role, content: serializeMessageForStorage(msg) });
+  }
+  return messages;
+}
+
 function sourceDomain(url) {
   try { return new URL(url).hostname.replace(/^www\./, ""); }
   catch (e) { return ""; }
@@ -318,6 +333,12 @@ function scheduleConversationSave(delay = 1200) {
   }, delay);
 }
 
+// Pendenten Debounce-Save verwerfen (vor Switch/New/Clear), damit er nicht in
+// die falsche Konversation feuert.
+function cancelScheduledConversationSave() {
+  if (_convSaveTimer) { clearTimeout(_convSaveTimer); _convSaveTimer = null; }
+}
+
 function persistChatAfterDomMutation() {
   saveChatHistory();
   scheduleConversationSave();
@@ -437,6 +458,9 @@ async function loadChatHistory() {
 
 // ── CHAT MESSAGE DISPLAY ─────────────────────────
 function clearChat() {
+  // Pendenten Auto-Save verwerfen, damit er nicht NACH dem Leeren die alten
+  // Nachrichten zurueckschreibt (DOM ist gleich leer -> Wipe-Schutz greift ohnehin).
+  cancelScheduledConversationSave();
   const msgs = chatMessages.querySelectorAll(".message");
   msgs.forEach((m) => m.remove());
   chatTransientRemoveItem(CHAT_HISTORY_CACHE_KEY);

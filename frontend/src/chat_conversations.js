@@ -134,6 +134,7 @@ async function newConversation() {
   _newConversationInFlight = true;
   setNewConversationControlsBusy(true);
   try {
+    cancelScheduledConversationSave();
     await saveCurrentConversation({ notifyFailure: true });
     const title = t("chat.newChatTitle");
     let result = null;
@@ -196,13 +197,7 @@ async function newConversation() {
 // in einen neuen Chat forken; das Original bleibt vollstaendig erhalten.
 async function forkConversationForEdit(allMsgs, idx, editText) {
   if (!LexaState.get("backendOnline")) return false;
-  const priorMessages = allMsgs.slice(0, idx)
-    .filter(isPersistableChatMessage)
-    .map((m) => ({
-      role: m.classList.contains("user-message") ? "user" : "assistant",
-      content: serializeMessageForStorage(m),
-    }))
-    .filter((m) => m.content);
+  const priorMessages = collectPersistableMessages(allMsgs.slice(0, idx));
   try {
     const created = await window.lexa.conversationCreate(t("chat.newChatTitle"));
     if (!created?.id) return false;
@@ -234,6 +229,7 @@ async function switchConversation(convId, notify = true) {
   try {
     const previousConvId = LexaState.get("currentConversationId");
     const previousActiveConversation = chatGetActiveConversationId();
+    cancelScheduledConversationSave();
     await saveCurrentConversation({ notifyFailure: notify });
     if (switchSeq !== _conversationSwitchSeq) return false;
     LexaState.set("currentConversationId", convId);
@@ -294,13 +290,7 @@ async function _performConversationSave(opts) {
   const convId = LexaState.get("currentConversationId");
   if (!convId) return true;
   saveAgentRunMetaForConversation(convId);
-  const messages = [];
-  chatMessages.querySelectorAll(".message").forEach((msg) => {
-    if (!isPersistableChatMessage(msg)) return;
-    const text = getMessagePersistText(msg);
-    const role = msg.classList.contains("user-message") ? "user" : "assistant";
-    if (text) messages.push({ role, content: serializeMessageForStorage(msg) });
-  });
+  const messages = collectPersistableMessages();
   // Niemals leer ueberschreiben (z.B. waehrend eines DOM-Clears) -> Wipe-Schutz.
   // Leeren erledigt clearChat() explizit ueber conversationUpdate(messages: []).
   if (!messages.length) return true;
