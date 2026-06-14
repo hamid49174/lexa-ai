@@ -1823,7 +1823,7 @@ async function sendMessage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, conversation_id: LexaState.get("currentConversationId") || null }),
         signal: window._lexaStreamAbort.signal,
       });
     } catch (abortErr) {

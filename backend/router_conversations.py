@@ -15,6 +15,7 @@ from backend.shared import (
     _history_lock,
     parse_json_body,
     _trim_history_unlocked,
+    set_active_conversation_id,
 )
 from backend import memory
 
@@ -103,4 +104,5 @@ async def load_conversation(conv_id: int):
         for msg in conv.get("messages", []):
             conversation_history.append(msg)
         _trim_history_unlocked()
+    set_active_conversation_id(conv_id)
     return {"status": "loaded", "message_count": len(conversation_history)}

@@ -206,7 +206,7 @@ async function handleMultiFileUpload(files) {
   if (isFirst) autoTitleConversation(files[0]?.name || t("chat.newChatTitle"));
   setFileUploadBusy(true); showTyping();
   try {
-    const res = await window.lexa.chatFiles(files, userMsg || "");
+    const res = await window.lexa.chatFiles(files, userMsg || "", LexaState.get("currentConversationId") || null);
     if (res.detail) { addMessage(res.detail, "system"); showToast(t("toast.fileError"), "error"); }
     else {
       addMessage(res.reply || "Ich konnte die Bilder leider nicht auswerten.", "system", null, false);
@@ -360,7 +360,7 @@ async function handleFileUpload(file) {
   if (isFirst) autoTitleConversation(file.name);
   setFileUploadBusy(true); showTyping();
   try {
-    const res = await window.lexa.chatFile(file, userMsg || "");
+    const res = await window.lexa.chatFile(file, userMsg || "", LexaState.get("currentConversationId") || null);
     if (res.detail) { addMessage(res.detail, "system"); showToast(t("toast.fileError"), "error"); }
     else {
       addFileUploadResponse(res);

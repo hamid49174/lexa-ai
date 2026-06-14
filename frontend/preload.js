@@ -1450,11 +1450,11 @@ const lexaBridge = {
   close: () => ipcRenderer.send("window-close"),
 
   // Chat API
-  chat: async (message) => {
+  chat: async (message, conversationId = null) => {
     const res = await fetchWithTimeout(`${API}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, conversation_id: conversationId || null }),
     });
     // apiJson prüft res.ok und liefert bei Rate-Limit/Backend-Fehler ein
     // strukturiertes Objekt (inkl. detail) statt eines rohen Fehler-Bodys
@@ -1463,20 +1463,22 @@ const lexaBridge = {
   },
 
   // Chat with File
-  chatFile: async (file, message = "") => {
+  chatFile: async (file, message = "", conversationId = null) => {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("message", message);
+    if (conversationId) formData.append("conversation_id", String(conversationId));
     const res = await fetchWithTimeout(`${API}/chat/file`, {
       method: "POST",
       body: formData,
     });
     return apiJson(res, "Chat file request failed");
   },
-  chatFiles: async (files, message = "") => {
+  chatFiles: async (files, message = "", conversationId = null) => {
     const formData = new FormData();
     for (const f of files || []) formData.append("files", f);
     formData.append("message", message);
+    if (conversationId) formData.append("conversation_id", String(conversationId));
     const res = await fetchWithTimeout(`${API}/chat/files`, {
       method: "POST",
       body: formData,

@@ -18,6 +18,53 @@ logger = logging.getLogger("lexa.shared")
 conversation_history: list[dict] = []
 _history_lock = asyncio.Lock()
 
+# Tracks which conversation the in-memory history currently reflects. Chat
+# endpoints re-sync when the active conversation changes, so context never bleeds
+# between different chats (the working history used to be a single global list
+# that only reset on explicit switch — not on "new chat").
+_active_conversation_id: Optional[int] = None
+
+
+def get_active_conversation_id() -> Optional[int]:
+    return _active_conversation_id
+
+
+def set_active_conversation_id(conv_id: Optional[int]) -> None:
+    """Mark which conversation the in-memory history reflects (e.g. after /load)."""
+    global _active_conversation_id
+    _active_conversation_id = conv_id
+
+
+async def ensure_active_conversation(conv_id: Optional[int]) -> None:
+    """Make conversation_history reflect conv_id.
+
+    If conv_id differs from the active one, reload that conversation's messages
+    from storage (clearing the prior chat's context). No-op when conv_id is None
+    (legacy/ad-hoc requests) or already active. A brand-new empty conversation
+    therefore starts with a clean history — no bleed from the previous chat.
+    """
+    global _active_conversation_id
+    if conv_id is None or conv_id == _active_conversation_id:
+        return
+    from backend import memory
+    try:
+        conv = await asyncio.to_thread(memory.conversation_get, conv_id)
+    except Exception as e:
+        logger.warning(f"ensure_active_conversation: load failed for {conv_id}: {e}")
+        conv = None
+    async with _history_lock:
+        conversation_history.clear()
+        for msg in (conv or {}).get("messages", []) or []:
+            if isinstance(msg, dict) and msg.get("content"):
+                conversation_history.append(
+                    {"role": msg.get("role", "user"), "content": str(msg["content"])}
+                )
+        _trim_history_unlocked()
+        _active_conversation_id = conv_id
+    logger.info(
+        f"Active conversation synced -> {conv_id} ({len(conversation_history)} msgs)"
+    )
+
 # ── Pending Confirmation State ──
 # Tracks the last action that requires user confirmation.
 # This allows Lexa to understand "bestätige" / "ja" / "mach es" follow-ups.

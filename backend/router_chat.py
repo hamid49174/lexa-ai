@@ -35,6 +35,7 @@ from backend.shared import (
     set_pending_confirmation,
     get_pending_confirmation,
     clear_pending_confirmation,
+    ensure_active_conversation,
 )
 from backend.ai_engine import chat, chat_stream
 from backend.web_research import gather_sources
@@ -518,6 +519,7 @@ router = APIRouter(tags=["chat"])
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=MAX_CHAT_MESSAGE_LENGTH)
+    conversation_id: int | None = None
 
 
 class ChatResponse(BaseModel):
@@ -1173,6 +1175,7 @@ async def chat_endpoint(req: ChatRequest):
             },
         )
 
+    await ensure_active_conversation(req.conversation_id)
     sanitized = sanitize_input(req.message)
     audit_log("chat", "received", _audit_message_details(sanitized))
 
@@ -1497,10 +1500,12 @@ def _build_web_grounding(query: str, sources: list[dict]) -> str:
 async def chat_file_endpoint(
     file: UploadFile = File(...),
     message: str = Form(""),
+    conversation_id: int | None = Form(None),
 ):
     """Upload a file and analyze it with AI context."""
     if not check_rate_limit("chat"):
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
+    await ensure_active_conversation(conversation_id)
 
     safe_filename, suffix = validate_chat_upload_filename(file.filename)
 
@@ -1628,10 +1633,12 @@ async def chat_file_endpoint(
 async def chat_files_endpoint(
     files: list[UploadFile] = File(...),
     message: str = Form(""),
+    conversation_id: int | None = Form(None),
 ):
     """Analysiert MEHRERE Bilder zusammen in EINER Nachricht (Vision)."""
     if not check_rate_limit("chat"):
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
+    await ensure_active_conversation(conversation_id)
     incoming = [f for f in (files or []) if f is not None]
     if not incoming:
         raise HTTPException(status_code=400, detail="Keine Dateien empfangen.")
@@ -1714,6 +1721,7 @@ async def chat_stream_endpoint(req: ChatRequest):
             },
         )
 
+    await ensure_active_conversation(req.conversation_id)
     sanitized = sanitize_input(req.message)
     audit_log("chat_stream", "received", _audit_message_details(sanitized))
 
