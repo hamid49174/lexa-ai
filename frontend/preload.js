@@ -75,6 +75,7 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("chat", "medium", "write", "/chat"),
   bridgePolicy("chatFile", "medium", "write", "/chat/file"),
   bridgePolicy("chatFiles", "medium", "write", "/chat/files"),
+  bridgePolicy("cancelUpload", "low", "write", "ipc:cancel-upload"),
   bridgePolicy("generateTitle", "medium", "write", "/ai/title"),
   bridgePolicy("verifyWithSources", "medium", "write", "/chat/verify-with-sources"),
   bridgePolicy("execute", "critical", "execute", "/companion/execute"),
@@ -917,6 +918,7 @@ if (isLexaSmokeMockAllowed()) {
     chat: async (message) => ({ response: `Mock: ${message || ""}`.trim() }),
     chatFile: async () => ({ response: "Mock file response" }),
     chatFiles: async () => ({ reply: "Mock files response" }),
+    cancelUpload: () => {},
     generateTitle: async (message = "") => runSmokeMock("generateTitle", [message], async () => ({ title: String(message || "Smoke Test").slice(0, 40) })),
     verifyWithSources: async (answer = "", question = "") => runSmokeMock("verifyWithSources", [answer, question], async () => ({ brief: "Smoke: Pruefbericht (keine echte Recherche).", sources: [] })),
     aiStatus: async () => ({
@@ -1245,6 +1247,12 @@ if (isLexaSmokeMockAllowed()) {
 async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
+  // Externes Signal (z.B. Nutzer-Abbruch eines Uploads) bricht die Anfrage ebenfalls ab.
+  const ext = options.signal;
+  if (ext) {
+    if (ext.aborted) controller.abort();
+    else ext.addEventListener("abort", () => controller.abort(), { once: true });
+  }
   try {
     const requestOptions = await withLocalAuthHeader(url, options);
     const res = await fetch(url, { ...requestOptions, signal: controller.signal });
@@ -1253,6 +1261,9 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
     clearTimeout(id);
   }
 }
+
+// Aktiver Datei-Upload, damit der Nutzer ihn abbrechen kann (cancelUpload).
+let _uploadAbortController = null;
 
 function apiErrorText(value) {
   if (!value) return "";
@@ -1477,23 +1488,36 @@ const lexaBridge = {
     formData.append("file", file);
     formData.append("message", message);
     if (conversationId) formData.append("conversation_id", String(conversationId));
-    const res = await fetchWithTimeout(`${API}/chat/file`, {
-      method: "POST",
-      body: formData,
-    });
-    return apiJson(res, "Chat file request failed");
+    _uploadAbortController = new AbortController();
+    try {
+      const res = await fetchWithTimeout(`${API}/chat/file`, {
+        method: "POST",
+        body: formData,
+        signal: _uploadAbortController.signal,
+      }, 120000);
+      return apiJson(res, "Chat file request failed");
+    } finally {
+      _uploadAbortController = null;
+    }
   },
   chatFiles: async (files, message = "", conversationId = null) => {
     const formData = new FormData();
     for (const f of files || []) formData.append("files", f);
     formData.append("message", message);
     if (conversationId) formData.append("conversation_id", String(conversationId));
-    const res = await fetchWithTimeout(`${API}/chat/files`, {
-      method: "POST",
-      body: formData,
-    }, 120000);
-    return apiJson(res, "Chat files request failed");
+    _uploadAbortController = new AbortController();
+    try {
+      const res = await fetchWithTimeout(`${API}/chat/files`, {
+        method: "POST",
+        body: formData,
+        signal: _uploadAbortController.signal,
+      }, 120000);
+      return apiJson(res, "Chat files request failed");
+    } finally {
+      _uploadAbortController = null;
+    }
   },
+  cancelUpload: () => { if (_uploadAbortController) _uploadAbortController.abort(); },
 
   // Companion API
   execute: async (command, params = {}, confirmed = false) => {

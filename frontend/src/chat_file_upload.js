@@ -88,6 +88,17 @@ let _stagedUploads = [];
 const MAX_STAGED_UPLOADS = 6;
 function getStagedUploads() { return _stagedUploads; }
 
+const ALLOWED_UPLOAD_EXT = new Set([
+  "pdf", "txt", "md", "csv", "json", "js", "ts", "py", "html", "css",
+  "xml", "yaml", "yml", "log", "sql",
+]);
+function isAllowedUploadFile(file) {
+  if (!file) return false;
+  if (String(file.type || "").startsWith("image/")) return true;
+  const ext = String(file.name || "").split(".").pop().toLowerCase();
+  return ALLOWED_UPLOAD_EXT.has(ext);
+}
+
 function handleAttachFiles(files) {
   const list = Array.from(files || []);
   if (!list.length) return;
@@ -99,6 +110,8 @@ function handleAttachFiles(files) {
       showToast(`Maximal ${MAX_STAGED_UPLOADS} Dateien gleichzeitig.`, "warning", 2500);
       break;
     }
+    // Typprüfung gilt für Button, Drag&Drop UND Paste (accept-Attribut wirkt nur im Dialog).
+    if (!isAllowedUploadFile(file)) { showToast(`${file.name}: Dateityp nicht unterstützt.`, "warning", 2800); continue; }
     if (file.size > maxSize) { showToast(`${file.name}: zu groß (max 2 MB).`, "error"); continue; }
     _stagedUploads.push(file);
     added++;
@@ -213,8 +226,12 @@ async function handleMultiFileUpload(files) {
       playTTS(res.reply || "");
     }
   } catch (err) {
-    addMessage(t("chat.uploadErrorMsg", {error: err.message}), "system");
-    showToast(t("toast.uploadError"), "error");
+    if (err?.name === "AbortError" || /abort/i.test(err?.message || "")) {
+      addMessage("Upload abgebrochen.", "system", null, false, true);
+    } else {
+      addMessage(t("chat.uploadErrorMsg", {error: err.message}), "system");
+      showToast(t("toast.uploadError"), "error");
+    }
   } finally {
     hideTyping();
     saveFileUploadConversationSnapshot();
@@ -368,8 +385,12 @@ async function handleFileUpload(file) {
       playTTS(fileUploadDisplayReply(res));
     }
   } catch (err) {
-    addMessage(t("chat.uploadErrorMsg", {error: err.message}), "system");
-    showToast(t("toast.uploadError"), "error");
+    if (err?.name === "AbortError" || /abort/i.test(err?.message || "")) {
+      addMessage("Upload abgebrochen.", "system", null, false, true);
+    } else {
+      addMessage(t("chat.uploadErrorMsg", {error: err.message}), "system");
+      showToast(t("toast.uploadError"), "error");
+    }
   } finally {
     hideTyping();
     saveFileUploadConversationSnapshot();

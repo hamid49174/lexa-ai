@@ -1686,6 +1686,8 @@ function showTyping() {
       window._lexaStreamAbortReason = "user";
       window._lexaStreamAbort.abort();
     }
+    // Laufenden Datei-Upload ebenfalls abbrechen (no-op, wenn keiner laeuft).
+    try { window.lexa?.cancelUpload?.(); } catch (e) { /* noop */ }
     hideTyping();
     LexaState.set("isLoading", false);
     if (sendBtn) sendBtn.disabled = false;
