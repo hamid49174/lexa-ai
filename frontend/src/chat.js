@@ -547,21 +547,23 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
     thumbsBtn.className = "msg-thumbs-btn";
     setIconButton(thumbsBtn, "\u2605", t("chat.saveAsMemoryTooltip"));
     thumbsBtn.addEventListener("click", () => saveMessageAsMemory(thumbsBtn, msg));
-    header.appendChild(createContinueFromMessageButton());
-    header.appendChild(createVerifyAnswerButton());
-    header.appendChild(createMessageExportButton());
-    const moreActions = [thumbsBtn, createWorkspaceHandoffButton()];
 
-    // Regenerate button for Lexa messages
+    // Regenerate visible in the bar (ChatGPT-style); only for non-restored messages.
     if (!silent) {
       const regenBtn = document.createElement("button");
       regenBtn.type = "button";
       regenBtn.className = "msg-action-btn msg-regen-btn";
       setIconButton(regenBtn, "\u21BB", t("chat.regenerateTooltip"));
       regenBtn.addEventListener("click", () => startRegenerateMessage(regenBtn, msg));
-      moreActions.push(regenBtn);
+      header.appendChild(regenBtn);
     }
-    header.appendChild(createMessageActionOverflowMenu(moreActions));
+    header.appendChild(createVerifyAnswerButton());
+    header.appendChild(createMessageExportButton());
+    header.appendChild(createMessageActionOverflowMenu([
+      createContinueFromMessageButton(),
+      createWorkspaceHandoffButton(),
+      thumbsBtn,
+    ]));
   }
 
   if (isUser && !silent) {
@@ -1759,10 +1761,10 @@ async function sendMessage() {
   header.appendChild(nameSpan);
   header.appendChild(timeSpan);
   header.appendChild(copyBtn);
-  header.appendChild(continueBtn);
+  header.appendChild(regenBtn);
   header.appendChild(verifyBtn);
   header.appendChild(exportBtn);
-  header.appendChild(createMessageActionOverflowMenu([memoryBtn, workspaceBtn, regenBtn]));
+  header.appendChild(createMessageActionOverflowMenu([continueBtn, workspaceBtn, memoryBtn]));
 
   const textEl = document.createElement("div");
   textEl.className = "msg-text streaming-text";
