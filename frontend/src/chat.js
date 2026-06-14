@@ -416,6 +416,26 @@ function scrollChatMessageIntoCleanView(messageEl, options = {}) {
   container.scrollTop = container.scrollHeight;
 }
 
+function isChatNearBottom(container, threshold = 140) {
+  // True, wenn der Nutzer (fast) am unteren Ende ist — Basis fuer Scroll-Lock.
+  if (!container) return true;
+  return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
+}
+
+function renderStreamingFormatted(target, text) {
+  // Live-Markdown waehrend des Streams: voller, sicherer DOM-Render + Cursor.
+  // try/catch faengt unvollstaendiges Markdown (offene ```-Codeblocks) waehrend des Tippens ab.
+  if (!target) return;
+  try {
+    renderFormattedMessage(target, text);
+  } catch (e) {
+    target.textContent = String(text || "");
+  }
+  const cursor = document.createElement("span");
+  cursor.className = "streaming-cursor";
+  target.appendChild(cursor);
+}
+
 function renderStreamingText(target, text, showCursor = true) {
   if (!target) return;
   target.textContent = String(text || "");
@@ -1512,6 +1532,8 @@ async function sendMessage() {
   let actionData = null;
   let streamRenderQueued = false;
   let streamRenderActive = true;
+  let _lastStreamRenderTs = 0;
+  const STREAM_RENDER_INTERVAL_MS = 90; // Live-Markdown, aber gedrosselt (kein O(n^2)-Reflow pro Token)
   const scheduleStreamRender = () => {
     if (streamRenderQueued) return;
     streamRenderQueued = true;
@@ -1519,8 +1541,16 @@ async function sendMessage() {
     schedule(() => {
       streamRenderQueued = false;
       if (!streamRenderActive) return;
-      renderStreamingText(textEl, fullText);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
+      const now = Date.now();
+      if (now - _lastStreamRenderTs < STREAM_RENDER_INTERVAL_MS) {
+        scheduleStreamRender(); // gedrosselt erneut versuchen
+        return;
+      }
+      _lastStreamRenderTs = now;
+      // Scroll-Lock: nur ans Ende ziehen, wenn der Nutzer ohnehin (fast) unten ist.
+      const stick = isChatNearBottom(chatMessages);
+      renderStreamingFormatted(textEl, fullText);
+      if (stick) chatMessages.scrollTop = chatMessages.scrollHeight;
     });
   };
 

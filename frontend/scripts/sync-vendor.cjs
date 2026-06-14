@@ -16,6 +16,16 @@ const assets = [
     source: path.join(frontendRoot, "node_modules", "simplex-noise", "simplex-noise.js"),
     target: path.join(vendorRoot, "simplex-noise.js"),
   },
+  {
+    label: "highlight.js",
+    source: path.join(frontendRoot, "node_modules", "@highlightjs", "cdn-assets", "highlight.min.js"),
+    target: path.join(vendorRoot, "highlight.min.js"),
+  },
+  {
+    label: "highlight.js-theme (github-dark)",
+    source: path.join(frontendRoot, "node_modules", "@highlightjs", "cdn-assets", "styles", "github-dark.min.css"),
+    target: path.join(vendorRoot, "highlight-github-dark.min.css"),
+  },
 ];
 
 function fail(message) {

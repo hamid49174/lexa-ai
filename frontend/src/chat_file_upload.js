@@ -38,6 +38,37 @@ function setupDragDrop() {
   chatContainer.addEventListener("dragleave", (e) => { e.preventDefault(); dragCounter--; if (dragCounter <= 0) { dragCounter = 0; overlay.classList.remove("visible"); } });
   chatContainer.addEventListener("dragover", (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; });
   chatContainer.addEventListener("drop", (e) => { e.preventDefault(); dragCounter = 0; overlay.classList.remove("visible"); const files = e.dataTransfer?.files; if (files && files.length > 0) handleFileUploadBatch(files); });
+
+  // Paste-Upload: kopierte Bilder/Dateien direkt aus der Zwischenablage anhaengen.
+  const pasteInput = document.getElementById("chat-input");
+  if (pasteInput) {
+    pasteInput.addEventListener("paste", (e) => {
+      const items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      const files = [];
+      for (const item of items) {
+        if (item.kind === "file") {
+          const f = item.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault(); // sonst fuegt der Browser den Bild-Pfad als Text ein
+        handleFileUploadBatch(files);
+      }
+    });
+  }
+
+  // Leerzustand: klickbare Beispiel-Prompts fuellen die Eingabe (kein Auto-Senden).
+  document.querySelectorAll(".example-prompt").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const input = document.getElementById("chat-input");
+      if (!input) return;
+      input.value = (btn.dataset.prompt || btn.textContent || "").trim();
+      input.focus();
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  });
 }
 function triggerFileUpload() { document.getElementById("file-input")?.click(); }
 function handleFileSelect(event) { const fileList = Array.from(event.target.files || []); if (fileList.length > 0) handleFileUploadBatch(fileList); event.target.value = ""; }

@@ -12,6 +12,7 @@
     "build": "set \"ELECTRON_RUN_AS_NODE=\" && electron-builder --config electron-builder.json"
   },
   "dependencies": {
+    "@highlightjs/cdn-assets": "^11.11.1",
     "simplex-noise": "2.4.0",
     "three": "0.128.0"
   },

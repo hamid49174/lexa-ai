@@ -143,6 +143,16 @@ function appendCodeBlock(parent, lang, codeText) {
   pre.className = "code-block";
   const code = document.createElement("code");
   code.textContent = String(codeText || "").trim();
+  // Syntax-Highlighting via vendored highlight.js. Arbeitet auf textContent (XSS-sicher);
+  // setzt nur Klassen + von hljs erzeugtes, escaptes Markup. Fehler -> roher Code bleibt.
+  if (typeof hljs !== "undefined" && code.textContent) {
+    try {
+      if (safeLang && hljs.getLanguage(safeLang)) {
+        code.className = "language-" + safeLang;
+      }
+      hljs.highlightElement(code);
+    } catch (e) { /* Fallback: nicht-hervorgehobener Code */ }
+  }
   pre.appendChild(code);
   wrap.appendChild(header);
   wrap.appendChild(pre);
