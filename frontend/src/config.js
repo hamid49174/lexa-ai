@@ -45,4 +45,11 @@ const LexaConfig = Object.freeze({
   // Voice WebSocket
   VOICE_WS_RECONNECT_DELAY: 1000,
   VOICE_WS_MAX_QUEUE: 1000,
+
+  // Fokus-Modus: nur Kern-Features sichtbar (Chat + Einstellungen; Voice ist im Chat
+  // integriert, Desktop-Automation laeuft ueber die KI im Chat). Alle anderen Views
+  // (dashboard/system/commands/productivity/memory/personal-os) sind ausgeblendet,
+  // bis sie auf hohem Niveau fertig sind. CORE_ONLY=false blendet alles wieder ein.
+  CORE_ONLY: true,
+  CORE_VIEWS: ["chat", "settings"],
 });

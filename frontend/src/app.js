@@ -303,13 +303,30 @@ async function init() {
 // ── SIDEBAR ──────────────────────────────────────
 function setupSidebar() {
   document.querySelectorAll(".sidebar-btn").forEach((btn) => {
+    // Fokus-Modus: Nav-Buttons fuer Nicht-Kern-Views ausblenden (reversibel via CORE_ONLY)
+    if (LexaConfig.CORE_ONLY && !LexaConfig.CORE_VIEWS.includes(btn.dataset.view)) {
+      btn.hidden = true;
+      return;
+    }
     btn.addEventListener("click", () => {
       switchView(btn.dataset.view);
     });
   });
+  // Auch andere switchView-Buttons ausserhalb der Sidebar (z.B. Topbar-Icons) ausblenden
+  if (LexaConfig.CORE_ONLY) {
+    document.querySelectorAll('[data-action="switchView"]').forEach((btn) => {
+      if (!LexaConfig.CORE_VIEWS.includes(btn.dataset.arg)) btn.hidden = true;
+    });
+  }
 }
 
 function switchView(view) {
+  // Fokus-Modus: Nicht-Kern-Views auf den Chat umleiten. Faengt ALLE Einstiege ab
+  // (Sidebar, Command-Palette, Shortcuts, Dashboard-Links), damit keine ausgeblendete
+  // (halbfertige) View erreichbar ist. Steuerung ueber LexaConfig.CORE_ONLY.
+  if (LexaConfig.CORE_ONLY && !LexaConfig.CORE_VIEWS.includes(view)) {
+    view = "chat";
+  }
   // Close nav menu when switching views
   const sidebar = document.querySelector(".sidebar");
   const overlay = document.getElementById("nav-overlay");
