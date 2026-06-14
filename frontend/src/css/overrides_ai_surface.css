@@ -305,8 +305,8 @@
 }
 
 .animated-ai-chat .char-counter {
-  grid-area: input;
-  align-self: end;
+  grid-area: spacer;
+  align-self: center;
   justify-self: end;
   margin: 0;
 }
@@ -317,7 +317,9 @@
 }
 
 .animated-ai-chat .composer-command-btn {
-  display: none;
+  grid-area: spacer;
+  justify-self: start;
+  display: inline-flex;
 }
 
 .animated-ai-chat .sleek-icon-btn {

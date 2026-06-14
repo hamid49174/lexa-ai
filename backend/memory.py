@@ -1340,6 +1340,27 @@ def snippet_use(name: str) -> "str | None":
 #  GLOBAL SEARCH
 # ══════════════════════════════════════════════════
 
+_LEXA_SOURCES_FENCE_RE = re.compile(r"\n*```lexa-sources\s*\n(.*?)\n```\s*$", re.DOTALL)
+
+
+def _split_sources_fence(content):
+    """Split an embedded ```lexa-sources block off a message's content.
+
+    Returns (clean_text, sources) where sources is a list of {title,url} dicts.
+    The fence is a frontend persistence detail and must not leak into search/export.
+    """
+    s = str(content or "")
+    m = _LEXA_SOURCES_FENCE_RE.search(s)
+    if not m:
+        return s, []
+    try:
+        data = json.loads(m.group(1))
+    except Exception:
+        return s, []
+    sources = [x for x in data if isinstance(x, dict) and x.get("url")] if isinstance(data, list) else []
+    return s[:m.start()].rstrip(), sources
+
+
 def global_search(query: str, limit: int = 30, *, include_ranking: bool = False) -> dict:
     """Search across conversations, notes, and memories.
 
@@ -1365,6 +1386,24 @@ def global_search(query: str, limit: int = 30, *, include_ranking: bool = False)
         f"WHERE {conv_conditions} ORDER BY updated_at DESC LIMIT ?",
         conv_params + [limit],
     ).fetchall()
+
+    # Drop false positives where the only match sat inside an embedded sources fence
+    # (the lexa-sources JSON is persisted in content but is not real conversation text).
+    def _conv_matches_real_text(row) -> bool:
+        title_l = (row["title"] or "").lower()
+        if any(w in title_l for w in words):
+            return True
+        try:
+            conv = conversation_get(row["id"])
+        except Exception:
+            return True  # on error, keep the result rather than hide it
+        text = " ".join(
+            _split_sources_fence(m.get("content", ""))[0]
+            for m in (conv or {}).get("messages", [])
+        ).lower()
+        return any(w in text for w in words)
+
+    convs = [row for row in convs if _conv_matches_real_text(row)]
 
     # Search notes — try FTS5 first
     notes_list: list[dict] = []
@@ -1469,7 +1508,10 @@ def conversation_export(conv_id: int, fmt: str = "markdown") -> "str | None":
         ]
         for msg in messages:
             role = "**Du**" if msg.get("role") == "user" else "**Lexa**"
-            lines.append(f"{role}: {msg.get('content', '')}")
+            clean, sources = _split_sources_fence(msg.get("content", ""))
+            lines.append(f"{role}: {clean}")
+            for i, s in enumerate(sources, 1):
+                lines.append(f"  {i}. [{s.get('title') or s.get('url')}]({s.get('url')})")
             lines.append("")
         return "\n".join(lines)
     else:
@@ -1482,7 +1524,10 @@ def conversation_export(conv_id: int, fmt: str = "markdown") -> "str | None":
         ]
         for msg in messages:
             role = "Du" if msg.get("role") == "user" else "Lexa"
-            lines.append(f"[{role}] {msg.get('content', '')}")
+            clean, sources = _split_sources_fence(msg.get("content", ""))
+            lines.append(f"[{role}] {clean}")
+            for i, s in enumerate(sources, 1):
+                lines.append(f"  {i}. {s.get('title') or s.get('url')} - {s.get('url')}")
             lines.append("")
         return "\n".join(lines)
 

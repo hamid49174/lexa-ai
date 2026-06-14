@@ -50,12 +50,3 @@ function continuePromptFromText(sourceText) {
   const text = `${prefix}${sourceLabel}${boundedSource}`.slice(0, targetMax);
   return { text, cursorStart: Math.min(prefix.length, text.length) };
 }
-
-function verifyAnswerPromptFromText(sourceText) {
-  const source = String(sourceText || "").trim();
-  if (!source) return "";
-  const researchCommand = LEXA_COMPOSER_COMMANDS.find((command) => command.id === "research");
-  const prefix = composerCommandPrefix(researchCommand);
-  const lead = `${prefix}Verify the following Lexa answer with source-backed research. Extract checkable claims, separate facts, assumptions, ideas, decisions, evidence, risks, unsupported claims, and follow-up tasks. Cite sources where available and mark anything not verified clearly.\n\nSource answer:\n`;
-  return messageActionPromptWithSource(lead, source, `\n\n${t("chat.verifyAnswerClipMarker")}`);
-}

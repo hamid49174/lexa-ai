@@ -50,9 +50,9 @@ _ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 _ANTHROPIC_API_VERSION = "2023-06-01"
 _ANTHROPIC_MAX_TOKENS = 4096
 _GROQ_MAX_TOKENS = 4096
-# Gemini laeuft sonst mit Provider-Defaults (ungedeckelt) — analog zu Groq begrenzen,
-# damit Latenz/Kosten beschraenkt bleiben und das Verhalten deterministisch ist.
-_GEMINI_MAX_TOKENS = 4096
+# Gemini laeuft sonst mit Provider-Defaults (ungedeckelt) — gedeckelt, aber grosszuegig:
+# 4096 schnitt lange Code-/Analyse-Antworten ab. Gemini Flash kann bis 8192 Output-Tokens.
+_GEMINI_MAX_TOKENS = 8192
 _GEMINI_TEMPERATURE = 0.7
 
 
@@ -230,7 +230,10 @@ def _categorize_error(e: Exception) -> str:
 
 
 # ── Token Budget ──
-_TOKEN_WARN_THRESHOLD = 6000  # rough token limit for system + history
+# Gemini 3.5 Flash hat ~1M Token Kontext. Der alte 6000er-Cap (GPT-3.5-Aera) trimmte
+# den Verlauf staendig weg und verschenkte Geminis groessten Vorteil. Jetzt nur noch
+# Notbremse gegen Runaway-Kontext; normale Gespraeche bleiben vollstaendig erhalten.
+_TOKEN_WARN_THRESHOLD = 200000  # rough token limit for system + history (Gemini 1M context)
 
 
 def _estimate_tokens(char_count: int) -> int:

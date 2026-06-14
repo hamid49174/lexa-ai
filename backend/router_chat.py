@@ -1176,7 +1176,7 @@ async def chat_endpoint(req: ChatRequest):
         )
 
     await ensure_active_conversation(req.conversation_id)
-    sanitized = sanitize_input(req.message)
+    sanitized = sanitize_input(req.message, max_chars=MAX_CHAT_MESSAGE_LENGTH)
     audit_log("chat", "received", _audit_message_details(sanitized))
 
     # Fast path: check if this is a confirmation of a pending action
@@ -1722,7 +1722,7 @@ async def chat_stream_endpoint(req: ChatRequest):
         )
 
     await ensure_active_conversation(req.conversation_id)
-    sanitized = sanitize_input(req.message)
+    sanitized = sanitize_input(req.message, max_chars=MAX_CHAT_MESSAGE_LENGTH)
     audit_log("chat_stream", "received", _audit_message_details(sanitized))
 
     # Fast path: check if this is a confirmation of a pending action
