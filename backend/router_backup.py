@@ -106,9 +106,16 @@ async def create_backup_file():
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     path = backup_dir / f"{_BACKUP_FILENAME_PREFIX}{timestamp}{_BACKUP_FILENAME_SUFFIX}"
 
+    # backup_database() writes the file itself when given a path. The fallback
+    # below only runs if that write did not produce a file (proven write
+    # failure) — otherwise the full backup dict is dropped immediately so the
+    # potentially large payload can be garbage-collected before we respond.
     data = await asyncio.to_thread(memory.backup_database, str(path))
-    if not path.exists():
+    if path.exists():
+        data = None
+    else:
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        data = None
 
     meta = _backup_metadata(path)
     return {"status": "ok", "success": True, **meta}

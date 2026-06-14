@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import hashlib
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -415,7 +416,14 @@ def trace_path_is_safe(path: str | Path, *, repo_root: str | Path | None = None)
     try:
         rel = resolved.relative_to(root)
     except ValueError:
-        return True
+        # Outside the repo: only the OS temp directory is treated as a safe,
+        # controlled scratch space (covers pytest tmp_path and tmp LEXA_AGENT_TRACE_DIR).
+        # Arbitrary external targets (system dirs, network drives) are rejected.
+        try:
+            temp_root = Path(tempfile.gettempdir()).resolve()
+        except OSError:
+            return False
+        return resolved.is_relative_to(temp_root)
     rel_text = rel.as_posix()
     return rel_text.startswith("tmp/") or rel_text.startswith(".test-tmp/") or rel_text.startswith("evals/results/")
 

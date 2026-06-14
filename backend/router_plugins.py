@@ -13,6 +13,7 @@ Endpoints:
   POST   /plugins/execute      -- Plugin-Tool ausfuehren
 """
 
+import asyncio
 import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
@@ -76,8 +77,12 @@ async def scan_plugins():
 
     Findet neue Plugins und laedt sie. Bereits geladene werden nicht beeinflusst.
     """
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Plugin-Scans. Bitte kurz warten.")
     try:
-        loaded = plugin_manager.discover_plugins()
+        # discover_plugins fuehrt Plugin-Top-Level-Code aus und macht blockierende
+        # Datei-I/O -> in einen Thread auslagern, damit der Event-Loop frei bleibt.
+        loaded = await asyncio.to_thread(plugin_manager.discover_plugins)
         all_plugins = plugin_manager.list_plugins()
         return JSONResponse({
             "success": True,
@@ -105,7 +110,9 @@ async def get_plugin_details(name: str):
 @router.post("/{name}/reload")
 async def reload_plugin(name: str):
     """Plugin entladen und neu laden (Hot-Reload)."""
-    success = plugin_manager.reload_plugin(name)
+    # reload_plugin fuehrt Plugin-Top-Level-Code aus und macht blockierende
+    # Datei-I/O -> in einen Thread auslagern, damit der Event-Loop frei bleibt.
+    success = await asyncio.to_thread(plugin_manager.reload_plugin, name)
     if not success:
         raise HTTPException(status_code=404, detail=f"Plugin '{name}' konnte nicht neu geladen werden")
     info = plugin_manager.get_plugin(name)

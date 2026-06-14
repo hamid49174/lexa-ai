@@ -19,6 +19,16 @@ const LexaI18n = (() => {
   let _loaded = false;
   let _loadPromise = null;
 
+  // Resolve the base path for JSON packs at load time.
+  // document.currentScript is only reliable while the script is executing
+  // synchronously, so we cache it here (it is null inside async callbacks).
+  // Query strings (e.g. i18n.js?v=2) are stripped to keep the path clean.
+  const _basePath = (() => {
+    const src = document.currentScript && document.currentScript.getAttribute("src");
+    if (!src) return "./i18n/";
+    return src.split("?")[0].replace(/i18n\.js$/, "");
+  })();
+
   function _debug(message) {
     if (window.LEXA_DEBUG_I18N === true) console.debug(message);
   }
@@ -28,9 +38,12 @@ const LexaI18n = (() => {
     const template = _strings[key] || _fallback[key] || key;
     if (!params) return template;
 
-    // Replace {{param}} placeholders
+    // Replace {{param}} placeholders.
+    // Coerce values to String to avoid "[object Object]" for accidental
+    // object/array params; keep the placeholder for null/undefined.
     return template.replace(/\{\{(\w+)\}\}/g, (_, name) => {
-      return params[name] !== undefined ? params[name] : `{{${name}}}`;
+      const value = params[name];
+      return value !== undefined && value !== null ? String(value) : `{{${name}}}`;
     });
   }
 
@@ -56,15 +69,11 @@ const LexaI18n = (() => {
     }
 
     // Strategy 2: fetch() fallback (works in dev server / non-Electron)
+    // Reuse the base path cached at load time via document.currentScript.
+    // It already strips query strings (e.g. i18n.js?v=2) and is more reliable
+    // than re-querying the DOM, where the script tag may be renamed/bundled.
     try {
-      const scriptTags = document.querySelectorAll('script[src*="i18n.js"]');
-      let basePath = "./i18n/";
-      if (scriptTags.length > 0) {
-        const src = scriptTags[0].getAttribute("src");
-        basePath = src.replace("i18n.js", "");
-      }
-
-      const resp = await fetch(basePath + info.file);
+      const resp = await fetch(_basePath + info.file);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       _debug(`[i18n] Loaded ${lang} via fetch (${Object.keys(data).length} keys)`);

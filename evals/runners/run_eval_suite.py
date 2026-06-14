@@ -556,7 +556,25 @@ def _evaluate_with_adapter(task: dict[str, Any], *, fixture_root: Path | None = 
     adapter_task = dict(task)
     if trace_dir is not None and adapter_task["category"] == "trace_replay":
         adapter_task["_trace_dir"] = str(trace_dir)
-    adapter_result = adapter.evaluate(adapter_task, fixture_root=fixture_root)
+    try:
+        adapter_result = adapter.evaluate(adapter_task, fixture_root=fixture_root)
+    except Exception as exc:
+        # Adapters import backend modules lazily inside evaluate() and may raise at
+        # runtime (e.g. ImportError from a missing transitive dependency). A single
+        # broken adapter must not abort the whole suite, so mark only this task as
+        # failed with an explanatory observation instead of letting it propagate.
+        return EvalResult(
+            task_id=task["id"],
+            category=task["category"],
+            risk_level=task["risk_level"],
+            passed=False,
+            checks=[
+                {"type": str(assertion.get("type")), "value_hash": stable_hash(assertion.get("value"))[:12], "passed": False}
+                for assertion in task["assertions"]
+            ],
+            observations=redact_secrets({"adapter_error": f"{type(exc).__name__}: {exc}"}),
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
     checks = adapter_result.get("assertion_results") or [
         evaluate_assertion(assertion, adapter_result) for assertion in task["assertions"]
     ]

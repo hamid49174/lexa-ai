@@ -235,13 +235,14 @@ function filterCommands(query) {
 const MAX_RECENT_CMDS = 6;
 function getRecentCommands() {
   const parsed = lexaStorageJson("lexa-recent-cmds", []);
-  return Array.isArray(parsed) ? parsed : [];
+  return Array.isArray(parsed) ? parsed.filter(n => typeof n === "string") : [];
 }
 function trackRecentCommand(name) {
   let recent = getRecentCommands().filter(n => n !== name);
   recent.unshift(name);
   recent = recent.slice(0, MAX_RECENT_CMDS);
-  lexaStorageSet("lexa-recent-cmds", JSON.stringify(recent));
+  const ok = lexaStorageSet("lexa-recent-cmds", JSON.stringify(recent));
+  if (!ok) console.warn("[Commands] Recently-used Liste konnte nicht gespeichert werden (Storage voll oder nicht verfuegbar)");
 }
 
 function bindCommandItemAction(el, handler, label) {
@@ -429,11 +430,34 @@ function appendHighlightedCommandText(target, text, query) {
 function insertCommand(cmd) {
   trackRecentCommand(cmd);
   switchView("chat");
-  chatInput.value = cmd.replace(/_/g, " ");
+  if (!chatInput) return;
+  let text = String(cmd || "").replace(/_/g, " ");
+  const maxLen = Number(LexaConfig?.MAX_CHAT_INPUT_LENGTH) || 4000;
+  if (text.length > maxLen) text = text.slice(0, maxLen);
+  if (typeof _setChatInputValue === "function") {
+    _setChatInputValue(text);
+  } else {
+    chatInput.value = text;
+  }
   chatInput.focus();
 }
 
 // ── TOOL QUICK ACTIONS ──────────────────────────
+// Render command result safely: strings pass through, structures are
+// JSON-serialized with a guard against circular refs / BigInt etc.
+function formatCommandResult(data) {
+  if (typeof data === "string") return data;
+  let text;
+  try {
+    text = JSON.stringify(data, null, 2);
+  } catch (_e) {
+    return "[nicht darstellbar]";
+  }
+  if (typeof text !== "string") return String(data);
+  if (text.length > 500) text = text.substring(0, 500) + "\n... (gekürzt)";
+  return text;
+}
+
 async function quickAction(command, promptText, paramKey) {
   if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
   const vals = await showInputModal(command, [{ id: "v", label: promptText, type: "text", required: true }], t("cmd.execute"));
@@ -455,7 +479,7 @@ async function quickAction(command, promptText, paramKey) {
     const res = await window.lexa.execute(command, params, true);
     hideTyping();
     if (res.success) {
-      const summary = typeof res.data === "string" ? res.data : JSON.stringify(res.data, null, 2).substring(0, 500);
+      const summary = formatCommandResult(res.data);
       addMessage(summary, "system");
       showToast(t("commands.success", {command}), "success");
       sendNotification("Lexa AI", t("cmd.successNotification", {command}));
@@ -480,7 +504,7 @@ async function runTool(command, params = {}) {
     const res = await window.lexa.execute(command, params, true);
     hideTyping();
     if (res.success) {
-      const summary = typeof res.data === "string" ? res.data : JSON.stringify(res.data, null, 2).substring(0, 500);
+      const summary = formatCommandResult(res.data);
       addMessage(summary, "system");
       showToast(t("commands.done", {command}), "success");
       sendNotification("Lexa AI", t("cmd.doneNotification", {command}));
@@ -509,7 +533,7 @@ async function dashQuickPomodoro() {
       await window.lexa.pomodoroStop();
       showToast(t("pomodoro.stopped"), "info", 2500);
       const pomoBtn = document.getElementById("dash-btn-pomo");
-      if (pomoBtn) pomoBtn.textContent = "\u23F1 Pomodoro";
+      if (pomoBtn) pomoBtn.textContent = "\u23F1 " + t("pomodoro.start");
     } else {
       // Use the new modal instead of prompt
       startPomodoro();

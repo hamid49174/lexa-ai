@@ -67,8 +67,12 @@ def _iso_ts(epoch: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
 
 
-def _cleanup_expired(now: float) -> None:
-    expired = [cid for cid, record in _store.items() if record.expires_at <= now or record.used]
+def _cleanup_expired(now: float, *, keep: str | None = None) -> None:
+    expired = [
+        cid
+        for cid, record in _store.items()
+        if (record.expires_at <= now or record.used) and cid != keep
+    ]
     for cid in expired:
         _store.pop(cid, None)
 
@@ -148,8 +152,14 @@ def consume_confirmation(
         raise ConfirmationError("confirmation_required", "Missing confirmation_id.", 403)
 
     now = time.time()
+    cid = str(confirmation_id)
     with _lock:
-        record = _store.get(str(confirmation_id))
+        # Auch beim Konsumieren abgelaufene/verbrauchte Records aufräumen, damit der
+        # _store bei prepare-Spam ohne folgendes create nicht unbegrenzt wächst.
+        # Den angefragten Eintrag selbst ausnehmen, um seine spezifischen
+        # Fehlercodes (expired/replay) unten zu erhalten.
+        _cleanup_expired(now, keep=cid)
+        record = _store.get(cid)
         if record is None:
             raise ConfirmationError("invalid_confirmation", "Invalid or expired confirmation_id.", 403)
         if record.used:

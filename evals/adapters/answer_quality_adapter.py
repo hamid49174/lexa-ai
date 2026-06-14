@@ -44,7 +44,12 @@ def evaluate(task: dict[str, Any], *, fixture_root: str | Path | None = None) ->
     started = time.perf_counter()
     output = _response_for(task, fixture_root)
     lower = output.lower()
-    cites_evidence = bool(re.search(r"\b(backend|frontend|tests|evals|docs|scripts)/[^\s,]+", output.replace("\\", "/")))
+    cites_evidence = bool(
+        re.search(
+            r"\b(backend|frontend|tests|evals|docs|scripts|companion|voice|personal_os|plugins)/[^\s,]+",
+            output.replace("\\", "/"),
+        )
+    )
     overclaim = any(
         marker in lower
         for marker in (

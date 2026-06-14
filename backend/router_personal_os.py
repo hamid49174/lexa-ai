@@ -14,7 +14,7 @@ import re
 import shutil
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -174,7 +174,7 @@ async def _ensure_personal_os_connected() -> list[dict]:
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
             logger.warning("Personal OS MCP server missing from registry cache; reloading MCP config")
             try:
-                mcp_registry.load_config()
+                await asyncio.to_thread(mcp_registry.load_config)
                 await mcp_registry.connect(_PERSONAL_OS_SERVER)
             except MCPError as retry_exc:
                 raise HTTPException(status_code=502, detail=str(retry_exc)) from retry_exc
@@ -245,11 +245,39 @@ async def _call_personal_os_tool(tool: str, arguments: dict) -> dict:
     return _parse_mcp_json_content(content)
 
 
+def _has_personal_os_manifest(path: Path) -> bool:
+    return (path / "OS_MANIFEST.md").exists()
+
+
+def _mcp_personal_os_root_candidate() -> Path | None:
+    """Resolve the Personal OS root from mcp_servers.json (env block), mirroring hermes_adapter."""
+    config_path = Path(__file__).resolve().parents[1] / "mcp_servers.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    personal_os = (config.get("servers") or {}).get("personal_os") or {}
+    env = personal_os.get("env") or {}
+    for key in ("PERSONAL_OS_ROOT", "PERSONAL_OS_SDK_ROOT"):
+        value = str(env.get(key) or "").strip()
+        if not value:
+            continue
+        path = Path(value)
+        if _has_personal_os_manifest(path):
+            return path
+    return None
+
+
 def _personal_os_root() -> Path:
-    configured = os.environ.get("PERSONAL_OS_ROOT")
-    if configured:
-        return Path(configured)
-    return Path(__file__).resolve().parents[3] / "OS"
+    # Keep this resolution aligned with hermes_adapter._resolve_personal_os_root so the
+    # REST/SDK worker paths use the same Personal OS root as the MCP tools.
+    explicit = os.environ.get("LEXA_PERSONAL_OS_ROOT") or os.environ.get("PERSONAL_OS_ROOT")
+    if explicit:
+        return Path(explicit)
+    project_link = Path(__file__).resolve().parents[1] / "personal_os"
+    if _has_personal_os_manifest(project_link):
+        return project_link
+    return _mcp_personal_os_root_candidate() or project_link
 
 
 def _raw_inbox_slug(value: str) -> str:
@@ -293,10 +321,24 @@ async def _write_raw_inbox_file(req: RawInboxSubmitRequest) -> dict:
     )
     return {
         "path": relative,
+        "absolutePath": str(absolute),
         "filename": filename,
         "title": title,
         "size": len(body.encode("utf-8")),
     }
+
+
+async def _terminate_process(process: "asyncio.subprocess.Process") -> None:
+    """Kill and reap a subprocess so pipes/transport close cleanly (no zombies)."""
+    try:
+        process.kill()
+    except ProcessLookupError:
+        return
+    try:
+        # Reap the killed child; bound the wait so a stuck reap can't hang the request.
+        await asyncio.wait_for(process.wait(), timeout=5)
+    except (asyncio.TimeoutError, ProcessLookupError):
+        pass
 
 
 async def _run_raw_inbox_worker(filename: str, processor: str) -> dict:
@@ -304,6 +346,11 @@ async def _run_raw_inbox_worker(filename: str, processor: str) -> dict:
     worker_dir = os_root / "07_Automations" / "Workflows" / "raw-inbox-worker"
     if not worker_dir.exists():
         raise HTTPException(status_code=502, detail=f"Raw inbox worker not found: {worker_dir}")
+    if not (worker_dir / "dist" / "index.js").exists():
+        raise HTTPException(
+            status_code=502,
+            detail="Raw inbox worker nicht gebaut: 'npm run build' im raw-inbox-worker ausfuehren.",
+        )
 
     node_cmd = "node.exe" if sys.platform.startswith("win") else "node"
     process = await asyncio.create_subprocess_exec(
@@ -325,7 +372,7 @@ async def _run_raw_inbox_worker(filename: str, processor: str) -> dict:
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=max(MCP_CALL_TIMEOUT, 45))
     except asyncio.TimeoutError as exc:
-        process.kill()
+        await _terminate_process(process)
         raise HTTPException(status_code=504, detail="Raw inbox worker timed out") from exc
 
     out_text = stdout.decode("utf-8", errors="replace").strip()
@@ -347,6 +394,11 @@ async def _run_raw_inbox_worker_status() -> dict:
     worker_dir = os_root / "07_Automations" / "Workflows" / "raw-inbox-worker"
     if not worker_dir.exists():
         raise HTTPException(status_code=502, detail=f"Raw inbox worker not found: {worker_dir}")
+    if not (worker_dir / "dist" / "index.js").exists():
+        raise HTTPException(
+            status_code=502,
+            detail="Raw inbox worker nicht gebaut: 'npm run build' im raw-inbox-worker ausfuehren.",
+        )
 
     node_cmd = "node.exe" if sys.platform.startswith("win") else "node"
     process = await asyncio.create_subprocess_exec(
@@ -361,7 +413,7 @@ async def _run_raw_inbox_worker_status() -> dict:
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=max(MCP_CALL_TIMEOUT, 15))
     except asyncio.TimeoutError as exc:
-        process.kill()
+        await _terminate_process(process)
         raise HTTPException(status_code=504, detail="Raw inbox worker status timed out") from exc
 
     out_text = stdout.decode("utf-8", errors="replace").strip()
@@ -392,6 +444,10 @@ def _validate_os_relative_path(value: str, *, require_markdown: bool = False) ->
     if not normalized:
         raise HTTPException(status_code=400, detail="OS path is required")
     if Path(normalized).is_absolute() or normalized.startswith("/"):
+        raise HTTPException(status_code=400, detail="OS path must be relative")
+    # Reject drive-relative Windows paths (e.g. "C:foo.md"): Path.is_absolute()
+    # returns False for a drive letter without a root, so check the drive directly.
+    if PureWindowsPath(normalized).drive:
         raise HTTPException(status_code=400, detail="OS path must be relative")
     if ".." in normalized.split("/"):
         raise HTTPException(status_code=400, detail="OS path must not contain directory traversal")
@@ -1293,7 +1349,7 @@ async def _run_draft_decision_cli(req: DraftDecisionRequest) -> dict:
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=MCP_CALL_TIMEOUT)
     except asyncio.TimeoutError as exc:
-        process.kill()
+        await _terminate_process(process)
         raise HTTPException(status_code=504, detail="Draft decision timed out") from exc
 
     out_text = stdout.decode("utf-8", errors="replace").strip()
@@ -1354,7 +1410,7 @@ async def _run_draft_apply_cli(req: DraftApplyRequest) -> dict:
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=MCP_CALL_TIMEOUT)
     except asyncio.TimeoutError as exc:
-        process.kill()
+        await _terminate_process(process)
         raise HTTPException(status_code=504, detail="Draft apply timed out") from exc
 
     out_text = stdout.decode("utf-8", errors="replace").strip()
@@ -1669,7 +1725,15 @@ async def raw_inbox_submit(req: RawInboxSubmitRequest):
         raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
 
     raw = await _write_raw_inbox_file(req)
-    worker = await _run_raw_inbox_worker(str(raw["filename"]), req.processor)
+    absolute_path = raw.pop("absolutePath", None)
+    try:
+        worker = await _run_raw_inbox_worker(str(raw["filename"]), req.processor)
+    except HTTPException:
+        # Worker failed (build missing, timeout, processing error): remove the just-written
+        # raw file so a failed submit does not leave an unprocessed leftover behind.
+        if absolute_path:
+            await asyncio.to_thread(Path(absolute_path).unlink, True)
+        raise
     return {
         "ok": bool(worker.get("ok")),
         "raw": raw,
@@ -1696,10 +1760,17 @@ async def raw_inbox_extract(req: RawInboxExtractRequest):
 
     audit_log("personal_os", "raw_inbox_extract", audit_value_metadata("source", req.sourcePath))
 
+    # Import/config failures (AI engine unavailable, no provider selected) are an
+    # availability problem (503); provider runtime failures are an upstream error (502).
     try:
         from backend.ai_engine import _chat_with_selected_provider, _get_selected_model_meta
 
         selected_model = _get_selected_model_meta()
+    except Exception as exc:
+        logger.exception("Personal OS raw inbox extraction: AI engine unavailable")
+        raise HTTPException(status_code=503, detail="Lexa AI engine is not available") from exc
+
+    try:
         result = await asyncio.to_thread(
             _chat_with_selected_provider,
             _build_messages(req),
@@ -1707,11 +1778,15 @@ async def raw_inbox_extract(req: RawInboxExtractRequest):
             None,
         )
     except Exception as exc:
-        logger.exception("Personal OS raw inbox extraction failed")
-        raise HTTPException(status_code=502, detail="Lexa extraction failed") from exc
+        logger.exception("Personal OS raw inbox extraction failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=502, detail="Lexa extraction provider call failed") from exc
 
     if not result or result.get("type") != "text":
-        raise HTTPException(status_code=502, detail="Lexa extraction did not return text")
+        # A configured provider with no usable client (e.g. missing API key) returns None.
+        raise HTTPException(
+            status_code=502,
+            detail="Lexa extraction returned no result; check that the selected provider is configured.",
+        )
 
     try:
         summary, tags = _parse_extraction(str(result.get("content", "")))

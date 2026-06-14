@@ -336,7 +336,10 @@ def _candidate_windows(window: str = "", *, all_visible: bool = True, prefer_rec
 
     unique = _dedupe_windows(candidates)
     if remembered_query and not unique:
-        return _candidate_windows("", all_visible=all_visible, prefer_recent=False)
+        # Das gemerkte Fenster existiert nicht mehr. Statt auf ALLE sichtbaren
+        # Fenster zurueckzufallen (was ein beliebiges Fenster zum Klickziel
+        # machen koennte), nur auf das aktuelle Vordergrundfenster beschraenken.
+        return _candidate_windows("", all_visible=False, prefer_recent=False)
     if explicit_query and query and not unique:
         raise ValueError(f"window not found: {window}")
     return unique
@@ -576,7 +579,9 @@ def ui_click(
             return result
         raise ValueError(f"UI control not found: {target_text}")
 
-    index = max(1, int(occurrence or 1)) - 1
+    requested_occurrence = max(1, int(occurrence or 1))
+    index = requested_occurrence - 1
+    occurrence_clamped = index > len(matches) - 1
     match = matches[min(index, len(matches) - 1)]
     _remember_target_control(match)
     rect = match["rect"]
@@ -588,7 +593,7 @@ def ui_click(
         raise ValueError(f"UI control has no clickable screen rectangle: {target_text}")
     x, y = _rect_center(rect)
     click_result = desktop_control.desktop_click(x=x, y=y, button=button, clicks=1)
-    return {
+    result = {
         "clicked": True,
         "target": target_text,
         "matched_text": match.get("name") or match.get("automation_id") or str(text or "").strip(),
@@ -600,3 +605,11 @@ def ui_click(
         "score": match.get("score"),
         "method": "ui-automation",
     }
+    if occurrence_clamped:
+        # Es wurden weniger Treffer gefunden als angefordert (occurrence). Statt
+        # stillschweigend den letzten Treffer als den gewuenschten auszugeben,
+        # die Abweichung explizit melden, damit LLM/Nutzer sie erkennen.
+        result["occurrence_clamped"] = True
+        result["requested_occurrence"] = requested_occurrence
+        result["match_count"] = len(matches)
+    return result

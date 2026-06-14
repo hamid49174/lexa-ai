@@ -108,6 +108,7 @@ def has_ws_clients() -> bool:
 # ── Convenience event pushers ──────────────────────────────
 
 _last_volume_push: float = 0.0
+_volume_throttle_lock = threading.Lock()
 _VOLUME_THROTTLE_S: float = 0.15  # Max ~6 events/sec (was ~7/sec unthrottled)
 
 
@@ -116,10 +117,14 @@ def push_volume(vol: float):
     global _last_volume_push
     if not has_ws_clients():
         return  # Skip if no WS clients
-    now = time.time()
-    if now - _last_volume_push < _VOLUME_THROTTLE_S:
-        return  # Throttle: skip if too soon
-    _last_volume_push = now
+    # Read-modify-write des Throttle-Zustands atomar unter Lock —
+    # push_volume kann aus mehreren Threads (Wakeword, TTS) aufgerufen werden.
+    # time.monotonic() statt time.time(): immun gegen NTP-/DST-Zeitspruenge.
+    now = time.monotonic()
+    with _volume_throttle_lock:
+        if now - _last_volume_push < _VOLUME_THROTTLE_S:
+            return  # Throttle: skip if too soon
+        _last_volume_push = now
     push_event("volume", "", vol=round(vol, 3))
 
 

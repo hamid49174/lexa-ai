@@ -347,12 +347,18 @@ function installLocalAuthRequestHeaders(ses = session.defaultSession) {
 }
 
 async function installLocalAuthCookie() {
-  await session.defaultSession.cookies.set({
-    url: "http://127.0.0.1:8000",
-    name: LOCAL_AUTH_COOKIE,
-    value: INSTANCE_TOKEN,
-    httpOnly: true,
-  });
+  // The onBeforeSendHeaders header (installLocalAuthRequestHeaders) is a second
+  // auth channel, so a cookie failure must not abort startup or hide the window.
+  try {
+    await session.defaultSession.cookies.set({
+      url: "http://127.0.0.1:8000",
+      name: LOCAL_AUTH_COOKIE,
+      value: INSTANCE_TOKEN,
+      httpOnly: true,
+    });
+  } catch (e) {
+    console.warn("[Main] local auth cookie set failed:", e.message || e);
+  }
 }
 
 function getBackendPath() {
@@ -542,6 +548,16 @@ function setupFrontendAutoReload() {
   const srcDir = path.join(__dirname, "src");
   if (!fs.existsSync(srcDir)) return;
 
+  // Tear down any watcher/timer from a previous window so repeated lifecycle
+  // transitions (window-all-closed -> activate -> createWindow) do not pile up
+  // fs.watch handles and reload timers.
+  clearTimeout(frontendReloadTimer);
+  frontendReloadTimer = null;
+  if (frontendWatcher) {
+    try { frontendWatcher.close(); } catch (_e) {}
+    frontendWatcher = null;
+  }
+
   const scheduleReload = (filename) => {
     const changed = String(filename || "");
     if (changed && !/\.(?:js|css|html)$/i.test(changed)) return;
@@ -557,6 +573,7 @@ function setupFrontendAutoReload() {
     frontendWatcher = fs.watch(srcDir, { recursive: true }, (_event, filename) => scheduleReload(filename));
     mainWindow?.on("closed", () => {
       clearTimeout(frontendReloadTimer);
+      frontendReloadTimer = null;
       frontendWatcher?.close();
       frontendWatcher = null;
     });
@@ -897,6 +914,18 @@ function installElectronSecurityGuards(win) {
         && !mediaTypes.includes("video");
       callback(Boolean(allowAudioCapture));
     });
+    // Some Web APIs (Permissions.query, enumerateDevices) route through the
+    // check handler instead of the request handler. Keep it consistent so
+    // microphone permission checks are deterministic for the trusted renderer.
+    if (typeof ses.setPermissionCheckHandler === "function") {
+      ses.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details = {}) => {
+        if (permission !== "media") return false;
+        const requestingUrl = details.requestingUrl || details.securityOrigin || requestingOrigin || "";
+        const mediaType = details.mediaType;
+        if (mediaType === "video") return false;
+        return isTrustedRendererUrl(requestingUrl);
+      });
+    }
   }
 }
 
@@ -1335,9 +1364,9 @@ safeIpcHandle("bridge:presence:consume", (event, rawPayload = {}) => {
 safeIpcOn("show-notification", (_event, data) => {
   if (Notification.isSupported()) {
     const notif = new Notification({
-      title: data.title || "Lexa AI",
-      body: data.body || "",
-      silent: data.silent || false,
+      title: String(data?.title || "Lexa AI").slice(0, 120),
+      body: String(data?.body || "").slice(0, 500),
+      silent: Boolean(data?.silent),
     });
     notif.show();
   }
@@ -1448,8 +1477,13 @@ app.whenReady().then(async () => {
   // Initialize trial license on first launch
   _initTrialIfNeeded();
 
-  // Start Python backend before creating the window
-  await startBackend();
+  // Start the Python backend before creating the window. A backend failure must
+  // not prevent the window from opening - the renderer has offline fallbacks.
+  try {
+    await startBackend();
+  } catch (err) {
+    console.error("[App] Backend startup failed - continuing with window:", err.message || err);
+  }
 
   createWindow();
   createTray();
@@ -1458,6 +1492,18 @@ app.whenReady().then(async () => {
   mainWindow.webContents.on("did-finish-load", () => {
     checkForUpdates();
   });
+}).catch((err) => {
+  // Last-resort guard: never leave the app running headless without a window.
+  console.error("[App] Startup failed:", err && (err.stack || err.message) || err);
+  try {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+      createTray();
+    }
+  } catch (fallbackErr) {
+    console.error("[App] Fallback window creation failed:", fallbackErr.message || fallbackErr);
+    app.exit(1);
+  }
 });
 
 app.on("window-all-closed", () => {

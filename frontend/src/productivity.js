@@ -19,6 +19,11 @@ let _pomodoroMutationRunning = false;
 let _timeTrackingRefreshSeq = 0;
 let _timeTrackingToggleRunning = false;
 let _focusModeToggleRunning = false;
+// Last celebrated streak per habit name — prevents the milestone notification
+// from re-firing on repeated same-day logs (target>1 keeps the streak constant).
+const _lastHabitStreak = new Map();
+// Client-side live state for the time-tracking elapsed display (no per-second HTTP).
+let _ttLive = { running: false, startMs: 0, currentApp: "" };
 
 function productivityLocale() {
   try {
@@ -56,6 +61,19 @@ function createProductivityEmptyState(message) {
   empty.className = "empty-state";
   empty.textContent = String(message || "");
   return empty;
+}
+
+// Shared sidebar todo-badge update (consistent count formatting + visibility).
+function setTodoSidebarBadge(count) {
+  const badge = document.getElementById("nav-todo-badge");
+  if (!badge) return;
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  if (n > 0) {
+    badge.textContent = n > 99 ? "99+" : String(n);
+    badge.classList.remove("hidden");
+  } else {
+    badge.classList.add("hidden");
+  }
 }
 
 function setTodoRowBusy(triggerBtn, busy) {
@@ -124,6 +142,28 @@ function renderTimeTrackingLiveStatus(target, label, timeText, currentApp) {
   if (currentApp) {
     target.appendChild(document.createTextNode(` | ${String(currentApp)}`));
   }
+}
+
+function formatTimeTrackingElapsed(elapsedSec) {
+  const elapsed = Math.max(0, Math.floor(Number(elapsedSec) || 0));
+  const h = Math.floor(elapsed / 3600);
+  const m = Math.floor((elapsed % 3600) / 60);
+  const s = elapsed % 60;
+  return (h > 0 ? h + "h " : "") + String(m).padStart(2, "0") + "m " + String(s).padStart(2, "0") + "s";
+}
+
+// Pure client-side tick: recomputes the elapsed-time line every second from the
+// last known start_time without any HTTP call (mirrors the pomodoro approach).
+function _timeTrackingLiveTick() {
+  const liveEl = document.getElementById("time-tracking-live");
+  // Self-clear when tracking ended, the view changed, or the element is gone \u2014
+  // switchView does not manage this interval, so the tick stops itself.
+  if (!liveEl || !_ttLive.running || !_ttLive.startMs || LexaState.get("currentView") !== "productivity") {
+    LexaState.clearInterval("time-tracking-live");
+    return;
+  }
+  const elapsed = Math.floor((Date.now() - _ttLive.startMs) / 1000);
+  renderTimeTrackingLiveStatus(liveEl, t("productivity.trackingActive"), formatTimeTrackingElapsed(elapsed), _ttLive.currentApp);
 }
 
 function createTimeReportItem(entry) {
@@ -284,9 +324,17 @@ async function refreshTodos() {
       // Check if overdue
       let isOverdue = false;
       if (td.due_date && td.status !== "done") {
-        const due = new Date(td.due_date);
-        due.setHours(23, 59, 59, 999);
-        isOverdue = due < new Date();
+        // Date-only strings ("YYYY-MM-DD") must be interpreted in local time,
+        // otherwise new Date() parses them as UTC midnight and setHours shifts
+        // the effective deadline by the timezone offset (false overdue flag).
+        const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(td.due_date);
+        const due = dateOnly
+          ? (() => { const [y, m, d] = td.due_date.split("-").map(Number); return new Date(y, m - 1, d, 23, 59, 59, 999); })()
+          : new Date(td.due_date);
+        if (!Number.isNaN(due.getTime())) {
+          if (!dateOnly) due.setHours(23, 59, 59, 999);
+          isOverdue = due < new Date();
+        }
       }
 
       const item = document.createElement("div");
@@ -537,14 +585,10 @@ function createTodo(prefillTitle = "") {
       if (LexaState.get("currentView") === "productivity") {
         await Promise.allSettled([refreshTodos(), refreshProdStats()]);
       }
-      // Update sidebar badge
+      // Update sidebar badge (status="open" only — distinct from refreshProdStats'
+      // open_todos which also counts in_progress, so we keep this dedicated call).
       const pendingRes = await window.lexa.todos("open").catch(() => ({ todos: [] }));
-      const pendingCount = (pendingRes.todos || []).length;
-      const badge = document.getElementById("nav-todo-badge");
-      if (badge) {
-        badge.textContent = pendingCount > 99 ? "99+" : pendingCount;
-        pendingCount > 0 ? badge.classList.remove("hidden") : badge.classList.add("hidden");
-      }
+      setTodoSidebarBadge((pendingRes.todos || []).length);
     } catch (e) {
       console.warn("[Productivity] Failed to create todo:", e.message || e);
       showToast(t("toast.executionError"), "error", 2200);
@@ -1095,11 +1139,15 @@ async function logHabit(name, triggerBtn) {
       if (h) {
         const streak = parseInt(h.streak) || 0;
         const milestones = [7, 14, 21, 30, 60, 100, 365];
-        if (milestones.includes(streak)) {
+        // Only celebrate on an actual streak increase, so multiple logs on the
+        // same milestone day (target>1) don't re-trigger beep/toast/notification.
+        const prevStreak = _lastHabitStreak.has(key) ? _lastHabitStreak.get(key) : -1;
+        if (streak > prevStreak && milestones.includes(streak)) {
           playBeep("pomodoro");
           showToast(t("habits.streakMilestone", {streak, name}), "success", 6000);
           sendNotification("Lexa \uD83C\uDF89", t("productivity.streakNotification", {streak, name}));
         }
+        _lastHabitStreak.set(key, streak);
       }
     } catch (e) { console.warn("[Productivity] Failed to check habit streak:", e.message || e); }
     refreshHabits();
@@ -1171,14 +1219,16 @@ async function refreshTimeTracking() {
       if (ttStatus.running) {
         liveEl.classList.remove("hidden");
         const startTime = ttStatus.start_time ? new Date(ttStatus.start_time) : null;
-        const elapsed = startTime ? Math.floor((Date.now() - startTime.getTime()) / 1000) : 0;
-        const h = Math.floor(elapsed / 3600);
-        const m = Math.floor((elapsed % 3600) / 60);
-        const s = elapsed % 60;
-        const timeStr = (h > 0 ? h + "h " : "") + String(m).padStart(2, "0") + "m " + String(s).padStart(2, "0") + "s";
-        renderTimeTrackingLiveStatus(liveEl, t("productivity.trackingActive"), timeStr, ttStatus.current_app);
+        const startMs = startTime && !Number.isNaN(startTime.getTime()) ? startTime.getTime() : Date.now();
+        const elapsed = Math.floor((Date.now() - startMs) / 1000);
+        renderTimeTrackingLiveStatus(liveEl, t("productivity.trackingActive"), formatTimeTrackingElapsed(elapsed), ttStatus.current_app);
+        // Keep the elapsed line ticking every second without polling the backend.
+        _ttLive = { running: true, startMs, currentApp: ttStatus.current_app || "" };
+        LexaState.setInterval("time-tracking-live", _timeTrackingLiveTick, 1000);
       } else {
         liveEl.classList.add("hidden");
+        _ttLive.running = false;
+        LexaState.clearInterval("time-tracking-live");
       }
     }
 

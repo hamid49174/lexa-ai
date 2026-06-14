@@ -118,6 +118,8 @@ def git_status(repo_path: str = "") -> dict:
             capture_output=True, text=True, timeout=10,
             cwd=repo_path,
         )
+        if result.returncode != 0:
+            return {"error": result.stderr.strip() or "Git-Status fehlgeschlagen."}
         lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
         branch = ""
         modified = []
@@ -129,13 +131,17 @@ def git_status(repo_path: str = "") -> dict:
                 continue
             if line.startswith("##"):
                 branch = line[3:].split("...")[0] if "..." in line else line[3:]
-            elif line.startswith("??"):
+                continue
+            if line.startswith("??"):
                 untracked.append(line[3:])
-            elif line[0] in ("M", "A", "D", "R"):
+                continue
+            # Porcelain format: XY <path> — X = index/staged, Y = working tree.
+            # A file can be both staged AND modified (e.g. "MM").
+            index_status = line[0]
+            worktree_status = line[1]
+            if index_status in ("M", "A", "D", "R", "C"):
                 staged.append(line.strip())
-            elif line[1] == "M":
-                modified.append(line.strip())
-            else:
+            if worktree_status in ("M", "D"):
                 modified.append(line.strip())
 
         return {
@@ -164,6 +170,8 @@ def git_log(repo_path: str = "", count: int = 10) -> list[dict]:
             capture_output=True, text=True, timeout=10,
             cwd=repo_path,
         )
+        if result.returncode != 0:
+            return [{"error": result.stderr.strip() or "Git-Log fehlgeschlagen."}]
         commits = []
         for line in result.stdout.strip().split("\n"):
             if "|" in line:
@@ -219,7 +227,13 @@ def git_diff(repo_path: str = "", staged: bool = False, full: bool = False) -> s
             return t("error.noChanges")
 
         if full:
-            return diff_output[:10000] if diff_output else t("error.noChanges")
+            if diff_output:
+                return diff_output[:10000]
+            # git diff (without --stat) emits no text diff for pure binary/mode/rename
+            # changes — fall back to the stat summary so we don't claim "no changes".
+            if stat_output:
+                return stat_output
+            return t("error.noChanges")
 
         # Combine stat + truncated diff
         parts = []
@@ -296,9 +310,13 @@ def git_add(repo_path: str = "", files: str = ".") -> str:
     err = _validate_repo_path(repo_path)
     if err:
         return err
+    files = (files or "").strip() or "."
+    if files.startswith("-"):
+        return "Ungültige Dateiangabe: darf nicht mit '-' beginnen."
     try:
         result = subprocess.run(
-            ["git", "add", files],
+            # "--" ensures the value is treated as a pathspec, never as a git option.
+            ["git", "add", "--", files],
             capture_output=True, text=True, timeout=10,
             cwd=repo_path,
         )
@@ -577,13 +595,18 @@ def http_request(url: str = "", method: str = "GET", headers: str = "", body: st
     if url_error:
         return {"error": url_error}
 
+    method = (method or "GET").strip().upper()
+    allowed_methods = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+    if method not in allowed_methods:
+        return {"error": f"HTTP-Methode '{method}' nicht erlaubt. Erlaubt: {', '.join(sorted(allowed_methods))}"}
+
     timeout = max(3, min(30, timeout))
 
     try:
         import urllib.request
         import urllib.error
 
-        req = urllib.request.Request(url, method=method.upper())
+        req = urllib.request.Request(url, method=method)
 
         # Parse custom headers
         if headers:
@@ -601,7 +624,7 @@ def http_request(url: str = "", method: str = "GET", headers: str = "", body: st
                         req.add_header(k.strip(), v.strip())
 
         # Add body for POST/PUT
-        if body and method.upper() in ("POST", "PUT", "PATCH"):
+        if body and method in ("POST", "PUT", "PATCH"):
             req.data = body.encode("utf-8")
             if "Content-Type" not in (headers or ""):
                 req.add_header("Content-Type", "application/json")
@@ -750,6 +773,36 @@ def _resolved_public_host_error(host: str, port: int) -> str | None:
     return None
 
 
+# Loopback is explicitly allowed for local diagnostics (default servers, dev ports);
+# all other private/link-local/reserved targets are blocked like in the URL path.
+_LOCAL_DIAGNOSTIC_HOSTS: frozenset[str] = frozenset({
+    "localhost",
+    "127.0.0.1",
+    "::1",
+})
+
+
+def _host_target_error(host: str, port: int) -> str | None:
+    """SSRF/private-IP check for the bare host:port path.
+
+    Loopback/localhost is allowed (local diagnostics); every other host is
+    routed through the same validation as the URL path.
+    """
+    candidate = host.lower().rstrip(".")
+    if candidate in _LOCAL_DIAGNOSTIC_HOSTS:
+        return None
+    try:
+        addr = ipaddress.ip_address(candidate)
+    except ValueError:
+        # Hostname — resolve and block dangerous answers (loopback already handled).
+        return _resolved_public_host_error(host, port)
+    if addr.is_loopback:
+        return None
+    if _is_dangerous_ip_address(addr):
+        return t("security.blockedSsrf", ip=addr)
+    return None
+
+
 def server_check(host: str = "", port: int = 80, name: str = "", url: str = "") -> dict:
     """Server/Port Erreichbarkeit prüfen mit Response-Time."""
     if url or host.startswith(("http://", "https://")):
@@ -765,6 +818,11 @@ def server_check(host: str = "", port: int = 80, name: str = "", url: str = "") 
 
     if not host:
         return {"error": "Host erforderlich."}
+
+    host_error = _host_target_error(host, int(port))
+    if host_error:
+        return {"error": host_error}
+
     try:
         start = datetime.now()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

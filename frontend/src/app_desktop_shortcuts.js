@@ -16,7 +16,7 @@ function setupDesktopIntegration() {
   if (window.lexa && window.lexa.onUpdateAvailable) {
     window.lexa.onUpdateAvailable((info) => {
       showToast(
-        t("app.updateAvailable", {latest: escapeHtml(info.latest), current: escapeHtml(info.current)}),
+        t("app.updateAvailable", {latest: info.latest, current: info.current}),
         "info",
         8000
       );
@@ -48,7 +48,7 @@ function setupKeyboardShortcuts() {
     // Ctrl+1-8: Switch views
     if (e.ctrlKey && !e.shiftKey && !e.altKey) {
       const num = parseInt(e.key);
-      if (num >= 1 && num <= 9) {
+      if (num >= 1 && num <= VIEW_KEYS.length) {
         e.preventDefault();
         switchView(VIEW_KEYS[num - 1]);
         return;
@@ -81,22 +81,28 @@ function setupKeyboardShortcuts() {
       return;
     }
 
+    // Plain Ctrl shortcuts (no Shift/Alt). Skip while typing in a text field
+    // to avoid hijacking the user's input or browser-native combos.
+    const ae = document.activeElement;
+    const isTextField = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable);
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && !isTextField) {
+
     // Ctrl+L: Clear chat
-    if (e.ctrlKey && e.key === "l") {
+    if (e.key === "l") {
       e.preventDefault();
       clearChat();
       return;
     }
 
     // Ctrl+B: Toggle sidebar
-    if (e.ctrlKey && e.key === "b") {
+    if (e.key === "b") {
       e.preventDefault();
       toggleSidebar();
       return;
     }
 
     // Ctrl+K: Focus command search
-    if (e.ctrlKey && e.key === "k") {
+    if (e.key === "k") {
       e.preventDefault();
       switchView("commands");
       setTimeout(() => {
@@ -107,39 +113,40 @@ function setupKeyboardShortcuts() {
     }
 
     // Ctrl+M: Start/stop conversation with Lexa
-    if (e.ctrlKey && e.key === "m") {
+    if (e.key === "m") {
       e.preventDefault();
       startOrbConversation();
       return;
     }
 
     // Ctrl+F: Global Search
-    if (e.ctrlKey && e.key === "f") {
+    if (e.key === "f") {
       e.preventDefault();
       openSearchOverlay();
       return;
     }
 
     // Ctrl+N: New Conversation
-    if (e.ctrlKey && e.key === "n") {
+    if (e.key === "n") {
       e.preventDefault();
       newConversation();
       return;
     }
 
     // Ctrl+P: Command Palette
-    if (e.ctrlKey && e.key === "p") {
+    if (e.key === "p") {
       e.preventDefault();
       openPalette();
       return;
     }
 
     // Ctrl+T: New Todo (quick capture)
-    if (e.ctrlKey && e.key === "t" && !e.shiftKey) {
+    if (e.key === "t") {
       e.preventDefault();
       dashQuickTodo();
       return;
     }
+    } // end plain Ctrl shortcuts
 
     // Ctrl+Shift+S: Screenshot Analysis (Vision)
     if (e.ctrlKey && e.shiftKey && e.key === "S") {

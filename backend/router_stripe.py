@@ -274,11 +274,25 @@ def _get_db() -> sqlite3.Connection:
                 stripe_customer_id TEXT,
                 stripe_subscription_id TEXT,
                 license_key TEXT UNIQUE,
+                price_id TEXT,
+                current_period_start TEXT,
                 current_period_end TEXT,
+                cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
         """)
+        # Migration fuer bestehende DBs: Spalten ergaenzen, falls die Tabelle aus
+        # einer aelteren Version stammt (SQLite kennt kein "ADD COLUMN IF NOT EXISTS").
+        existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(subscriptions)")}
+        if "price_id" not in existing_cols:
+            conn.execute("ALTER TABLE subscriptions ADD COLUMN price_id TEXT")
+        if "current_period_start" not in existing_cols:
+            conn.execute("ALTER TABLE subscriptions ADD COLUMN current_period_start TEXT")
+        if "cancel_at_period_end" not in existing_cols:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN cancel_at_period_end INTEGER NOT NULL DEFAULT 0"
+            )
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_subs_stripe_customer
             ON subscriptions(stripe_customer_id)
@@ -351,9 +365,50 @@ def _price_id_from_subscription(subscription) -> str:
         return ""
 
 
+def _subscription_field(subscription, field: str):
+    """Read a field from a Stripe subscription object (dict or SDK object)."""
+    try:
+        if isinstance(subscription, dict):
+            return subscription.get(field)
+        if hasattr(subscription, "get"):
+            return subscription.get(field)
+        return getattr(subscription, field, None)
+    except Exception:
+        return None
+
+
+def _subscription_first_item(subscription):
+    """Return the first subscription item (dict or SDK object), if available."""
+    try:
+        items = _subscription_field(subscription, "items")
+        if items is None:
+            return None
+        data = items.get("data", []) if isinstance(items, dict) else getattr(items, "data", [])
+        if not data:
+            return None
+        return data[0]
+    except Exception:
+        return None
+
+
+def _subscription_period_value(subscription, field: str):
+    """Read a period timestamp, preferring the item-level field (Stripe API 2025-*).
+
+    Aktuelle Stripe-API-Versionen verschieben current_period_start/-end von der
+    Subscription auf die Subscription-Items. Wir lesen daher zuerst vom ersten Item
+    und fallen auf das Top-Level-Feld zurueck (aeltere API-Versionen).
+    """
+    item = _subscription_first_item(subscription)
+    if item is not None:
+        value = item.get(field) if isinstance(item, dict) else getattr(item, field, None)
+        if value:
+            return value
+    return _subscription_field(subscription, field)
+
+
 def _subscription_period_start(subscription) -> str | None:
     try:
-        value = subscription.get("current_period_start") if isinstance(subscription, dict) else subscription.current_period_start
+        value = _subscription_period_value(subscription, "current_period_start")
         return datetime.fromtimestamp(value, tz=timezone.utc).isoformat() if value else None
     except Exception:
         return None
@@ -361,7 +416,7 @@ def _subscription_period_start(subscription) -> str | None:
 
 def _subscription_period_end(subscription) -> str | None:
     try:
-        value = subscription.get("current_period_end") if isinstance(subscription, dict) else subscription.current_period_end
+        value = _subscription_period_value(subscription, "current_period_end")
         return datetime.fromtimestamp(value, tz=timezone.utc).isoformat() if value else None
     except Exception:
         return None
@@ -478,24 +533,32 @@ def _sqlite_upsert_subscription(user_id: str, customer_id: str, subscription) ->
     subscription_id = _subscription_id(subscription)
     plan = _extract_plan_name(subscription)
     status = _subscription_status(subscription)
+    price_id = _price_id_from_subscription(subscription)
+    period_start = _subscription_period_start(subscription)
     period_end = _subscription_period_end(subscription)
+    cancel_at_period_end = 1 if _subscription_cancel_at_period_end(subscription) else 0
     license_key = _generate_license_key(user_id, subscription_id)
 
     conn = _get_db()
     try:
         conn.execute("""
             INSERT INTO subscriptions (user_id, plan, status, stripe_customer_id,
-                stripe_subscription_id, license_key, current_period_end, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                stripe_subscription_id, license_key, price_id, current_period_start,
+                current_period_end, cancel_at_period_end, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(user_id) DO UPDATE SET
                 plan = excluded.plan,
                 status = excluded.status,
                 stripe_customer_id = excluded.stripe_customer_id,
                 stripe_subscription_id = excluded.stripe_subscription_id,
                 license_key = excluded.license_key,
+                price_id = excluded.price_id,
+                current_period_start = excluded.current_period_start,
                 current_period_end = excluded.current_period_end,
+                cancel_at_period_end = excluded.cancel_at_period_end,
                 updated_at = datetime('now')
-        """, (user_id, plan, status, customer_id, subscription_id, license_key, period_end))
+        """, (user_id, plan, status, customer_id, subscription_id, license_key,
+              price_id, period_start, period_end, cancel_at_period_end))
         conn.commit()
     finally:
         conn.close()
@@ -505,15 +568,20 @@ def _sqlite_update_subscription(subscription) -> None:
     subscription_id = _subscription_id(subscription)
     plan = _extract_plan_name(subscription)
     status = _subscription_status(subscription)
+    price_id = _price_id_from_subscription(subscription)
+    period_start = _subscription_period_start(subscription)
     period_end = _subscription_period_end(subscription)
+    cancel_at_period_end = 1 if _subscription_cancel_at_period_end(subscription) else 0
 
     conn = _get_db()
     try:
         conn.execute("""
             UPDATE subscriptions
-            SET plan = ?, status = ?, current_period_end = ?, updated_at = datetime('now')
+            SET plan = ?, status = ?, price_id = ?, current_period_start = ?,
+                current_period_end = ?, cancel_at_period_end = ?, updated_at = datetime('now')
             WHERE stripe_subscription_id = ?
-        """, (plan, status, period_end, subscription_id))
+        """, (plan, status, price_id, period_start, period_end,
+              cancel_at_period_end, subscription_id))
         conn.commit()
     finally:
         conn.close()
@@ -659,7 +727,10 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(None, 
     webhook_secret = _get_webhook_secret()
     if not webhook_secret:
         logger.error("STRIPE_WEBHOOK_SECRET not configured")
-        return JSONResponse(status_code=200, content={"error": "Webhook not configured"})
+        # 503 statt 200: Stripe wertet 2xx als erfolgreiche Zustellung und wiederholt
+        # nicht. Ohne Secret koennen wir die Signatur nicht pruefen, also signalisieren
+        # wir einen voruebergehenden Fehler, damit Stripe das Event spaeter erneut zustellt.
+        return JSONResponse(status_code=503, content={"error": "Webhook not configured"})
 
     # Read raw body for signature verification
     payload = await request.body()
@@ -691,7 +762,10 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(None, 
             logger.info(f"Unhandled Stripe event: {event_type}")
     except Exception as e:
         logger.error(f"Webhook handler error for {event_type}: {e}", exc_info=True)
-        return JSONResponse(status_code=200, content={"error": "Handler error"})
+        # 500 statt 200: Bei (oft transienten) Handler-Fehlern soll Stripe das Event
+        # gemaess Retry-Policy erneut zustellen. Idempotenz ist durch die upsert-/
+        # ON-CONFLICT-Logik gegeben, sodass Wiederholungen keine Duplikate erzeugen.
+        return JSONResponse(status_code=500, content={"error": "Handler error"})
 
     return {"status": "ok"}
 
@@ -710,6 +784,20 @@ async def _handle_checkout_completed(session: dict):
     def _fetch_and_store():
         _init_stripe()
         sub = stripe.Subscription.retrieve(subscription_id)
+        # Defense-in-Depth: Die abgerufene Subscription muss zum Customer der Session
+        # gehoeren. Die Signaturpruefung garantiert nur die Echtheit des Events, nicht
+        # die Bindung user_id<->subscription (die aus der Metadata stammt).
+        if customer_id:
+            sub_customer = _subscription_customer_id(sub)
+            if sub_customer and sub_customer != customer_id:
+                logger.error(
+                    "Checkout customer mismatch: session customer %s != subscription customer %s (sub=%s)",
+                    customer_id,
+                    sub_customer,
+                    subscription_id,
+                )
+                audit_log("stripe_webhook", "customer_mismatch", subscription_id[:40])
+                return
         if _supabase_configured():
             _supabase_upsert_subscription(user_id, customer_id, sub)
         else:
@@ -777,9 +865,17 @@ def _extract_plan_name(subscription) -> str:
                 return "ultra"
             if "pro" in label:
                 return "pro"
+            logger.warning(
+                "Could not classify plan from Stripe subscription (price_id=%s, label=%r); "
+                "falling back to 'free'",
+                _price_id_from_subscription(subscription),
+                label.strip(),
+            )
     except Exception as e:
         logger.warning(f"Could not extract plan name: {e}")
-    return "pro"
+    # Bei nicht eindeutig erkennbarem Plan bewusst 'free' statt 'pro' zurueckgeben,
+    # damit kein bezahltes Feature ohne passendes Produkt freigeschaltet wird.
+    return "free"
 
 
 @router.get("/stripe/subscription/{user_id}")
@@ -805,9 +901,9 @@ async def get_subscription(user_id: str, request: Request):
         return {"plan": "free", "status": "inactive", "current_period_end": None}
 
     return {
-        "plan": result["plan"],
-        "status": result["status"],
-        "current_period_end": result["current_period_end"],
+        "plan": result.get("plan", "free"),
+        "status": result.get("status", "inactive"),
+        "current_period_end": result.get("current_period_end"),
     }
 
 
@@ -875,10 +971,17 @@ async def validate_license(req: LicenseValidateRequest):
     if not result:
         return {"valid": False, "error": "License key not found"}
 
-    is_active = result["status"] in _ACTIVE_SUBSCRIPTION_STATUSES
-    return {
+    status = result.get("status", "inactive")
+    is_active = status in _ACTIVE_SUBSCRIPTION_STATUSES
+    response = {
         "valid": is_active,
-        "plan": result["plan"],
-        "status": result["status"],
-        "expires": result["current_period_end"],
+        "plan": result.get("plan", "free"),
+        "status": status,
+        "expires": result.get("current_period_end"),
     }
+    # Bei Zahlungsproblemen einen differenzierten Grund mitliefern, damit das Frontend
+    # ein ausstehendes Zahlungsproblem von einem ungueltigen/abgelaufenen Key
+    # unterscheiden kann (bessere UX, weniger Support-Faelle).
+    if not is_active and status in {"past_due", "unpaid"}:
+        response["reason"] = "payment_failed"
+    return response

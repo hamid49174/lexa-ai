@@ -52,8 +52,13 @@ _sessions: dict[str, requests.Session] = {
 
 
 def _get_key(provider: str) -> str | None:
-    """Load API key from keyring (cached after first load)."""
-    if _keys_loaded[provider] and _keys[provider] is not None:
+    """Load API key from keyring (cached after first load).
+
+    The cache flag is set regardless of the result, so a missing key is
+    remembered and keyring is not re-queried on every transcription. The
+    set_*_key helpers refresh the cache when a key is configured later.
+    """
+    if _keys_loaded[provider]:
         return _keys[provider]
     try:
         import keyring
@@ -65,7 +70,7 @@ def _get_key(provider: str) -> str | None:
         _keys[provider] = keyring.get_password("lexa-ai", key_names[provider])
     except Exception:
         _keys[provider] = None
-    _keys_loaded[provider] = _keys[provider] is not None
+    _keys_loaded[provider] = True
     return _keys[provider]
 
 
@@ -462,6 +467,23 @@ def _transcribe_local_file(audio_path: str) -> str:
 #  PROVIDER CHAIN (selected engine first, then fallbacks)
 # ═══════════════════════════════════════════════════
 
+# Default keyterm always boosted on Deepgram (assistant name). Configurable via
+# env so deployments can add domain terms (comma-separated).
+_DEEPGRAM_KEYTERM = os.environ.get("LEXA_STT_KEYTERM", "Lexa").strip()
+
+
+def _deepgram_keyterm(prompt: str = "") -> str:
+    """Build the Deepgram keyterm: always boost the assistant name, plus any
+    distinct terms carried in the prompt."""
+    terms = [t.strip() for t in _DEEPGRAM_KEYTERM.split(",") if t.strip()]
+    if prompt:
+        for t in prompt.split():
+            t = t.strip()
+            if t and t not in terms:
+                terms.append(t)
+    return " ".join(terms)
+
+
 def _get_provider_order() -> list[str]:
     """Build provider order: user-selected STT_ENGINE first, then fallbacks."""
     if STT_ENGINE == "local":
@@ -477,7 +499,7 @@ def _cloud_transcribe(audio: np.ndarray, sample_rate: int = 16000,
     transcribers = {
         "openai": lambda: _transcribe_openai(audio, sample_rate),
         "deepgram": lambda: _transcribe_deepgram(audio, sample_rate,
-                                                 keywords="Lexa" if "Lexa" in prompt else ""),
+                                                 keywords=_deepgram_keyterm(prompt)),
         "groq": lambda: _transcribe_groq(audio, sample_rate, prompt=prompt),
     }
 

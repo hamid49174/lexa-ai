@@ -48,7 +48,11 @@ _sessions["elevenlabs"].headers.update({
 
 
 def _get_key(provider: str) -> str | None:
-    if _keys_loaded[provider] and _keys[provider] is not None:
+    # Cache flag wird unabhaengig vom Ergebnis gesetzt, damit ein fehlender Key
+    # gemerkt wird und Keyring nicht bei jedem Aufruf erneut (blockierend)
+    # abgefragt wird. set_*_key aktualisiert den Cache, falls der Key spaeter
+    # gesetzt wird.
+    if _keys_loaded[provider]:
         return _keys[provider]
     try:
         import keyring
@@ -60,7 +64,7 @@ def _get_key(provider: str) -> str | None:
         _keys[provider] = keyring.get_password("lexa-ai", key_names[provider])
     except Exception:
         _keys[provider] = None
-    _keys_loaded[provider] = _keys[provider] is not None
+    _keys_loaded[provider] = True
     if _keys[provider] and provider == "elevenlabs":
         _sessions["elevenlabs"].headers["xi-api-key"] = _keys[provider]
     return _keys[provider]
@@ -80,6 +84,9 @@ _elevenlabs_stability = ELEVENLABS_STABILITY
 _elevenlabs_similarity = ELEVENLABS_SIMILARITY
 _elevenlabs_style = ELEVENLABS_STYLE
 _elevenlabs_enabled = True
+# Effektive TTS-Sprache (aktuell fest "de"; geht in die Cache-Signatur ein,
+# damit ein kuenftiger Sprachwechsel den Cache korrekt invalidiert).
+_tts_language = "de"
 _valid_tts_providers = ("elevenlabs", "cartesia", "openai", "sapi")
 
 
@@ -135,7 +142,7 @@ def _ordered_tts_providers() -> list[str]:
 
 def _provider_cache_signature(provider: str) -> str:
     if provider == "openai":
-        return "|".join(["openai", _openai_tts_model, _openai_tts_voice])
+        return "|".join(["openai", _openai_tts_model, _openai_tts_voice, _tts_language])
     if provider == "elevenlabs":
         return "|".join([
             "elevenlabs",
@@ -144,11 +151,12 @@ def _provider_cache_signature(provider: str) -> str:
             str(_elevenlabs_stability),
             str(_elevenlabs_similarity),
             str(_elevenlabs_style),
+            _tts_language,
         ])
     if provider == "cartesia":
-        return "|".join(["cartesia", _cartesia_model, _cartesia_voice_id])
+        return "|".join(["cartesia", _cartesia_model, _cartesia_voice_id, _tts_language])
     if provider == "sapi":
-        return "sapi|windows-sapi-v1"
+        return "|".join(["sapi", "windows-sapi-v1", _tts_language])
     return provider
 
 
@@ -274,9 +282,39 @@ async def _speak_with_provider(provider: str, text: str, target: str) -> str:
     if provider == "cartesia":
         return await asyncio.to_thread(_speak_cartesia, text, target)
     if provider == "sapi":
-        sapi_path = target.replace(".mp3", ".wav") if target.endswith(".mp3") else target
-        return await asyncio.to_thread(_speak_sapi, text, sapi_path)
+        if target.endswith(".mp3"):
+            # SAPI erzeugt WAV. Wenn der Aufrufer explizit eine .mp3 erwartet,
+            # WAV erzeugen und nach .mp3 transkodieren, damit der Rueckgabepfad
+            # dem erwarteten output_path entspricht. Ist keine Transkodierung
+            # verfuegbar, Fehler werfen statt einen divergenten Pfad
+            # zurueckzugeben (der Fallback ueberspringt SAPI dann sauber).
+            sapi_path = target[:-len(".mp3")] + ".wav"
+            await asyncio.to_thread(_speak_sapi, text, sapi_path)
+            return await asyncio.to_thread(_transcode_wav_to_mp3, sapi_path, target)
+        return await asyncio.to_thread(_speak_sapi, text, target)
     raise RuntimeError(f"Unknown TTS provider: {provider}")
+
+
+def _transcode_wav_to_mp3(wav_path: str, mp3_path: str) -> str:
+    """Transkodiert eine WAV-Datei nach MP3. Loescht die Quell-WAV bei Erfolg."""
+    try:
+        from pydub import AudioSegment
+    except ImportError:
+        try:
+            Path(wav_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise RuntimeError("WAV->MP3 transcode requires pydub (not installed)")
+    try:
+        AudioSegment.from_wav(wav_path).export(mp3_path, format="mp3", bitrate="128k")
+    except Exception as e:
+        raise RuntimeError(f"WAV->MP3 transcode failed: {e}")
+    finally:
+        try:
+            Path(wav_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+    return mp3_path
 
 # ═══════════════════════════════════════════════════
 #  TEXT CHUNKING
@@ -337,7 +375,7 @@ def _speak_cartesia(text: str, output_path: str) -> str:
         "transcript": text[:MAX_TTS_TEXT_CHARS],
         "voice": {"mode": "id", "id": _cartesia_voice_id},
         "output_format": CARTESIA_OUTPUT_FORMAT,
-        "language": "de",
+        "language": _tts_language,
     }
 
     read_timeout = min(30 + len(text) // 100, 120)
@@ -451,8 +489,10 @@ def _concat_mp3_chunks(chunk_paths: list[str], output_path: str):
             combined += AudioSegment.from_mp3(cp)
         combined.export(output_path, format="mp3", bitrate="128k")
         return
-    except (ImportError, Exception):
-        pass
+    except ImportError:
+        logger.info("pydub not installed; using binary MP3 concat fallback")
+    except Exception as e:
+        logger.warning(f"pydub MP3 concat failed ({e}); using binary concat fallback")
 
     # Binary concat fallback
     with open(output_path, "wb") as out:
@@ -567,10 +607,19 @@ async def _speak_multi(chunks: list[str], text_hash: str,
         return await _speak_with_provider(provider, full_text, target)
 
     logger.info(f"TTS chunking: {len(chunks)} chunks for {len(full_text)} chars via {provider}")
+    # Temporaere Chunk-Dateien in ein Unterverzeichnis schreiben, das von
+    # _cache_files()/_prune_cache() (nicht-rekursives glob('tts_*.*')) nicht
+    # gescannt wird. Verhindert, dass paralleles Pruning oder clear_cache()
+    # gerade entstehende Chunks eines anderen Threads loescht.
+    chunk_dir = AUDIO_CACHE_DIR / "chunks"
+    try:
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        chunk_dir = AUDIO_CACHE_DIR
     chunk_paths = []
     try:
         for i, chunk in enumerate(chunks):
-            chunk_path = str(AUDIO_CACHE_DIR / f"tts_{text_hash}_c{i}.mp3")
+            chunk_path = str(chunk_dir / f"tts_{text_hash}_c{i}.mp3")
             await _speak_single(chunk, chunk_path, provider)
             chunk_paths.append(chunk_path)
 

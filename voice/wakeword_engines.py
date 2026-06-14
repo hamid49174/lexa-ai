@@ -201,15 +201,19 @@ class OpenWakeWordEngine:
         if not self.model_refs:
             self._error = "No openWakeWord model configured. Set LEXA_OPENWAKEWORD_MODELS, e.g. 'alexa' or a custom Lexa .onnx path."
             return
-        missing = [path for path in self.model_paths if not Path(path).exists()]
-        if missing:
-            self._error = f"openWakeWord model file missing: {missing[0]}"
-            return
         try:
             from openwakeword.model import Model
             if self.auto_download and self.model_names:
                 from openwakeword.utils import download_models
                 download_models(model_names=self.model_names)
+
+            # Check local ONNX/TFLite paths only after the auto-download step.
+            # download_models only provisions named models (model_names); local
+            # file paths must already exist on disk and cannot be downloaded.
+            missing = [path for path in self.model_paths if not Path(path).exists()]
+            if missing:
+                self._error = f"openWakeWord model file missing: {missing[0]}"
+                return
 
             self._model = Model(
                 wakeword_models=list(self.model_refs),
@@ -237,10 +241,13 @@ class OpenWakeWordEngine:
         try:
             threshold = {label: self.threshold for label in self._labels}
             patience = {label: self.patience for label in self._labels if self.patience > 1}
+            # Always pass the configured threshold map so detection uses
+            # WAKE_OPENWAKEWORD_THRESHOLD regardless of the patience value.
+            # patience is only meaningful (and only accepted alongside it) when > 1.
             if patience:
                 scores = self._model.predict(pcm16, patience=patience, threshold=threshold)
             else:
-                scores = self._model.predict(pcm16)
+                scores = self._model.predict(pcm16, threshold=threshold)
         except Exception as e:
             self._error = str(e)
             return WakeDetection(False, source=self.name, detail={"error": self._error})

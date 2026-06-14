@@ -97,6 +97,9 @@ def media_stop() -> str:
 
 # Cache the Spotify access token (expires after 3600s)
 _spotify_token_cache: dict = {"token": None, "expires_at": 0}
+# Serialize access to the token cache: open_spotify() spawns daemon threads,
+# so multiple requests may try to fetch/write the token concurrently.
+_spotify_token_lock = threading.Lock()
 
 
 def _get_spotify_token() -> str | None:
@@ -106,36 +109,45 @@ def _get_spotify_token() -> str | None:
     Get them free at https://developer.spotify.com/dashboard
     """
     now = time.time()
+    # Fast path: valid cached token (read is atomic enough for a single dict lookup,
+    # but re-check under the lock before fetching to avoid duplicate API calls).
     if _spotify_token_cache["token"] and now < _spotify_token_cache["expires_at"] - 60:
         return _spotify_token_cache["token"]
 
-    try:
-        client_id = keyring.get_password("lexa-ai", "spotify_client_id")
-        client_secret = keyring.get_password("lexa-ai", "spotify_client_secret")
-    except Exception:
-        return None
+    with _spotify_token_lock:
+        # Double-checked locking: another thread may have refreshed the token
+        # while we waited for the lock.
+        now = time.time()
+        if _spotify_token_cache["token"] and now < _spotify_token_cache["expires_at"] - 60:
+            return _spotify_token_cache["token"]
 
-    if not client_id or not client_secret:
-        return None
+        try:
+            client_id = keyring.get_password("lexa-ai", "spotify_client_id")
+            client_secret = keyring.get_password("lexa-ai", "spotify_client_secret")
+        except Exception:
+            return None
 
-    try:
-        import base64
-        import requests
-        auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
-        resp = requests.post(
-            "https://accounts.spotify.com/api/token",
-            headers={"Authorization": f"Basic {auth}",
-                     "Content-Type": "application/x-www-form-urlencoded"},
-            data={"grant_type": "client_credentials"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            _spotify_token_cache["token"] = data["access_token"]
-            _spotify_token_cache["expires_at"] = now + data.get("expires_in", 3600)
-            return data["access_token"]
-    except Exception as e:
-        logger.debug(f"Spotify token fetch failed: {e}")
+        if not client_id or not client_secret:
+            return None
+
+        try:
+            import base64
+            import requests
+            auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+            resp = requests.post(
+                "https://accounts.spotify.com/api/token",
+                headers={"Authorization": f"Basic {auth}",
+                         "Content-Type": "application/x-www-form-urlencoded"},
+                data={"grant_type": "client_credentials"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                _spotify_token_cache["token"] = data["access_token"]
+                _spotify_token_cache["expires_at"] = now + data.get("expires_in", 3600)
+                return data["access_token"]
+        except Exception as e:
+            logger.debug(f"Spotify token fetch failed: {e}")
 
     return None
 
@@ -403,8 +415,10 @@ def open_spotify(search: str = "", auto_play: bool = True) -> str:
 
     # Strategy 1: Spotify Web API (precise, auto-plays) — optional
     result = _spotify_api_search(search)
-    if result:
+    if result and str(result.get("uri", "")).startswith("spotify:"):
         uri = result["uri"]
+        # Schema is whitelisted: only 'spotify:' URIs are handed to 'cmd /c start',
+        # which would otherwise open arbitrary protocol handlers/files.
         subprocess.Popen(["cmd", "/c", "start", "", uri], shell=False)
         if result["type"] == "track":
             logger.info(f"Spotify: playing track '{result['name']}' by {result['artist']}")
@@ -451,6 +465,11 @@ def convert_media(input_path: str, output_path: str = "", format: str = "mp3") -
     if err:
         return t("error.generic", error=str(err))
 
+    # ffmpeg -y overwrites the target — guard output_path against system dirs.
+    err = _validate_media_path(output_path, must_exist=False)
+    if err:
+        return t("error.generic", error=str(err))
+
     try:
         result = subprocess.run(
             ["ffmpeg", "-i", input_path, "-y", output_path],
@@ -476,6 +495,11 @@ def extract_audio(video_path: str, output_path: str = "") -> str:
         p = Path(video_path)
         output_path = str(p.with_suffix(".mp3"))
 
+    # ffmpeg -y overwrites the target — guard output_path against system dirs.
+    err = _validate_media_path(output_path, must_exist=False)
+    if err:
+        return t("error.generic", error=str(err))
+
     try:
         result = subprocess.run(
             ["ffmpeg", "-i", video_path, "-vn", "-acodec", "libmp3lame", "-y", output_path],
@@ -500,22 +524,49 @@ def screen_record(duration: int = 10, output_path: str = "") -> str:
         rec_dir.mkdir(exist_ok=True)
         output_path = str(rec_dir / f"recording_{ts}.mp4")
 
+    # ffmpeg runs in the background for the full duration. Do NOT use PIPE for
+    # stderr: the recording continues after we return, nobody drains the pipe,
+    # and ffmpeg would block once the ~64KB OS pipe buffer fills up. Redirect
+    # stderr to a log file instead — that also lets us read early-exit errors.
+    log_path = str(Path(output_path).with_suffix(".log"))
+    try:
+        log_file = open(log_path, "wb")
+    except OSError:
+        log_file = None
     try:
         proc = subprocess.Popen(
             ["ffmpeg", "-f", "gdigrab", "-framerate", "30", "-t", str(duration),
              "-i", "desktop", "-y", output_path],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=(log_file if log_file is not None else subprocess.DEVNULL),
         )
         # Wait briefly to check for immediate errors (e.g. ffmpeg not found, no display)
         try:
             proc.wait(timeout=2)
             # If it exited within 2s, there was likely an error
+            if log_file is not None:
+                log_file.flush()
             if proc.returncode != 0:
-                stderr = proc.stderr.read().decode(errors="replace")[:300]
+                stderr = ""
+                if log_file is not None:
+                    try:
+                        with open(log_path, "rb") as f:
+                            stderr = f.read().decode(errors="replace")[-300:]
+                    except OSError:
+                        stderr = ""
+                if log_file is not None:
+                    log_file.close()
                 return f"Aufnahme fehlgeschlagen: {stderr}"
+            # Exited cleanly within 2s (very short duration) — nothing left to drain.
+            if log_file is not None:
+                log_file.close()
         except subprocess.TimeoutExpired:
-            # Still running = good, it's recording
-            pass
+            # Still running = good, it's recording. ffmpeg keeps the log file
+            # handle and closes it when it terminates after `duration` seconds.
+            if log_file is not None:
+                log_file.close()
         return f"Bildschirmaufnahme gestartet ({duration}s) → {output_path}"
     except FileNotFoundError:
+        if log_file is not None:
+            log_file.close()
         return "ffmpeg nicht installiert."

@@ -18,7 +18,9 @@ from backend.hermes_adapter import (
 
 
 def _normalize(text: str) -> str:
-    value = str(text or "").lower()
+    # Replacements run BEFORE lower(), so Gross-/Kleinbuchstaben und die
+    # Mojibake-Sequenzen (UTF-8 als Latin-1 gelesen) treffen tatsaechlich.
+    value = str(text or "")
     replacements = {
         "ä": "ae",
         "Ä": "ae",
@@ -28,10 +30,6 @@ def _normalize(text: str) -> str:
         "Ü": "ue",
         "ß": "ss",
         "ẞ": "ss",
-        "ä": "ae",
-        "ö": "oe",
-        "ü": "ue",
-        "ß": "ss",
         "Ã¤": "ae",
         "Ã¶": "oe",
         "Ã¼": "ue",
@@ -39,6 +37,7 @@ def _normalize(text: str) -> str:
     }
     for source, target in replacements.items():
         value = value.replace(source, target)
+    value = value.lower()
     return re.sub(r"\s+", " ", value).strip()
 
 
@@ -128,7 +127,7 @@ def _draft_line(counts: dict[str, Any]) -> str:
     )
 
 
-async def build_lexa_system_answer(user_message: str) -> str:
+async def build_lexa_system_answer() -> str:
     hermes, autostart, logs, counts = await asyncio.gather(
         _to_thread_or_empty(get_hermes_status),
         _to_thread_or_empty(get_hermes_gateway_autostart_status),
@@ -162,4 +161,4 @@ async def build_lexa_system_answer(user_message: str) -> str:
 async def try_lexa_system_answer(user_message: str) -> str | None:
     if not looks_like_lexa_system_question(user_message):
         return None
-    return await build_lexa_system_answer(user_message)
+    return await build_lexa_system_answer()

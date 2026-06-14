@@ -6,13 +6,16 @@ and worker agents such as Hermes execute bounded tasks through this runtime.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
+import sys
 import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -25,11 +28,18 @@ from backend.hermes_adapter import (
 )
 from backend.lexa_voice import LEXA_WORKER_VOICE_RULES
 
+logger = logging.getLogger(__name__)
+
 TASK_STORE_ROOT = HERMES_WORKSPACE_ROOT / "os_agent_tasks"
+_MAX_STORED_TASKS = 200
 _MAX_STORED_TEXT = 16000
 _MAX_REVIEW_OUTPUT = 2000
 _LOCK = threading.RLock()
 _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="lexa-os-agent")
+# Cache the os-sdk build outcome so that a missing dist/ does not trigger a
+# blocking npm build (up to 60s) on every review-draft creation. Guarded by
+# _LOCK; None = not yet attempted, True/False = last known build state.
+_SDK_BUILD_OK: bool | None = None
 _SECRET_REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\b\d{5,20}:[A-Za-z0-9_-]{20,120}\b"), "[telegram-token-redacted]"),
     (re.compile(r"\b(sk|rk|pk|xox[baprs]?)-[A-Za-z0-9_-]{16,}\b", re.IGNORECASE), "[api-token-redacted]"),
@@ -83,6 +93,40 @@ def _redact_review_text(value: Any, limit: int = _MAX_REVIEW_OUTPUT) -> str:
     return text
 
 
+def _redact_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of a Hermes result with secrets stripped from text streams.
+
+    run_hermes_task returns raw stdout/stderr/error that may contain tokens,
+    bearer headers or API keys. This output is persisted to disk and served
+    verbatim by the read-only cockpit API, so the text streams must be run
+    through _SECRET_REDACTIONS before storage. A generous limit (_MAX_STORED_TEXT)
+    keeps the stored output useful while still removing secrets.
+    """
+    if not isinstance(result, dict):
+        return result
+    redacted = dict(result)
+    for key in ("stdout", "stderr", "error"):
+        if result.get(key):
+            redacted[key] = _redact_review_text(result.get(key), _MAX_STORED_TEXT)
+    return redacted
+
+
+def _fenced_block(content: str, language: str = "text") -> str:
+    """Wrap content in a fenced code block with a collision-safe backtick fence.
+
+    The agent output may itself contain triple-backtick code fences. A fixed
+    ``` fence would be closed prematurely by those, breaking the rest of the
+    markdown. Per CommonMark, an opening fence of N backticks is only closed by
+    a line of at least N backticks, so we choose a fence longer than the longest
+    backtick run in the content.
+    """
+    longest_run = 0
+    for run in re.findall(r"`+", content):
+        longest_run = max(longest_run, len(run))
+    fence = "`" * max(3, longest_run + 1)
+    return f"{fence}{language}\n{content}\n{fence}"
+
+
 def _build_review_output_summary(result: dict[str, Any]) -> list[str]:
     stdout = str(result.get("stdout") or "")
     stderr = str(result.get("stderr") or "")
@@ -100,13 +144,23 @@ def _sdk_root() -> Path:
 
 
 def _ensure_os_sdk_build(sdk_root: Path) -> bool:
+    global _SDK_BUILD_OK
     if (sdk_root / "dist" / "index.js").exists():
+        with _LOCK:
+            _SDK_BUILD_OK = True
         return True
     if not (sdk_root / "package.json").exists():
         return False
+    # Avoid re-running the (up to 60s) blocking npm build on every review-draft
+    # if a previous attempt already failed; only retry once per process unless a
+    # dist/ appears in the meantime (handled by the early return above).
+    with _LOCK:
+        if _SDK_BUILD_OK is False:
+            return False
+    npm_cmd = "npm.cmd" if sys.platform.startswith("win") else "npm"
     try:
         build = subprocess.run(
-            ["npm", "run", "build", "--silent"],
+            [npm_cmd, "run", "build", "--silent"],
             cwd=sdk_root,
             capture_output=True,
             text=True,
@@ -114,8 +168,13 @@ def _ensure_os_sdk_build(sdk_root: Path) -> bool:
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
+        with _LOCK:
+            _SDK_BUILD_OK = False
         return False
-    return build.returncode == 0 and (sdk_root / "dist" / "index.js").exists()
+    ok = build.returncode == 0 and (sdk_root / "dist" / "index.js").exists()
+    with _LOCK:
+        _SDK_BUILD_OK = ok
+    return ok
 
 
 def _write_os_draft_via_sdk(
@@ -173,9 +232,10 @@ console.log(JSON.stringify(result));
 """
     env = os.environ.copy()
     env["PERSONAL_OS_SDK_ROOT"] = str(PERSONAL_OS_ROOT)
+    node_cmd = "node.exe" if sys.platform.startswith("win") else "node"
     try:
         proc = subprocess.run(
-            ["node", "--input-type=module", "-e", node_script],
+            [node_cmd, "--input-type=module", "-e", node_script],
             cwd=sdk_root,
             env=env,
             input=json.dumps(payload, ensure_ascii=False),
@@ -209,6 +269,27 @@ def _save_task(task: dict[str, Any]) -> dict[str, Any]:
     return task
 
 
+def _prune_task_store(keep: int = _MAX_STORED_TASKS) -> None:
+    """Keep only the newest `keep` task files to bound disk growth.
+
+    Task filenames carry a sortable `osagt_YYYYMMDDHHMMSS_...` prefix, so we can
+    order by name without a stat() per file. Best-effort: prune errors are logged
+    and ignored so they never break task creation.
+    """
+    try:
+        with _LOCK:
+            # Restrict to the osagt_ prefix so foreign files cannot distort the
+            # name-based ordering and cause newer tasks to be pruned.
+            paths = sorted(TASK_STORE_ROOT.glob("osagt_*.json"), key=lambda p: p.name, reverse=True)
+            for path in paths[keep:]:
+                try:
+                    path.unlink()
+                except OSError:
+                    logger.warning("os_agent: could not prune task file %s", path)
+    except Exception:
+        logger.exception("os_agent: task store pruning failed")
+
+
 def _load_task(task_id: str) -> dict[str, Any]:
     path = _task_path(task_id)
     if not path.exists():
@@ -218,6 +299,19 @@ def _load_task(task_id: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("Task file is invalid")
     return data
+
+
+def _update_task(task_id: str, mutator: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+    """Atomically load, mutate and save a task under the shared lock.
+
+    Runs the whole read-modify-write sequence inside _LOCK so that concurrent
+    callers (e.g. _run_task and create_os_agent_review_draft) cannot overwrite
+    each other's updates (lost update).
+    """
+    with _LOCK:
+        task = _load_task(task_id)
+        mutator(task)
+        return _save_task(task)
 
 
 def _append_evidence(task: dict[str, Any], kind: str, message: str, data: Any | None = None) -> None:
@@ -295,15 +389,11 @@ def _write_review_draft(task: dict[str, Any]) -> str | None:
 
 ## Evidence
 
-```text
-{stdout if stdout else '[no stdout]'}
-```
+{_fenced_block(stdout if stdout else '[no stdout]')}
 
 ## Errors Or Warnings
 
-```text
-{stderr or error or '[none]'}
-```
+{_fenced_block(stderr or error or '[none]')}
 
 ## Tasks
 
@@ -365,7 +455,10 @@ def list_os_agent_tasks(limit: int = 30, status: str = "") -> dict[str, Any]:
     tasks: list[dict[str, Any]] = []
     TASK_STORE_ROOT.mkdir(parents=True, exist_ok=True)
     with _LOCK:
-        paths = sorted(TASK_STORE_ROOT.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        # Filenames carry a sortable `osagt_YYYYMMDDHHMMSS_...` prefix, so we sort
+        # by name (newest first) instead of doing a stat() syscall per file.
+        # Restrict to the osagt_ prefix so foreign files cannot distort ordering.
+        paths = sorted(TASK_STORE_ROOT.glob("osagt_*.json"), key=lambda p: p.name, reverse=True)
         for path in paths:
             try:
                 task = json.loads(path.read_text(encoding="utf-8"))
@@ -386,38 +479,71 @@ def get_os_agent_task(task_id: str) -> dict[str, Any]:
     return _load_task(task_id)
 
 
-def _run_task(task_id: str) -> None:
-    task = _load_task(task_id)
-    task["status"] = "running"
-    task["started_at"] = _now()
-    _append_evidence(task, "runtime", "Task started by Lexa OS Agent Runtime")
-    _save_task(task)
-
-    prompt = _build_worker_instructions(task)
-    result = run_hermes_task(
-        prompt,
-        mode=str(task.get("mode") or "lexa_improve"),
-        timeout=int(task.get("timeout_seconds") or 180),
-    )
-    task = _load_task(task_id)
-    task["result"] = result
-    task["finished_at"] = _now()
-    if result.get("success"):
-        task["status"] = "completed"
-        _append_evidence(task, "agent_result", "Hermes completed the task", result)
-    elif result.get("status") == "unavailable":
-        task["status"] = "blocked"
-        _append_evidence(task, "agent_blocked", "Hermes is not executable yet", result)
-    else:
+def _mark_task_failed(task_id: str, exc: BaseException) -> None:
+    """Best-effort: flip a task to 'failed' after an unexpected runtime error."""
+    def _apply(task: dict[str, Any]) -> None:
         task["status"] = "failed"
-        _append_evidence(task, "agent_result", "Hermes returned a non-success result", result)
+        task["finished_at"] = _now()
+        _append_evidence(
+            task,
+            "runtime_error",
+            "Task runtime raised an unexpected error",
+            {"error": _redact_review_text(f"{type(exc).__name__}: {exc}", 800)},
+        )
 
-    if task.get("create_review_draft") and task["status"] == "completed":
-        draft_path = _write_review_draft(task)
-        if draft_path:
-            task["review_draft_path"] = draft_path
-            _append_evidence(task, "os_draft", "Review draft created in Personal OS", {"path": draft_path})
-    _save_task(task)
+    try:
+        _update_task(task_id, _apply)
+    except Exception:
+        logger.exception("os_agent: failed to record failure status for task %s", task_id)
+
+
+def _run_task(task_id: str) -> None:
+    try:
+        def _start(task: dict[str, Any]) -> None:
+            task["status"] = "running"
+            task["started_at"] = _now()
+            _append_evidence(task, "runtime", "Task started by Lexa OS Agent Runtime")
+
+        task = _update_task(task_id, _start)
+
+        prompt = _build_worker_instructions(task)
+        raw_result = run_hermes_task(
+            prompt,
+            mode=str(task.get("mode") or "lexa_improve"),
+            timeout=int(task.get("timeout_seconds") or 180),
+        )
+        # Strip secrets from the worker output before it is persisted to disk or
+        # served by the read-only cockpit API.
+        result = _redact_result(raw_result)
+
+        def _apply_result(task: dict[str, Any]) -> None:
+            task["result"] = result
+            task["finished_at"] = _now()
+            if result.get("success"):
+                task["status"] = "completed"
+                _append_evidence(task, "agent_result", "Hermes completed the task", result)
+            elif result.get("status") == "unavailable":
+                task["status"] = "blocked"
+                _append_evidence(task, "agent_blocked", "Hermes is not executable yet", result)
+            else:
+                task["status"] = "failed"
+                _append_evidence(task, "agent_result", "Hermes returned a non-success result", result)
+
+        task = _update_task(task_id, _apply_result)
+
+        if task.get("create_review_draft") and task.get("status") == "completed":
+            # _write_review_draft spawns subprocesses (npm/node); run it outside
+            # the lock, then persist the outcome atomically.
+            draft_path = _write_review_draft(task)
+            if draft_path:
+                def _apply_draft(task: dict[str, Any]) -> None:
+                    task["review_draft_path"] = draft_path
+                    _append_evidence(task, "os_draft", "Review draft created in Personal OS", {"path": draft_path})
+
+                _update_task(task_id, _apply_draft)
+    except Exception as exc:  # noqa: BLE001 - background task must never silently hang
+        logger.exception("os_agent: task %s failed in runtime", task_id)
+        _mark_task_failed(task_id, exc)
 
 
 def start_os_agent_task(
@@ -458,6 +584,7 @@ def start_os_agent_task(
     }
     _append_evidence(task, "runtime", "Task queued by Lexa")
     _save_task(task)
+    _prune_task_store()
 
     hermes = get_hermes_status()
     if not hermes.get("can_run_tasks"):
@@ -472,8 +599,17 @@ def start_os_agent_task(
         _append_evidence(task, "agent_blocked", "Hermes is not executable yet", task["result"])
         return _save_task(task)
 
-    _EXECUTOR.submit(_run_task, task_id)
+    future = _EXECUTOR.submit(_run_task, task_id)
+    future.add_done_callback(_log_task_future)
     return task
+
+
+def _log_task_future(future: "Future[None]") -> None:
+    """Surface exceptions from the discarded _run_task future instead of swallowing them."""
+    try:
+        future.result()
+    except Exception:
+        logger.exception("os_agent: background task future raised")
 
 
 def create_os_agent_review_draft(task_id: str) -> dict[str, Any]:
@@ -482,6 +618,9 @@ def create_os_agent_review_draft(task_id: str) -> dict[str, Any]:
     draft_path = _write_review_draft(task)
     if not draft_path:
         raise ValueError("No review draft could be created for this task")
-    task["review_draft_path"] = draft_path
-    _append_evidence(task, "os_draft", "Review draft created in Personal OS", {"path": draft_path})
-    return _save_task(task)
+
+    def _apply_draft(task: dict[str, Any]) -> None:
+        task["review_draft_path"] = draft_path
+        _append_evidence(task, "os_draft", "Review draft created in Personal OS", {"path": draft_path})
+
+    return _update_task(task_id, _apply_draft)

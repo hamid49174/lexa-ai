@@ -31,6 +31,7 @@ MAX_TEMPLATE_DEPTH = 5
 WORKFLOW_BACKOFF_AFTER_FAILURES = 3
 WORKFLOW_BACKOFF_AFTER_MORE_FAILURES = 5
 WORKFLOW_AUTO_DISABLE_AFTER_FAILURES = 10
+WORKFLOW_LOG_RETENTION_PER_WORKFLOW = 200  # max. behaltene Log-Eintraege pro Workflow
 _thread_local = threading.local()
 
 # ══════════════════════════════════════════════════
@@ -111,7 +112,7 @@ class Workflow:
 #  Unterstuetzt: *, Zahlen, Bereiche (1-5), Listen (1,3,5), Schritte (*/5)
 # ══════════════════════════════════════════════════
 
-def _cron_field_matches(field_expr: str, current_value: int, max_value: int) -> bool:
+def _cron_field_matches(field_expr: str, current_value: int, min_value: int, max_value: int) -> bool:
     """Prueft ob ein Cron-Feld auf den aktuellen Wert passt."""
     if field_expr == "*":
         return True
@@ -130,7 +131,9 @@ def _cron_field_matches(field_expr: str, current_value: int, max_value: int) -> 
                 continue
 
             if range_part == "*":
-                if current_value % step == 0:
+                # Schritt ab Feldminimum (Standard-Cron): bei 1-basierten Feldern
+                # (Tag/Monat) startet */step bei min_value, nicht bei 0.
+                if min_value <= current_value <= max_value and (current_value - min_value) % step == 0:
                     return True
             elif "-" in range_part:
                 try:
@@ -183,15 +186,16 @@ def _cron_matches(cron_expr: str, dt: Optional[datetime] = None) -> bool:
     # Convert Python weekday to cron: (py_weekday + 1) % 7
     cron_dow = (dt.weekday() + 1) % 7
 
-    if not _cron_field_matches(minute_expr, dt.minute, 59):
+    # min_value/max_value pro Feld: minute/hour/dow sind 0-basiert, dom/month 1-basiert.
+    if not _cron_field_matches(minute_expr, dt.minute, 0, 59):
         return False
-    if not _cron_field_matches(hour_expr, dt.hour, 23):
+    if not _cron_field_matches(hour_expr, dt.hour, 0, 23):
         return False
-    if not _cron_field_matches(dom_expr, dt.day, 31):
+    if not _cron_field_matches(dom_expr, dt.day, 1, 31):
         return False
-    if not _cron_field_matches(month_expr, dt.month, 12):
+    if not _cron_field_matches(month_expr, dt.month, 1, 12):
         return False
-    if not _cron_field_matches(dow_expr, cron_dow, 7):
+    if not _cron_field_matches(dow_expr, cron_dow, 0, 7):
         return False
 
     return True
@@ -236,6 +240,7 @@ class WorkflowEngine:
             return
         self._db_lock = threading.Lock()
         self._event_handlers: dict[str, list] = {}  # event_name -> [workflow_ids]
+        self._running_workflows: set[str] = set()  # aktuell vom Scheduler laufende Workflow-IDs
         self._scheduler_task: Optional[asyncio.Task] = None
         self._companion_execute = None
         self._tables_ready = False
@@ -320,6 +325,7 @@ class WorkflowEngine:
                 CREATE INDEX IF NOT EXISTS idx_workflows_enabled ON workflows(enabled);
                 CREATE INDEX IF NOT EXISTS idx_workflow_logs_wf_id ON workflow_logs(workflow_id);
                 CREATE INDEX IF NOT EXISTS idx_workflow_logs_started ON workflow_logs(started_at);
+                CREATE INDEX IF NOT EXISTS idx_workflow_logs_finished ON workflow_logs(finished_at);
             """)
             for column, definition in (
                 ("failure_count", "INTEGER DEFAULT 0"),
@@ -669,6 +675,19 @@ class WorkflowEngine:
                     workflow_id,
                 ),
             )
+            # Retention: nur die letzten N Log-Eintraege pro Workflow behalten,
+            # damit workflow_logs nicht unbegrenzt waechst.
+            db.execute(
+                """DELETE FROM workflow_logs
+                    WHERE workflow_id = ?
+                      AND id NOT IN (
+                          SELECT id FROM workflow_logs
+                           WHERE workflow_id = ?
+                           ORDER BY id DESC
+                           LIMIT ?
+                      )""",
+                (workflow_id, workflow_id, WORKFLOW_LOG_RETENTION_PER_WORKFLOW),
+            )
             db.commit()
         finally:
             self._release_db(db)
@@ -767,13 +786,21 @@ class WorkflowEngine:
         try:
             from backend.ai_engine import chat
             result = await asyncio.to_thread(chat, prompt, [])
-            return {
-                "type": "ai_response",
-                "content": result.get("content", ""),
-                "prompt": prompt[:200],
-            }
         except Exception as e:
             raise RuntimeError(f"AI-Prompt fehlgeschlagen: {e}")
+
+        # chat() liefert {"type": "text"|"tool_call"|"error", "content": ...}.
+        result_type = result.get("type", "text")
+        content = result.get("content", "")
+        if result_type == "error":
+            raise RuntimeError(f"AI-Prompt fehlgeschlagen: {content or 'unbekannter Fehler'}")
+
+        return {
+            "type": "ai_response",
+            "result_type": result_type,
+            "content": content,
+            "prompt": prompt[:200],
+        }
 
     async def _step_condition(self, step: dict, context: dict) -> dict:
         """Wertet eine Bedingung aus und fuehrt then_steps oder else_steps aus."""
@@ -820,7 +847,9 @@ class WorkflowEngine:
 
         logger.info(f"Workflow-Notification: {message}")
 
-        # Versuche Windows Toast Notification
+        # Versuche Windows Toast Notification. Die Nachricht wird base64-kodiert
+        # an PowerShell uebergeben, damit der Inhalt niemals als Code interpretiert
+        # werden kann (kein PowerShell-Injection ueber den message-Payload).
         try:
             message_b64 = base64.b64encode(message[:200].encode("utf-8")).decode("ascii")
             ps_cmd = f'''
@@ -851,7 +880,10 @@ class WorkflowEngine:
         method = step.get("method", "GET").upper()
         url = step.get("url", "")
         body = step.get("body")
-        headers = step.get("headers", {})
+        # Kopie anlegen, damit das im Step-Dict gespeicherte Original nicht
+        # mutiert wird (setdefault/add_header). Header werden — konsistent zu
+        # url und body — ebenfalls durch die Template-Engine geleitet.
+        headers = self._resolve_templates(dict(step.get("headers", {})), context)
 
         if not url:
             raise ValueError("Step 'http': Keine URL angegeben.")
@@ -865,17 +897,20 @@ class WorkflowEngine:
 
         url = _validate_workflow_http_url(url)
 
-        # SSRF Protection: Block private IPs
-        try:
-            hostname = urlparse(url).hostname
-            if hostname:
+        # SSRF Protection: Block private IPs (fail-closed)
+        hostname = urlparse(url).hostname
+        if hostname:
+            try:
                 resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-                for _, _, _, _, sockaddr in resolved:
-                    ip = ipaddress.ip_address(sockaddr[0])
-                    if is_dangerous_network_ip(ip):
-                        raise ValueError(f"Zugriff auf private IP-Adressen nicht erlaubt: {hostname}")
-        except (socket.gaierror, OSError):
-            pass  # DNS resolution failed — let the request fail naturally
+            except (socket.gaierror, OSError) as exc:
+                # Fail-closed: ohne erfolgreiche DNS-Aufloesung kann die Ziel-IP
+                # nicht gegen private Adressen geprueft werden — Request ablehnen,
+                # statt eine ungepruefte Verbindung (z.B. via DNS-Rebinding) zuzulassen.
+                raise ValueError(f"DNS-Aufloesung fehlgeschlagen, Request abgelehnt: {hostname} ({exc})")
+            for _, _, _, _, sockaddr in resolved:
+                ip = ipaddress.ip_address(sockaddr[0])
+                if is_dangerous_network_ip(ip):
+                    raise ValueError(f"Zugriff auf private IP-Adressen nicht erlaubt: {hostname}")
 
         # Request bauen
         body_bytes = None
@@ -1010,11 +1045,20 @@ class WorkflowEngine:
                         if op == "<":
                             return left_num < right_num
                     except ValueError:
-                        # String comparison
+                        # String comparison — auch Ordnungsvergleiche lexikografisch
+                        # auswerten, statt stumm False zu liefern.
                         if op == "==":
                             return left == right
                         if op == "!=":
                             return left != right
+                        if op == ">=":
+                            return left >= right
+                        if op == "<=":
+                            return left <= right
+                        if op == ">":
+                            return left > right
+                        if op == "<":
+                            return left < right
                         return False
                 break
 
@@ -1090,6 +1134,10 @@ class WorkflowEngine:
                         continue
                     if self._workflow_in_backoff(wf, now):
                         continue
+                    # Bereits laufenden Workflow nicht erneut starten — schuetzt vor
+                    # Doppelausfuehrung, wenn ein Lauf laenger als ein Scheduler-Tick dauert.
+                    if wf["id"] in self._running_workflows:
+                        continue
 
                     should_run = False
 
@@ -1116,6 +1164,7 @@ class WorkflowEngine:
 
                     # Workflow ausfuehren (non-blocking)
                     logger.info(f"Scheduler: Workflow '{wf['name']}' ist faellig — wird gestartet")
+                    self._running_workflows.add(wf["id"])
                     asyncio.create_task(self._safe_run_workflow(wf["id"]))
 
             except asyncio.CancelledError:
@@ -1131,6 +1180,8 @@ class WorkflowEngine:
             await self.run_workflow(workflow_id)
         except Exception as e:
             logger.error(f"Workflow {workflow_id} fehlgeschlagen: {e}", exc_info=True)
+        finally:
+            self._running_workflows.discard(workflow_id)
 
     def stop_scheduler(self) -> None:
         """Stoppt den Scheduler."""

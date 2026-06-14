@@ -1020,6 +1020,23 @@ def try_contextual_followup(user_message: str, history: list[dict]) -> str | Non
     )
 
 
+# Patterns that indicate a model described a tool call as plain text instead of
+# emitting a real tool call. Used by the stream fallback detector and to keep
+# such half-broken answers out of the response cache.
+_STREAM_TOOL_CALL_PATTERNS = (
+    # function_name(args) only as a standalone token at the start of a line, so
+    # prose like "max(3, 5)" or "Punkt (a)" is not misread as a tool call.
+    re.compile(r"(?m)^\s*(\w+)\([^()]*\)\s*$"),
+    re.compile(r"[Ff]ühre\s+['\"]?(\w+)['\"]?\s+aus"),
+    re.compile(r"[Rr]ufe\s+['\"]?(\w+)['\"]?\s+auf"),
+)
+
+
+def _looks_like_text_tool_call(text: str) -> bool:
+    """True if the text contains a tool-call-like pattern (possibly bogus)."""
+    return any(pat.search(text or "") for pat in _STREAM_TOOL_CALL_PATTERNS)
+
+
 # ══════════════════════════════════════════════════
 #  FILE UPLOAD HELPERS
 # ══════════════════════════════════════════════════
@@ -1249,14 +1266,12 @@ async def chat_endpoint(req: ChatRequest):
                     if data and isinstance(data, str):
                         reply_msg = data
                     elif data and isinstance(data, dict):
+                        # Only surface explicit, user-facing fields. Never dump the
+                        # whole result dict — that can leak internal field names,
+                        # technical raw values or paths into the chat answer.
                         reply_msg = (
                             data.get("summary")
                             or data.get("message")
-                            or data.get("error")
-                            or ". ".join(
-                                f"{k}: {v}" for k, v in data.items()
-                                if v and k not in ("icon", "icon_code", "will_rain", "success")
-                            )
                             or reply_msg
                         )
                     action = None  # Already executed
@@ -1655,14 +1670,12 @@ async def chat_stream_endpoint(req: ChatRequest):
                     if data and isinstance(data, str):
                         reply_msg = data
                     elif data and isinstance(data, dict):
+                        # Only surface explicit, user-facing fields. Never dump the
+                        # whole result dict — that can leak internal field names,
+                        # technical raw values or paths into the chat answer.
                         reply_msg = (
                             data.get("summary")
                             or data.get("message")
-                            or data.get("error")
-                            or ". ".join(
-                                f"{k}: {v}" for k, v in data.items()
-                                if v and k not in ("icon", "icon_code", "will_rain", "success")
-                            )
                             or reply_msg
                         )
                     # Action already executed — don't send it to frontend
@@ -1712,6 +1725,8 @@ async def chat_stream_endpoint(req: ChatRequest):
         full_text = ""
         _sentinel = object()
         tool_call_result = None  # Phase 40: accumulates tool call dict
+        history_saved = False    # True once full_text is persisted to history
+        chunk_future = None      # in-flight run_in_executor future for next(gen)
 
         try:
             try:
@@ -1723,9 +1738,10 @@ async def chat_stream_endpoint(req: ChatRequest):
 
             while True:
                 try:
-                    chunk = await loop.run_in_executor(
+                    chunk_future = loop.run_in_executor(
                         None, lambda g=gen, s=_sentinel: next(g, s)
                     )
+                    chunk = await chunk_future
                 except Exception as e:
                     logger.error(f"Stream chunk error: {e}")
                     yield f"data: {json.dumps({'error': t('error.streamError')})}\n\n"
@@ -1760,7 +1776,7 @@ async def chat_stream_endpoint(req: ChatRequest):
                     action_name = action.get("action", "")
                     params = action.get("params", {})
                     params_str = ", ".join(f"{k}={v}" for k, v in params.items()) if params else ""
-                    history_reply = f"{reply} [Aktion: {action_name}({params_str}) wartet auf Bestätigung]"
+                    history_reply = f"{reply} [Aktion: {action_name}({params_str}) wartet auf Bestaetigung]"
                 async with _history_lock:
                     update_history(conversation_history, sanitized, history_reply, MAX_HISTORY)
                 audit_log("chat_stream", "tool_call", f"ACTION={action.get('action') if action else 'none'}")
@@ -1770,18 +1786,13 @@ async def chat_stream_endpoint(req: ChatRequest):
             elif full_text:
                 async with _history_lock:
                     update_history(conversation_history, sanitized, full_text, MAX_HISTORY)
+                history_saved = True
                 reply, action, requires_confirmation = process_ai_response(full_text, source="chat_stream")
 
                 # Fallback: detect tool calls described as text (happens when fallback model has no tools)
                 # e.g. "weather_current(location='Hamburg')" or "Führe weather_current aus"
                 if action is None and full_text:
-                    import re as _re
-                    _tool_patterns = [
-                        _re.compile(r'(\w+)\(.*?\)'),  # function_name(args)
-                        _re.compile(r"[Ff]ühre\s+['\"]?(\w+)['\"]?\s+aus"),
-                        _re.compile(r"[Rr]ufe\s+['\"]?(\w+)['\"]?\s+auf"),
-                    ]
-                    for pat in _tool_patterns:
+                    for pat in _STREAM_TOOL_CALL_PATTERNS:
                         m = pat.search(full_text)
                         if not m:
                             continue
@@ -1838,7 +1849,9 @@ async def chat_stream_endpoint(req: ChatRequest):
                     set_pending_confirmation(action)
                 elif action:
                     clear_pending_confirmation()
-                elif not requires_confirmation:
+                elif not requires_confirmation and not _looks_like_text_tool_call(full_text):
+                    # Don't cache half-broken model answers that merely describe a
+                    # tool call as text (the detector above found no real tool).
                     remember_chat_response(sanitized, history_snapshot, full_text)
 
                 audit_log("chat_stream", "done", f"LEN={len(full_text)}")
@@ -1852,12 +1865,36 @@ async def chat_stream_endpoint(req: ChatRequest):
                 yield f"data: {json.dumps({'done': True, 'action': None, 'rc': False})}\n\n"
         except asyncio.CancelledError:
             logger.info(f"Stream cancelled by client (partial LEN={len(full_text)})")
+            # Persist the text already streamed to the user so the backend-side
+            # conversation memory matches what the user saw. Shield against the
+            # ongoing cancellation so the lock acquisition is not itself cancelled.
+            if full_text and not history_saved:
+                try:
+                    async def _save_partial():
+                        async with _history_lock:
+                            update_history(conversation_history, sanitized, full_text, MAX_HISTORY)
+                    await asyncio.shield(_save_partial())
+                    history_saved = True
+                except Exception:
+                    logger.warning("Failed to persist partial stream text after cancel")
+            raise
         except Exception:
             logger.exception("Unexpected error in event_stream")
             yield f"data: {json.dumps({'error': t('error.internalStream')})}\n\n"
         finally:
+            # Ensure no run_in_executor future is still iterating the generator in a
+            # worker thread before closing it; closing a generator that is currently
+            # executing raises "generator already executing".
+            if chunk_future is not None and not chunk_future.done():
+                try:
+                    await asyncio.shield(chunk_future)
+                except Exception:
+                    pass
             if gen is not None:
-                gen.close()
+                try:
+                    gen.close()
+                except Exception:
+                    logger.debug("gen.close() raised during stream cleanup", exc_info=True)
 
     return StreamingResponse(
         event_stream(),

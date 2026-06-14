@@ -10,10 +10,11 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes
 import logging
-import subprocess
+import sys
 import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Callable, Optional
 
@@ -22,8 +23,24 @@ import psutil
 logger = logging.getLogger("lexa.context_monitor")
 
 # ── Windows API Definitionen ─────────────────────────────
-user32 = ctypes.windll.user32
-kernel32 = ctypes.windll.kernel32
+# ctypes.windll existiert nur unter Windows. Damit das Modul auch auf
+# Nicht-Windows-Systemen (CI/Tests/portierbare Importe) importierbar bleibt,
+# wird der Zugriff plattform-geschuetzt und nur bei Erfolg gesetzt.
+if sys.platform == "win32":
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+
+    # Prototypen fuer Clipboard-Zugriff — restype/argtypes muessen explizit
+    # gesetzt werden, sonst trunkiert ctypes HANDLE/Pointer auf 64-bit-Systemen.
+    user32.GetClipboardData.restype = ctypes.wintypes.HANDLE
+    user32.GetClipboardData.argtypes = [ctypes.wintypes.UINT]
+    user32.OpenClipboard.argtypes = [ctypes.wintypes.HWND]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [ctypes.wintypes.HANDLE]
+    kernel32.GlobalUnlock.argtypes = [ctypes.wintypes.HANDLE]
+else:  # pragma: no cover — nur fuer Import auf Nicht-Windows
+    user32 = None
+    kernel32 = None
 
 
 class LASTINPUTINFO(ctypes.Structure):
@@ -85,6 +102,13 @@ class ContextMonitor:
         # Event-Handlers
         self._event_handlers: dict[str, list[Callable]] = {}
 
+        # Handler-Aufrufe werden in einem kleinen Pool entkoppelt, damit ein
+        # langsamer/blockierender Handler den Monitor-Tick nicht aufhaelt.
+        self._handler_pool = ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix="ctx-monitor-handler",
+        )
+
         # App-History (Ring-Buffer)
         self._app_history: deque[dict] = deque(maxlen=_APP_HISTORY_MAX)
 
@@ -105,6 +129,8 @@ class ContextMonitor:
         Returns:
             {"title": "...", "process": "...", "exe": "..."}
         """
+        if user32 is None:
+            return {"title": "", "process": "", "exe": ""}
         try:
             hwnd = user32.GetForegroundWindow()
             if not hwnd:
@@ -150,6 +176,8 @@ class ContextMonitor:
         Gibt die Sekunden seit der letzten Maus/Tastatur-Eingabe zurueck.
         Nutzt Windows API: GetLastInputInfo.
         """
+        if user32 is None or kernel32 is None:
+            return 0.0
         try:
             lii = LASTINPUTINFO()
             lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
@@ -170,26 +198,48 @@ class ContextMonitor:
     def get_clipboard(self) -> str:
         """
         Liest den aktuellen Clipboard-Text (nur Text, keine Bilder).
-        Nutzt PowerShell Get-Clipboard als sicherste Methode ohne pywin32.
+        Nutzt das Win32-API direkt via ctypes (OpenClipboard/GetClipboardData
+        CF_UNICODETEXT) — kein PowerShell-Prozess-Spawn pro Tick, daher billig
+        genug fuer haeufiges Polling.
 
         Returns:
             Clipboard-Text (max 200 Zeichen) oder leerer String.
         """
-        try:
-            result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
-                capture_output=True,
-                text=True,
-                timeout=3,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            if result.returncode == 0:
-                text = result.stdout.strip()
-                return text[:_CLIPBOARD_MAX_LEN] if text else ""
+        if user32 is None or kernel32 is None:
             return ""
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+
+        _CF_UNICODETEXT = 13
+        opened = False
+        try:
+            # OpenClipboard kann fehlschlagen, wenn ein anderer Prozess das
+            # Clipboard gerade haelt — dann einfach leeren String liefern.
+            if not user32.OpenClipboard(0):
+                return ""
+            opened = True
+
+            handle = user32.GetClipboardData(_CF_UNICODETEXT)
+            if not handle:
+                return ""
+
+            ptr = kernel32.GlobalLock(handle)
+            if not ptr:
+                return ""
+            try:
+                text = ctypes.c_wchar_p(ptr).value or ""
+            finally:
+                kernel32.GlobalUnlock(handle)
+
+            text = text.strip()
+            return text[:_CLIPBOARD_MAX_LEN] if text else ""
+        except Exception as e:
             logger.debug(f"get_clipboard Fehler: {e}")
             return ""
+        finally:
+            if opened:
+                try:
+                    user32.CloseClipboard()
+                except Exception:
+                    pass
 
     # ══════════════════════════════════════════════════
     #  LAUFENDE APPS
@@ -321,15 +371,27 @@ class ContextMonitor:
             logger.debug(f"Event-Handler registriert: {event_name}")
 
     def emit(self, event_name: str, data: Any = None) -> None:
-        """Loest ein Event aus und ruft alle registrierten Handler auf."""
+        """
+        Loest ein Event aus und ruft alle registrierten Handler auf.
+
+        Die Handler werden in einem separaten Pool ausgefuehrt, damit ein
+        langsamer/blockierender Handler den Monitor-Loop nicht verzoegert.
+        """
         with self._lock:
             handlers = list(self._event_handlers.get(event_name, []))
 
         for handler in handlers:
-            try:
-                handler(event_name, data)
-            except Exception as e:
-                logger.warning(f"Event-Handler Fehler ({event_name}): {e}", exc_info=True)
+            self._handler_pool.submit(
+                self._run_handler, handler, event_name, data
+            )
+
+    @staticmethod
+    def _run_handler(handler: Callable, event_name: str, data: Any) -> None:
+        """Ruft einen einzelnen Event-Handler isoliert auf und faengt Fehler ab."""
+        try:
+            handler(event_name, data)
+        except Exception as e:
+            logger.warning(f"Event-Handler Fehler ({event_name}): {e}", exc_info=True)
 
     # ══════════════════════════════════════════════════
     #  MONITOR LOOP (Background Thread)

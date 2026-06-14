@@ -148,32 +148,45 @@ def execute_context_tool(name: str, args: dict[str, Any] | None = None) -> dict[
     if args is None:
         args = {}
 
+    # Audit-Logging: Diese Tools fuehren auf KI-Anweisung sensible System-/
+    # Subprozess-Operationen aus (Browser-History, Dateisystem-Scan, Spotify).
+    # Wie der Companion-Pfad wird jeder Aufruf protokolliert.
+    from backend.security import audit_log
+
     # Tool-Name validieren
     valid_tools = {t["function"]["name"] for t in CONTEXT_TOOLS}
     if name not in valid_tools:
+        audit_log(f"context_tool:{name}", "rejected", "unbekanntes Context-Tool")
         return {"success": False, "error": f"Unbekanntes Context-Tool: {name}"}
 
     try:
         if name == "get_screen_context":
-            return _exec_screen_context()
+            result = _exec_screen_context()
         elif name == "get_clipboard_content":
-            return _exec_clipboard_content()
+            result = _exec_clipboard_content()
         elif name == "get_browser_tabs":
-            return _exec_browser_tabs(args)
+            result = _exec_browser_tabs(args)
         elif name == "control_spotify":
-            return _exec_control_spotify(args)
+            result = _exec_control_spotify(args)
         elif name == "get_recent_files":
-            return _exec_recent_files(args)
+            result = _exec_recent_files(args)
         elif name == "get_active_project":
-            return _exec_active_project()
+            result = _exec_active_project()
         elif name == "get_spotify_status":
-            return _exec_spotify_status()
+            result = _exec_spotify_status()
         elif name == "get_clipboard_history":
-            return _exec_clipboard_history()
+            result = _exec_clipboard_history()
         else:
+            audit_log(f"context_tool:{name}", "error", "nicht implementiert")
             return {"success": False, "error": f"Tool nicht implementiert: {name}"}
+        audit_log(
+            f"context_tool:{name}",
+            "success" if result.get("success") else "failed",
+        )
+        return result
     except Exception as e:
         logger.warning(f"Context-Tool '{name}' Fehler: {e}", exc_info=True)
+        audit_log(f"context_tool:{name}", "error", str(e))
         return {"success": False, "error": f"Tool-Ausfuehrung fehlgeschlagen: {str(e)}"}
 
 

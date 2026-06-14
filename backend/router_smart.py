@@ -5,6 +5,7 @@ API Endpoints fuer User-Profil, Vorschlaege, Lern-Statistiken, Insights.
 import asyncio
 import json
 import logging
+import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
@@ -66,10 +67,13 @@ async def delete_profile_entry(key: str):
     if not check_rate_limit("chat"):
         return JSONResponse({"error": "Rate limit ueberschritten."}, status_code=429)
 
-    if not key or not key.strip():
+    key = key.strip()
+    if not key:
         return JSONResponse({"error": "Key darf nicht leer sein."}, status_code=400)
+    if len(key) > 200:
+        return JSONResponse({"error": "Key zu lang (max 200 Zeichen)."}, status_code=400)
 
-    result = await asyncio.to_thread(sm.profile_delete, key.strip())
+    result = await asyncio.to_thread(sm.profile_delete, key)
 
     if "nicht gefunden" in result.lower():
         return JSONResponse({"status": result}, status_code=404)
@@ -187,13 +191,35 @@ async def common_apps(limit: int = 20):
 #  AI-GENERIERTE INSIGHTS
 # ══════════════════════════════════════════════════
 
+# Kurzzeit-Cache fuer /insights: Insights aendern sich nicht im Sekundentakt,
+# daher werden die teure Daten-Aggregation und der AI-Call fuer eine kurze
+# TTL wiederverwendet, statt sie bei jedem Aufruf erneut auszufuehren.
+_INSIGHTS_CACHE_TTL = 120.0  # Sekunden
+_insights_cache: dict | None = None
+_insights_cache_ts: float = 0.0
+
+
 @router.get("/insights")
 async def get_insights():
     """AI-generierte Insights ueber User-Verhalten.
     Nutzt die AI-Engine fuer eine Zusammenfassung der gesammelten Daten.
+    Ergebnisse werden kurz gecacht, um teure AI-Calls zu vermeiden.
     """
     if not check_rate_limit("chat"):
         return JSONResponse({"error": "Rate limit ueberschritten."}, status_code=429)
+
+    global _insights_cache, _insights_cache_ts
+
+    # Gecachtes Ergebnis innerhalb der TTL zurueckgeben
+    if _insights_cache is not None and (time.monotonic() - _insights_cache_ts) < _INSIGHTS_CACHE_TTL:
+        return _insights_cache
+
+    def _cache(payload: dict) -> dict:
+        """Ergebnis fuer die TTL merken und zurueckgeben."""
+        global _insights_cache, _insights_cache_ts
+        _insights_cache = payload
+        _insights_cache_ts = time.monotonic()
+        return payload
 
     # Daten sammeln
     insights_data = await asyncio.to_thread(sm.get_insights_data)
@@ -201,11 +227,11 @@ async def get_insights():
     # Pruefen ob genug Daten vorhanden
     total_interactions = insights_data.get("stats", {}).get("total_interactions", 0)
     if total_interactions < 5:
-        return {
+        return _cache({
             "insights": "Noch nicht genug Daten fuer Insights. Nutze Lexa ein paar Tage, damit ich deine Muster erkennen kann.",
             "data_points": total_interactions,
             "ai_generated": False,
-        }
+        })
 
     # AI-Insights generieren
     try:
@@ -218,25 +244,25 @@ async def get_insights():
         if result.get("type") == "error" or not content:
             # Fallback: Regelbasierte Insights
             content = _generate_fallback_insights(insights_data)
-            return {
+            return _cache({
                 "insights": content,
                 "data_points": total_interactions,
                 "ai_generated": False,
-            }
+            })
 
-        return {
+        return _cache({
             "insights": content,
             "data_points": total_interactions,
             "ai_generated": True,
-        }
+        })
     except Exception as e:
         logger.error(f"AI Insights fehlgeschlagen: {e}", exc_info=True)
         content = _generate_fallback_insights(insights_data)
-        return {
+        return _cache({
             "insights": content,
             "data_points": total_interactions,
             "ai_generated": False,
-        }
+        })
 
 
 def _build_insights_prompt(data: dict) -> str:
@@ -249,18 +275,18 @@ def _build_insights_prompt(data: dict) -> str:
     profile = data.get("profile", {})
 
     # Peak-Hours berechnen
-    peak_hours = sorted(activity_hours, key=lambda x: x["count"], reverse=True)[:3]
-    peak_str = ", ".join(f"{h['hour']}:00 ({h['count']}x)" for h in peak_hours) if peak_hours else "keine Daten"
+    peak_hours = sorted(activity_hours, key=lambda x: x.get("count", 0), reverse=True)[:3]
+    peak_str = ", ".join(f"{h.get('hour', '?')}:00 ({h.get('count', 0)}x)" for h in peak_hours) if peak_hours else "keine Daten"
 
     # Peak-Days berechnen
-    peak_days = sorted(activity_days, key=lambda x: x["count"], reverse=True)[:3]
-    days_str = ", ".join(f"{d['name']} ({d['count']}x)" for d in peak_days) if peak_days else "keine Daten"
+    peak_days = sorted(activity_days, key=lambda x: x.get("count", 0), reverse=True)[:3]
+    days_str = ", ".join(f"{d.get('name', '?')} ({d.get('count', 0)}x)" for d in peak_days) if peak_days else "keine Daten"
 
     # Top Commands
-    cmd_str = ", ".join(f"'{c['command']}' ({c['count']}x)" for c in commands[:5]) if commands else "keine"
+    cmd_str = ", ".join(f"'{c.get('command', '?')}' ({c.get('count', 0)}x)" for c in commands[:5]) if commands else "keine"
 
     # Top Apps
-    app_str = ", ".join(f"{a['name']} ({a['frequency']}x)" for a in apps[:5]) if apps else "keine"
+    app_str = ", ".join(f"{a.get('name', '?')} ({a.get('frequency', 0)}x)" for a in apps[:5]) if apps else "keine"
 
     # Profil-Info
     prefs = {}

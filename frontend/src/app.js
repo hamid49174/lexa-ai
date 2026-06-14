@@ -87,6 +87,22 @@ function updateCommandCount(total) {
   if (settingsCount) settingsCount.textContent = t("app.commandsRegistered", {count: total});
 }
 
+async function fetchCommandCount() {
+  try {
+    const data = await window.lexa.commands();
+    if (data && Number.isFinite(data.total)) {
+      updateCommandCount(data.total);
+      return;
+    }
+  } catch (e) {
+    console.warn("[Lexa:app] Failed to fetch command count:", e.message || e);
+  }
+  // Fallback: lokal bekannter Befehlsumfang, damit die UI nicht auf dem HTML-Default haengenbleibt
+  if (typeof ALL_COMMANDS_DATA !== "undefined" && Array.isArray(ALL_COMMANDS_DATA)) {
+    updateCommandCount(ALL_COMMANDS_DATA.length);
+  }
+}
+
 function updateConversationCount(count = LexaState.get("conversationsList").length) {
   const safeCount = Number.isFinite(count) ? count : 0;
   const greetingCount = document.getElementById("greeting-conv-count");
@@ -113,6 +129,7 @@ function normalizeUiCopy() {
 // ── WAKE WORD STATE (wakeWordActive in LexaState) ──
 // Module-local polling intervals (not shared):
 let _wakeWordPollInterval = null;
+let _wakeWordPollRate = null;
 let _wakeWordNextStatusCheck = 0;
 let _wakeWordRestartTimer = null;
 let _wakeWordRestartAttempts = 0;
@@ -154,7 +171,8 @@ async function init() {
     // normalizeUiCopy uses t() — must run AFTER i18n is loaded
     normalizeUiCopy();
     loadSidebarState();
-    applySendModeToggle(lexaStorageGet("lexa-ctrl-enter") === "true");
+    // window.ctrlEnterMode wird bereits in chat.js aus demselben Storage-Key abgeleitet — als alleinige Quelle nutzen.
+    applySendModeToggle(Boolean(window.ctrlEnterMode));
 
     // FORCE CHAT VIEW (Next-Level UI) — start in ambient orb mode
     window._chatViewOpen = false;
@@ -261,13 +279,12 @@ async function init() {
       });
     }
 
-    // Fetch initial limits
-    try {
-      const data = await window.lexa.commands();
-      if (data.total) {
-        updateCommandCount(data.total);
-      }
-    } catch (e) { console.warn("[Lexa:app] Failed to fetch command count:", e.message || e); }
+    // Fetch initial limits (mit Fallback auf den lokal bekannten Befehlsumfang)
+    await fetchCommandCount();
+    // Bei Reconnect (offline -> online) Command-Count erneut laden
+    LexaState.on("backendOnline", (online) => {
+      if (online) fetchCommandCount();
+    });
 
   } catch (err) {
     console.error("[LEXA] Init error:", err);
@@ -476,11 +493,8 @@ async function toggleWakeWord() {
       _startWakeWordPolling();
       showToast(t("toast.wakewordEnabled"), "success", 3000);
     }
+    // _updateWakeWordUI() (oben) setzt den korrekten aktiv/inaktiv-Tooltip bereits.
     _updateWakeWordUI();
-    const wakewordIndicator = document.getElementById("wakeword-indicator");
-    if (wakewordIndicator) {
-      wakewordIndicator.title = LexaState.get("wakeWordActive") ? t("nav.wakeWordTooltip") : t("nav.wakeWordTooltip");
-    }
   } catch (e) {
     if (_wakeWordPreferenceOn()) {
       _markWakeWordInactive("", { keepPreference: true, autoRestart: true });
@@ -500,11 +514,21 @@ function _updateWakeWordUI() {
   if (toggle) toggle.checked = active;
 }
 
-function _startWakeWordPolling() {
+function _startWakeWordPolling(rate = LexaConfig.WAKEWORD_POLL_INTERVAL) {
   _stopWakeWordPolling();
   _wakeWordNextStatusCheck = 0;
-  _wakeWordPollInterval = setInterval(_pollWakeWordEvents, LexaConfig.WAKEWORD_POLL_INTERVAL);
+  _wakeWordPollRate = rate;
+  _wakeWordPollInterval = setInterval(_pollWakeWordEvents, rate);
   _pollWakeWordEvents();
+}
+
+// Wechselt nur die Poll-Frequenz (ohne sofortigen Re-Poll), damit pro Poll-Batch
+// hoechstens ein Timer-Wechsel passiert und keine verwaisten Timer entstehen.
+function _setWakeWordPollRate(rate) {
+  if (!_wakeWordPollInterval || rate === _wakeWordPollRate) return;
+  clearInterval(_wakeWordPollInterval);
+  _wakeWordPollRate = rate;
+  _wakeWordPollInterval = setInterval(_pollWakeWordEvents, rate);
 }
 
 function _stopWakeWordPolling() {
@@ -512,6 +536,7 @@ function _stopWakeWordPolling() {
     clearInterval(_wakeWordPollInterval);
     _wakeWordPollInterval = null;
   }
+  _wakeWordPollRate = null;
 }
 
 async function _pollWakeWordEvents() {
@@ -535,6 +560,10 @@ async function _pollWakeWordEvents() {
 
     const res = await window.lexa.wakewordEvents();
     if (!res.events || res.events.length === 0) return;
+
+    // Gewuenschte Poll-Frequenz pro Batch sammeln und erst NACH der Schleife
+    // einmalig anwenden, damit nicht mehrere Timer-Wechsel pro Batch entstehen.
+    let desiredPollRate = null;
 
     for (const evt of res.events) {
       switch (evt.type) {
@@ -592,8 +621,7 @@ async function _pollWakeWordEvents() {
           _updateConversationModeUI(true);
           _setOrbConversationState("listening");
           _voiceStatusBarEventUpdate({ state: "listening", provider: _voiceConversationProviderLabel(), transcript: _voiceText("app.voiceConversationActive", "Conversation mode active.") });
-          _stopWakeWordPolling();
-          _wakeWordPollInterval = setInterval(_pollWakeWordEvents, LexaConfig.WAKEWORD_FAST_POLL_INTERVAL);
+          desiredPollRate = LexaConfig.WAKEWORD_FAST_POLL_INTERVAL;
           break;
         case "conversation_end":
           // conversation mode ended
@@ -604,8 +632,7 @@ async function _pollWakeWordEvents() {
           _voiceStatusBarEventUpdate({ state: "idle", provider: "", transcript: "", volume: 0 });
               showToast(t("toast.conversationEnded"), "info", 2000);
           // Back to normal polling speed
-          _stopWakeWordPolling();
-          _wakeWordPollInterval = setInterval(_pollWakeWordEvents, LexaConfig.WAKEWORD_POLL_INTERVAL);
+          desiredPollRate = LexaConfig.WAKEWORD_POLL_INTERVAL;
           break;
         case "speaking":
           // Lexa is speaking (TTS playing from backend)
@@ -632,6 +659,9 @@ async function _pollWakeWordEvents() {
           break;
       }
     }
+
+    // Poll-Frequenz erst nach dem Batch umschalten — nur ein Timer-Wechsel pro Poll.
+    if (desiredPollRate !== null) _setWakeWordPollRate(desiredPollRate);
   } catch (e) { console.warn("[Lexa:wakeword] Poll error:", e.message || e); }
 }
 
@@ -818,7 +848,7 @@ async function _initWakeWord() {
           break;
         } else {
           console.warn("[WakeWord] " + t("common.error") + ":", res?.error || "unbekannt");
-          if (attempt === 3) {
+          if (attempt === LexaConfig.WAKEWORD_MAX_RETRIES) {
             showToast(t("toast.wakewordStartFailed", {error: res?.error || "unbekannt"}), "warning", 5000);
             _scheduleWakeWordRestart(res?.error || "wake word start failed");
           }

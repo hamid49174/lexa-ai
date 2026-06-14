@@ -72,7 +72,12 @@ PERSONAL_OS_ROOT = _resolve_personal_os_root()
 _MAX_STDOUT_CHARS = 12000
 _MAX_STDERR_CHARS = 4000
 _LOG_TAIL_BYTES = 256_000
-_TELEGRAM_TOKEN_RE = re.compile(r"^\d{5,20}:[A-Za-z0-9_-]{20,120}$")
+# Full-Match-Regex zur Token-VALIDIERUNG (verankert ^...$). Nicht zu verwechseln mit
+# der Wort-Grenzen-Regex zur Redaktion in router_hermes.py.
+_TELEGRAM_TOKEN_FULLMATCH_RE = re.compile(r"^\d{5,20}:[A-Za-z0-9_-]{20,120}$")
+# Full-Match-Regex zur VALIDIERUNG der Telegram-Chat-ID: numerische ID (Gruppen negativ)
+# oder @username.
+_TELEGRAM_HOME_CHANNEL_RE = re.compile(r"^(?:-?\d{5,}|@[A-Za-z0-9_]{4,})$")
 _LOG_LINE_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+\s+"
     r"(?P<level>[A-Z]+)\s+(?P<logger>[^:]+):\s+(?P<message>.*)$"
@@ -222,6 +227,26 @@ _PERSONAL_OS_MCP_INDEX = Path("11_Integrations") / "MCP" / "os-mcp-server" / "di
 logger = logging.getLogger("lexa.hermes_adapter")
 
 
+_WHICH_CACHE: dict[str, tuple[float, str | None]] = {}
+_WHICH_CACHE_TTL = 30.0
+
+
+def _cached_which(command: str) -> str | None:
+    """shutil.which mit kurzem TTL-Cache.
+
+    Statusrouten (/hermes/extensions, /hermes/capabilities, /hermes/overview)
+    fragen Befehlsverfuegbarkeit haeufig ab; ein PATH-Scan pro Aufruf ist teuer.
+    Der kurze TTL haelt frisch installierte Befehle nach wenigen Sekunden sichtbar.
+    """
+    now = time.monotonic()
+    cached = _WHICH_CACHE.get(command)
+    if cached is not None and now - cached[0] < _WHICH_CACHE_TTL:
+        return cached[1]
+    resolved = shutil.which(command)
+    _WHICH_CACHE[command] = (now, resolved)
+    return resolved
+
+
 def _split_command(value: str) -> list[str]:
     value = value.strip()
     if not value:
@@ -276,8 +301,14 @@ def _display_command(command: list[str] | None) -> str | None:
     return text[:600] + " ...[truncated]"
 
 
+def _cmd_escape_percent(value: str) -> str:
+    # In Batch-Skripten ist '%' ein Sondersteuerzeichen (Variablen-Expansion).
+    # Wortwoertlich eingebettete Pfade muessen '%' zu '%%' verdoppeln.
+    return str(value).replace("%", "%%")
+
+
 def _cmd_quote(value: str) -> str:
-    return '"' + str(value).replace('"', '""') + '"'
+    return '"' + _cmd_escape_percent(str(value).replace('"', '""')) + '"'
 
 
 def _normalize_cmd_script(text: str) -> str:
@@ -511,7 +542,7 @@ def _quote_env_value(value: str) -> str:
 def _write_hermes_env_values(updates: dict[str, str]) -> Path:
     HERMES_HOME_ROOT.mkdir(parents=True, exist_ok=True)
     path = _hermes_env_path()
-    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
 
     out: list[str] = []
     seen: set[str] = set()
@@ -1047,14 +1078,19 @@ def _media_area(
     }
 
 
-def get_hermes_media_status(status_info: dict[str, Any] | None = None) -> dict[str, Any]:
+def get_hermes_media_status(
+    status_info: dict[str, Any] | None = None,
+    provider_status: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return read-only Hermes STT/TTS/image/video readiness without secrets."""
     status_info = status_info or get_hermes_status()
     env_values = _read_hermes_env_file()
     config, config_meta = _read_hermes_config_file()
     _auth, auth_meta = _read_hermes_auth_file()
     command_available = bool(status_info.get("available"))
-    provider_status = get_hermes_provider_status(status_info)
+    # provider_status kann vom Aufrufer (z.B. get_hermes_capabilities) durchgereicht
+    # werden, um die doppelte Berechnung zu vermeiden.
+    provider_status = provider_status or get_hermes_provider_status(status_info)
     primary_ready = provider_status.get("healthState") != "blocked"
 
     tts_cfg = _config_section(config, "tts")
@@ -1092,7 +1128,7 @@ def get_hermes_media_status(status_info: dict[str, Any] | None = None) -> dict[s
     stt_provider = _configured_media_provider(stt_cfg, "local")
     stt_provider_cfg = _provider_section(stt_cfg, stt_provider)
     stt_model = _config_text(stt_provider_cfg, "model", "model_id") or _config_text(stt_cfg, "model")
-    local_stt_command_ready = bool(_env_or_file_value(env_values, "HERMES_LOCAL_STT_COMMAND") or shutil.which("whisper"))
+    local_stt_command_ready = bool(_env_or_file_value(env_values, "HERMES_LOCAL_STT_COMMAND") or _cached_which("whisper"))
     stt_command_ready = _has_command_provider(stt_cfg, stt_provider)
     stt_cloud_keys = {
         "groq": ("GROQ_API_KEY",),
@@ -1343,6 +1379,11 @@ def _safe_lexa_memory_snapshot() -> dict[str, Any]:
         uri = f"file:{path.resolve().as_posix()}?mode=ro"
         with sqlite3.connect(uri, uri=True, timeout=0.25) as db:
             for table in _LEXA_MEMORY_TABLES:
+                # Tabellenname stammt ausschliesslich aus der festen Whitelist
+                # _LEXA_MEMORY_TABLES (kein User-Input). Defensive Absicherung gegen
+                # spaetere Aenderungen gemaess backend.md ("NIEMALS f-Strings in SQL").
+                if not table.isidentifier():
+                    continue
                 try:
                     row = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
                 except sqlite3.Error:
@@ -1416,7 +1457,7 @@ def _lexa_mcp_command_ready(name: str, config: dict[str, Any]) -> tuple[bool, st
         return False, "missing command"
 
     command_path = Path(command)
-    command_ready = command_path.exists() if command_path.is_absolute() else bool(shutil.which(command) or command_path.exists())
+    command_ready = command_path.exists() if command_path.is_absolute() else bool(_cached_which(command) or command_path.exists())
     if not command_ready:
         return False, "command not found"
 
@@ -1824,7 +1865,7 @@ def get_hermes_capabilities(status_info: dict[str, Any] | None = None) -> dict[s
     telegram_configured = bool((status_info.get("gateway") or {}).get("configured"))
     personal_os_available = bool(status_info.get("personal_os_available"))
     provider_status = get_hermes_provider_status(status_info)
-    media_status = get_hermes_media_status(status_info)
+    media_status = get_hermes_media_status(status_info, provider_status=provider_status)
     extension_status = get_hermes_extension_status(status_info)
     media_counts = media_status.get("counts") if isinstance(media_status.get("counts"), dict) else {}
     extension_counts = extension_status.get("counts") if isinstance(extension_status.get("counts"), dict) else {}
@@ -2140,6 +2181,52 @@ def _selftest_command_result(
     }
 
 
+def _selftest_fake_read_json(url: str, timeout: float = 2.0) -> dict[str, Any]:
+    """Deterministic fake for the plugin's _read_json during selftest.
+
+    Verhindert reale, re-entrante HTTP-Requests gegen das eigene Backend
+    (127.0.0.1:8000) waehrend der Selftest selbst von einem Endpoint laeuft.
+    Liefert plausible, nicht-leere Payloads, damit die Plugin-Formatierung
+    deterministisch geprueft wird.
+    """
+    if "/gateway/logs" in url:
+        return {
+            "exists": True,
+            "health_state": "ok",
+            "summary": "Selftest-Logzusammenfassung (kein echter Netzwerk-Read).",
+            "size_mb": 0,
+            "tail_lines": 0,
+            "counts": {"inbound_messages": 0, "responses_ready": 0, "memory_heartbeats": 0},
+            "issues": [],
+            "latest": [],
+            "log_path": str(_hermes_gateway_log_path()),
+        }
+    if "/hermes/overview" in url:
+        return {
+            "telegramText": "Selftest Overview (kein echter Netzwerk-Read).",
+            "summary": "Selftest",
+            "nextAction": "-",
+            "checks": [],
+        }
+    if "/drafts" in url:
+        return {"success": True, "summary": "0 pending", "drafts": []}
+    # Generischer Status-Read (health, hermes/status, telegram/status, autostart).
+    return {"status": "ok", "summary": "Selftest", "health_state": "ok"}
+
+
+def _selftest_fake_post_json(url: str, payload: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
+    """Deterministic fake for the plugin's _post_json during selftest."""
+    if "/draft" in url:
+        return {
+            "success": True,
+            "title": payload.get("title") or "Selftest Draft",
+            "draftPath": "06_Inbox/Drafts/selftest_dry_run.md",
+            "targetPath": "05_Memory/Session/selftest_dry_run.md",
+            "dryRun": True,
+        }
+    return {"success": True, "summary": "Selftest", "result": "ok"}
+
+
 def _run_lexa_status_plugin_command(plugin: Any, command: str) -> dict[str, Any]:
     samples = {
         "lexa-status": ("_plugin_status", ""),
@@ -2155,27 +2242,23 @@ def _run_lexa_status_plugin_command(plugin: Any, command: str) -> dict[str, Any]
     if not callable(func):
         return _selftest_command_result(command, state="blocked", detail=f"{func_name} missing")
 
-    original_post_json = None
-    if command == "lexa-draft":
-        original_post_json = getattr(plugin, "_post_json", None)
-
-        def fake_post_json(url: str, payload: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
-            return {
-                "success": True,
-                "title": payload.get("title") or "Selftest Draft",
-                "draftPath": "06_Inbox/Drafts/selftest_dry_run.md",
-                "targetPath": "05_Memory/Session/selftest_dry_run.md",
-                "dryRun": True,
-            }
-
-        setattr(plugin, "_post_json", fake_post_json)
+    # Alle HTTP-Reads/Writes des Plugins durch deterministische Fakes ersetzen,
+    # damit der Selftest keine realen, re-entranten Backend-Calls ausloest.
+    original_read_json = getattr(plugin, "_read_json", None)
+    original_post_json = getattr(plugin, "_post_json", None)
+    if original_read_json is not None:
+        setattr(plugin, "_read_json", _selftest_fake_read_json)
+    if original_post_json is not None:
+        setattr(plugin, "_post_json", _selftest_fake_post_json)
 
     try:
         output = func(args)
     except Exception as exc:
         return _selftest_command_result(command, state="blocked", detail=str(exc), mutates=command == "lexa-draft", dry_run=command == "lexa-draft")
     finally:
-        if command == "lexa-draft" and original_post_json is not None:
+        if original_read_json is not None:
+            setattr(plugin, "_read_json", original_read_json)
+        if original_post_json is not None:
             setattr(plugin, "_post_json", original_post_json)
 
     text = str(output or "").strip()
@@ -2263,7 +2346,9 @@ def get_hermes_telegram_command_selftest(include_samples: bool = True) -> dict[s
         ("Erstelle einen Lexa OS Draft: Status merken", "/lexa_draft"),
         ("Was ist der Stand von Lexa/OS?", "/lexa_status"),
     ]
-    hook = getattr(plugin, "_pre_gateway_dispatch", None)
+    # Den tatsaechlich registrierten Hook aus context.hooks beziehen (echter Vertrag),
+    # nicht ueber den privaten Namen raten.
+    hook = context.hooks.get("pre_gateway_dispatch")
     for text, expected in rewrite_cases:
         try:
             result = hook(type("Event", (), {"text": text})()) if callable(hook) else None
@@ -2354,19 +2439,28 @@ def get_hermes_gateway_autostart_status() -> dict[str, Any]:
     }
 
 
+_GATEWAY_LOG_ROTATE_BYTES = 5 * 1024 * 1024
+
+
 def _gateway_autostart_script_body(command: list[str]) -> str:
     argv = command + ["gateway", "run", "--replace"]
     quoted_argv = " ".join(_cmd_quote(part) for part in argv)
+    log_path = _hermes_gateway_log_path()
+    quoted_log = _cmd_quote(str(log_path))
+    quoted_log_prev = _cmd_quote(str(log_path) + ".1")
     return "\n".join([
         "@echo off",
         "setlocal",
-        f"set \"HERMES_HOME={HERMES_HOME_ROOT}\"",
-        f"set \"LEXA_PERSONAL_OS_ROOT={PERSONAL_OS_ROOT}\"",
+        f"set \"HERMES_HOME={_cmd_escape_percent(str(HERMES_HOME_ROOT))}\"",
+        f"set \"LEXA_PERSONAL_OS_ROOT={_cmd_escape_percent(str(PERSONAL_OS_ROOT))}\"",
         "set \"PYTHONUTF8=1\"",
         "set \"PYTHONIOENCODING=utf-8\"",
         f"cd /d {_cmd_quote(str(PROJECT_ROOT))}",
-        f"echo [%date% %time%] Starting Hermes gateway >> {_cmd_quote(str(_hermes_gateway_log_path()))}",
-        f"{quoted_argv} >> {_cmd_quote(str(_hermes_gateway_log_path()))} 2>&1",
+        # Log-Rotation: gateway.log -> gateway.log.1, sobald die Datei zu gross wird,
+        # damit das Log bei Dauerbetrieb nicht unbegrenzt waechst.
+        f"if exist {quoted_log} for %%I in ({quoted_log}) do if %%~zI GTR {_GATEWAY_LOG_ROTATE_BYTES} move /y {quoted_log} {quoted_log_prev} >nul 2>&1",
+        f"echo [%date% %time%] Starting Hermes gateway >> {quoted_log}",
+        f"{quoted_argv} >> {quoted_log} 2>&1",
         "endlocal",
         "",
     ])
@@ -2403,8 +2497,7 @@ def set_hermes_gateway_autostart(enabled: bool = True) -> dict[str, Any]:
         }
 
     if not enabled:
-        if startup_path.exists():
-            startup_path.unlink()
+        startup_path.unlink(missing_ok=True)
         next_status = get_hermes_gateway_autostart_status()
         return {"success": True, "status": "disabled", "autostart": next_status}
 
@@ -2444,7 +2537,7 @@ def configure_hermes_telegram(
             "error": "TELEGRAM_BOT_TOKEN fehlt. Erstelle zuerst einen Bot bei BotFather und fuege den Token ein.",
             "telegram_status": get_hermes_telegram_status(),
         }
-    if token and not _TELEGRAM_TOKEN_RE.match(token):
+    if token and not _TELEGRAM_TOKEN_FULLMATCH_RE.match(token):
         return {
             "success": False,
             "status": "invalid_token_format",
@@ -2453,6 +2546,13 @@ def configure_hermes_telegram(
         }
     if "\n" in home_channel or "\r" in home_channel:
         return {"success": False, "status": "invalid_home_channel", "error": "Telegram-Chat-ID darf keine Zeilenumbrueche enthalten."}
+    if home_channel and not _TELEGRAM_HOME_CHANNEL_RE.match(home_channel):
+        return {
+            "success": False,
+            "status": "invalid_home_channel",
+            "error": "Telegram-Chat-ID sieht ungueltig aus. Erwartet wird eine numerische Chat-ID wie 123456789 (Gruppen ggf. negativ) oder ein @username.",
+            "telegram_status": get_hermes_telegram_status(),
+        }
     if "\n" in home_name or "\r" in home_name:
         return {"success": False, "status": "invalid_home_channel_name", "error": "Name darf keine Zeilenumbrueche enthalten."}
 
@@ -2534,10 +2634,28 @@ Task:
 """
 
 
+# Windows-CreateProcess hat ein Kommandozeilen-Limit von 32767 Zeichen. Wird der
+# Prompt als argv-Argument uebergeben (-z), deckeln wir ihn mit Sicherheitsmarge,
+# damit grosse Prompts nicht mit einem schwer verstaendlichen OSError fehlschlagen.
+_MAX_ARGV_PROMPT_CHARS = 30000
+
+
+def _cap_argv_prompt(prompt: str) -> str:
+    if len(prompt) <= _MAX_ARGV_PROMPT_CHARS:
+        return prompt
+    logger.warning(
+        "Hermes prompt exceeds argv-safe length (%s chars); truncating to %s.",
+        len(prompt),
+        _MAX_ARGV_PROMPT_CHARS,
+    )
+    marker = "\n...[prompt truncated to fit command-line limit]"
+    return prompt[: _MAX_ARGV_PROMPT_CHARS - len(marker)] + marker
+
+
 def _build_run_command(command: list[str], prompt: str) -> tuple[list[str], str | None]:
     run_args = os.environ.get("LEXA_HERMES_RUN_ARGS", "").strip()
     if not run_args:
-        return command + ["-z", prompt], None
+        return command + ["-z", _cap_argv_prompt(prompt)], None
 
     replacements = {
         "{prompt}": prompt,
@@ -2547,12 +2665,18 @@ def _build_run_command(command: list[str], prompt: str) -> tuple[list[str], str 
     }
     args: list[str] = []
     prompt_in_args = False
+    # LEXA_HERMES_RUN_ARGS ist ein POSIX-Stil Argument-Template (z.B. -c "print('x')").
+    # Hier muss posix=True bleiben, damit umschliessende Quotes korrekt entfernt werden.
+    # (Anders als _split_command, das einen Windows-Pfad aufloest und dort posix=False braucht.)
     for arg in shlex.split(run_args, posix=True):
         for key, value in replacements.items():
             if key in arg:
                 prompt_in_args = True
                 arg = arg.replace(key, value)
         args.append(arg)
+    # Wird der Prompt ueber argv (Platzhalter im Template) eingesetzt, ebenfalls deckeln.
+    if prompt_in_args:
+        args = [_cap_argv_prompt(arg) for arg in args]
     return command + args, None if prompt_in_args else prompt
 
 

@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 
 from backend.config import MAX_CONVERSATION_TITLE, MAX_CONVERSATION_MESSAGES
+from backend.security import check_rate_limit
 from backend.shared import (
     conversation_history,
     _history_lock,
@@ -44,6 +45,8 @@ async def list_conversations():
 
 @router.post("/conversations")
 async def create_conversation(req: Request):
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     data = await parse_json_body(req)
     title = str(data.get("title", "Neuer Chat"))[:MAX_CONVERSATION_TITLE]
     conv_id = await asyncio.to_thread(memory.conversation_create, title)
@@ -62,6 +65,8 @@ async def get_conversation(conv_id: int):
 
 @router.put("/conversations/{conv_id}")
 async def update_conversation(conv_id: int, req: Request):
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     data = await parse_json_body(req)
     title = data.get("title")
     if title is not None:
@@ -79,6 +84,8 @@ async def update_conversation(conv_id: int, req: Request):
 
 @router.delete("/conversations/{conv_id}")
 async def delete_conversation(conv_id: int):
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     result = await asyncio.to_thread(memory.conversation_delete, conv_id)
     return {"status": result}
 
@@ -86,6 +93,8 @@ async def delete_conversation(conv_id: int):
 @router.post("/conversations/{conv_id}/load")
 async def load_conversation(conv_id: int):
     """Load a conversation's messages as the active chat history."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     conv = await asyncio.to_thread(memory.conversation_get, conv_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")

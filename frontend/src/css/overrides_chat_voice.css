@@ -647,7 +647,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: rgba(255, 231, 168, 0.82);
-  font-family: var(--font-main);
+  font-family: var(--font);
   font-size: 10px;
   font-weight: 700;
 }

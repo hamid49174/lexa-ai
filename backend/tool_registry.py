@@ -1,5 +1,6 @@
 """Lexa AI — Tool Registry (Phase 40)
-Central registry of all 138+ companion commands as native LLM tool definitions.
+Central registry of all companion commands as native LLM tool definitions
+(siehe Start-Log fuer die aktuelle Gesamtzahl).
 Supports: Groq, OpenAI, Gemini (all use OpenAI-compatible function calling format).
 
 Instead of listing commands in the system prompt and hoping the LLM produces
@@ -22,6 +23,14 @@ _DANGEROUS_ARGUMENT_KEYS: frozenset[str] = frozenset({
     "constructor",
     "prototype",
 })
+
+# Tools die mindestens einen aus einer Gruppe optionaler Parameter brauchen.
+# Das JSON-Schema des Registry kann "genau eines von X/Y" nicht ausdruecken,
+# daher wird diese Mindestbedingung in validate_tool_arguments erzwungen,
+# statt sich allein auf die Companion-Schicht zu verlassen.
+_REQUIRED_ONE_OF: dict[str, tuple[str, ...]] = {
+    "process_kill": ("pid", "name"),
+}
 
 
 class ToolSchemaValidationError(ValueError):
@@ -842,30 +851,46 @@ def _register_vision_tools() -> list[dict]:
 # ══════════════════════════════════════════════════
 
 def register_all_tools() -> None:
-    """Register all 140+ Lexa commands as tool definitions. Called once at startup."""
+    """Register all Lexa commands as tool definitions. Called once at startup.
+
+    Die Kategorie-Zahlen werden absichtlich nicht mehr hartkodiert kommentiert,
+    da sie bei jeder Tool-Aenderung veralteten. Die tatsaechliche Gesamt- und
+    Kategorie-Aufteilung wird beim Start dynamisch geloggt.
+    """
     global TOOL_DEFINITIONS, _TOOL_MAP
 
+    registries = [
+        _register_basis_tools,
+        _register_browser_tools,
+        _register_file_tools,
+        _register_media_tools,
+        _register_communication_tools,
+        _register_memory_tools,
+        _register_personal_os_tools,
+        _register_hermes_tools,
+        _register_os_agent_tools,
+        _register_productivity_tools,
+        _register_pc_control_tools,
+        _register_dev_tools,
+        _register_reminder_tools,
+        _register_calendar_tools,
+        _register_weather_tools,
+        _register_vision_tools,
+    ]
+
     tools: list[dict] = []
-    tools.extend(_register_basis_tools())        # 22
-    tools.extend(_register_browser_tools())       # 8
-    tools.extend(_register_file_tools())          # 19
-    tools.extend(_register_media_tools())         # 8
-    tools.extend(_register_communication_tools())  # 5
-    tools.extend(_register_memory_tools())        # 11
-    tools.extend(_register_personal_os_tools())   # 11
-    tools.extend(_register_hermes_tools())        # 5
-    tools.extend(_register_os_agent_tools())      # 5
-    tools.extend(_register_productivity_tools())  # 17
-    tools.extend(_register_pc_control_tools())    # 27
-    tools.extend(_register_dev_tools())           # 25
-    tools.extend(_register_reminder_tools())       # 3
-    tools.extend(_register_calendar_tools())      # 6
-    tools.extend(_register_weather_tools())       # 2
-    tools.extend(_register_vision_tools())        # 3
+    category_counts: dict[str, int] = {}
+    for register in registries:
+        category_tools = register()
+        # Kategorie-Name aus '_register_<name>_tools' ableiten.
+        category = register.__name__.removeprefix("_register_").removesuffix("_tools")
+        category_counts[category] = len(category_tools)
+        tools.extend(category_tools)
 
     TOOL_DEFINITIONS = tools
     _TOOL_MAP = {t["function"]["name"]: t for t in tools}
-    logger.info(f"Tool Registry: {len(tools)} tools registered")
+    breakdown = ", ".join(f"{name}={count}" for name, count in category_counts.items())
+    logger.info(f"Tool Registry: {len(tools)} tools registered ({breakdown})")
 
 
 def get_all_tools() -> list[dict]:
@@ -924,7 +949,23 @@ def validate_tool_arguments(name: str, arguments: dict) -> dict:
         "properties": {},
     }
     _validate_schema_object(parameters, arguments, path="arguments", reject_unknown=True)
+    _validate_required_one_of(name, arguments)
     return dict(arguments)
+
+
+def _validate_required_one_of(name: str, arguments: dict) -> None:
+    """Erzwinge "mindestens einer aus der Gruppe" fuer entweder/oder-Tools.
+
+    Falsy-Werte (None, "", 0, leere Liste) gelten als nicht angegeben, weil die
+    Companion-Schicht sie ebenfalls als fehlend behandelt.
+    """
+    group = _REQUIRED_ONE_OF.get(name)
+    if not group:
+        return
+    if not any(arguments.get(key) for key in group):
+        raise ToolSchemaValidationError(
+            f"arguments requires at least one of: {', '.join(group)}"
+        )
 
 
 def _validate_no_dangerous_argument_keys(value: Any, path: str = "arguments") -> None:
@@ -1163,7 +1204,9 @@ def get_tools_for_context(user_message: str, max_tools: int = 45) -> list[dict]:
     # If total tools fit within limit, send all
     if len(all_tools) <= max_tools:
         return all_tools
-    msg_words = set(re.findall(r'[a-zäöüß]{3,}', msg_lower))
+    # Allow 2-char and digit-containing tokens so short/alphanumeric keywords
+    # (e.g. "os", "ip", "qa", "pc", "a11y") can still match their categories.
+    msg_words = set(re.findall(r'[a-z0-9äöüß]{2,}', msg_lower))
 
     matched_categories: list[str] = []
     for cat_name, keywords in _CATEGORY_KEYWORDS.items():

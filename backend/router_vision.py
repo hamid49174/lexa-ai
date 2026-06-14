@@ -34,6 +34,9 @@ logger = logging.getLogger("lexa.vision.router")
 
 router = APIRouter(prefix="/vision", tags=["vision"])
 
+_MAX_UPLOAD_SIZE = 10 * 1024 * 1024
+_UPLOAD_CHUNK_SIZE = 64 * 1024
+
 _LOCAL_PATH_RE = re.compile(
     r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
 )
@@ -210,10 +213,19 @@ async def analyze_uploaded_file(
         return _error(unsupported_upload_format_error(content_type), 400)
 
     try:
-        # Datei lesen (max 10MB)
-        image_bytes = await file.read()
-        if len(image_bytes) > 10 * 1024 * 1024:
-            return _error("Datei zu gross (max. 10MB)", 413)
+        # Datei chunkweise lesen und bei Ueberschreiten von 10MB sofort abbrechen,
+        # damit ueberdimensionierte Uploads nicht komplett in den RAM gelesen werden.
+        chunks: list[bytes] = []
+        total_size = 0
+        while True:
+            chunk = await file.read(_UPLOAD_CHUNK_SIZE)
+            if not chunk:
+                break
+            total_size += len(chunk)
+            if total_size > _MAX_UPLOAD_SIZE:
+                return _error("Datei zu gross (max. 10MB)", 413)
+            chunks.append(chunk)
+        image_bytes = b"".join(chunks)
         if len(image_bytes) == 0:
             return _error("Leere Datei", 400)
         if supported_image_signature(image_bytes) is None:

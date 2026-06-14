@@ -332,7 +332,7 @@ function updateMemoryGraphInspector(node, graph) {
   const metaEl = panel.querySelector(".memory-graph-inspector-meta");
   if (!node) {
     if (typeEl) typeEl.textContent = "Graph";
-    if (titleEl) titleEl.textContent = `${graph.nodes.length} Knoten · ${graph.links.length} Linien`;
+    if (titleEl) titleEl.textContent = `${graph?.nodes?.length || 0} Knoten · ${graph?.links?.length || 0} Linien`;
     if (metaEl) metaEl.textContent = "Hover oder Klick auf einen Punkt zeigt Details.";
     return;
   }
@@ -1066,9 +1066,15 @@ async function revealClipboardHistory(triggerBtn) {
 }
 
 async function clearClipboardHistory() {
-  await window.lexa.clipboardClear();
-  showToast(t("toast.clipboardCleared"), "info");
-  refreshMemoryView();
+  if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
+  try {
+    await window.lexa.clipboardClear();
+    showToast(t("toast.clipboardCleared"), "info");
+    refreshMemoryView();
+  } catch (e) {
+    console.warn("[Memory] Failed to clear clipboard history:", e.message || e);
+    showToast(t("toast.executionError"), "error", 2200);
+  }
 }
 
 function createNote() {
@@ -1267,12 +1273,32 @@ async function openNoteModal(noteId, noteTitle) {
 }
 
 // ── CLIPBOARD HISTORY & SNIPPETS (Phase 16) ─────
+// Erkennt wahrscheinlich sensible Zwischenablage-Inhalte (Schlüssel/Tokens/Passwörter),
+// damit diese nicht in die lokale Historie persistiert werden.
+function isLikelySensitiveClipboard(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  // Bekannte Schlüssel-/Token-Präfixe (Stripe, OpenAI, GitHub, Slack, AWS, Bearer, JWT ...).
+  if (/\b(sk|pk|rk)_[a-z0-9]/i.test(value)) return true;
+  if (/\b(gh[pousr]|xox[baprs]|AKIA|ASIA|ya29|eyJ[A-Za-z0-9_-]{10,})/i.test(value)) return true;
+  if (/\bBearer\s+[A-Za-z0-9._-]{16,}/i.test(value)) return true;
+  if (/\b(api[_-]?key|secret|token|passwor[dt])\b\s*[:=]/i.test(value)) return true;
+  // Lange, leerzeichenfreie Hex-/Base64-artige Strings (typisch für Keys/Hashes).
+  if (/^[A-Za-z0-9+/=_-]{40,}$/.test(value) && !/\s/.test(value)) return true;
+  return false;
+}
+
 async function trackClipboard() {
   try {
     const text = await navigator.clipboard.readText();
-    if (text && text.trim()) {
-      await window.lexa.clipboardAdd(text.trim().substring(0, 1000));
+    const trimmed = text ? text.trim() : "";
+    if (!trimmed) return;
+    // Sensible Inhalte (Schlüssel/Tokens/Passwörter) bewusst NICHT speichern.
+    if (isLikelySensitiveClipboard(trimmed)) {
+      console.info("[Memory] Skipped clipboard capture: content looks sensitive.");
+      return;
     }
+    await window.lexa.clipboardAdd(trimmed.substring(0, 1000));
   } catch (e) { console.warn("[Memory] Failed to track clipboard:", e.message || e); }
 }
 
@@ -1404,6 +1430,13 @@ async function showDiagnostics() {
 async function runMemoryCleanup() {
   if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
   if (_memoryCleanupRunning) return;
+  // Destructive action: require explicit confirmation before deleting memories.
+  // Kriterien werden genannt; "ja" muss explizit eingegeben werden (analog Notiz-/Snippet-Löschung).
+  const confirmLabel = `${t("memory.cleanupOld")} — Erinnerungen älter als 90 Tage mit Wichtigkeit < 3 werden unwiderruflich gelöscht. Zum Bestätigen "ja" eingeben.`;
+  const confirmResult = await showInputModal(t("common.confirm"), [
+    { name: "confirm", label: confirmLabel, type: "text", required: true }
+  ], t("common.confirm"));
+  if (!confirmResult || confirmResult.confirm.trim().toLowerCase() !== "ja") return;
   _memoryCleanupRunning = true;
   setMemoryActionButtonsBusy("runMemoryCleanup", true);
   try {

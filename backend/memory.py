@@ -247,7 +247,9 @@ def full_text_search(query: str, limit: int = 20) -> dict:
             (fts_query, limit)
         ).fetchall()]
         memories = _rank_memory_results(memories, query, terms)
-        memories = _finalize_memory_results(db, memories[:limit], expose_id=True)
+        # Search overviews must not inflate access_count — that would self-reinforce
+        # ranking toward frequently-searched-but-never-opened memories.
+        memories = _finalize_memory_results(db, memories[:limit], expose_id=True, track_access=False)
         return {"notes": notes, "memories": memories, "total": len(notes) + len(memories)}
     except Exception as e:
         logger.warning(f"FTS search failed, falling back to LIKE: {e}")
@@ -290,7 +292,7 @@ def _like_search_all(db: sqlite3.Connection, query: str, limit: int = 20) -> dic
             mem_params + [limit],
         ).fetchall()]
         memories = _rank_memory_results(memories, query, words)
-        memories = _finalize_memory_results(db, memories[:limit], expose_id=True)
+        memories = _finalize_memory_results(db, memories[:limit], expose_id=True, track_access=False)
     except Exception:
         memories = []
 
@@ -303,6 +305,12 @@ def _like_search_all(db: sqlite3.Connection, query: str, limit: int = 20) -> dic
 
 def note_create(title: str, content: str, category: str = "general") -> str:
     """Create or update a note."""
+    from backend.config import MAX_NOTE_CATEGORY, MAX_NOTE_CONTENT, MAX_NOTE_TITLE
+    # Cap inputs consistently with note_update_by_id to keep the DB bounded,
+    # even when called from internal sources (companion/tools).
+    title = title[:MAX_NOTE_TITLE]
+    content = content[:MAX_NOTE_CONTENT]
+    category = category[:MAX_NOTE_CATEGORY]
     db = _get_db()
     db.execute(
         """INSERT INTO notes (title, content, category)
@@ -475,23 +483,21 @@ def add_memory(
                 if sim >= 0.75:
                     return "Bereits bekannt."
 
-    db.execute(
+    cursor = db.execute(
         "INSERT INTO memories (content, category, memory_type, importance, source) VALUES (?, ?, ?, ?, ?)",
         (content_stripped, category, resolved_memory_type, importance, source),
     )
+    new_id = cursor.lastrowid
     db.commit()
 
     # Phase 42: Auto-embed new memory in background (non-blocking)
     try:
         from backend.config import EMBEDDING_ENABLED
-        if EMBEDDING_ENABLED:
-            row = db.execute(
-                "SELECT id FROM memories WHERE content = ? ORDER BY id DESC LIMIT 1",
-                (content_stripped,),
-            ).fetchone()
-            if row:
-                _embed_memory_row(db, row["id"], content_stripped)
-                db.commit()
+        if EMBEDDING_ENABLED and new_id:
+            # cursor.lastrowid is the exact id of the row just inserted — atomic and
+            # index-free (avoids a full-table scan on the unindexed content column).
+            _embed_memory_row(db, new_id, content_stripped)
+            db.commit()
     except Exception as e:
         logger.debug(f"Auto-embed skipped for new memory: {e}")
 
@@ -802,7 +808,11 @@ def reindex_embeddings(batch_size: int = 50) -> dict:
 
     # Process in batches
     newly_indexed = 0
-    offset = 0
+    # Track ids that could not be embedded so the WHERE clause keeps making
+    # progress. Without this, a row whose embedding permanently fails (result is
+    # None — e.g. OpenAI-only setup with no local fallback) would still match the
+    # "embedding IS NULL" filter and the same batch would be reloaded forever.
+    failed_ids: set[int] = set()
 
     while True:
         rows = db.execute(
@@ -811,10 +821,12 @@ def reindex_embeddings(batch_size: int = 50) -> dict:
                   OR embedding_provider IS NULL
                   OR embedding_model IS NULL
                   OR embedding_dimension IS NULL
-               LIMIT ? OFFSET ?""",
-            (batch_size, 0),  # Always offset 0 since we UPDATE them
+               LIMIT ?""",
+            (batch_size + len(failed_ids),),
         ).fetchall()
 
+        # Drop rows already known to be unembeddable, then take the batch.
+        rows = [row for row in rows if row["id"] not in failed_ids][:batch_size]
         if not rows:
             break
 
@@ -843,9 +855,10 @@ def reindex_embeddings(batch_size: int = 50) -> dict:
                     ),
                 )
                 newly_indexed += 1
+            else:
+                failed_ids.add(row_id)
 
         db.commit()
-        offset += batch_size
         logger.info(f"Embedding reindex: {newly_indexed}/{unindexed} done")
 
     indexed_now = db.execute("SELECT COUNT(*) FROM memories WHERE embedding IS NOT NULL").fetchone()[0]
@@ -920,6 +933,12 @@ def auto_remember(user_msg: str, ai_reply: str) -> None:
     - Explicit remember commands get high importance (9)
     """
     global _auto_remember_counter
+    # Skip internal agent-step / tool-call placeholders. Multi-step agent runs call
+    # this with user_msg="[agent-step]" and ai_reply="[Tool: ...]" (see ai_engine
+    # _save_chat_result/_save_interaction). Persisting those floods the interactions
+    # table with contentless rows that dilute memory search and statistics.
+    if (user_msg or "").strip() == "[agent-step]" and (ai_reply or "").lstrip().startswith("[Tool:"):
+        return
     db = _get_db()
     try:
         # --- Detect action in AI reply (proper JSON parsing) ---
@@ -1158,11 +1177,13 @@ def routine_delete(name: str) -> str:
 def routine_toggle(name: str) -> str:
     """Enable/disable a routine."""
     db = _get_db()
-    db.execute(
+    result = db.execute(
         "UPDATE routines SET enabled = CASE WHEN enabled=1 THEN 0 ELSE 1 END WHERE name = ?",
         (name,),
     )
     db.commit()
+    if result.rowcount == 0:
+        return f"Routine '{name}' nicht gefunden."
     return f"Routine '{name}' umgeschaltet."
 
 
@@ -1407,6 +1428,7 @@ def global_search(query: str, limit: int = 30, *, include_ranking: bool = False)
         mems_list[:limit],
         include_ranking=include_ranking,
         expose_id=True,
+        track_access=False,
     )
 
     return {
@@ -1824,9 +1846,12 @@ def clipboard_add(text: str) -> str:
     """Add text to clipboard history (avoids duplicates, moves to top)."""
     if not text or not text.strip():
         return "empty"
+    # Normalize surrounding whitespace so entries differing only in leading/
+    # trailing spaces or newlines aren't treated as distinct near-duplicates.
+    text = text.strip()
     db = _get_db()
-    # Remove duplicates
-    db.execute("DELETE FROM clipboard_entries WHERE text = ?", (text,))
+    # Remove duplicates (compare on the trimmed stored value)
+    db.execute("DELETE FROM clipboard_entries WHERE TRIM(text) = ?", (text,))
     # Insert at top (newest ID = most recent)
     db.execute("INSERT INTO clipboard_entries (text) VALUES (?)", (text,))
     # Enforce max entries
@@ -2060,8 +2085,10 @@ def restore_database(data: dict) -> dict:
                 col_str = ", ".join(safe_cols)
                 values = [row[c] for c in safe_cols]
                 try:
-                    db.execute(f"INSERT OR IGNORE INTO {table} ({col_str}) VALUES ({placeholders})", values)
-                    inserted += 1
+                    cur = db.execute(f"INSERT OR IGNORE INTO {table} ({col_str}) VALUES ({placeholders})", values)
+                    # rowcount is 0 when OR IGNORE silently dropped the row on a
+                    # UNIQUE/PK conflict — only count rows actually written.
+                    inserted += cur.rowcount
                 except Exception:
                     pass
             stats[table] = inserted
@@ -2075,6 +2102,7 @@ def restore_database(data: dict) -> dict:
             logger.warning("FTS rebuild after restore failed", exc_info=True)
 
         # Restore productivity data (separate DB connection, separate transaction)
+        prod_db = None
         try:
             from backend import productivity
             prod_db = productivity._get_db()
@@ -2098,17 +2126,18 @@ def restore_database(data: dict) -> dict:
                     col_str = ", ".join(safe_cols)
                     values = [row[c] for c in safe_cols]
                     try:
-                        prod_db.execute(f"INSERT OR IGNORE INTO {table} ({col_str}) VALUES ({placeholders})", values)
-                        inserted += 1
+                        cur = prod_db.execute(f"INSERT OR IGNORE INTO {table} ({col_str}) VALUES ({placeholders})", values)
+                        inserted += cur.rowcount
                     except Exception:
                         pass
                 stats[table] = inserted
             prod_db.execute("COMMIT")
         except Exception:
-            try:
-                prod_db.execute("ROLLBACK")
-            except Exception:
-                pass
+            if prod_db is not None:
+                try:
+                    prod_db.execute("ROLLBACK")
+                except Exception:
+                    pass
             logger.warning("Productivity restore failed — rolled back", exc_info=True)
 
         return {"status": "ok", "restored": stats}

@@ -86,7 +86,10 @@ function chatTransientRemoveItem(key) {
 function chatCachedHistorySnapshot() {
   try {
     const parsed = JSON.parse(chatTransientGetItem(CHAT_HISTORY_CACHE_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    // Externally beeinflussbarer Cache (sessionStorage): nur Plain-Objekte
+    // durchlassen, damit Konsumenten keine Nicht-Objekt-Eintraege rendern.
+    return parsed.filter((it) => it && typeof it === "object" && !Array.isArray(it));
   } catch (_e) {
     return [];
   }

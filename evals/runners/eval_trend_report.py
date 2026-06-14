@@ -60,7 +60,7 @@ def summarize_report(report: dict[str, Any]) -> dict[str, Any]:
     passed = int(report.get("passed") or 0)
     failed = int(report.get("failed") or max(0, total - passed))
     penalty = risk_penalty(report)
-    max_penalty = max(1, sum(RISK_WEIGHTS.get(str(result.get("risk_level", "medium")).lower(), 2) for result in report.get("results", [])))
+    max_penalty = max(1, sum(RISK_WEIGHTS.get(str(result.get("risk_level") or _risk_from_checks(result)).lower(), 2) for result in report.get("results", [])))
     return {
         "total_cases": total,
         "passed": passed,

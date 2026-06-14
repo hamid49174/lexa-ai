@@ -474,18 +474,31 @@ def find_app(query: str) -> Optional[dict]:
                     return {**app, "match_type": "nickname", "score": 90}
 
     # ── Tier 2c: Substring match (word-boundary aware) ──
+    # Ranking statt "kürzester Name gewinnt": Ein voller Wort-Treffer
+    # (z.B. "word" in "Microsoft Word") schlägt einen Wortanfang-Treffer
+    # (z.B. "word" in "WordPad"); danach gewinnt die frühere Match-Position,
+    # erst zuletzt der kürzere Name. So wird nicht systematisch die kürzere,
+    # aber unpassendere App bevorzugt.
     best_sub: Optional[dict] = None
-    best_sub_len = 999
+    best_sub_rank: Optional[tuple] = None
+    end_q = len(q_lower)
 
     for app in _app_list:
         app_lower = app["name"].lower()
 
-        # Query is substring of app name (with word boundary)
+        # Query is substring of app name (with word boundary at the start)
         idx = app_lower.find(q_lower)
         if idx >= 0 and (idx == 0 or not app_lower[idx - 1].isalpha()):
-            if len(app_lower) < best_sub_len:
-                best_sub = {**app, "match_type": "substring", "score": 85}
-                best_sub_len = len(app_lower)
+            after = idx + end_q
+            # Whole-word match: end of string or followed by a non-letter
+            is_full_word = after >= len(app_lower) or not app_lower[after].isalpha()
+            # Lower tuple sorts as "better": full word first, then earlier
+            # position, then shorter name.
+            rank = (0 if is_full_word else 1, idx, len(app_lower))
+            if best_sub_rank is None or rank < best_sub_rank:
+                score = 88 if is_full_word else 85
+                best_sub = {**app, "match_type": "substring", "score": score}
+                best_sub_rank = rank
 
     if best_sub:
         return best_sub
@@ -566,6 +579,24 @@ def list_installed_apps(limit: int = 100) -> list[dict]:
 #  APP LAUNCHER
 # ══════════════════════════════════════════════════
 
+# AppIDs come from Get-StartApps/Registry (PowerShell JSON). They are normally
+# simple shell:AppsFolder identifiers or .exe paths. Even though shell=False
+# prevents classic shell injection, a manipulated cache entry could carry
+# control characters or steer explorer toward an unexpected handler. We harden
+# the value before passing it to explorer.
+_MAX_APP_ID_LEN = 512
+
+
+def _is_valid_app_id(app_id: str) -> bool:
+    """Reject obviously invalid/manipulated AppIDs before launching."""
+    if not app_id or len(app_id) > _MAX_APP_ID_LEN:
+        return False
+    # No control characters (incl. newlines/tabs/NUL) — legit AppIDs never have these
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in app_id):
+        return False
+    return True
+
+
 def launch_app(query: str, path: str = "") -> str:
     """Smart app launcher — resolves query and launches the app.
 
@@ -618,6 +649,9 @@ def launch_app(query: str, path: str = "") -> str:
 
         elif app_id:
             # shell:AppsFolder launch — works for BOTH Win32 and UWP
+            if not _is_valid_app_id(app_id):
+                logger.warning(f"Ungültige App-ID für '{app_name}' abgelehnt.")
+                return f"App '{app_name}' hat eine ungültige ID."
             subprocess.Popen(
                 ["explorer", f"shell:AppsFolder\\{app_id}"],
                 shell=False,
@@ -641,13 +675,20 @@ def warm_cache_async() -> None:
     def _init():
         if not _load_disk_cache():
             _rebuild_cache()
-        else:
-            # Disk cache loaded, refresh in background
+        elif (time.time() - _cache_timestamp) >= _CACHE_TTL:
+            # Disk cache loaded but stale — refresh in background.
+            # Ein frischer Disk-Cache (jünger als _CACHE_TTL) wird NICHT
+            # unnötig neu gescannt (spart PowerShell-/CPU-Last beim Start).
             _rebuild_cache()
 
     t = threading.Thread(target=_init, daemon=True, name="app-discovery")
     t.start()
 
 
-# Auto-warm on import (non-blocking)
-warm_cache_async()
+# Auto-warm on import (non-blocking).
+# Opt-out via LEXA_NO_AUTOWARM=1 — verhindert, dass Tests/Build/Hilfsskripte
+# beim bloßen Import einen PowerShell-Thread (Get-StartApps) spawnen.
+# Der Cache wird ohnehin lazy via _ensure_cache() befüllt; das Auto-Warm ist
+# nur eine Latenz-Optimierung für den ersten Aufruf.
+if os.environ.get("LEXA_NO_AUTOWARM", "").strip().lower() not in ("1", "true", "yes"):
+    warm_cache_async()

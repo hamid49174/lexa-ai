@@ -20,11 +20,19 @@ _SCOPES_WRITE = ["https://www.googleapis.com/auth/calendar.events"]
 _SCOPES = _SCOPES_READ + _SCOPES_WRITE
 
 
-def _get_calendar_service():
+def _get_calendar_service(interactive: bool = True):
     """Handle OAuth2 flow and return an authorized Calendar API service.
 
     First time: Opens browser for Google login, saves refresh token.
     Subsequent calls: Uses saved refresh token silently (auto-refresh if expired).
+
+    Args:
+        interactive: If True (default, used by the explicit "Kalender verbinden"
+            endpoint), an interactive browser/local-server OAuth flow may be
+            started when no valid credentials exist. Read/query functions call
+            with interactive=False so they never block a normal tool call on a
+            browser consent screen — they return None instead and surface a
+            "bitte verbinden"-Hinweis to the caller.
     """
     try:
         from google.oauth2.credentials import Credentials
@@ -55,6 +63,11 @@ def _get_calendar_service():
             creds = None
 
     if not creds or not creds.valid:
+        if not interactive:
+            # Do not start a blocking browser/local-server OAuth flow from a
+            # normal query. Connecting happens only via the explicit endpoint.
+            logger.debug("No valid Google Calendar credentials and interactive flow disabled")
+            return None
         if not os.path.exists(_CLIENT_SECRET_FILE):
             logger.debug("Google Calendar client secret not configured at %s", _CLIENT_SECRET_FILE)
             return None
@@ -82,9 +95,34 @@ def _get_calendar_service():
 
 
 def get_calendar_status() -> dict:
-    """Return whether the Google Calendar is connected."""
-    connected = os.path.exists(_CREDENTIALS_FILE)
+    """Return whether the Google Calendar is connected.
+
+    "connected" reflects whether a *usable* credential exists, not merely that
+    a credentials file is present. A stored token that is expired/revoked but
+    still has a refresh token counts as connected (it can be refreshed
+    silently). An expired token without refresh token, or an unreadable file,
+    counts as not connected — matching what the next real calendar call would do.
+    Never triggers the interactive OAuth flow.
+    """
+    has_credentials_file = os.path.exists(_CREDENTIALS_FILE)
     has_client_secret = os.path.exists(_CLIENT_SECRET_FILE)
+
+    connected = False
+    if has_credentials_file:
+        try:
+            from google.oauth2.credentials import Credentials
+
+            creds = Credentials.from_authorized_user_file(_CREDENTIALS_FILE, _SCOPES)
+            # Valid token, or expired but refreshable without user interaction.
+            connected = bool(creds.valid or (creds.expired and creds.refresh_token))
+        except ImportError:
+            # Library missing: fall back to file existence as a best-effort hint.
+            logger.debug("google-auth not installed, reporting status via file existence")
+            connected = True
+        except Exception as e:
+            logger.warning("Failed to validate saved calendar credentials: %s", e)
+            connected = False
+
     return {
         "connected": connected,
         "has_client_secret": has_client_secret,
@@ -145,7 +183,7 @@ def _parse_natural_date(text: str) -> str | None:
 
 def calendar_today() -> dict:
     """Return today's events as a list of dicts."""
-    service = _get_calendar_service()
+    service = _get_calendar_service(interactive=False)
     if not service:
         return {"success": False, "error": "Kalender nicht verbunden. Bitte in Settings verbinden."}
 
@@ -177,7 +215,7 @@ def calendar_today() -> dict:
 
 def calendar_week() -> dict:
     """Return this week's events."""
-    service = _get_calendar_service()
+    service = _get_calendar_service(interactive=False)
     if not service:
         return {"success": False, "error": "Kalender nicht verbunden. Bitte in Settings verbinden."}
 
@@ -212,7 +250,7 @@ def calendar_week() -> dict:
 
 def calendar_next() -> dict:
     """Return the next upcoming event."""
-    service = _get_calendar_service()
+    service = _get_calendar_service(interactive=False)
     if not service:
         return {"success": False, "error": "Kalender nicht verbunden. Bitte in Settings verbinden."}
 
@@ -270,12 +308,28 @@ def calendar_create(
     if not start_iso:
         return {"success": False, "error": f"Startzeit nicht erkannt: '{start}'"}
 
+    # A pure date (no time component, e.g. '2026-06-15') means an all-day event,
+    # not a 1h event at midnight. Google Calendar uses 'date' instead of
+    # 'dateTime' for all-day events, with an exclusive end date.
+    all_day = "T" not in start_iso
+
     if end and end.strip():
         end_iso = _parse_natural_date(end.strip())
         if not end_iso:
             return {"success": False, "error": f"Endzeit nicht erkannt: '{end}'"}
+        # Keep start/end representation consistent: if either side is a pure
+        # date, treat the whole event as all-day.
+        if "T" not in end_iso:
+            all_day = True
+    elif all_day:
+        # All-day default: end date is the day after start (exclusive end).
+        try:
+            start_date = datetime.fromisoformat(start_iso).date()
+            end_iso = (start_date + timedelta(days=1)).isoformat()
+        except (ValueError, TypeError):
+            end_iso = start_iso
     else:
-        # Default: 1 hour after start
+        # Timed default: 1 hour after start.
         try:
             start_dt = datetime.fromisoformat(start_iso)
             end_dt = start_dt + timedelta(hours=1)
@@ -283,16 +337,36 @@ def calendar_create(
         except (ValueError, TypeError):
             end_iso = start_iso
 
-    service = _get_calendar_service()
+    service = _get_calendar_service(interactive=False)
     if not service:
         return {"success": False, "error": "Kalender nicht verbunden. Bitte in Settings verbinden."}
 
     try:
-        event_body = {
-            "summary": title,
-            "start": {"dateTime": start_iso, "timeZone": "Europe/Berlin"},
-            "end": {"dateTime": end_iso, "timeZone": "Europe/Berlin"},
-        }
+        if all_day:
+            # All-day event: use date-only values (no timeZone needed).
+            start_date_str = start_iso[:10]
+            # If an explicit timed end was given alongside a date start, fall
+            # back to a single-day all-day event (start day + 1).
+            if "T" in end_iso:
+                try:
+                    end_date_str = (
+                        datetime.fromisoformat(start_date_str).date() + timedelta(days=1)
+                    ).isoformat()
+                except (ValueError, TypeError):
+                    end_date_str = end_iso[:10]
+            else:
+                end_date_str = end_iso[:10]
+            event_body = {
+                "summary": title,
+                "start": {"date": start_date_str},
+                "end": {"date": end_date_str},
+            }
+        else:
+            event_body = {
+                "summary": title,
+                "start": {"dateTime": start_iso, "timeZone": "Europe/Berlin"},
+                "end": {"dateTime": end_iso, "timeZone": "Europe/Berlin"},
+            }
         if description:
             event_body["description"] = description
         if location:
@@ -317,7 +391,7 @@ def calendar_delete(event_id: str) -> dict:
         return {"success": False, "error": "Event-ID erforderlich."}
     event_id = event_id.strip()
 
-    service = _get_calendar_service()
+    service = _get_calendar_service(interactive=False)
     if not service:
         return {"success": False, "error": "Kalender nicht verbunden. Bitte in Settings verbinden."}
 
@@ -353,7 +427,7 @@ def calendar_search(query: str, days: int = 30) -> dict:
     # Clamp days
     days = max(1, min(365, int(days)))
 
-    service = _get_calendar_service()
+    service = _get_calendar_service(interactive=False)
     if not service:
         return {"success": False, "error": "Kalender nicht verbunden. Bitte in Settings verbinden."}
 

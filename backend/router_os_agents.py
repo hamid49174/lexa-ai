@@ -24,7 +24,9 @@ router = APIRouter(prefix="/os", tags=["os-agents"])
 
 class OSAgentTaskRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=160)
-    instructions: str = Field(..., min_length=1, max_length=8000)
+    # sanitize_input (security.py) kappt hart auf 2000 Zeichen; das Limit hier
+    # muss konsistent sein, sonst werden 2000-8000 Zeichen still abgeschnitten.
+    instructions: str = Field(..., min_length=1, max_length=2000)
     agent: Literal["hermes"] = "hermes"
     mode: Literal["general", "lexa_improve", "os_context"] = "lexa_improve"
     timeoutSeconds: int = Field(180, ge=10, le=600)

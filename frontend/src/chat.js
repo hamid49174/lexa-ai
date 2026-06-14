@@ -264,6 +264,9 @@ function renderMessageAvatar(avatar, type = "system") {
 
 // Agent step rendering and completion panel helpers live in chat_agent_runs.js.
 
+// Note: `requiresConfirmation` is kept as a positional placeholder for call-site
+// compatibility (callers pass `silent`/`options` by position); the confirmation
+// flow was removed and the value is intentionally unused here.
 function addMessage(text, type = "system", action = null, requiresConfirmation = false, silent = false, options = {}) {
   const sleekGreeting = document.getElementById("sleek-greeting");
   if (sleekGreeting && !sleekGreeting.classList.contains("hidden")) sleekGreeting.classList.add("hidden");
@@ -430,7 +433,10 @@ function denyAction(btn) {
   btn.disabled = true;
   btn.classList.add("action-denied");
   // Clear pending confirmation on the backend
-  try { fetch(`${window.lexa.API_BASE}/chat/confirm-clear`, { method: "POST", credentials: "include" }); } catch (_) {}
+  try {
+    fetch(`${window.lexa.API_BASE}/chat/confirm-clear`, { method: "POST", credentials: "include" })
+      .catch((e) => console.warn("[Chat] Failed to clear pending confirmation:", e?.message || e));
+  } catch (e) { console.warn("[Chat] Failed to clear pending confirmation:", e?.message || e); }
   showToast(t("toast.actionCancelled"), "warning");
 }
 
@@ -1374,7 +1380,6 @@ function showTyping() {
     }
     hideTyping();
     LexaState.set("isLoading", false);
-    const sendBtn = document.getElementById("send-btn");
     if (sendBtn) sendBtn.disabled = false;
   });
   indicator.appendChild(stopBtn);
@@ -1505,7 +1510,6 @@ async function sendMessage() {
   chatMessages.scrollTop = chatMessages.scrollHeight;
   let fullText = "";
   let actionData = null;
-  let requiresConfirmation = false;
   let streamRenderQueued = false;
   let streamRenderActive = true;
   const scheduleStreamRender = () => {
@@ -1520,12 +1524,13 @@ async function sendMessage() {
     });
   };
 
+  let _streamTimeout = null;
   try {
     window._lexaStreamAbort = new AbortController();
     window._lexaStreamAbortReason = "";
-    const _streamTimeout = setTimeout(() => {
+    _streamTimeout = setTimeout(() => {
       window._lexaStreamAbortReason = "timeout";
-      window._lexaStreamAbort.abort();
+      if (window._lexaStreamAbort) window._lexaStreamAbort.abort();
     }, 45000);
     let response;
     try {
@@ -1597,7 +1602,6 @@ async function sendMessage() {
       }
       if (data.done) {
         actionData = data.action;
-        requiresConfirmation = data.rc;
         if (data.reply && !fullText) fullText = data.reply;
         if (!streamEventError) streamError = null;
       }
@@ -1668,8 +1672,9 @@ async function sendMessage() {
     if (actionData) {
       handleChatToolActionBlocked(actionData);
     }
-    // Show follow-up suggestion chips if response has substance
-    if (fullText && fullText.length > 50 && !actionData) {
+    // Show follow-up suggestion chips only for a complete, error-free response
+    if (fullText && fullText.length > 50 && !actionData
+        && !streamStoppedByUser && !streamTimedOut && !streamError) {
       const suggestDiv = document.createElement("div");
       suggestDiv.className = "msg-suggestions";
       const suggestions = generateSuggestions(fullText, text);
@@ -1679,7 +1684,9 @@ async function sendMessage() {
         chip.className = "suggestion-chip";
         chip.textContent = s;
         chip.addEventListener("click", () => {
+          if (LexaState.get("isLoading")) return;
           chatInput.value = s;
+          syncChatInputSize();
           suggestDiv.remove();
           sendMessage();
         });
@@ -1700,6 +1707,7 @@ async function sendMessage() {
     }
     playTTS(actionData?.message || fullText);
   } catch (err) {
+    clearTimeout(_streamTimeout);
     streamRenderActive = false;
     textEl.classList.remove("streaming-text");
     textEl.textContent = t("chat.backendUnreachable");
@@ -1714,6 +1722,7 @@ async function sendMessage() {
     showToast(t("toast.chatError"), "error");
   }
 
+  clearTimeout(_streamTimeout);
   saveChatHistory();
   saveCurrentConversation();
   LexaState.set("isLoading", false);
@@ -2180,10 +2189,12 @@ async function sendAgentMessage(text, options) {
         try { await agentReader.cancel(); } catch (e) { console.warn("[Agent] Reader cancel failed:", e.message || e); }
         throw new Error("agent_stream_timeout");
       }
+      let readTimeoutHandle = null;
       const readResult = await Promise.race([
         agentReader.read(),
-        new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), remainingMs)),
+        new Promise((resolve) => { readTimeoutHandle = setTimeout(() => resolve({ timeout: true }), remainingMs); }),
       ]);
+      clearTimeout(readTimeoutHandle);
       if (readResult.timeout) {
         try { await agentReader.cancel(); } catch (e) { console.warn("[Agent] Reader cancel failed:", e.message || e); }
         throw new Error("agent_stream_timeout");

@@ -193,7 +193,10 @@ async function newConversation() {
   }
 }
 async function switchConversation(convId, notify = true) {
-  if (convId === LexaState.get("currentConversationId") && notify) return;
+  // Already on this conversation: avoid an unnecessary reload (and the
+  // associated backend roundtrips / full DOM rebuild) regardless of the
+  // notify flag. notify only governs user-facing toasts, not load avoidance.
+  if (convId === LexaState.get("currentConversationId")) return true;
   const switchSeq = ++_conversationSwitchSeq;
   _conversationSwitchInFlight += 1;
   try {
@@ -300,8 +303,33 @@ async function deleteConversation(convId, triggerBtn = null) {
       showToast(t("toast.deleteRefreshFailed"), "warning", 3000);
     }
     if (wasActive) {
-      if (convList.length > 0) await switchConversation(convList[0].id);
-      else await newConversation();
+      // switchConversation/newConversation swallow their own errors and signal
+      // failure via a falsy return value (they do not throw), so the outer
+      // catch never sees them. Inspect the result and fall back to a clean
+      // zero-state with a clear hint instead of leaving an empty, unclear chat.
+      const followUpOk = convList.length > 0
+        ? await switchConversation(convList[0].id)
+        : await newConversation();
+      if (!followUpOk) {
+        // Follow-up switch/create failed: fall back to a clean zero-state
+        // (hero greeting) instead of leaving an empty, unexplained chat.
+        LexaState.set("currentConversationId", null);
+        clearChatActiveConversationId();
+        chatMessages.querySelectorAll(".message").forEach((m) => m.remove());
+        const sleekGreeting = document.getElementById("sleek-greeting");
+        if (sleekGreeting) sleekGreeting.classList.remove("hidden");
+        const floatingCards = document.getElementById("floating-cards-container");
+        if (floatingCards) floatingCards.classList.remove("hidden");
+        const chatMessagesEl = document.getElementById("chat-messages");
+        if (chatMessagesEl) chatMessagesEl.classList.add("hidden");
+        clearOrbTranscript();
+        window._chatViewOpen = false;
+        const chatArrow = document.getElementById("chat-view-arrow");
+        if (chatArrow) chatArrow.classList.remove("flipped");
+        renderConversationList();
+        showToast(t("toast.loadError"), "warning", 3000);
+        return;
+      }
     }
     showToast(t("toast.chatDeleted"), "info", 2000);
   } catch (e) {

@@ -8,6 +8,7 @@ SikuliX.
 
 from __future__ import annotations
 
+import logging
 import time
 import ctypes
 import importlib.util
@@ -20,27 +21,59 @@ from typing import Any
 
 from companion import ocr, ui_automation
 
+logger = logging.getLogger(__name__)
+
 ENGINE_ID = "lexa-hermes-desktop-engine"
 TEXT_PREVIEW_CHARS = 500
 UIA_TEXT_TIMEOUT_SECONDS = 4.0
 UI_TREE_TIMEOUT_SECONDS = 5.0
-TEXT_READ_TIMEOUT_SECONDS = 10.0
+
+# A worker thread that times out cannot be force-killed (the underlying UIA/COM
+# call is not cancellable from here). To avoid unbounded thread/COM-resource
+# accumulation on repeated hangs, cap how many timed-out workers may linger at
+# once. Once the cap is reached, callers fail fast instead of spawning yet more
+# threads that would pile up behind the same stuck window.
+_MAX_LINGERING_WORKERS = 8
+_lingering_workers = threading.BoundedSemaphore(_MAX_LINGERING_WORKERS)
 
 
 def _call_with_timeout(func, *, timeout_seconds: float, label: str) -> Any:
     result_queue: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+    slot_acquired = _lingering_workers.acquire(blocking=False)
+    if not slot_acquired:
+        raise TimeoutError(
+            f"{label} skipped: too many stuck desktop workers "
+            f"(>= {_MAX_LINGERING_WORKERS}); aborting to avoid resource leaks"
+        )
 
     def runner() -> None:
         try:
             result_queue.put((True, func()))
         except Exception as exc:
             result_queue.put((False, exc))
+        finally:
+            # Free the slot only once the worker actually finishes, even if that
+            # happens long after the timeout was reported to the caller.
+            _lingering_workers.release()
 
     thread = threading.Thread(target=runner, name=f"hermes-desktop-{label}", daemon=True)
-    thread.start()
+    try:
+        thread.start()
+    except Exception:
+        # The runner never ran, so its finally block won't release the slot.
+        _lingering_workers.release()
+        raise
     thread.join(max(0.1, float(timeout_seconds or 1.0)))
     if thread.is_alive():
+        # The slot stays held by the still-running worker; it is released in the
+        # runner's finally block when (if) the underlying call returns.
+        logger.warning(
+            "hermes-desktop %s timed out after %.1fs; worker thread still running in background",
+            label,
+            timeout_seconds,
+        )
         raise TimeoutError(f"{label} timed out after {timeout_seconds:.1f}s")
+    # Worker completed within the deadline: it already released the slot.
     ok, payload = result_queue.get_nowait()
     if ok:
         return payload
@@ -186,9 +219,14 @@ def read_screen_text(window: str = "") -> dict[str, Any]:
     payload = ocr_payload(ocr_result)
     text = str(payload.get("text") or "").strip()
     if ocr_result.get("success") and text:
+        # Work on a shallow copy so we never mutate the dict ocr.ocr_screenshot
+        # returned (it may be reused/cached internally).
+        payload = dict(payload)
         payload["method"] = payload.get("method") or "ocr"
         payload["provider"] = payload.get("provider") or "ocr"
         payload["providers_tried"] = providers_tried
+        if isinstance(ocr_result, dict):
+            ocr_result["data"] = payload
         return ocr_result
 
     ui_tree_data: dict[str, Any] | None = None
@@ -223,12 +261,16 @@ def read_screen_text(window: str = "") -> dict[str, Any]:
                 "ocr": ocr_result,
             }
 
-    if isinstance(payload, dict):
+    if isinstance(payload, dict) and isinstance(ocr_result, dict) and isinstance(ocr_result.get("data"), dict):
+        # Shallow copy first so the original ocr.ocr_screenshot result dict is
+        # left untouched even when we enrich the returned payload.
+        payload = dict(payload)
         payload["method"] = payload.get("method") or "ocr"
         payload["provider"] = payload.get("provider") or "ocr"
         payload["providers_tried"] = providers_tried
         if ui_error:
             payload["uia_error"] = ui_error[:200]
+        ocr_result["data"] = payload
     return ocr_result
 
 
@@ -264,11 +306,12 @@ def observe(
     text_payload: dict[str, Any] = {}
     if include_text:
         try:
-            text_result = _call_with_timeout(
-                lambda: read_screen_text(window=target_window),
-                timeout_seconds=TEXT_READ_TIMEOUT_SECONDS,
-                label="read_screen_text",
-            )
+            # read_screen_text bounds its own blocking UIA call via
+            # _call_with_timeout internally. Calling it here without an extra
+            # outer worker avoids consuming a second _lingering_workers slot per
+            # observe() and prevents an outer worker from holding a slot while
+            # read_screen_text's (non-cancellable) OCR grab is still running.
+            text_result = read_screen_text(window=target_window)
             text_payload = ocr_payload(text_result)
         except Exception as exc:
             text_result = {"success": False, "error": str(exc)}

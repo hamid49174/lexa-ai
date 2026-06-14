@@ -28,7 +28,13 @@ def _is_sensitive_env_name(name: str) -> bool:
 
 
 def _sanitize_ps_arg(s: str, max_len: int = 200) -> str:
-    """Escape a string for safe embedding inside a PowerShell double-quoted string."""
+    """Escape a string for safe embedding inside a PowerShell DOUBLE-quoted string.
+
+    WICHTIG: Das Ergebnis ist NUR im "..."-Kontext sicher. Für einfach-gequotete
+    PowerShell-Strings ('...') muss stattdessen _sanitize_ps_arg_single() benutzt
+    werden, da Backtick/Dollar dort nicht als Escape gelten, einfache
+    Anführungszeichen aber ausbrechen können.
+    """
     if not s:
         return ""
     s = str(s)[:max_len]
@@ -36,6 +42,22 @@ def _sanitize_ps_arg(s: str, max_len: int = 200) -> str:
     s = s.replace("`", "``")      # backtick is PS escape char
     s = s.replace('"', '`"')      # escape double-quotes
     s = s.replace("$", "`$")      # prevent variable expansion
+    s = s.replace("\n", "")       # strip newlines
+    s = s.replace("\r", "")       # strip carriage returns
+    return s
+
+
+def _sanitize_ps_arg_single(s: str, max_len: int = 200) -> str:
+    """Escape a string for safe embedding inside a PowerShell SINGLE-quoted string.
+
+    In '...'-Strings ist das einzige Ausbruchszeichen das einfache
+    Anführungszeichen, das durch Verdopplung ('') entschärft wird. Backtick und
+    Dollar sind dort literal und müssen NICHT escaped werden.
+    """
+    if not s:
+        return ""
+    s = str(s)[:max_len]
+    s = s.replace("'", "''")      # double single-quotes to neutralise breakout
     s = s.replace("\n", "")       # strip newlines
     s = s.replace("\r", "")       # strip carriage returns
     return s
@@ -316,15 +338,29 @@ def autostart_add(name: str = "", path: str = "") -> str:
     try:
         safe_name = _sanitize_ps_arg(name, max_len=100)
         safe_path = _sanitize_ps_arg(path, max_len=500)
+        # Bestehende Run-Einträge nicht stillschweigend überschreiben: zuerst
+        # prüfen, ob der Name bereits existiert, und nur dann anlegen.
         ps = f'''
-        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" -Name "{safe_name}" -Value "{safe_path}"
-        "OK"
+        $runKey = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+        $existing = (Get-ItemProperty -Path $runKey -Name "{safe_name}" -ErrorAction SilentlyContinue)
+        if ($existing -and ($existing.PSObject.Properties.Name -contains "{safe_name}")) {{
+            "EXISTS:" + $existing."{safe_name}"
+        }} else {{
+            Set-ItemProperty -Path $runKey -Name "{safe_name}" -Value "{safe_path}"
+            "OK"
+        }}
         '''
         result = subprocess.run(
             ["powershell", "-Command", ps],
             capture_output=True, text=True, timeout=10,
         )
-        if "OK" in result.stdout:
+        out = result.stdout.strip()
+        if out.startswith("EXISTS:"):
+            current = out[len("EXISTS:"):].strip()
+            return (f"Autostart-Eintrag '{safe_name}' existiert bereits (Ziel: {current}). "
+                    f"Er wurde NICHT überschrieben. Entferne ihn zuerst mit autostart_remove, "
+                    f"wenn du ihn ersetzen möchtest.")
+        if "OK" in out:
             return t("autostart.added", name=safe_name)
         return t("error.stderr", stderr=result.stderr.strip())
     except Exception as e:
@@ -538,7 +574,9 @@ def env_set(name: str = "", value: str = "") -> str:
             capture_output=True, text=True, timeout=10,
         )
         if "OK" in result.stdout:
-            os.environ[name] = value
+            # Prozess-Sicht konsistent zum persistent geschriebenen Wert halten
+            # (PowerShell hat safe_value geschrieben, nicht den Rohwert).
+            os.environ[name] = safe_value
             return t("env.set", name=safe_name)
         return t("error.stderr", stderr=result.stderr.strip())
     except Exception as e:
@@ -576,8 +614,11 @@ def installed_apps(search: str = "") -> list[dict]:
     try:
         filter_cmd = ""
         if search:
-            safe_search = _sanitize_ps_arg(search, max_len=100)
-            safe_search = safe_search.replace("*", "``*").replace("?", "``?")
+            # Filter wird in einen EINFACH-gequoteten PS-String eingebettet
+            # ('*...*'), daher single-quote-sicher escapen (verhindert Ausbruch
+            # via ' ). Backtick-escaping danach neutralisiert -like-Wildcards.
+            safe_search = _sanitize_ps_arg_single(search, max_len=100)
+            safe_search = safe_search.replace("*", "`*").replace("?", "`?")
             filter_cmd = f"| Where-Object {{ $_.DisplayName -like '*{safe_search}*' }}"
 
         ps = f'''
@@ -620,16 +661,47 @@ def installed_apps(search: str = "") -> list[dict]:
 #  NETZWERK-TOOLS
 # ══════════════════════════════════════════════════════
 
+# RFC-1123-konformes Hostname-Muster (Labels 1-63 Zeichen, durch Punkte getrennt).
+_HOSTNAME_RE = re.compile(
+    r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$"
+)
+
+
+def _classify_host(host: str):
+    """Validate a host argument.
+
+    Returns (is_valid, is_ipv6). Erkennt rohe IP-Adressen via ipaddress und
+    fällt sonst auf strikte RFC-1123-Hostname-Prüfung zurück. So werden
+    mehrdeutige Eingaben (z.B. 'a:b:c') frühzeitig abgelehnt, statt erst beim
+    externen Tool mit unklarem Fehler zu scheitern.
+    """
+    import ipaddress
+    host = str(host or "")
+    if not host or len(host) > 253:
+        return False, False
+    try:
+        ip = ipaddress.ip_address(host)
+        return True, ip.version == 6
+    except ValueError:
+        pass
+    return bool(_HOSTNAME_RE.match(host)), False
+
+
 def ping_host(host: str = "", count: int = 4) -> dict:
     """Host anpingen."""
     if not host:
         return {"error": t("network.hostRequired")}
-    if len(host) > 253 or not re.match(r'^[a-zA-Z0-9.\-:]+$', host):
+    valid, is_ipv6 = _classify_host(host)
+    if not valid:
         return {"error": t("validation.invalidHostname")}
     count = max(1, min(10, count))
     try:
+        cmd = ["ping", "-n", str(count)]
+        if is_ipv6:
+            cmd.append("-6")  # Windows ping braucht -6 für rohe IPv6-Adressen
+        cmd.append(host)
         result = subprocess.run(
-            ["ping", "-n", str(count), host],
+            cmd,
             capture_output=True, text=True, timeout=30,
         )
         lines = result.stdout.strip().split("\n")
@@ -658,7 +730,8 @@ def dns_lookup(host: str = "") -> dict:
     """DNS-Lookup für einen Hostnamen."""
     if not host:
         return {"error": t("network.hostnameRequired")}
-    if len(host) > 253 or not re.match(r'^[a-zA-Z0-9.\-:]+$', host):
+    valid, _ = _classify_host(host)
+    if not valid:
         return {"error": t("validation.invalidHostname")}
     try:
         results = []
@@ -769,12 +842,17 @@ def traceroute(host: str = "", max_hops: int = 15) -> dict:
     """Traceroute zu einem Host."""
     if not host:
         return {"error": t("network.hostRequired")}
-    if len(host) > 253 or not re.match(r'^[a-zA-Z0-9.\-:]+$', host):
+    valid, is_ipv6 = _classify_host(host)
+    if not valid:
         return {"error": t("validation.invalidHostname")}
     max_hops = max(5, min(30, max_hops))
     try:
+        cmd = ["tracert", "-d", "-h", str(max_hops)]
+        if is_ipv6:
+            cmd.append("-6")  # Windows tracert braucht -6 für rohe IPv6-Adressen
+        cmd.append(host)
         result = subprocess.run(
-            ["tracert", "-d", "-h", str(max_hops), host],
+            cmd,
             capture_output=True, text=True, timeout=60,
         )
         lines = result.stdout.strip().split("\n")

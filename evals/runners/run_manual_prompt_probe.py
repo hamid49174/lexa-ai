@@ -28,6 +28,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from evals.adapters.base import has_secret, redact_secrets  # noqa: E402
+
 DEFAULT_SUITE = REPO_ROOT / "docs" / "product" / "manual_lexa_prompt_suite.md"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "evals" / "results"
 MODEL_DISABLED_REPLY = (
@@ -129,13 +131,18 @@ def route_for_prompt(prompt: ManualPrompt) -> str:
 
 
 def reset_probe_state() -> None:
-    from backend import router_chat
+    from backend import router_chat, shared
     from backend.response_cache import clear_response_cache
     from backend.shared import clear_pending_confirmation
 
     clear_pending_confirmation()
     clear_response_cache()
-    router_chat.conversation_history = []
+    # Clear the canonical shared list in-place instead of rebinding it, so the
+    # object guarded by shared._history_lock and the one router_chat reads stay
+    # the same. (The single-threaded TestClient never touches the history
+    # concurrently between probes, so no async lock acquisition is needed here.)
+    shared.conversation_history.clear()
+    router_chat.conversation_history = shared.conversation_history
 
 
 def _manual_text_fixture() -> bytes:
@@ -159,12 +166,13 @@ def _manual_image_fixture() -> bytes:
 
 
 def _install_sandbox_patches(*, allow_model: bool, allow_vision: bool, allow_live_status: bool) -> None:
-    from backend import action_executor, router_chat
+    from backend import action_executor, router_chat, shared
 
     router_chat.check_rate_limit = lambda _bucket: True
     router_chat.audit_log = lambda *_args, **_kwargs: None
     router_chat.publish_chat_context = lambda *_args, **_kwargs: None
-    router_chat.conversation_history = []
+    shared.conversation_history.clear()
+    router_chat.conversation_history = shared.conversation_history
 
     def blocked_execute_action(action: dict, *, source: str = "") -> dict[str, Any]:
         return {
@@ -227,8 +235,15 @@ def run_prompt(client: Any, prompt: ManualPrompt) -> tuple[int | None, str, str 
     except Exception:
         return response.status_code, response.text, "response was not JSON"
 
-    reply = str(payload.get("reply") or payload.get("detail") or payload)
-    return response.status_code, reply, None
+    reply_value = payload.get("reply") if isinstance(payload, dict) else None
+    if reply_value is None and isinstance(payload, dict):
+        reply_value = payload.get("detail")
+    if reply_value is None:
+        # Do not stringify the whole payload as if it were the answer: that would
+        # smuggle internal structures into the report and skew the checks. Flag
+        # the shape explicitly so json_response/non_empty_reply mark it failed.
+        return response.status_code, "", "unexpected payload shape"
+    return response.status_code, str(reply_value), None
 
 
 def _add_check(checks: list[dict[str, Any]], name: str, passed: bool, detail: str = "") -> None:
@@ -442,7 +457,7 @@ def summarize(results: list[ProbeResult]) -> dict[str, Any]:
 
 
 def _safe_reply_excerpt(reply: str, max_chars: int = 320) -> str:
-    text = re.sub(r"\s+", " ", reply).strip()
+    text = re.sub(r"\s+", " ", redact_secrets(reply)).strip()
     if len(text) > max_chars:
         return text[: max_chars - 3].rstrip() + "..."
     return text
@@ -455,11 +470,15 @@ def write_reports(results: list[ProbeResult], output_dir: Path = DEFAULT_OUTPUT_
     json_path = output_dir / f"{run_id}.json"
     md_path = output_dir / f"{run_id}.md"
 
-    json_payload = {
-        "run_id": run_id,
-        "summary": summary,
-        "results": [asdict(result) for result in results],
-    }
+    json_payload = redact_secrets(
+        {
+            "run_id": run_id,
+            "summary": summary,
+            "results": [asdict(result) for result in results],
+        }
+    )
+    if has_secret(json_payload):
+        raise ValueError("manual prompt probe report contains secret-shaped data after redaction")
     json_path.write_text(json.dumps(json_payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     lines = [
@@ -504,11 +523,14 @@ def _parse_numbers(value: str | None) -> set[int] | None:
         part = part.strip()
         if not part:
             continue
-        if "-" in part:
-            start, end = part.split("-", 1)
-            numbers.update(range(int(start), int(end) + 1))
-        else:
-            numbers.add(int(part))
+        try:
+            if "-" in part:
+                start, end = part.split("-", 1)
+                numbers.update(range(int(start), int(end) + 1))
+            else:
+                numbers.add(int(part))
+        except ValueError:
+            raise ValueError(f"invalid --numbers value: {part!r}") from None
     return numbers
 
 
@@ -525,13 +547,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", help="Stable report id. Defaults to timestamp.")
     args = parser.parse_args(argv)
 
-    prompts = parse_manual_prompt_suite(args.suite)
-    chosen = selected_prompts(
-        prompts,
-        sections=_parse_sections(args.sections),
-        numbers=_parse_numbers(args.numbers),
-        limit=args.limit,
-    )
+    try:
+        prompts = parse_manual_prompt_suite(args.suite)
+        chosen = selected_prompts(
+            prompts,
+            sections=_parse_sections(args.sections),
+            numbers=_parse_numbers(args.numbers),
+            limit=args.limit,
+        )
+    except (OSError, ValueError) as exc:
+        print(f"Failed to load prompts: {exc}", file=sys.stderr)
+        return 2
     if not chosen:
         print("No prompts selected.", file=sys.stderr)
         return 2

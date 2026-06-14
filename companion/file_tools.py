@@ -37,6 +37,8 @@ _FILE_WRITE_BLOCKED_PATH_PARTS = (
     "syswow64",
     "windows\\system",
     "program files\\windows defender",
+    # Autostart-Ordner (Persistenz-Mechanismus) blockieren.
+    "start menu\\programs\\startup",
 )
 
 
@@ -83,14 +85,40 @@ def _is_trusted_temp_root(path: Path) -> bool:
     return False
 
 
+def _is_blocked_system_path(path: Path) -> bool:
+    """Component-wise check whether a path points into a protected system area.
+
+    Compares path segments (case-insensitive) instead of a fragile substring
+    match, so harmless paths like 'C:/Users/me/system32_backup' are not blocked
+    while real 'C:/Windows/System32' targets are.
+    """
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    parts = [part.lower() for part in resolved.parts]
+    # Single protected directory names anywhere in the path.
+    if "system32" in parts or "syswow64" in parts:
+        return True
+    # Two-segment sequences (parent + child) that must be matched together.
+    blocked_sequences = (
+        ("windows", "system"),
+        ("windows defender",),
+    )
+    for seq in blocked_sequences:
+        n = len(seq)
+        for i in range(len(parts) - n + 1):
+            if tuple(parts[i:i + n]) == seq:
+                return True
+    return False
+
+
 def _validate_scan_path(path: str) -> str | None:
     """Returns error string if path should not be scanned."""
     p = Path(path)
     if not p.exists():
         return f"Pfad nicht gefunden: {path}"
-    resolved = str(p.resolve()).lower()
-    blocked = ["system32", "syswow64", "windows\\system", "program files\\windows defender"]
-    if any(b in resolved for b in blocked):
+    if _is_blocked_system_path(p):
         return "Systemverzeichnis nicht erlaubt."
     return None
 
@@ -123,6 +151,8 @@ def find_duplicates(search_path: str = "C:/Users", max_files: int = 1000) -> lis
     }
 
     for root, dirs, files in os.walk(search_path):
+        if count >= max_files:  # enough files collected — stop walking the tree
+            break
         if time.monotonic() - start_time > 30:  # 30s timeout
             break
         dirs[:] = [d for d in dirs if not d.startswith(".") and d not in skip_dirs]
@@ -213,7 +243,10 @@ def batch_rename(folder: str, pattern: str = "", prefix: str = "", suffix: str =
             stem = stem + suffix
 
         if pattern:
-            stem = pattern.replace("{n}", str(i + 1).zfill(3)).replace("{name}", filepath.stem)
+            # pattern is applied to the already transformed stem so that
+            # prefix/suffix/replace are not silently discarded; {name} refers
+            # to the current (transformed) stem for consistency.
+            stem = pattern.replace("{n}", str(i + 1).zfill(3)).replace("{name}", stem)
 
         new_name = stem + ext
         # Security: prevent path traversal via filename
@@ -222,7 +255,17 @@ def batch_rename(folder: str, pattern: str = "", prefix: str = "", suffix: str =
             continue
         if new_name != old_name:
             new_path = filepath.parent / new_name
-            filepath.rename(new_path)
+            # Never overwrite an existing file — report as skipped instead.
+            if new_path.exists():
+                results.append({"old": old_name, "skipped": new_name,
+                                "reason": "Ziel existiert bereits"})
+                continue
+            try:
+                filepath.rename(new_path)
+            except OSError as e:
+                # A single failure must not abort the rest of the batch.
+                results.append({"old": old_name, "failed": new_name, "reason": str(e)})
+                continue
             results.append({"old": old_name, "new": new_name})
 
     return results
@@ -232,6 +275,10 @@ def organize_downloads(downloads_path: str = "") -> dict:
     """Organize downloads folder by file type."""
     if not downloads_path:
         downloads_path = str(Path.home() / "Downloads")
+
+    err = _validate_scan_path(downloads_path)
+    if err:
+        return {"error": err}
 
     categories = {
         "Bilder": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico"],
@@ -273,23 +320,43 @@ def organize_downloads(downloads_path: str = "") -> dict:
 
 def merge_pdfs(pdf_paths: list[str], output_path: str = "") -> str:
     """Merge multiple PDFs into one."""
-    from pypdf import PdfMerger
+    try:
+        from pypdf import PdfWriter
+    except ImportError:
+        return "pypdf nicht installiert. pip install pypdf"
 
-    merger = PdfMerger()
-    for path in pdf_paths:
-        merger.append(path)
+    if not pdf_paths:
+        return "Keine PDF-Pfade angegeben."
+
+    # Validate inputs before touching pypdf so a single missing file does not
+    # crash the whole operation with an unhandled exception.
+    missing = [path for path in pdf_paths if not Path(path).is_file()]
+    if missing:
+        return "PDF nicht gefunden: " + ", ".join(missing)
 
     if not output_path:
         output_path = str(Path(pdf_paths[0]).parent / "merged.pdf")
 
-    merger.write(output_path)
-    merger.close()
+    # PdfWriter.append replaces the deprecated PdfMerger.
+    writer = PdfWriter()
+    try:
+        for path in pdf_paths:
+            writer.append(path)
+        writer.write(output_path)
+    finally:
+        writer.close()
     return output_path
 
 
 def split_pdf(pdf_path: str, pages: str = "") -> list[str]:
     """Split a PDF. pages format: '1-3,5,7-10'"""
-    from pypdf import PdfReader, PdfWriter
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except ImportError:
+        return [{"error": "pypdf nicht installiert. pip install pypdf"}]
+
+    if not Path(pdf_path).is_file():
+        return [{"error": f"PDF nicht gefunden: {pdf_path}"}]
 
     reader = PdfReader(pdf_path)
     output_dir = Path(pdf_path).parent / "split"
@@ -301,22 +368,29 @@ def split_pdf(pdf_path: str, pages: str = "") -> list[str]:
         page_nums = []
         for part in pages.split(","):
             part = part.strip()
+            if not part:
+                continue
             try:
                 if "-" in part:
                     start, end = part.split("-", 1)
                     s, e = int(start), int(end)
                     if s < 1:
                         s = 1
+                    if e < s:
+                        return [{"error": f"Ungültiger Seitenbereich: {part}"}]
                     page_nums.extend(range(s - 1, e))
                 else:
                     page_nums.append(int(part) - 1)
             except ValueError:
-                continue  # Skip invalid page specs
+                return [{"error": f"Ungültige Seitenangabe: {part}"}]
 
         writer = PdfWriter()
         for num in page_nums:
             if 0 <= num < len(reader.pages):
                 writer.add_page(reader.pages[num])
+
+        if len(writer.pages) == 0:
+            return [{"error": "Keine gültigen Seiten im angegebenen Bereich."}]
 
         out = str(output_dir / f"pages_{pages.replace(',', '_')}.pdf")
         with open(out, "wb") as f:
@@ -440,12 +514,16 @@ def clean_temp() -> dict:
                     deleted += 1
                     freed_bytes += size
                 elif item.is_dir():
-                    # Calculate size before deletion
+                    # Calculate size before deletion. This is only an estimate
+                    # for the freed_mb report — the actual (safe) deletion is done
+                    # by shutil.rmtree below — so we skip the expensive per-file
+                    # resolve() and rely on the is_symlink() guard to avoid
+                    # counting files outside the tree via symlinks.
                     dir_size = 0
                     try:
                         dir_size = sum(
                             f.stat().st_size for f in item.rglob("*")
-                            if f.is_file() and not f.is_symlink() and _is_relative_to_path(f.resolve(), item_resolved)
+                            if f.is_file() and not f.is_symlink()
                         )
                     except (PermissionError, OSError):
                         pass
@@ -588,7 +666,14 @@ def archive_extract(archive_path: str = "", destination: str = "") -> str:
         elif ext in (".tar", ".gz", ".bz2", ".xz", ".tgz"):
             import tarfile
             with tarfile.open(archive_path) as tf:
-                tf.extractall(destination, filter="data")
+                dest_path = Path(destination).resolve()
+                safe_names, skipped = _safe_archive_members(tf.getnames(), dest_path)
+                safe_name_set = set(safe_names)
+                members = [m for m in tf.getmembers() if m.name in safe_name_set]
+                # filter="data" is an additional safety net (Python 3.12+).
+                tf.extractall(destination, members=members, filter="data")
+            if skipped:
+                return f"TAR-Archiv entpackt nach {destination} ({skipped} unsichere Einträge geblockt)"
             return f"TAR-Archiv entpackt nach {destination}"
         else:
             return f"Unbekanntes Archiv-Format: {ext}"
@@ -939,11 +1024,21 @@ def file_copy(source: str = "", destination: str = "") -> dict:
 
     try:
         if src.is_dir():
-            result_path = shutil.copytree(str(src), str(dst))
+            # Mirror file_move semantics: copying into an existing folder copies
+            # the source folder *into* it (dst/src.name) instead of failing.
+            if dst.is_dir():
+                target = dst / src.name
+                if target.exists():
+                    return {"error": f"Zielordner existiert bereits: {target}"}
+                result_path = shutil.copytree(str(src), str(target))
+            else:
+                result_path = shutil.copytree(str(src), str(dst))
         else:
             result_path = shutil.copy2(str(src), str(dst))
         logger.info(f"file_copy: {source} → {result_path}")
         return {"success": True, "data": t("file.copied", source=src.name, destination=str(result_path))}
+    except FileExistsError:
+        return {"error": "Zielordner existiert bereits."}
     except Exception as e:
         logger.error(f"file_copy failed: {e}", exc_info=True)
         return {"error": t("error.generic", error=str(e))}
@@ -1051,9 +1146,7 @@ def folder_create(path: str = "") -> dict:
     p = Path(path)
 
     # Validate path — block system directories
-    resolved = str(p.resolve()).lower()
-    blocked = ["system32", "syswow64", "windows\\system", "program files\\windows defender"]
-    if any(b in resolved for b in blocked):
+    if _is_blocked_system_path(p):
         return {"error": t("file.systemPath")}
 
     try:

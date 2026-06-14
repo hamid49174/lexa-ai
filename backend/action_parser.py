@@ -42,6 +42,41 @@ _DEFAULT_PARAM_MAX_LEN: int = 5000
 _JSON_EXTRACTION_CHAR_LIMIT: int = 100_000
 _PARAMS_MISSING = object()
 _TOOL_ARGUMENT_ERROR_REPLY = "Tool-Argumente ungueltig. Aktion wurde nicht ausgefuehrt."
+# Max length for an LLM-supplied reply message before it is truncated.
+_REPLY_MESSAGE_MAX_LEN: int = 5000
+
+
+def _scan_params_for_dangerous_output(params) -> None:
+    """Run dangerous-command detection over string parameter values.
+
+    The action name itself already passes _ACTION_NAME_PATTERN and can never
+    contain shell metacharacters, so checking it is a no-op. Real shell patterns
+    (rm -rf, powershell -enc, ...) can only appear inside string argument values
+    such as command/text/code. Raises ValueError on a match.
+    """
+    if not isinstance(params, dict):
+        return
+    for value in params.values():
+        if isinstance(value, str):
+            validate_command_output(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str):
+                    validate_command_output(item)
+        elif isinstance(value, dict):
+            _scan_params_for_dangerous_output(value)
+
+
+def _coerce_reply_message(value, fallback: str) -> str:
+    """Normalize an LLM-supplied 'message' field into a safe reply string.
+
+    The LLM may emit message=null or a non-string (dict/list). Such values are
+    replaced by the fallback so downstream code (update_history, reply[:N]) never
+    receives None or a non-str. Strings are length-capped.
+    """
+    if not isinstance(value, str):
+        return str(fallback)[:_REPLY_MESSAGE_MAX_LEN]
+    return value[:_REPLY_MESSAGE_MAX_LEN]
 
 
 # ══════════════════════════════════════════════════
@@ -365,9 +400,10 @@ def process_ai_response(
     param_count = len(parsed["params"])
     logger.info(f"Extracted action: {action_name} (params={param_count})")
 
-    # Validate output safety
+    # Validate output safety: scan string parameter values for dangerous shell
+    # patterns (the action name can never contain them after _ACTION_NAME_PATTERN).
     try:
-        validate_command_output(action_name)
+        _scan_params_for_dangerous_output(parsed["params"])
     except ValueError as e:
         audit_log(action_name, "dangerous_blocked", str(e))
         return t("command.blocked", name=action_name), None, False
@@ -382,7 +418,9 @@ def process_ai_response(
     elif permission == "confirmation_required":
         requires_confirmation = True
         action = parsed
-        reply = parsed.get("message", f"Soll ich '{action_name}' ausführen?")
+        reply = _coerce_reply_message(
+            parsed.get("message"), f"Soll ich '{action_name}' ausführen?"
+        )
         audit_log(action_name, "awaiting_confirmation")
 
     elif permission == "unknown":
@@ -394,12 +432,12 @@ def process_ai_response(
 
     elif permission == "allowed":
         action = parsed
-        reply = parsed.get("message", ai_response)
+        reply = _coerce_reply_message(parsed.get("message"), ai_response)
         audit_log(action_name, "allowed")
 
     else:
         action = parsed
-        reply = parsed.get("message", ai_response)
+        reply = _coerce_reply_message(parsed.get("message"), ai_response)
 
     audit_log(source, "responded", f"ACTION={'yes' if action else 'no'}")
     return reply, action, requires_confirmation
@@ -464,9 +502,10 @@ def process_tool_call(
         "message": ai_message or f"Fuehre '{action_name}' aus.",
     }
 
-    # Validate output safety
+    # Validate output safety: scan string parameter values for dangerous shell
+    # patterns (the action name can never contain them after _ACTION_NAME_PATTERN).
     try:
-        validate_command_output(action_name)
+        _scan_params_for_dangerous_output(params)
     except ValueError as e:
         audit_log(action_name, "dangerous_blocked", str(e))
         return t("command.blocked", name=action_name), None, False
@@ -552,7 +591,7 @@ def process_chat_result(
 # ══════════════════════════════════════════════════
 
 def update_history(
-    history: list[dict], user_msg: str, ai_msg: str, max_entries: int = 40
+    history: list[dict], user_msg: str, ai_msg: str, max_entries: Optional[int] = None
 ) -> None:
     """Update conversation history in-place with size limit.
 
@@ -560,8 +599,15 @@ def update_history(
         history: The conversation history list (modified in-place)
         user_msg: User message to append
         ai_msg: AI response to append
-        max_entries: Maximum number of entries to keep
+        max_entries: Maximum number of entries to keep. Defaults to
+            config.MAX_HISTORY so every code path (chat and agent) trims the
+            shared history to the same length.
     """
+    if max_entries is None:
+        # Lazy import keeps the default in sync with config.MAX_HISTORY without a
+        # module-level dependency (callers may load this module in isolation).
+        from backend.config import MAX_HISTORY
+        max_entries = MAX_HISTORY
     history.append({"role": "user", "content": user_msg})
     history.append({"role": "assistant", "content": ai_msg})
     if len(history) > max_entries:

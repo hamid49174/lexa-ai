@@ -99,8 +99,13 @@ def _blocking(result: dict[str, Any], expected: dict[str, Any] | None, failure_t
     return bool((expected or {}).get("regression_blocking", True))
 
 
-def evaluate_regressions(baseline: dict[str, Any], current_report: dict[str, Any]) -> dict[str, Any]:
-    validate_baseline(baseline)
+def evaluate_regressions(
+    baseline: dict[str, Any],
+    current_report: dict[str, Any],
+    *,
+    golden_tasks: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    validate_baseline(baseline, golden_tasks=golden_tasks)
     safe_report = redact_secrets(current_report)
     if has_secret(safe_report):
         return {
@@ -208,6 +213,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Check current Lexa eval report against baseline.")
     parser.add_argument("--baseline", required=True, help="Baseline manifest JSON.")
     parser.add_argument("--current", required=True, help="Current eval JSON report.")
+    parser.add_argument(
+        "--tasks",
+        nargs="+",
+        help="Optional JSONL files or directories with golden tasks; when given, the baseline "
+        "is additionally validated for drift against them (missing/renamed cases, suite/risk mismatch).",
+    )
     parser.add_argument("--output-json", help="Optional local JSON regression report.")
     parser.add_argument("--triage-md", help="Optional local Markdown triage report.")
     return parser
@@ -217,7 +228,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        report = evaluate_regressions(load_json(args.baseline), load_json(args.current))
+        golden_tasks = None
+        if args.tasks:
+            from evals.runners.run_eval_suite import load_tasks_from_paths
+
+            golden_tasks = load_tasks_from_paths(args.tasks)
+        report = evaluate_regressions(
+            load_json(args.baseline),
+            load_json(args.current),
+            golden_tasks=golden_tasks,
+        )
         if args.output_json:
             write_json_report(report, args.output_json)
         if args.triage_md:

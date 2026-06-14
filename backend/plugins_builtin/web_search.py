@@ -111,8 +111,13 @@ def _parse_ddg_html(raw_html: str, max_results: int) -> list[dict]:
     # Ergebnis-Links: <a rel="nofollow" class="result__a" href="...">Title</a>
     # Snippets: <a class="result__snippet" ...>Snippet text</a>
 
-    # Pattern fuer Ergebnis-Bloecke
-    result_pattern = re.compile(
+    # WICHTIG: Titel/URL und Snippet muessen aus DEMSELBEN Ergebnis-Block stammen.
+    # DuckDuckGo liefert nicht fuer jeden Treffer ein Snippet (Werbe-/Sonderbloecke),
+    # daher wuerde eine rein positionelle Zuordnung (snippets[i] zu links[i]) bei
+    # einem fehlenden Snippet alle nachfolgenden Ergebnisse verschieben. Deshalb wird
+    # die Seite zuerst in Bloecke entlang der Ergebnis-Links zerlegt und das Snippet
+    # nur innerhalb desselben Blocks gesucht.
+    link_pattern = re.compile(
         r'class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>',
         re.DOTALL,
     )
@@ -121,12 +126,18 @@ def _parse_ddg_html(raw_html: str, max_results: int) -> list[dict]:
         re.DOTALL,
     )
 
-    links = result_pattern.findall(raw_html)
-    snippets = snippet_pattern.findall(raw_html)
+    matches = list(link_pattern.finditer(raw_html))
 
-    for i, (raw_url, raw_title) in enumerate(links[:max_results]):
+    for i, link_match in enumerate(matches[:max_results]):
+        raw_url, raw_title = link_match.group(1), link_match.group(2)
+        # Block = Text vom Ende dieses Links bis zum Anfang des naechsten Links.
+        block_start = link_match.end()
+        block_end = matches[i + 1].start() if i + 1 < len(matches) else len(raw_html)
+        block = raw_html[block_start:block_end]
+
+        snippet_match = snippet_pattern.search(block)
         title = _clean_html(raw_title).strip()
-        snippet = _clean_html(snippets[i]).strip() if i < len(snippets) else ""
+        snippet = _clean_html(snippet_match.group(1)).strip() if snippet_match else ""
 
         # DuckDuckGo Redirect-URL aufloesung
         actual_url = raw_url
@@ -169,11 +180,25 @@ def _percent_decode(text: str) -> str:
     return re.sub(r"%([0-9a-fA-F]{2})", _replace, str(text or "").replace("+", " "))
 
 
+def _coerce_max_results(value, default: int = 5) -> int:
+    """Parst max_results defensiv.
+
+    Der Endpoint /plugins/execute durchlaeuft keine Schema-Validierung, daher
+    kann max_results ein nicht-numerischer String (z.B. 'abc') sein. In dem
+    Fall wird auf den Default zurueckgefallen statt einen ValueError zu werfen.
+    _ddg_search clampt den Wert anschliessend ohnehin auf 1..15.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 async def execute(tool_name: str, args: dict) -> dict:
     """Plugin-Eintrittspunkt -- wird vom PluginManager aufgerufen."""
     if tool_name == "web_search":
         query = args.get("query", "")
-        max_results = int(args.get("max_results", 5))
+        max_results = _coerce_max_results(args.get("max_results", 5))
         results = await _ddg_search(query, max_results)
         if not results:
             return {"result": "Keine Ergebnisse gefunden.", "results": []}

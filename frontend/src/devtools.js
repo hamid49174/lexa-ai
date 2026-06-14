@@ -134,7 +134,8 @@ async function imageBatchResize() {
 
 const GIT_REPO_KEY = "lexa-git-repo";
 function getLastGitRepo() {
-  return lexaStorageGet(GIT_REPO_KEY, "C:\\Users\\admin\\OneDrive\\Desktop\\lexa\\lexa-ai");
+  // Kein geratener Default-Pfad: der Nutzer gibt das Repo selbst an; gemerkt wird nur ein zuvor genutzter Pfad.
+  return lexaStorageGet(GIT_REPO_KEY, "");
 }
 function setLastGitRepo(path) {
   if (path) lexaStorageSet(GIT_REPO_KEY, path);
@@ -230,7 +231,13 @@ async function gitCommitAction() {
   addMessage(t("devtools.gitCommitMsg", {message: vals.message}), "user");
   showTyping();
   try {
-    await window.lexa.execute("git_add", { repo_path: vals.repo, files: "." }, true);
+    const addRes = await window.lexa.execute("git_add", { repo_path: vals.repo, files: "." }, true);
+    if (!addRes.success) {
+      hideTyping();
+      addMessage(t("common.error") + ": " + addRes.error, "system");
+      showToast(t("devtools.commitFailed"), "error");
+      return;
+    }
     const res = await window.lexa.execute("git_commit", { repo_path: vals.repo, message: vals.message }, true);
     hideTyping();
     addMessage(res.success ? res.data : t("common.error") + ": " + res.error, "system");
@@ -409,8 +416,13 @@ async function base64Action() {
     const res = await window.lexa.execute(cmd, { text: vals.text });
     hideTyping();
     addMessage(res.success ? "`" + res.data + "`" : t("common.error") + ": " + res.error, "system");
-    if (res.success) navigator.clipboard.writeText(res.data).catch(() => { });
-    showToast(res.success ? t("devtools.resultCopied") : t("common.error"), res.success ? "success" : "error");
+    if (res.success) {
+      copyTextToClipboard(res.data)
+        .then(() => showToast(t("devtools.resultCopied"), "success"))
+        .catch(() => showToast(t("toast.copyFailed"), "warning"));
+    } else {
+      showToast(t("common.error"), "error");
+    }
   } catch (e) { hideTyping(); addMessage(t("common.error") + ": " + e.message, "system"); }
 }
 
@@ -429,8 +441,9 @@ async function hashAction() {
     hideTyping();
     if (res.success && res.data) {
       addMessage(`${res.data.algorithm}: \`${res.data.hash}\``, "system");
-      navigator.clipboard.writeText(res.data.hash).catch(() => { });
-      showToast(t("toast.hashCopied"), "success");
+      copyTextToClipboard(res.data.hash)
+        .then(() => showToast(t("toast.hashCopied"), "success"))
+        .catch(() => showToast(t("toast.copyFailed"), "warning"));
     } else { addMessage(t("common.error") + ": " + res.error, "system"); }
   } catch (e) { hideTyping(); addMessage(t("common.error") + ": " + e.message, "system"); }
 }
@@ -443,8 +456,13 @@ async function uuidAction() {
     const res = await window.lexa.execute("generate_uuid");
     hideTyping();
     addMessage(res.success ? "`" + res.data + "`" : t("common.error") + ": " + res.error, "system");
-    if (res.success) navigator.clipboard.writeText(res.data).catch(() => { });
-    showToast(res.success ? t("devtools.uuidCopied") : t("common.error"), res.success ? "success" : "error");
+    if (res.success) {
+      copyTextToClipboard(res.data)
+        .then(() => showToast(t("devtools.uuidCopied"), "success"))
+        .catch(() => showToast(t("toast.copyFailed"), "warning"));
+    } else {
+      showToast(t("common.error"), "error");
+    }
   } catch (e) { hideTyping(); addMessage(t("common.error") + ": " + e.message, "system"); }
 }
 

@@ -138,7 +138,7 @@ async function refreshSettingsView() {
       checks: [{ label: "Backend", state: "blocked", detail: "Lokaler API-Dienst antwortet nicht." }],
     });
     setupHermesGatewayAutostartControls();
-    return;
+    return "blocked";
   }
 
   const [aiRes, voiceRes, healthRes, memRes, cmdsRes, toolHealthRes, mcpRes, diagnosticsRes, hermesAutostartRes] = await Promise.allSettled([
@@ -152,7 +152,7 @@ async function refreshSettingsView() {
     window.lexa.diagnostics(),
     window.lexa.hermesGatewayAutostartStatus?.(),
   ]);
-  if (requestId !== _settingsRefreshSeq || !LexaState.get("backendOnline")) return;
+  if (requestId !== _settingsRefreshSeq || !LexaState.get("backendOnline")) return null;
 
   const ai = aiRes.status === "fulfilled" ? aiRes.value : { groq: {}, openai: {}, gemini: {}, anthropic: {} };
   const voice = voiceRes.status === "fulfilled" ? voiceRes.value : { tts: {}, stt: {} };
@@ -166,7 +166,7 @@ async function refreshSettingsView() {
     : { supported: false, enabled: false, can_enable: false, error: "Autostart-Status nicht verfügbar." };
   renderVoiceDiagnostics(voice);
   renderHermesGatewayAutostart(hermesAutostart);
-  renderSystemReadiness(buildSystemReadinessModel({
+  const readinessModel = buildSystemReadinessModel({
     ai,
     voice,
     health,
@@ -175,7 +175,8 @@ async function refreshSettingsView() {
     mcp,
     diagnostics,
     commandsTotal: cmdsRes.status === "fulfilled" ? cmdsRes.value.total : 0,
-  }));
+  });
+  renderSystemReadiness(readinessModel);
 
   const groqEl = document.getElementById("groq-status");
   const openaiEl = document.getElementById("openai-status");
@@ -202,12 +203,8 @@ async function refreshSettingsView() {
       : "Nicht konfiguriert";
     cartesiaStatusEl.className = "setting-status" + (ready ? "" : " offline");
   }
-  const ttsEl = document.getElementById("tts-status") || document.getElementById("el-status");
-  if (ttsEl) {
-    const elOk = voice.tts?.elevenlabs_available;
-    ttsEl.textContent = elOk ? "Verbunden" : "Kein API Key";
-    ttsEl.className = "setting-status" + (elOk ? "" : " offline");
-  }
+  // ElevenLabs-Status (#el-status) wird ausschließlich von loadElevenLabsSettings()
+  // gesetzt (drei Zustände, lokalisiert). Kein doppelter Schreibzugriff hier.
 
   // STT Status — Deepgram (Primary) + Groq (Fallback) + Local
   const sttEl = document.getElementById("stt-status");
@@ -250,6 +247,8 @@ async function refreshSettingsView() {
   // Wire backup controls
   setupHermesGatewayAutostartControls();
   setupBackupControls();
+
+  return readinessModel.state;
 }
 
 // AI model selection uses the guarded renderer bridge; API-key/keyring actions live elsewhere.
@@ -336,7 +335,7 @@ function readinessSummaryFromState(state, blockers, warnings) {
 }
 
 function buildSystemReadinessModel({ ai, voice, health, mem, toolHealth, mcp, diagnostics, commandsTotal }) {
-  const providers = ["groq", "openai", "gemini", "anthropic"];
+  const providers = ["gemini"];
   const aiReadyCount = diagnosticsCountWhere(providers, (name) => ai?.[name]?.available);
   const aiReady = aiReadyCount > 0;
   const fallbackAvailable = Array.isArray(ai?.fallback_available) ? ai.fallback_available.length : 0;
@@ -361,8 +360,8 @@ function buildSystemReadinessModel({ ai, voice, health, mem, toolHealth, mcp, di
   });
   checks.push({
     label: "AI providers",
-    state: aiReady ? (aiReadyCount >= 2 ? "ready" : "attention") : "blocked",
-    detail: `${aiReadyCount}/4 Provider verfügbar. Aktiv: ${ai?.active_provider || ai?.selected_provider || "unknown"}. Fallbacks: ${fallbackAvailable}.`,
+    state: aiReady ? "ready" : "blocked",
+    detail: `${aiReadyCount}/${providers.length} Provider verfügbar. Aktiv: ${ai?.active_provider || ai?.selected_provider || "unknown"}. Fallbacks: ${fallbackAvailable}.`,
   });
   checks.push({
     label: "Hermes",
@@ -416,9 +415,9 @@ function buildSystemReadinessModel({ ai, voice, health, mem, toolHealth, mcp, di
     },
     {
       label: "AI",
-      value: `${aiReadyCount}/4`,
+      value: `${aiReadyCount}/${providers.length}`,
       meta: ai?.active_provider ? `Aktiv ${ai.active_provider}, Fallbacks ${fallbackAvailable}` : "Kein aktiver Provider",
-      state: aiReady ? (aiReadyCount >= 2 ? "ready" : "attention") : "blocked",
+      state: aiReady ? "ready" : "blocked",
     },
     {
       label: "Hermes",
@@ -644,11 +643,11 @@ async function runSystemDiagnostics() {
   setSettingsActionButtonsBusy("runSystemDiagnostics", true);
   showToast("System Diagnostics laufen...", "info");
   try {
-    await refreshSettingsView();
-    const readinessStatus = document.getElementById("readiness-status");
-    const state = readinessStatus?.textContent || "READY";
-  if (state === "READY") showToast("System Readiness ist grün.", "success");
-    else if (state === "ATTENTION") showToast("System Readiness braucht Aufmerksamkeit.", "warning", 5000);
+    // Status direkt aus dem berechneten Readiness-Modell verwenden, nicht aus
+    // dem (englisch-/locale-abhaengigen) gerenderten Text auslesen.
+    const state = await refreshSettingsView();
+    if (state === "ready") showToast("System Readiness ist grün.", "success");
+    else if (state === "attention") showToast("System Readiness braucht Aufmerksamkeit.", "warning", 5000);
     else showToast("System Readiness ist blockiert.", "error", 6000);
   } catch (e) {
     showToast(t("settings.errorPrefix", {message: e.message || e}), "error");
@@ -1021,7 +1020,7 @@ async function setDeepgramKeyAction() {
       const res = await window.lexa.deepgramSetKey(result.apiKey);
       if (res.success) {
         showToast(t("settings.deepgramKeySaved"), "success");
-        refreshSettingsView();
+        await refreshSettingsView();
       } else {
         showToast(res.error || t("settings.errorGeneric"), "error");
       }
@@ -1035,7 +1034,7 @@ async function deleteDeepgramKeyAction() {
       const res = await window.lexa.deepgramDeleteKey();
       if (res.success) {
         showToast(t("settings.deepgramKeyRemoved"), "info");
-        refreshSettingsView();
+        await refreshSettingsView();
       }
     } catch (e) { showToast(t("settings.errorPrefix", {message: e.message}), "error"); }
   });
@@ -1054,7 +1053,7 @@ async function setCartesiaKeyAction() {
       const res = await window.lexa.cartesiaSetKey(result.apiKey);
       if (res.success) {
         showToast("Cartesia Key gespeichert", "success");
-        refreshSettingsView();
+        await refreshSettingsView();
       } else {
         showToast(res.error || "Fehler beim Speichern", "error");
       }
@@ -1068,7 +1067,7 @@ async function deleteCartesiaKeyAction() {
       const res = await window.lexa.cartesiaDeleteKey();
       if (res.success) {
         showToast("Cartesia Key entfernt", "info");
-        refreshSettingsView();
+        await refreshSettingsView();
       }
     } catch (e) { showToast("Fehler: " + e.message, "error"); }
   });
@@ -1147,7 +1146,7 @@ async function elevenlabsKeyAction() {
       const res = await window.lexa.elevenlabsSetKey(result.apiKey);
       if (res.success) {
         showToast(t("settings.elKeySaveSuccess"), "success");
-        refreshSettingsView();
+        await refreshSettingsView();
       } else {
         showToast(res.error || t("common.error"), "error");
       }
@@ -1288,7 +1287,7 @@ function _showTrialBar(el, mode, daysLeft) {
   if (mode === "active") {
     const safeDaysLeft = Math.max(0, Math.min(14, Number(daysLeft) || 0));
     const text = document.createElement("span");
-    text.textContent = t("settings.trialProgress", {days: daysLeft});
+    text.textContent = t("settings.trialProgress", {days: safeDaysLeft});
     const bar = document.createElement("div");
     bar.className = "trial-progress";
     const fill = document.createElement("div");
@@ -1319,7 +1318,9 @@ async function activateLicense() {
     ], t("settings.licenseActivateBtn"));
     if (!result || !result.key) return;
 
-    const key = result.key.trim().toUpperCase();
+    // Interne Whitespaces (Leerzeichen/Umbrüche aus Copy & Paste) entfernen,
+    // bevor das strikte Format geprüft wird.
+    const key = result.key.replace(/\s+/g, "").toUpperCase();
     if (!/^LEXA-[A-F0-9]{5}-[A-F0-9]{5}-[A-F0-9]{5}-[A-F0-9]{5}$/.test(key)) {
       showToast(t("license.invalidFormat"), "error");
       return;
@@ -1358,11 +1359,18 @@ async function removeLicense() {
 }
 
 async function saveProfile() {
-  const name = document.getElementById("profile-name").value.trim();
-  const lang = document.getElementById("profile-language").value.trim();
-  if (name) await window.lexa.setProfile("name", name);
-  if (lang) await window.lexa.setProfile("language", lang);
-  showToast(t("toast.profileSaved"), "success");
+  const nameEl = document.getElementById("profile-name");
+  const langEl = document.getElementById("profile-language");
+  if (!nameEl && !langEl) return;
+  const name = nameEl ? nameEl.value.trim() : "";
+  const lang = langEl ? langEl.value.trim() : "";
+  try {
+    if (name) await window.lexa.setProfile("name", name);
+    if (lang) await window.lexa.setProfile("language", lang);
+    showToast(t("toast.profileSaved"), "success");
+  } catch (e) {
+    showToast(t("common.error") + ": " + settingsClip(e.message || e, 120), "error");
+  }
 }
 
 // ── LANGUAGE / i18n (Phase 42.1) ─────────────────

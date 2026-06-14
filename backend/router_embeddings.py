@@ -17,6 +17,9 @@ logger = logging.getLogger("lexa.embeddings.router")
 # ── Track background reindex progress ────────────
 _reindex_running = False
 _reindex_progress: dict = {}
+# Guards the compare-and-set on _reindex_running so that two concurrent
+# POST /reindex requests can never both start a background task.
+_reindex_lock = asyncio.Lock()
 
 
 @router.get("/status")
@@ -36,11 +39,14 @@ async def reindex_embeddings():
     """
     global _reindex_running, _reindex_progress
 
-    if _reindex_running:
-        return {"status": "already_running", **_reindex_progress}
+    # Atomic compare-and-set: prüfen und setzen unter demselben Lock,
+    # damit parallele Requests nicht beide einen Task starten.
+    async with _reindex_lock:
+        if _reindex_running:
+            return {"status": "already_running", **_reindex_progress}
 
-    _reindex_running = True
-    _reindex_progress = {"status": "running", "newly_indexed": 0}
+        _reindex_running = True
+        _reindex_progress = {"status": "running", "newly_indexed": 0}
 
     async def _run():
         global _reindex_running, _reindex_progress

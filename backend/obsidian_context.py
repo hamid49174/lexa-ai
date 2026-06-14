@@ -9,8 +9,15 @@ from __future__ import annotations
 import os
 import re
 import json
+import logging
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+# Laenge des Prefix, das fuer das Topic-Scoring gelesen wird.
+_SCORE_PREFIX_CHARS = 2200
+
+logger = logging.getLogger("lexa.obsidian")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -144,7 +151,9 @@ def _clip(text: object, limit: int) -> str:
         return value
     marker = "\n\n[truncated]"
     if limit <= len(marker):
-        return marker[:limit]
+        # Bei sehr kleinem Limit den echten Inhaltsanfang liefern statt eines
+        # abgeschnittenen Truncation-Marker-Fragments.
+        return value[:limit]
     return value[: limit - len(marker)] + marker
 
 
@@ -172,7 +181,17 @@ def resolve_personal_os_root() -> Path:
                 return candidate
         except OSError:
             continue
-    return candidates[0] if candidates else PROJECT_ROOT / "personal_os"
+    # Kein Kandidat enthielt OS_MANIFEST.md. Statt still einen evtl. falsch
+    # konfigurierten Env-Pfad (candidates[0]) zu liefern, deterministisch auf
+    # den projektlokalen Default zuruecksetzen und die Fehlkonfiguration loggen.
+    fallback = PROJECT_ROOT / "personal_os"
+    logger.warning(
+        "Personal OS vault not found: no OS_MANIFEST.md among %d candidate(s); "
+        "falling back to %s",
+        len(candidates),
+        fallback,
+    )
+    return fallback
 
 
 def _relative_path(path: Path, root: Path) -> str:
@@ -188,6 +207,19 @@ def _read_prefix(path: Path, limit: int) -> str:
             return handle.read(max(0, limit))
     except OSError:
         return ""
+
+
+@lru_cache(maxsize=2048)
+def _read_score_prefix_cached(path_str: str) -> str:
+    """Read the lower-cased scoring prefix once per path.
+
+    Innerhalb eines build_obsidian_context_payload-Aufrufs wird derselbe Pfad
+    in mehreren Ranking-Durchlaeufen (Priority-Seiten, Area-Indexe, Markdown-
+    Ranking) bewertet. Ohne Cache wuerde _score_path die Datei jedes Mal neu
+    oeffnen. Der Cache wird zu Beginn jedes Aufrufs geleert, damit ein
+    veraenderter Vault zwischen Aufrufen weiterhin korrekt gelesen wird.
+    """
+    return _read_prefix(Path(path_str), _SCORE_PREFIX_CHARS).lower()
 
 
 def _parse_scalar_frontmatter(prefix: str) -> dict[str, Any]:
@@ -259,14 +291,20 @@ def _iter_markdown_paths(root: Path, *, scan_limit: int = 500) -> list[Path]:
         iterator = root.rglob("*.md")
     except OSError:
         return paths
+    # Hard safety cap so an enormous vault cannot blow up memory, but generous
+    # enough that the stable sort below sees a broad, deterministic candidate set.
+    collect_cap = max(scan_limit * 8, scan_limit)
     for path in iterator:
         parts = set(path.relative_to(root).parts[:-1]) if path.is_relative_to(root) else set(path.parts)
         if parts & _SKIP_DIRS:
             continue
         paths.append(path)
-        if len(paths) >= scan_limit:
+        if len(paths) >= collect_cap:
             break
-    return sorted(paths, key=lambda item: _relative_path(item, root).lower())
+    # Sort BEFORE truncating so the cutoff is deterministic (alphabetical by
+    # relative path) instead of dependent on filesystem rglob order.
+    paths.sort(key=lambda item: _relative_path(item, root).lower())
+    return paths[:scan_limit]
 
 
 def _topic_terms(topic: str) -> list[str]:
@@ -281,7 +319,7 @@ def _score_path(path: Path, root: Path, terms: list[str]) -> int:
     if not terms:
         return 0
     rel = _relative_path(path, root).lower()
-    prefix = _read_prefix(path, 2200).lower()
+    prefix = _read_score_prefix_cached(path.as_posix())
     score = 0
     for term in terms:
         if term in rel:
@@ -356,9 +394,18 @@ def _rank_topic_files(root: Path, terms: list[str], *, limit: int, scan_limit: i
 
 def _priority_context_paths(root: Path, terms: list[str]) -> list[Path]:
     """Return high-signal OS pages for Lexa/Hermes/status topics."""
-    if not terms or not any(term in _LEXA_PRIORITY_TERMS for term in terms):
+    if not terms:
         return []
-    return [root / rel for rel in _LEXA_PRIORITY_CONTEXT_FILES if (root / rel).exists()]
+    candidates = [root / rel for rel in _LEXA_PRIORITY_CONTEXT_FILES if (root / rel).exists()]
+    if not candidates:
+        return []
+    # Schneller Pfad: bekanntes Lexa/Status-Schluesselwort -> immer priorisieren.
+    if any(term in _LEXA_PRIORITY_TERMS for term in terms):
+        return candidates
+    # Fallback: auch semantisch nahe (z.B. deutsche) Topics einsammeln, wenn die
+    # Topic-Terms inhaltlich gegen eine der High-Signal-Seiten matchen, statt nur
+    # bei exaktem Treffer in der fixen Wortliste.
+    return [path for path in candidates if _score_path(path, root, terms) > 0]
 
 
 def _build_lexa_repo_inventory(topic: str, *, max_files_per_surface: int = 18) -> dict[str, Any]:
@@ -461,6 +508,10 @@ def build_obsidian_context_payload(
     include_previews: bool = True,
 ) -> dict[str, Any]:
     """Build a bounded, read-only context packet for the Markdown vault."""
+    # Scoring-Prefix-Cache pro Aufruf leeren, damit derselbe Pfad in den
+    # mehreren Ranking-Durchlaeufen nur einmal von der Platte gelesen wird,
+    # ein zwischen Aufrufen veraenderter Vault aber frisch gelesen wird.
+    _read_score_prefix_cached.cache_clear()
     max_files = max(1, min(int(max_files or 8), 14))
     body_chars = max(160, min(int(body_chars or 800), 1800))
     root = resolve_personal_os_root()

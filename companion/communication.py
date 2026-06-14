@@ -66,10 +66,12 @@ def _detect_email_provider(email_addr: str) -> dict:
         custom_imap = keyring.get_password("lexa-ai", "email_imap_server")
         if custom_smtp:
             custom_port = keyring.get_password("lexa-ai", "email_smtp_port")
+            custom_imap_port = keyring.get_password("lexa-ai", "email_imap_port")
             return {
                 "smtp": custom_smtp,
                 "smtp_port": int(custom_port) if custom_port else 465,
                 "imap": custom_imap or f"imap.{domain}",
+                "imap_port": int(custom_imap_port) if custom_imap_port else 993,
                 "ssl": True,
             }
     except Exception:
@@ -80,6 +82,7 @@ def _detect_email_provider(email_addr: str) -> dict:
         "smtp": f"smtp.{domain}",
         "smtp_port": 465,
         "imap": f"imap.{domain}",
+        "imap_port": 993,
         "ssl": True,
     }
 
@@ -203,6 +206,22 @@ def email_send(to: str, subject: str, body: str, attachment_path: str = "") -> s
         return t("communication.emailError", error=str(e))
 
 
+def _sanitize_imap_arg(value: str) -> str:
+    """Sanitize a value for embedding in an IMAP search string (double-quoted).
+
+    Removes control characters (notably CR/LF) to prevent IMAP command
+    injection, and escapes backslashes and double quotes so the value stays
+    inside its quoted string.
+    """
+    if not value:
+        return ""
+    # Drop control characters (CR/LF and other non-printables below 0x20)
+    cleaned = "".join(ch for ch in value if ch >= " ")
+    # Escape backslash first, then the double quote
+    cleaned = cleaned.replace("\\", "\\\\").replace('"', '\\"')
+    return cleaned
+
+
 def _parse_email_message(msg, eid: bytes = b"", flags_str: str = "") -> dict:
     """Parse an email.message.Message into a structured dict.
 
@@ -229,8 +248,10 @@ def _parse_email_message(msg, eid: bytes = b"", flags_str: str = "") -> dict:
         if payload:
             body = payload.decode(errors="ignore")[:500]
 
-    # Determine read status from flags
-    is_read = "\\Seen" in flags_str if flags_str else True
+    # Determine read status from flags.
+    # If no FLAGS were returned (some servers/response formats omit them),
+    # treat the message as unread to avoid hiding genuinely unread mail.
+    is_read = "\\Seen" in flags_str if flags_str else False
 
     return {
         "message_id": msg.get("Message-ID", ""),
@@ -259,26 +280,31 @@ def email_read(count: int = 10, folder: str = "INBOX",
     addr, pwd = _get_email_creds()
     provider = _detect_email_provider(addr)
     imap_host = provider.get("imap", "imap.gmail.com")
+    imap_port = provider.get("imap_port", 993)
 
     try:
-        with imaplib.IMAP4_SSL(imap_host, timeout=15) as mail:
+        with imaplib.IMAP4_SSL(imap_host, imap_port, timeout=15) as mail:
             mail.login(addr, pwd)
             mail.select(folder, readonly=True)
 
-            # Build IMAP search criteria
+            # Build IMAP search criteria. Filter by sender server-side via
+            # FROM so we don't download up to count*3 full message bodies just
+            # to discard most of them client-side (N+1 IMAP fetch pattern).
+            criteria_parts = []
             if unread_only:
-                _, data = mail.search(None, "UNSEEN")
-            else:
-                _, data = mail.search(None, "ALL")
+                criteria_parts.append("UNSEEN")
+            if sender:
+                safe_sender = _sanitize_imap_arg(sender.strip()[:200])
+                if safe_sender:
+                    criteria_parts.append(f'FROM "{safe_sender}"')
+            criteria = " ".join(criteria_parts) if criteria_parts else "ALL"
+
+            _, data = mail.search(None, criteria)
 
             ids = data[0].split()
-            # Take more IDs than requested if filtering by sender
-            fetch_count = count * 3 if sender else count
-            recent_ids = ids[-fetch_count:] if len(ids) >= fetch_count else ids
+            recent_ids = ids[-count:] if len(ids) >= count else ids
 
             emails = []
-            sender_lower = sender.lower().strip() if sender else ""
-
             for eid in reversed(recent_ids):
                 if len(emails) >= count:
                     break
@@ -300,13 +326,6 @@ def email_read(count: int = 10, folder: str = "INBOX",
                     continue
 
                 msg = email.message_from_bytes(raw_msg)
-
-                # Filter by sender if specified
-                if sender_lower:
-                    msg_from = msg.get("From", "").lower()
-                    if sender_lower not in msg_from:
-                        continue
-
                 emails.append(_parse_email_message(msg, eid, flags_str))
 
             return emails
@@ -340,9 +359,10 @@ def email_search(query: str, sender: str = "", days: int = 7) -> list[dict]:
     addr, pwd = _get_email_creds()
     provider = _detect_email_provider(addr)
     imap_host = provider.get("imap", "imap.gmail.com")
+    imap_port = provider.get("imap_port", 993)
 
     try:
-        with imaplib.IMAP4_SSL(imap_host, timeout=15) as mail:
+        with imaplib.IMAP4_SSL(imap_host, imap_port, timeout=15) as mail:
             mail.login(addr, pwd)
             mail.select("INBOX", readonly=True)
 
@@ -351,12 +371,14 @@ def email_search(query: str, sender: str = "", days: int = 7) -> list[dict]:
 
             # Search in subject first, then body — IMAP OR syntax
             # IMAP SEARCH: OR (SUBJECT "query") (BODY "query") SINCE date
-            search_query = query.replace('"', '\\"')
+            # Strip control chars (CR/LF) to prevent IMAP command injection.
+            search_query = _sanitize_imap_arg(query)
 
             criteria_parts = [f'SINCE {since_date}']
             if sender:
-                safe_sender = sender.strip()[:200].replace('"', '\\"')
-                criteria_parts.append(f'FROM "{safe_sender}"')
+                safe_sender = _sanitize_imap_arg(sender.strip()[:200])
+                if safe_sender:
+                    criteria_parts.append(f'FROM "{safe_sender}"')
 
             # Search subject OR body with the query
             subject_criteria = " ".join(criteria_parts + [f'SUBJECT "{search_query}"'])
@@ -474,11 +496,15 @@ def telegram_send(message: str) -> str:
     message = message[:4096]  # Telegram max message length
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    resp = requests.post(url, json={
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "HTML",
-    }, timeout=10)
+    try:
+        resp = requests.post(url, json={
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "HTML",
+        }, timeout=10)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Telegram send failed: {e}", exc_info=True)
+        return t("communication.telegramError", error=str(e))
 
     if resp.status_code == 200:
         return t("communication.telegramSent")
@@ -531,7 +557,11 @@ def telegram_read(count: int = 5) -> list[dict]:
     if last_offset is not None:
         params["offset"] = last_offset + 1
 
-    resp = requests.get(url, params=params, timeout=15)
+    try:
+        resp = requests.get(url, params=params, timeout=15)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Telegram read failed: {e}", exc_info=True)
+        return [{"error": t("communication.telegramError", error=str(e))}]
 
     if resp.status_code != 200:
         return [{"error": resp.text}]
@@ -591,10 +621,14 @@ def discord_send(message: str, username: str = "Lexa AI") -> str:
     message = message[:2000]   # Discord max message length
     username = username[:80]   # Discord max username length
 
-    resp = requests.post(webhook_url, json={
-        "content": message,
-        "username": username,
-    }, timeout=10)
+    try:
+        resp = requests.post(webhook_url, json={
+            "content": message,
+            "username": username,
+        }, timeout=10)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Discord send failed: {e}", exc_info=True)
+        return t("communication.discordError", error=str(e))
 
     if resp.status_code in (200, 204):
         return t("communication.discordSent")

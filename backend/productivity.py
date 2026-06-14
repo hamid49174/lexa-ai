@@ -44,6 +44,16 @@ _pomodoro_status_cache: dict = {"data": None, "ts": 0.0}
 _POMODORO_CACHE_TTL = 1.0  # seconds
 
 
+def _invalidate_pomodoro_cache() -> None:
+    """Invalidate the pomodoro status cache atomically (data AND ts).
+
+    Must be called while holding ``_pomodoro_lock``. Resetting both fields
+    together prevents future inconsistencies between ``data`` and ``ts``.
+    """
+    _pomodoro_status_cache["data"] = None
+    _pomodoro_status_cache["ts"] = 0.0
+
+
 # ══════════════════════════════════════════════════
 #  VALIDATION HELPERS
 # ══════════════════════════════════════════════════
@@ -328,14 +338,16 @@ def pomodoro_start(task: str = "", duration: int = 25) -> str:
         # setting running=True above and clearing the event
         _pomodoro_stop_event.clear()
         # Invalidate status cache (merged into same lock acquisition)
-        _pomodoro_status_cache["data"] = None
+        _invalidate_pomodoro_cache()
 
-    # Log session
+    # Log session — remember the concrete row id so the timer thread marks
+    # exactly this session as completed (instead of a racy MAX(id)).
     db = _get_db()
-    db.execute(
+    cursor = db.execute(
         "INSERT INTO pomodoro_sessions (task, duration_min) VALUES (?, ?)",
         (task, duration),
     )
+    session_id = cursor.lastrowid
     db.commit()
 
     def _timer():
@@ -349,20 +361,21 @@ def pomodoro_start(task: str = "", duration: int = 25) -> str:
                 _active_pomodoro["running"] = False
                 _active_pomodoro["completed_at"] = time.time()
                 _active_pomodoro["acknowledged"] = False
-                _pomodoro_status_cache["data"] = None
+                _invalidate_pomodoro_cache()
         # Mark completed in DB
         try:
             db2 = _get_db()
             db2.execute(
-                "UPDATE pomodoro_sessions SET completed = 1 WHERE id = (SELECT MAX(id) FROM pomodoro_sessions)"
+                "UPDATE pomodoro_sessions SET completed = 1 WHERE id = ?",
+                (session_id,),
             )
             db2.commit()
         except Exception as e:
             logger.error(f"Pomodoro DB-Update fehlgeschlagen: {e}", exc_info=True)
 
-    t = threading.Thread(target=_timer, daemon=True)
-    t.start()
-    _active_pomodoro["thread"] = t
+    timer_thread = threading.Thread(target=_timer, daemon=True)
+    timer_thread.start()
+    _active_pomodoro["thread"] = timer_thread
     return f"Pomodoro gestartet: {duration} Min — Task: '{task or 'Kein Task'}'"
 
 
@@ -372,7 +385,7 @@ def pomodoro_stop() -> str:
             return "Kein aktiver Pomodoro."
         _active_pomodoro["running"] = False
         _active_pomodoro["end_time"] = None
-        _pomodoro_status_cache["data"] = None
+        _invalidate_pomodoro_cache()
     # Signal the timer thread to terminate immediately
     _pomodoro_stop_event.set()
     return "Pomodoro gestoppt."
@@ -452,7 +465,7 @@ def pomodoro_acknowledge() -> str:
     """Acknowledge pomodoro completion so completed_just_now resets."""
     with _pomodoro_lock:
         _active_pomodoro["acknowledged"] = True
-        _pomodoro_status_cache["data"] = None
+        _invalidate_pomodoro_cache()
     return "Pomodoro-Benachrichtigung bestätigt."
 
 
@@ -463,11 +476,13 @@ def pomodoro_acknowledge() -> str:
 def _calc_streak_sql(db: sqlite3.Connection, habit_id: int) -> int:
     """Calculate consecutive days streak using SQL date math — much faster than Python loop."""
     today_iso = date.today().isoformat()
-    # Get all log dates for this habit, descending from today
+    # Get all log dates for this habit where the target was met, descending from today.
+    # Consistency with habit_list: a day counts as fulfilled only when count >= target.
     rows = db.execute(
-        """SELECT log_date FROM habit_logs
-           WHERE habit_id = ? AND log_date <= ? AND count > 0
-           ORDER BY log_date DESC LIMIT 366""",
+        """SELECT hl.log_date FROM habit_logs hl
+           JOIN habits h ON h.id = hl.habit_id
+           WHERE hl.habit_id = ? AND hl.log_date <= ? AND hl.count >= h.target
+           ORDER BY hl.log_date DESC LIMIT 366""",
         (habit_id, today_iso),
     ).fetchall()
     if not rows:
@@ -619,42 +634,56 @@ _time_tracker_stop_event = threading.Event()
 
 
 def _get_active_window() -> tuple[str, str]:
-    """Get currently active window app name and title."""
+    """Get currently active window app name and title.
+
+    Uses the WinAPI directly via ctypes (user32/kernel32) instead of spawning a
+    PowerShell process per call. PowerShell + Add-Type recompiled C# on every
+    tick (csc.exe cold start), which caused recurring CPU spikes while tracking
+    was active. ctypes runs in-process with millisecond latency and no recompile.
+    """
     try:
-        ps = '''
-        Add-Type @"
-        using System;
-        using System.Runtime.InteropServices;
-        using System.Text;
-        using System.Diagnostics;
-        public class ActiveWin {
-            [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
-            [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-            [DllImport("user32.dll")] static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-            public static string[] Get() {
-                IntPtr h = GetForegroundWindow();
-                uint pid;
-                GetWindowThreadProcessId(h, out pid);
-                var sb = new StringBuilder(256);
-                GetWindowText(h, sb, 256);
-                try {
-                    var p = Process.GetProcessById((int)pid);
-                    return new string[] { p.ProcessName, sb.ToString() };
-                } catch { return new string[] { "unknown", sb.ToString() }; }
-            }
-        }
-"@
-        $r = [ActiveWin]::Get()
-        "$($r[0])|$($r[1])"
-        '''
-        result = subprocess.run(
-            ["powershell", "-Command", ps],
-            capture_output=True, text=True, timeout=5,
-        )
-        parts = result.stdout.strip().split("|", 1)
-        if len(parts) == 2:
-            return parts[0].strip(), parts[1].strip()
-        return "unknown", ""
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return "unknown", ""
+
+        # Window title
+        length = user32.GetWindowTextLengthW(hwnd)
+        title = ""
+        if length > 0:
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value
+
+        # Owning process id
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+
+        # Resolve process name (without .exe) via the executable image path
+        app_name = "unknown"
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        h_proc = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+        if h_proc:
+            try:
+                size = wintypes.DWORD(260)
+                path_buf = ctypes.create_unicode_buffer(size.value)
+                if kernel32.QueryFullProcessImageNameW(
+                    h_proc, 0, path_buf, ctypes.byref(size)
+                ):
+                    exe = os.path.basename(path_buf.value)
+                    if exe.lower().endswith(".exe"):
+                        exe = exe[:-4]
+                    if exe:
+                        app_name = exe
+            finally:
+                kernel32.CloseHandle(h_proc)
+
+        return app_name, title
     except Exception:
         return "unknown", ""
 

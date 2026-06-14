@@ -180,12 +180,14 @@ def _capture_for_ocr(window_title: Optional[str] = None) -> bytes:
 #  PUBLIC API
 # ══════════════════════════════════════════════════
 
-def ocr_screenshot(image_bytes: bytes = None, window_title: str = None) -> dict:
+def ocr_screenshot(image_bytes: bytes = None, window_title: str = None, lang: str = "de") -> dict:
     """Take a screenshot (or use provided bytes), run OCR, return result.
 
     Args:
         image_bytes: Optional pre-captured image bytes (PNG/JPEG)
         window_title: Optional window title to capture
+        lang: Language hint (default "de"); steuert den Tesseract-Fallback
+            (deu+eng bei "de", sonst eng)
 
     Returns:
         {"success": True, "data": {"text": "...", "word_count": N, "engine": "rapidocr", "duration_ms": X}}
@@ -196,7 +198,7 @@ def ocr_screenshot(image_bytes: bytes = None, window_title: str = None) -> dict:
         if image_bytes is None:
             image_bytes = _capture_for_ocr(window_title)
 
-        text, engine, blocks = _run_ocr_with_blocks(image_bytes)
+        text, engine, blocks = _run_ocr_with_blocks(image_bytes, lang)
         duration_ms = round((time.monotonic() - start) * 1000)
 
         if text is None:
@@ -220,12 +222,13 @@ def ocr_screenshot(image_bytes: bytes = None, window_title: str = None) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def ocr_from_bytes(image_bytes: bytes, lang: str = "en") -> dict:
+def ocr_from_bytes(image_bytes: bytes, lang: str = "de") -> dict:
     """Run OCR on raw image bytes.
 
     Args:
         image_bytes: Image data (PNG, JPEG, etc.)
-        lang: Language hint (default "en")
+        lang: Language hint (default "de"); "de" aktiviert den deu+eng
+            Tesseract-Fallback, sonst eng
 
     Returns:
         {"success": True, "data": {"text": "...", "word_count": N, "engine": "...", "duration_ms": X}}

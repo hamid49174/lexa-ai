@@ -36,11 +36,20 @@ function setupDragDrop() {
   if (attachBtn) attachBtn.addEventListener("click", triggerFileUpload);
   chatContainer.addEventListener("dragenter", (e) => { e.preventDefault(); dragCounter++; overlay.classList.add("visible"); });
   chatContainer.addEventListener("dragleave", (e) => { e.preventDefault(); dragCounter--; if (dragCounter <= 0) { dragCounter = 0; overlay.classList.remove("visible"); } });
-  chatContainer.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; });
-  chatContainer.addEventListener("drop", (e) => { e.preventDefault(); dragCounter = 0; overlay.classList.remove("visible"); const files = e.dataTransfer.files; if (files.length > 0) handleFileUpload(files[0]); });
+  chatContainer.addEventListener("dragover", (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; });
+  chatContainer.addEventListener("drop", (e) => { e.preventDefault(); dragCounter = 0; overlay.classList.remove("visible"); const files = e.dataTransfer?.files; if (files && files.length > 0) handleFileUploadBatch(files); });
 }
 function triggerFileUpload() { document.getElementById("file-input")?.click(); }
-function handleFileSelect(event) { const file = event.target.files?.[0]; if (file) handleFileUpload(file); event.target.value = ""; }
+function handleFileSelect(event) { const fileList = Array.from(event.target.files || []); if (fileList.length > 0) handleFileUploadBatch(fileList); event.target.value = ""; }
+
+// Verarbeitet mehrere ausgewählte/gezogene Dateien sequenziell, damit keine
+// Datei stillschweigend verworfen wird. Jeder Upload wird abgewartet, bevor der
+// nächste startet (die isLoading-Sperre würde sonst Folge-Uploads abweisen).
+async function handleFileUploadBatch(files) {
+  for (const file of Array.from(files)) {
+    await handleFileUpload(file);
+  }
+}
 
 function buildFileUploadIcon(ext) {
   const icon = document.createElement("div");

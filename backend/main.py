@@ -26,28 +26,35 @@ try:
 except ImportError:
     print("[Main] sentry-sdk not installed — error tracking disabled")
 
-if _sentry_available:
-    _sentry_dsn = os.environ.get("SENTRY_DSN", "")
-    if not _sentry_dsn:
-        try:
-            import keyring
-            _sentry_dsn = keyring.get_password("lexa-ai", "sentry_dsn") or ""
-        except Exception:
-            pass
+def _init_sentry(dsn: str) -> None:
+    """Initialize the Sentry SDK with the given DSN (idempotent guard via _sentry_dsn)."""
+    global _sentry_dsn
+    if not dsn:
+        return
+    _sentry_dsn = dsn
+    sentry_sdk.init(
+        dsn=dsn,
+        integrations=[
+            FastApiIntegration(transaction_style="endpoint"),
+            StarletteIntegration(transaction_style="endpoint"),
+        ],
+        traces_sample_rate=0.1,
+        profiles_sample_rate=0.1,
+        environment=os.environ.get("LEXA_ENV", "production"),
+        release=f"lexa-ai@{os.environ.get('LEXA_VERSION', APP_VERSION)}",
+        send_default_pii=False,
+    )
 
-    if _sentry_dsn:
-        sentry_sdk.init(
-            dsn=_sentry_dsn,
-            integrations=[
-                FastApiIntegration(transaction_style="endpoint"),
-                StarletteIntegration(transaction_style="endpoint"),
-            ],
-            traces_sample_rate=0.1,
-            profiles_sample_rate=0.1,
-            environment=os.environ.get("LEXA_ENV", "production"),
-            release=f"lexa-ai@{os.environ.get('LEXA_VERSION', APP_VERSION)}",
-            send_default_pii=False,
-        )
+
+if _sentry_available:
+    # Only the env-var DSN is read at import time (non-blocking). The keyring
+    # lookup can block for seconds on some platforms (Windows Credential Manager
+    # under load, unreachable D-Bus/SecretService on Linux) and is therefore
+    # deferred to startup_event via asyncio.to_thread, so it never delays the
+    # backend/app start.
+    _env_sentry_dsn = os.environ.get("SENTRY_DSN", "")
+    if _env_sentry_dsn:
+        _init_sentry(_env_sentry_dsn)
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
@@ -67,6 +74,7 @@ from backend.config import (
     SLOW_REQUEST_THRESHOLD,
 )
 from backend.error_response import error_payload
+from backend.security import sanitize_input
 from backend.local_auth import (
     LOCAL_AUTH_HEADER,
     health_auth_fields,
@@ -109,34 +117,49 @@ from backend.router_calendar import router as calendar_router
 from backend.router_health import router as health_router
 
 # ── Phase 39+ Feature Routers ──
-try:
-    from backend.router_vision import router as vision_router
-except ImportError:
-    vision_router = None
-try:
-    from backend.router_plugins import router as plugins_router
-except ImportError:
-    plugins_router = None
-try:
-    from backend.router_workflows import router as workflows_router
-except ImportError:
-    workflows_router = None
-try:
-    from backend.router_smart import router as smart_router
-except ImportError:
-    smart_router = None
-try:
-    from backend.router_context import router as context_router
-except ImportError:
-    context_router = None
-try:
-    from backend.router_mcp import router as mcp_router
-except ImportError:
-    mcp_router = None
-try:
-    from backend.router_personal_os import router as personal_os_router
-except ImportError:
-    personal_os_router = None
+import importlib as _importlib
+
+# logger is configured below; use a module-level logger here so optional-router
+# import problems are visible even before logging.basicConfig runs.
+_import_logger = logging.getLogger("lexa.server")
+
+
+def _load_optional_router(module_name: str):
+    """Import an optional feature router, returning its `router` or None.
+
+    A missing module (ModuleNotFoundError for the module itself) is expected and
+    logged at debug level. Any other ImportError means a real code/import bug
+    *inside* the module — that must not vanish silently, so it is logged as a
+    warning instead of making the feature disappear without a trace.
+    """
+    try:
+        module = _importlib.import_module(module_name)
+        return getattr(module, "router", None)
+    except ModuleNotFoundError as exc:
+        # Distinguish "this module is absent" (fine) from "a dependency the
+        # module imports is absent" (a real problem worth surfacing).
+        if exc.name == module_name:
+            _import_logger.debug(f"Optional router '{module_name}' not present: {exc}")
+        else:
+            _import_logger.warning(
+                f"Optional router '{module_name}' failed to import "
+                f"(missing dependency '{exc.name}'): {exc}"
+            )
+        return None
+    except ImportError as exc:
+        _import_logger.warning(
+            f"Optional router '{module_name}' failed to import (import error): {exc}"
+        )
+        return None
+
+
+vision_router = _load_optional_router("backend.router_vision")
+plugins_router = _load_optional_router("backend.router_plugins")
+workflows_router = _load_optional_router("backend.router_workflows")
+smart_router = _load_optional_router("backend.router_smart")
+context_router = _load_optional_router("backend.router_context")
+mcp_router = _load_optional_router("backend.router_mcp")
+personal_os_router = _load_optional_router("backend.router_personal_os")
 from backend.voice_ws import init_ws_loop
 from backend.shared import parse_json_body
 
@@ -159,11 +182,15 @@ app = FastAPI(
 # GZip compression for faster API responses (min 500 bytes)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
-# CORS: Nur localhost erlauben
+# CORS: Der Electron-Renderer wird per file://-URL geladen (siehe frontend/main.js),
+# sein Origin ist daher "null" — niemals ein Port-3000-Dev-Server. Der eigentliche
+# Schutz kommt aus local_auth_middleware + 127.0.0.1-Binding, nicht aus CORS.
+# allow_credentials bleibt False, da die Auth header-basiert (LOCAL_AUTH_HEADER)
+# und nicht cookie-basiert ist.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_credentials=True,
+    allow_origins=["null"],
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type", "Authorization", "X-Request-ID", LOCAL_AUTH_HEADER],
 )
@@ -347,7 +374,19 @@ async def startup_event():
     # Initialize WebSocket voice event loop reference
     init_ws_loop(asyncio.get_running_loop())
 
-    # Sentry status
+    # Sentry status — if no env DSN was found at import, try the keyring now
+    # (off the event loop) instead of blocking the module import.
+    if _sentry_available and not _sentry_dsn:
+        def _load_sentry_dsn_from_keyring() -> str:
+            try:
+                import keyring
+                return keyring.get_password("lexa-ai", "sentry_dsn") or ""
+            except Exception:
+                return ""
+
+        keyring_dsn = await asyncio.to_thread(_load_sentry_dsn_from_keyring)
+        if keyring_dsn:
+            _init_sentry(keyring_dsn)
     if _sentry_dsn:
         logger.info("Sentry error tracking enabled")
     else:
@@ -718,8 +757,13 @@ async def scheduler_status():
 @app.post("/ai/title")
 async def ai_generate_title(req: ChatRequest):
     """Generate an AI-powered conversation title."""
+    # Skip the (latency-/cost-heavy) provider call for empty input and sanitize
+    # the message first — consistent with the chat path (router_chat.sanitize_input).
+    message = sanitize_input((req.message or "").strip())
+    if not message:
+        return {"status": "ok", "title": "Neue Unterhaltung"}
     try:
-        title = await asyncio.to_thread(generate_title, req.message)
+        title = await asyncio.to_thread(generate_title, message)
         return {"status": "ok", "title": title}
     except Exception as e:
         logger.warning(f"AI title generation failed: {e}")
@@ -803,4 +847,8 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=BACKEND_HOST, port=BACKEND_PORT)
+    # Use the same import-string startup as the production entry point
+    # (backend/pyinstaller_entry.py) so dev and prod behave identically and
+    # uvicorn features like reload/workers stay available. Host/Port come from
+    # backend.config (single source of truth — derived from LEXA_HOST/LEXA_PORT).
+    uvicorn.run("backend.main:app", host=BACKEND_HOST, port=BACKEND_PORT)

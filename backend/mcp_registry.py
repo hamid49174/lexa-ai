@@ -6,6 +6,7 @@ and merges discovered MCP tools with the existing tool_registry for LLM calls.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -77,6 +78,56 @@ def _looks_like_personal_os_mcp_index(value: object) -> bool:
     return normalized.endswith("11_integrations/mcp/os-mcp-server/dist/index.js")
 
 
+# Minimal set of host environment variables that subprocesses legitimately
+# need to start (path lookup, temp dirs, Windows runtime). Everything else —
+# especially API keys/secrets exported into the Lexa process — is withheld so a
+# third-party MCP server can't read them. Variables a server actually requires
+# must be declared explicitly in its cfg["env"].
+_ENV_PASSTHROUGH_KEYS = (
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "HOME",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "COMSPEC",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+    "LANG",
+    "LC_ALL",
+)
+
+
+def _build_subprocess_env(cfg_env: dict | None) -> dict[str, str]:
+    """Build a minimal environment for an MCP subprocess.
+
+    Only a small allowlist of host variables (PATH, temp/home dirs, Windows
+    runtime basics) is forwarded; secrets in os.environ are NOT inherited.
+    Variables explicitly declared in the server config's "env" are added on top.
+    """
+    env: dict[str, str] = {}
+    for key in _ENV_PASSTHROUGH_KEYS:
+        value = os.environ.get(key)
+        if value is not None:
+            env[key] = value
+    if cfg_env:
+        for key, value in cfg_env.items():
+            if value is not None:
+                env[str(key)] = str(value)
+    return env
+
+
 def _normalize_personal_os_config(cfg: dict) -> dict:
     normalized = dict(cfg)
     args = list(normalized.get("args") or [])
@@ -117,6 +168,18 @@ class MCPRegistry:
         self._clients: dict[str, MCPClient] = {}
         self._errors: dict[str, str] = {}  # server_name -> last error message
         self._loaded = False
+        # Per-server locks serialize concurrent connect/disconnect calls so two
+        # parallel requests for the same server can't each spawn a subprocess
+        # and orphan one of them.
+        self._connect_locks: dict[str, asyncio.Lock] = {}
+
+    def _get_connect_lock(self, name: str) -> asyncio.Lock:
+        """Return (creating on demand) the per-server connect/disconnect lock."""
+        lock = self._connect_locks.get(name)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._connect_locks[name] = lock
+        return lock
 
     def load_config(self) -> dict[str, dict]:
         """Load MCP server configs from mcp_servers.json.
@@ -192,9 +255,15 @@ class MCPRegistry:
         if not self._loaded:
             self.load_config()
 
+        # Iterate over snapshots: connect()/disconnect() run on the event loop
+        # and can mutate self._configs/_clients concurrently while this method
+        # runs in a worker thread (router_mcp calls it via asyncio.to_thread).
+        # Iterating the live dicts could raise "dictionary changed size during
+        # iteration".
         result = []
-        for name, cfg in self._configs.items():
-            client = self._clients.get(name)
+        clients_snapshot = dict(self._clients)
+        for name, cfg in list(self._configs.items()):
+            client = clients_snapshot.get(name)
             entry = {
                 "name": name,
                 "command": cfg.get("command", ""),
@@ -229,50 +298,73 @@ class MCPRegistry:
         if not cfg.get("enabled", True):
             raise MCPError(f"MCP server '{name}' is disabled in config")
 
-        # Disconnect existing client if any
-        if name in self._clients:
+        # Serialize connect/disconnect per server so two parallel connect calls
+        # (double UI click, parallel auto-connect) can't both spawn a subprocess
+        # and orphan the one that gets overwritten in self._clients.
+        async with self._get_connect_lock(name):
+            # Disconnect existing client if any
+            if name in self._clients:
+                try:
+                    await self._clients.pop(name).disconnect()
+                except Exception:
+                    pass
+
+            self._errors.pop(name, None)
+
+            # Build a minimal environment for the subprocess (no secret leak).
+            env = _build_subprocess_env(cfg.get("env"))
+
+            client = MCPClient(
+                name=name,
+                command=cfg["command"],
+                args=cfg.get("args", []),
+                env=env,
+            )
+
             try:
-                await self._clients[name].disconnect()
-            except Exception:
-                pass
+                server_info = await client.connect()
+            except MCPError as exc:
+                self._errors[name] = str(exc)
+                raise
+            except Exception as e:
+                self._errors[name] = str(e)
+                raise MCPError(f"Connection to '{name}' failed: {e}")
 
-        self._errors.pop(name, None)
-
-        # Build environment for subprocess
-        env = dict(os.environ)
-        if cfg.get("env"):
-            env.update(cfg["env"])
-
-        client = MCPClient(
-            name=name,
-            command=cfg["command"],
-            args=cfg.get("args", []),
-            env=env,
-        )
-
-        try:
-            server_info = await client.connect()
-            # Auto-discover tools after successful connection
-            await client.list_tools()
+            # Connect succeeded: register the client immediately so any later
+            # failure (or disconnect_all) can still reach and clean up the
+            # already-running subprocess instead of orphaning it.
             self._clients[name] = client
+
+            try:
+                # Auto-discover tools after successful connection
+                await client.list_tools()
+            except Exception as e:
+                # Discovery failed — tear down the subprocess we just started.
+                self._clients.pop(name, None)
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+                self._errors[name] = str(e)
+                if isinstance(e, MCPError):
+                    raise
+                raise MCPError(f"Tool discovery for '{name}' failed: {e}")
+
             logger.info(
                 f"MCP [{name}] Ready — {len(client.tools)} tools available"
             )
             return server_info
-        except MCPError as exc:
-            self._errors[name] = str(exc)
-            raise
-        except Exception as e:
-            self._errors[name] = str(e)
-            raise MCPError(f"Connection to '{name}' failed: {e}")
 
     async def disconnect(self, name: str) -> None:
         """Disconnect from an MCP server."""
-        client = self._clients.pop(name, None)
-        if client:
-            await client.disconnect()
-        self._errors.pop(name, None)
-        logger.info(f"MCP [{name}] Disconnected")
+        # Hold the same per-server lock as connect() so a disconnect can't race
+        # with an in-flight connect and leave a subprocess running.
+        async with self._get_connect_lock(name):
+            client = self._clients.pop(name, None)
+            if client:
+                await client.disconnect()
+            self._errors.pop(name, None)
+            logger.info(f"MCP [{name}] Disconnected")
 
     async def disconnect_all(self) -> None:
         """Disconnect from all MCP servers. Called on shutdown."""
@@ -319,7 +411,12 @@ class MCPRegistry:
         prefixed with the server name to avoid collisions.
         """
         all_tools: list[dict] = []
-        for name, client in self._clients.items():
+        # Iterate over a snapshot: connect() (sets self._clients[name]) and
+        # disconnect() (pops) run on the event loop and can mutate self._clients
+        # concurrently while this method builds the tool list, which would raise
+        # "RuntimeError: dictionary changed size during iteration". list_servers()
+        # snapshots for the same reason.
+        for name, client in list(self._clients.items()):
             if not client.is_connected:
                 continue
             for tool in client.tools:

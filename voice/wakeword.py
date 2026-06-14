@@ -122,6 +122,7 @@ class WakeWordDetector:
         self._ready = False
         if self._conversation:
             self._conversation.stop()
+        self._conversation = None
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=3)
         self._thread = None
@@ -158,13 +159,20 @@ class WakeWordDetector:
     # ── Internal ──────────────────────────────────
 
     def _get_conversation_engine(self) -> ConversationEngine:
-        """Create or return ConversationEngine with current callbacks."""
-        player = AudioPlayer(on_volume=self._on_volume)
-        self._conversation = ConversationEngine(
-            player=player,
-            on_state=self._on_conversation_state,
-            on_volume=self._on_volume,
-        )
+        """Return the cached ConversationEngine, creating it once per session.
+
+        Reusing the same instance keeps ``_history`` consistent across the
+        multiple calls within a single wake cycle (command recording + run)
+        and across follow-up turns. The cache is cleared in ``stop()`` so a
+        new listening session always starts fresh.
+        """
+        if self._conversation is None:
+            player = AudioPlayer(on_volume=self._on_volume)
+            self._conversation = ConversationEngine(
+                player=player,
+                on_state=self._on_conversation_state,
+                on_volume=self._on_volume,
+            )
         return self._conversation
 
     def _mark_unavailable(self, message: str):
@@ -251,8 +259,14 @@ class WakeWordDetector:
 
                 self._reset_fallback_stt_backoff()
 
+                inline_command = detection.command or _command_after_wake_phrase(text, self.wake_phrases)
+
+                # Cooldown only suppresses pure re-triggering (a bare wake word
+                # without a spoken command). An already-detected inline command
+                # ("Lexa stopp") must still be processed even within the cooldown
+                # window, otherwise fast follow-up commands get lost.
                 now = time.time()
-                if now - self._last_wake < WAKE_COOLDOWN_S:
+                if not inline_command and now - self._last_wake < WAKE_COOLDOWN_S:
                     continue
                 self._last_wake = now
                 self._last_detected_text = text[:160]
@@ -262,7 +276,6 @@ class WakeWordDetector:
                 if self.on_wake:
                     self.on_wake()
 
-                inline_command = detection.command or _command_after_wake_phrase(text, self.wake_phrases)
                 if inline_command:
                     command = inline_command
                     self._last_command_source = detection.source or "wake_window"

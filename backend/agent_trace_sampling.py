@@ -8,6 +8,7 @@ explicit, test/synthetic scoped, bounded, and directed only at ignored paths.
 from __future__ import annotations
 
 import os
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ class AgentTraceSamplingPolicy:
     require_synthetic_context: bool = True
     output_dir: Path = field(default_factory=lambda: Path("evals/results/traces"))
     redact_level: str = "strict"
+    seed: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "sample_rate", max(0.0, min(1.0, float(self.sample_rate))))
@@ -38,6 +40,9 @@ class AgentTraceSamplingPolicy:
         object.__setattr__(self, "allowed_sources", {str(source).lower() for source in self.allowed_sources})
         object.__setattr__(self, "denied_sources", {str(source).lower() for source in self.denied_sources})
         object.__setattr__(self, "output_dir", Path(self.output_dir).expanduser())
+        # Dedicated RNG so sampling decisions are decoupled from the global
+        # random state and reproducible for eval runs when a seed is given.
+        object.__setattr__(self, "_rng", random.Random(self.seed))
 
     @classmethod
     def from_env(cls, *, default_output_dir: str | Path | None = None) -> "AgentTraceSamplingPolicy":
@@ -50,14 +55,15 @@ class AgentTraceSamplingPolicy:
         denied = _env_csv("LEXA_AGENT_TRACE_DENIED_SOURCES") or {"runtime", "production", "user"}
         return cls(
             enabled=env_flag("LEXA_AGENT_TRACE") and env_flag("LEXA_AGENT_TRACE_SAMPLING"),
-            sample_rate=float(os.getenv("LEXA_AGENT_TRACE_SAMPLE_RATE", "1") or 1),
+            sample_rate=_env_float("LEXA_AGENT_TRACE_SAMPLE_RATE", 1.0),
             allowed_sources=allowed,
             denied_sources=denied,
-            max_events_per_run=int(os.getenv("LEXA_AGENT_TRACE_MAX_EVENTS", "100") or 100),
-            max_metadata_chars=int(os.getenv("LEXA_AGENT_TRACE_MAX_METADATA_CHARS", "160") or 160),
+            max_events_per_run=_env_int("LEXA_AGENT_TRACE_MAX_EVENTS", 100),
+            max_metadata_chars=_env_int("LEXA_AGENT_TRACE_MAX_METADATA_CHARS", 160),
             require_synthetic_context=not env_flag("LEXA_AGENT_TRACE_ALLOW_REAL_CONTEXT"),
             output_dir=output_dir,
             redact_level=os.getenv("LEXA_AGENT_TRACE_REDACT_LEVEL", "strict").strip().lower() or "strict",
+            seed=_env_optional_int("LEXA_AGENT_TRACE_SEED"),
         )
 
     def should_sample(self, *, source: str, synthetic_context: bool) -> bool:
@@ -72,7 +78,12 @@ class AgentTraceSamplingPolicy:
             return False
         if self.allowed_sources and normalized_source not in self.allowed_sources:
             return False
-        return self.sample_rate >= 1
+        if self.sample_rate >= 1:
+            return True
+        # Probabilistic sampling for intermediate rates (e.g. 0.5 -> ~50%).
+        # Uses a dedicated RNG so eval runs stay reproducible (with a seed)
+        # and decoupled from the process-wide random state.
+        return self._rng.random() < self.sample_rate
 
     def safe_output_path(self, run_id: str) -> Path:
         output_path = (self.output_dir / f"{run_id}.jsonl").expanduser().resolve()
@@ -93,6 +104,45 @@ def _env_csv(name: str) -> set[str]:
     if not raw:
         return set()
     return {part.strip().lower() for part in raw.split(",") if part.strip()}
+
+
+def _env_float(name: str, default: float) -> float:
+    """Parse a float env var, falling back to default on missing/invalid input.
+
+    A typo like LEXA_AGENT_TRACE_SAMPLE_RATE=hoch must not crash the agent run.
+    """
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    """Parse an int env var, falling back to default on missing/invalid input."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_optional_int(name: str) -> int | None:
+    """Parse an optional int env var, returning None on missing/invalid input.
+
+    Used for the trace sampling seed: absent or malformed means "no fixed seed".
+    """
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _clip_value(value: Any, max_chars: int) -> Any:

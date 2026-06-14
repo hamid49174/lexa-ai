@@ -387,7 +387,11 @@ function renderStartupHealth(payload) {
   const providers = Array.isArray(groups.providers?.available) ? groups.providers.available : [];
   const tools = groups.tools || {};
   const stateTone = hermesOverviewTone(payload.state);
-  const toolsPct = systemDisplayNumber(systemDisplayPercent(tools.healthPct));
+  // Missing/invalid healthPct should read as "?", not a misleading "0%".
+  const toolsHealth = Number(tools.healthPct);
+  const toolsPctLabel = Number.isFinite(toolsHealth)
+    ? `${systemDisplayPercent(toolsHealth)}%`
+    : "?";
   const providerCount = systemDisplayCount(providers.length);
 
   target.setAttribute("aria-busy", "false");
@@ -396,7 +400,7 @@ function renderStartupHealth(payload) {
   metrics.append(
     createSystemOverviewMetric(t("system.startupMetricChecks"), startupHealthMetric(counts)),
     createSystemOverviewMetric(t("system.startupMetricProviders"), `${providerCount}/4`),
-    createSystemOverviewMetric(t("system.startupMetricTools"), `${toolsPct}%`)
+    createSystemOverviewMetric(t("system.startupMetricTools"), toolsPctLabel)
   );
 
   const checkRows = checks.length

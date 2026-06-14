@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.agent_protocol import redacted_summary
-from backend.config import MCP_ENABLED, MCP_CALL_TIMEOUT
+from backend.config import MCP_ENABLED
 from backend.security import audit_error_details, check_rate_limit, audit_log
 from backend.mcp_registry import mcp_registry, MCPError
 
@@ -165,10 +165,12 @@ async def call_server_tool(name: str, req: ToolCallRequest):
     audit_log("mcp", "call_tool", f"server={name} tool={req.tool}")
 
     try:
-        result = await asyncio.wait_for(
-            mcp_registry.call_tool(name, req.tool, req.arguments),
-            timeout=MCP_CALL_TIMEOUT,
-        )
+        # The MCP client enforces MCP_CALL_TIMEOUT internally (see
+        # mcp_client._send_request) and cleans up its pending-request table on
+        # timeout. We deliberately rely on that single timeout layer instead of
+        # wrapping the call in a second asyncio.wait_for, which would race the
+        # inner timer and could leave a stale entry in the client's _pending map.
+        result = await mcp_registry.call_tool(name, req.tool, req.arguments)
 
         # Flatten content items for simpler response
         output_parts = []
@@ -193,12 +195,6 @@ async def call_server_tool(name: str, req: ToolCallRequest):
         logger.warning(f"MCP tool call failed: {name}/{req.tool}: {e}")
         audit_log("mcp", "call_tool_error", f"server={name} tool={req.tool} {audit_error_details(e)}")
         raise HTTPException(status_code=502, detail=_client_safe_mcp_error(e))
-    except asyncio.TimeoutError:
-        audit_log("mcp", "call_tool_timeout", f"server={name} tool={req.tool}")
-        raise HTTPException(
-            status_code=504,
-            detail=f"Tool call '{req.tool}' timed out after {MCP_CALL_TIMEOUT}s",
-        )
     except Exception as e:
         logger.error(f"MCP tool call error: {name}/{req.tool}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Tool call failed")

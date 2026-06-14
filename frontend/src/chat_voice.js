@@ -20,6 +20,8 @@ const Voice = {
   silenceTimer: null,
   recordTimeout: null,
   audioCtx: null,
+  silenceSource: null,
+  silenceAnalyser: null,
 };
 
 const VOICE_TTS_MIN_CHUNK_CHARS = 10;
@@ -339,6 +341,7 @@ function voiceStop() {
   const shouldProcessRecording = voiceRecorderWillProcessOnStop();
   if (Voice.silenceTimer) { clearInterval(Voice.silenceTimer); Voice.silenceTimer = null; }
   if (Voice.recordTimeout) { clearTimeout(Voice.recordTimeout); Voice.recordTimeout = null; }
+  voiceStopSilenceDetect();
   if (shouldProcessRecording) Voice.mediaRecorder.stop();
   if (Voice.stream) { Voice.stream.getTracks().forEach(t => t.stop()); Voice.stream = null; }
   Voice.recording = false;
@@ -356,19 +359,38 @@ function voiceStop() {
 }
 
 // ── SILENCE DETECTION ──
+function voiceStopSilenceDetect() {
+  // Audio-Graph-Knoten der Stille-Erkennung trennen, damit keine toten
+  // Source-/Analyser-Nodes im wiederverwendeten AudioContext zurückbleiben.
+  if (Voice.silenceSource) { try { Voice.silenceSource.disconnect(); } catch (_) {} Voice.silenceSource = null; }
+  if (Voice.silenceAnalyser) { try { Voice.silenceAnalyser.disconnect(); } catch (_) {} Voice.silenceAnalyser = null; }
+}
+
 function voiceStartSilenceDetect(stream) {
   try {
-    if (!Voice.audioCtx) Voice.audioCtx = new AudioContext();
+    // Den bereits in chat.js verwalteten Shared-AudioContext wiederverwenden
+    // (mit Resume bei suspended + Wiederaufbau nach close), damit nicht ein
+    // zweiter, paralleler AudioContext gehalten wird und das Browser-Limit
+    // aktiver Kontexte (~6) nicht unnötig belastet wird.
+    if (typeof _getAudioCtx === "function") {
+      Voice.audioCtx = _getAudioCtx();
+    } else if (!Voice.audioCtx || Voice.audioCtx.state === "closed") {
+      Voice.audioCtx = new AudioContext();
+    }
     const src = Voice.audioCtx.createMediaStreamSource(stream);
     const analyser = Voice.audioCtx.createAnalyser();
     analyser.fftSize = 512;
     src.connect(analyser);
+    Voice.silenceSource = src;
+    Voice.silenceAnalyser = analyser;
     const data = new Float32Array(analyser.fftSize);
     let silenceStart = null;
     let hasSpeech = false;
 
-    Voice.silenceTimer = setInterval(() => {
-      if (!Voice.recording) { clearInterval(Voice.silenceTimer); return; }
+    // Eigenen Interval-Handle lokal halten, damit ein veralteter Tick nicht
+    // den frischen Timer einer neuen Aufnahme (Stop→Start) clearen kann.
+    const localTimer = setInterval(() => {
+      if (!Voice.recording) { clearInterval(localTimer); return; }
       analyser.getFloatTimeDomainData(data);
       let sum = 0;
       for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
@@ -379,11 +401,12 @@ function voiceStartSilenceDetect(stream) {
         if (!silenceStart) silenceStart = Date.now();
         else if (Date.now() - silenceStart > 2000) {
           voiceDebugLog("[Voice] Silence detected, auto-stop");
-          clearInterval(Voice.silenceTimer);
+          clearInterval(localTimer);
           voiceStop();
         }
       }
     }, 100);
+    Voice.silenceTimer = localTimer;
   } catch (e) {
     console.warn("[Voice] Silence detection failed:", e);
   }
@@ -469,8 +492,9 @@ async function voiceStreamChat(text) {
       signal: abort.signal,
     });
 
-    if (!resp.ok) {
-      // Fallback to non-streaming
+    if (!resp.ok || !resp.body) {
+      // Fallback to non-streaming (auch wenn der Response keinen Body hat,
+      // z.B. 200/204 ohne Stream — sonst würfe resp.body.getReader() einen TypeError).
       const fallback = await window.lexa.chat(text);
       handleChatResponse(fallback, true);
       voiceStatusBarResetIfNoSpeechPending();
@@ -526,6 +550,10 @@ async function voiceStreamChat(text) {
       addMessage(displayText, "system", action, requiresConfirmation, true);
       if (action) handleChatToolActionBlocked(action, { source: "voice", toast: false });
     }
+    // Voice-Turn persistieren, analog zum getippten Stream-Pfad in chat.js.
+    // addMessage wird hier mit silent=true aufgerufen, speichert also nicht selbst.
+    if (typeof saveChatHistory === "function") saveChatHistory();
+    if (typeof saveCurrentConversation === "function") saveCurrentConversation();
     voiceStatusBarResetIfNoSpeechPending();
 
   } catch (e) {
@@ -676,7 +704,11 @@ function toggleChatView() {
   const greeting = document.getElementById("sleek-greeting");
   const cards = document.getElementById("floating-cards-container");
   if (!msgs) return;
-  window._chatViewOpen = !window._chatViewOpen;
+  // Zielzustand aus dem tatsächlichen DOM ableiten statt einen separaten
+  // globalen Flag blind zu invertieren — so können Flag und DOM nicht
+  // auseinanderlaufen, falls anderswo nur eines von beiden gesetzt wurde.
+  const isOpen = !msgs.classList.contains("hidden");
+  window._chatViewOpen = !isOpen;
   if (window._chatViewOpen) {
     msgs.classList.remove("hidden");
     if (arrow) arrow.classList.add("flipped");

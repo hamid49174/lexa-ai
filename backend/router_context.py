@@ -51,6 +51,8 @@ async def get_context():
 @router.get("/active-window")
 async def get_active_window():
     """Nur das aktuell aktive Fenster."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     try:
         window = await asyncio.to_thread(context_monitor.get_active_window)
         return {"status": "ok", **window}
@@ -62,6 +64,8 @@ async def get_active_window():
 @router.get("/clipboard")
 async def get_clipboard():
     """Clipboard-Inhalt mit Typ-Erkennung (code, url, email, text, etc.)."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     try:
         analysis = await asyncio.to_thread(clipboard_intel.analyze_clipboard)
         return {"status": "ok", **analysis}
@@ -73,6 +77,8 @@ async def get_clipboard():
 @router.get("/apps")
 async def get_running_apps():
     """Liste aller laufenden Apps mit sichtbaren Fenstern."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     try:
         apps = await asyncio.to_thread(context_monitor.get_running_apps)
         return {"status": "ok", "apps": apps, "count": len(apps)}
@@ -84,6 +90,8 @@ async def get_running_apps():
 @router.get("/idle")
 async def get_idle_time():
     """Idle-Zeit in Sekunden seit letzter Maus/Tastatur-Eingabe."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     try:
         idle = await asyncio.to_thread(context_monitor.get_idle_time)
         return {"status": "ok", "idle_seconds": round(idle, 1)}
@@ -102,6 +110,8 @@ async def recent_files(
     directory: str = Query(default="", description="Optionales Verzeichnis"),
 ):
     """Kuerzlich geaenderte Dateien in Standard-Verzeichnissen oder einem bestimmten Ordner."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     try:
         dir_param = directory.strip() if directory else None
         files = await asyncio.to_thread(get_recent_files, hours, dir_param)
@@ -114,6 +124,8 @@ async def recent_files(
 @router.get("/project")
 async def project_context():
     """Erkanntes aktives Projekt (VS Code, PyCharm, etc.)."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     try:
         project = await asyncio.to_thread(get_project_context)
         return {"status": "ok", **project}
@@ -131,6 +143,8 @@ async def browser_tabs(
     limit: int = Query(default=20, ge=1, le=100, description="Max Anzahl Tabs"),
 ):
     """Zuletzt besuchte Browser-Tabs (Chrome History)."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     try:
         tabs = await asyncio.to_thread(get_browser_tabs, limit)
         return {"status": "ok", "tabs": tabs, "count": len(tabs)}
@@ -142,6 +156,8 @@ async def browser_tabs(
 @router.get("/browser/current")
 async def browser_current_url():
     """Aktuelle URL aus dem Browser-Fenstertitel."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     try:
         url = await asyncio.to_thread(get_current_url)
         return {"status": "ok", "url": url}
@@ -157,6 +173,8 @@ async def browser_current_url():
 @router.get("/spotify")
 async def spotify_status():
     """Aktueller Spotify-Song (aus Fenstertitel)."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     try:
         status = await asyncio.to_thread(get_spotify_status)
         return {"status": "ok", **status}
@@ -168,6 +186,8 @@ async def spotify_status():
 @router.post("/spotify/control")
 async def spotify_ctrl(req: SpotifyControlRequest):
     """Spotify steuern: play, pause, next, previous."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     allowed_actions = {"play", "pause", "next", "previous", "prev"}
     action = req.action.strip().lower()
     if action not in allowed_actions:
@@ -191,7 +211,7 @@ async def spotify_ctrl(req: SpotifyControlRequest):
 async def clipboard_history():
     """Clipboard-History (letzte 20 Eintraege, In-Memory Ring-Buffer)."""
     try:
-        history = clipboard_intel.get_history()
+        history = await asyncio.to_thread(clipboard_intel.get_history)
         return {"status": "ok", "history": history, "count": len(history)}
     except Exception as e:
         logger.warning(f"Clipboard-History-Abfrage fehlgeschlagen: {e}", exc_info=True)

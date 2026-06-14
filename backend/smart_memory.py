@@ -24,6 +24,18 @@ _tables_ready: bool = False
 _tables_lock = threading.Lock()
 _thread_local = threading.local()
 
+# Thread-safe Counter fuer periodische Wartung (gleiches Muster wie memory.py)
+_maintenance_lock = threading.Lock()
+_interaction_counter: int = 0
+_app_usage_counter: int = 0
+
+# Obergrenzen / Wartungs-Intervalle
+_INTERACTION_LOG_KEEP = 5000      # behaltene Zeilen nach Cleanup
+_INTERACTION_LOG_MAX = 6000       # erst aufraeumen wenn deutlich darueber
+_INTERACTION_CLEANUP_EVERY = 50   # Cleanup-Check nur alle N Interaktionen
+_APP_USAGE_RETENTION_DAYS = 90    # app_usage-Zeilen aelter als N Tage loeschen
+_COMMON_APPS_UPDATE_EVERY = 20    # _update_common_apps nur jede N-te Nutzung
+
 DB_PATH = LEXA_DATA_DIR / "lexa_memory.db"
 
 
@@ -71,7 +83,7 @@ def _init_smart_tables(db: sqlite3.Connection) -> None:
 def _init_smart_tables_inner(db: sqlite3.Connection) -> None:
     """Tatsaechliche Tabellenerstellung — wird unter Lock aufgerufen."""
     db.executescript("""
-        CREATE TABLE IF NOT EXISTS user_profile (
+        CREATE TABLE IF NOT EXISTS smart_user_profile (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
             updated_at TEXT DEFAULT (datetime('now', 'localtime')),
@@ -124,7 +136,7 @@ def profile_get(key: str) -> Optional[dict]:
         return None
     db = _get_db()
     row = db.execute(
-        "SELECT key, value, updated_at, confidence FROM user_profile WHERE key = ?",
+        "SELECT key, value, updated_at, confidence FROM smart_user_profile WHERE key = ?",
         (key.strip(),)
     ).fetchone()
     if not row:
@@ -145,7 +157,7 @@ def profile_get_all() -> dict[str, Any]:
     """Komplettes Profil als Dict {key: {value, updated_at, confidence}} zurueckgeben."""
     db = _get_db()
     rows = db.execute(
-        "SELECT key, value, updated_at, confidence FROM user_profile ORDER BY key"
+        "SELECT key, value, updated_at, confidence FROM smart_user_profile ORDER BY key"
     ).fetchall()
     result = {}
     for row in rows:
@@ -173,12 +185,12 @@ def profile_set(key: str, value: Any, confidence: float = 0.5) -> str:
 
     db = _get_db()
     db.execute(
-        """INSERT INTO user_profile (key, value, updated_at, confidence)
+        """INSERT INTO smart_user_profile (key, value, updated_at, confidence)
            VALUES (?, ?, datetime('now', 'localtime'), ?)
            ON CONFLICT(key) DO UPDATE SET
                value = excluded.value,
                updated_at = excluded.updated_at,
-               confidence = MAX(user_profile.confidence, excluded.confidence)""",
+               confidence = MAX(smart_user_profile.confidence, excluded.confidence)""",
         (key, val_json, confidence),
     )
     db.commit()
@@ -190,7 +202,7 @@ def profile_delete(key: str) -> str:
     if not key or not key.strip():
         return "Key darf nicht leer sein."
     db = _get_db()
-    result = db.execute("DELETE FROM user_profile WHERE key = ?", (key.strip(),))
+    result = db.execute("DELETE FROM smart_user_profile WHERE key = ?", (key.strip(),))
     db.commit()
     if result.rowcount:
         return f"Profil '{key}' geloescht."
@@ -277,6 +289,22 @@ def learn_from_interaction(
     )
     db.commit()
 
+    # 1b. interaction_log periodisch kappen (verhindert unbegrenztes Wachstum)
+    global _interaction_counter
+    with _maintenance_lock:
+        _interaction_counter += 1
+        counter_val = _interaction_counter
+    if counter_val % _INTERACTION_CLEANUP_EVERY == 0:
+        row_count = db.execute("SELECT COUNT(*) FROM interaction_log").fetchone()[0]
+        if row_count > _INTERACTION_LOG_MAX:
+            db.execute(
+                "DELETE FROM interaction_log WHERE id NOT IN "
+                "(SELECT id FROM interaction_log ORDER BY id DESC LIMIT ?)",
+                (_INTERACTION_LOG_KEEP,),
+            )
+            db.commit()
+            logger.debug(f"Smart Memory: interaction_log Cleanup {row_count} -> {_INTERACTION_LOG_KEEP}")
+
     # 2. Praeferenzen extrahieren (Keyword-basiert, kein AI-Call)
     _extract_preferences(user_message)
 
@@ -334,8 +362,21 @@ def learn_app_usage(app_name: str) -> None:
     )
     db.commit()
 
-    # Auch im Profil als common_apps aktualisieren (Top 20)
-    _update_common_apps()
+    # Periodische Wartung statt bei jeder einzelnen Nutzung (vermeidet N+1-Aggregation)
+    global _app_usage_counter
+    with _maintenance_lock:
+        _app_usage_counter += 1
+        counter_val = _app_usage_counter
+
+    if counter_val % _COMMON_APPS_UPDATE_EVERY == 0:
+        # Alte app_usage-Zeilen bereinigen (sie fliessen ohnehin nicht mehr in die
+        # 30-Tage-Aggregation ein) und common_apps im Profil aktualisieren.
+        db.execute(
+            "DELETE FROM app_usage WHERE timestamp < datetime('now', ?, 'localtime')",
+            (f"-{_APP_USAGE_RETENTION_DAYS} days",),
+        )
+        db.commit()
+        _update_common_apps()
 
 
 def _extract_preferences(message: str) -> None:
@@ -531,7 +572,7 @@ def get_stats() -> dict:
     """Lern-Statistiken: Anzahl Interaktionen, gelernte Patterns etc."""
     db = _get_db()
     interaction_count = db.execute("SELECT COUNT(*) as c FROM interaction_log").fetchone()["c"]
-    profile_count = db.execute("SELECT COUNT(*) as c FROM user_profile").fetchone()["c"]
+    profile_count = db.execute("SELECT COUNT(*) as c FROM smart_user_profile").fetchone()["c"]
     command_count = db.execute("SELECT COUNT(*) as c FROM command_frequency").fetchone()["c"]
     app_count = db.execute("SELECT COUNT(DISTINCT app_name) as c FROM app_usage").fetchone()["c"]
 

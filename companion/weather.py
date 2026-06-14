@@ -4,6 +4,7 @@ No registration, no API key, no credit card. 10,000 calls/day free.
 """
 
 import logging
+import threading
 import time
 from typing import Optional
 from datetime import datetime
@@ -13,7 +14,9 @@ import requests
 logger = logging.getLogger("lexa.weather")
 
 # ── Cache (TTL 10 minutes) ──
+# Accessed from worker threads (asyncio.to_thread), therefore guarded by a lock.
 _cache: dict[str, dict] = {}
+_cache_lock = threading.Lock()
 _CACHE_TTL = 600  # 10 minutes
 
 # ── WMO Weather Code → Emoji + Description (German) ──
@@ -58,14 +61,24 @@ def _wmo_to_description(code: int) -> str:
 
 
 def _cache_get(key: str) -> Optional[dict]:
-    entry = _cache.get(key)
-    if entry and (time.time() - entry["ts"]) < _CACHE_TTL:
-        return entry["data"]
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry and (time.time() - entry["ts"]) < _CACHE_TTL:
+            return entry["data"]
+        # Expired entry → drop it so the cache cannot grow unbounded.
+        if entry is not None:
+            _cache.pop(key, None)
     return None
 
 
 def _cache_set(key: str, data: dict) -> None:
-    _cache[key] = {"data": data, "ts": time.time()}
+    now = time.time()
+    with _cache_lock:
+        # Purge stale entries to bound memory growth over long runtimes.
+        expired = [k for k, v in _cache.items() if (now - v["ts"]) >= _CACHE_TTL]
+        for k in expired:
+            _cache.pop(k, None)
+        _cache[key] = {"data": data, "ts": now}
 
 
 def _geocode(city: str) -> Optional[dict]:
@@ -112,7 +125,8 @@ def _get_default_city() -> Optional[str]:
         pass
 
     try:
-        resp = requests.get("http://ip-api.com/json/?fields=city", timeout=3)
+        # HTTPS-Quelle (kein API-Key nötig) — schützt den Standort gegen MITM-Manipulation.
+        resp = requests.get("https://ipapi.co/json/", timeout=3)
         if resp.status_code == 200:
             city = resp.json().get("city")
             if city:
@@ -296,16 +310,22 @@ def weather_will_it_rain(city: str = "") -> dict:
     probs = hourly.get("precipitation_probability", [])
     amounts = hourly.get("precipitation", [])
 
+    # Only consider hours from "now" onwards (timezone Europe/Berlin, see request).
+    now = datetime.now()
     rain_entries = []
     for i in range(len(times)):
+        try:
+            dt = datetime.strptime(times[i], "%Y-%m-%dT%H:%M")
+        except (ValueError, IndexError):
+            dt = None
+        # Skip past hours of the current day so "expected_time" is always in the future.
+        if dt is not None and dt < now.replace(minute=0, second=0, microsecond=0):
+            continue
+
         prob = probs[i] if i < len(probs) else 0
         amount = amounts[i] if i < len(amounts) else 0
         if prob > 30 or amount > 0:
-            try:
-                dt = datetime.strptime(times[i], "%Y-%m-%dT%H:%M")
-                time_str = dt.strftime("%H:%M")
-            except (ValueError, IndexError):
-                time_str = times[i]
+            time_str = dt.strftime("%H:%M") if dt is not None else times[i]
             rain_entries.append({
                 "time": time_str,
                 "probability": prob,

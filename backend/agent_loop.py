@@ -34,11 +34,15 @@ from backend.config import (
     AGENT_STEP_TIMEOUT,
 )
 from backend.agent_reflection import reflect_action
-from backend.security import audit_value_metadata, is_command_allowed, audit_log, validate_params
-from backend.action_parser import _ACTION_NAME_PATTERN, _sanitize_params
+from backend.security import audit_value_metadata, check_action_rate_limit, is_command_allowed, audit_log, validate_params
+from backend.action_parser import (
+    _ACTION_NAME_PATTERN,
+    _TOOL_ARGUMENT_ERROR_REPLY,
+    _sanitize_params,
+    _scan_params_for_dangerous_output,
+)
 logger = logging.getLogger("lexa.agent")
 _AGENT_ARGS_MISSING = object()
-_TOOL_ARGUMENT_ERROR_REPLY = "Tool-Argumente ungueltig. Aktion wurde nicht ausgefuehrt."
 
 
 # ══════════════════════════════════════════════════
@@ -201,7 +205,17 @@ def _infer_agent_action_risk(action_name: str, permission: str = "") -> str:
 
 
 def _build_agent_run_ledger(run: AgentRun):
-    from backend.agent_protocol import AgentPlan, AgentRunLedger
+    from backend.agent_protocol import (
+        MAX_BUDGET_SECONDS,
+        AgentPlan,
+        AgentRunLedger,
+    )
+
+    # AGENT_MAX_STEPS (bis 50) * AGENT_STEP_TIMEOUT (bis 600s) kann das in
+    # AgentPlan erlaubte Budget (MAX_BUDGET_SECONDS) ueberschreiten und wuerde
+    # sonst bei jedem run_agent()-Aufruf einen ValueError werfen. Deshalb hart
+    # auf das erlaubte Maximum kappen.
+    budget_seconds = min(AGENT_MAX_STEPS * AGENT_STEP_TIMEOUT, MAX_BUDGET_SECONDS)
 
     plan = AgentPlan(
         goal=run.user_message,
@@ -209,14 +223,14 @@ def _build_agent_run_ledger(run: AgentRun):
         allowed_tools=[],
         forbidden_tools=["shell", "unsafe_direct_write", "mcpCallTool"],
         budget_steps=AGENT_MAX_STEPS,
-        budget_seconds=AGENT_MAX_STEPS * AGENT_STEP_TIMEOUT,
+        budget_seconds=budget_seconds,
         checkpoints=["plan", "act", "verify", "review"],
         requires_user_review=False,
         max_tool_calls=AGENT_MAX_STEPS,
         max_risky_tool_calls=max(1, AGENT_MAX_STEPS // 2),
         max_memory_reads=AGENT_MAX_STEPS,
         max_os_writes=1,
-        max_runtime_seconds=AGENT_MAX_STEPS * AGENT_STEP_TIMEOUT,
+        max_runtime_seconds=budget_seconds,
         max_retry_count=2,
     )
     return AgentRunLedger(run_id=run.id, plan=plan, status="running")
@@ -417,12 +431,39 @@ async def _execute_tool(action_name: str, params: dict, *, plan_length: int = 1,
 
     safe_params = _sanitize_params(safe_params)
 
+    # Gefaehrliche Shell-Muster (rm -rf, powershell -enc, ...) in LLM-gelieferten
+    # String-Argumenten konsistent zum Chat-Pfad (action_parser) blockieren.
+    try:
+        _scan_params_for_dangerous_output(safe_params)
+    except ValueError as e:
+        audit_log(action_name, "agent_dangerous_param_blocked", audit_value_metadata("reason", str(e)))
+        return {"success": False, "error": str(e)}
+
+    # Risk-weighted rate limit — wie im action_executor-Pfad. Ein einzelner
+    # Agent-Run kann sonst bis AGENT_MAX_STEPS riskante Aktionen in schneller
+    # Folge ausfuehren, ohne dass der Schutz greift, der den Chat-Pfad sichert.
+    rate_limit = check_action_rate_limit(action_name)
+    if not rate_limit.get("allowed", False):
+        audit_log(
+            action_name,
+            "agent_risk_rate_limited",
+            f"used={rate_limit.get('used')} limit={rate_limit.get('limit')}",
+        )
+        return {
+            "success": False,
+            "error": "Zu viele riskante Aktionen in kurzer Zeit. Read-only Aktionen bleiben erlaubt.",
+            "rate_limited": True,
+        }
+
     if action_name.startswith("personal_os_"):
         try:
             from backend.personal_os_actions import execute_personal_os_action, is_personal_os_action
             if not is_personal_os_action(action_name):
                 return {"success": False, "error": f"Unbekannte Personal OS Aktion: {action_name}"}
-            return await execute_personal_os_action(action_name, safe_params)
+            result = await execute_personal_os_action(action_name, safe_params)
+            if not isinstance(result, dict):
+                return {"success": False, "error": f"Unerwartetes Ergebnis: {type(result).__name__}"}
+            return result
         except Exception as e:
             logger.error(f"Personal OS tool execution failed: {action_name} - {e}", exc_info=True)
             return {"success": False, "error": str(e)}
@@ -1144,6 +1185,7 @@ async def run_agent(
 
     step_count = 0
     failed_tool_attempts: dict[str, int] = {}
+    failed_tool_by_name: dict[str, int] = {}
     forced_first_tool = (
         ("hermes_desktop_task", {"message": user_message})
         if _hermes_desktop_controller_required(worker_name, user_message)
@@ -1200,7 +1242,7 @@ async def run_agent(
                 )
             except asyncio.TimeoutError:
                 exec_result = {"success": False, "error": f"Timeout nach {AGENT_STEP_TIMEOUT}s"}
-                step.duration_ms = AGENT_STEP_TIMEOUT * 1000
+                step.duration_ms = (time.time() - step.started_at) * 1000
             else:
                 step.duration_ms = (time.time() - step.started_at) * 1000
 
@@ -1234,24 +1276,32 @@ async def run_agent(
                     "role": "user",
                     "content": f"[TOOL ERGEBNIS] {step.result}",
                 })
-                if action_name == "desktop_position" and exec_result.get("success"):
-                    forced_direct_summary = _format_desktop_position_user_summary(exec_result.get("data", {}))
-                elif action_name == "desktop_engine_status" and exec_result.get("success"):
-                    forced_direct_summary = _format_desktop_engine_status_user_summary(exec_result.get("data", {}))
-                elif action_name == "desktop_engine_observe" and exec_result.get("success"):
-                    forced_direct_summary = _format_desktop_engine_observe_user_summary(exec_result.get("data", {}))
-                elif action_name == "ui_tree" and exec_result.get("success"):
-                    forced_direct_summary = _format_ui_tree_user_summary(exec_result.get("data", {}))
-                elif action_name == "ui_find" and exec_result.get("success"):
-                    forced_direct_summary = _format_ui_find_user_summary(exec_result.get("data", {}))
-                elif action_name == "hermes_desktop_task" and exec_result.get("success"):
-                    forced_direct_summary = _format_hermes_desktop_task_user_summary(exec_result.get("data", {}))
-                elif (
+                # Tools, die direkt eine fertige User-Antwort liefern sollen (kein
+                # zusaetzlicher LLM-Roundtrip). Liefert der Formatter "" zurueck,
+                # darf der Run trotzdem nicht stillschweigend ins LLM fallen — wir
+                # fallen dann auf step.result zurueck und schliessen den Run ab.
+                direct_summary_formatters = {
+                    "desktop_position": _format_desktop_position_user_summary,
+                    "desktop_engine_status": _format_desktop_engine_status_user_summary,
+                    "desktop_engine_observe": _format_desktop_engine_observe_user_summary,
+                    "ui_tree": _format_ui_tree_user_summary,
+                    "ui_find": _format_ui_find_user_summary,
+                    "hermes_desktop_task": _format_hermes_desktop_task_user_summary,
+                }
+                formatter = direct_summary_formatters.get(action_name)
+                if (
                     action_name == "screen_read_text"
-                    and exec_result.get("success")
-                    and not _hermes_screen_text_needs_llm_followup(user_message)
+                    and _hermes_screen_text_needs_llm_followup(user_message)
                 ):
-                    forced_direct_summary = _format_screen_read_text_user_summary(exec_result.get("data", {}))
+                    formatter = None
+                elif action_name == "screen_read_text":
+                    formatter = _format_screen_read_text_user_summary
+                if formatter is not None and exec_result.get("success"):
+                    forced_direct_summary = (
+                        formatter(exec_result.get("data", {}))
+                        or step.result
+                        or f"{action_name}: Aktion ausgefuehrt."
+                    )
             step_count += 1
 
     if forced_direct_summary:
@@ -1260,21 +1310,29 @@ async def run_agent(
         yield {"type": "thinking", "message": forced_direct_summary}
 
     while run.status == "running" and step_count < AGENT_MAX_STEPS:
-        # Call LLM with tools
-        # First call: user_message goes through normal _build_messages path
-        # Subsequent calls: user_message=None, last msg is already in agent_messages
+        # Call LLM with tools.
+        # Die User-Nachricht liegt bereits als letzter Eintrag in agent_messages
+        # (siehe oben), daher immer msg=None uebergeben — sonst haengt
+        # ai_engine._build_messages die identische Nachricht beim ersten Call
+        # ein zweites Mal an (doppelter Prompt-Eintrag).
         try:
-            msg = user_message if step_count == 0 else None
             result = await asyncio.to_thread(
                 chat,
-                msg,
+                None,
                 agent_messages,
                 system_extra=agent_context,
             )
         except Exception as e:
             logger.error(f"Agent LLM call failed: {e}", exc_info=True)
+            # Rohe Provider-Exceptions koennen lokale Pfade, URLs oder
+            # Schluessel-Fragmente enthalten. Vor der Ausgabe an den Client
+            # (SSE-Event UND run.summary) konsequent durch die Secret-Redaction
+            # leiten, damit die im Projekt eingebaute Filterung nicht umgangen wird.
+            from backend.agent_protocol import redacted_summary
+
+            safe_error = f"KI-Fehler: {redacted_summary(str(e))}"
             run.status = "failed"
-            run.summary = f"KI-Fehler: {e}"
+            run.summary = safe_error
             if trace_recorder is not None:
                 _record_agent_trace(
                     trace_recorder,
@@ -1285,7 +1343,7 @@ async def run_agent(
                     summary="Agent LLM call failed",
                     metadata={"error": str(e)},
                 )
-            yield {"type": "error", "message": f"KI-Fehler: {e}"}
+            yield {"type": "error", "message": safe_error}
             break
 
         result_type = result.get("type", "text")
@@ -1457,7 +1515,7 @@ async def run_agent(
                 except asyncio.TimeoutError:
                     step.status = StepStatus.FAILED
                     step.error = f"Timeout nach {AGENT_STEP_TIMEOUT}s"
-                    step.duration_ms = AGENT_STEP_TIMEOUT * 1000
+                    step.duration_ms = (time.time() - step.started_at) * 1000
                     if run.ledger is not None:
                         if trace_recorder is not None:
                             _record_agent_trace(
@@ -1567,6 +1625,7 @@ async def run_agent(
                     break
 
                 repeat_failure_count = 0
+                tool_failure_limit_hit = False
                 if exec_result.get("success"):
                     step.status = StepStatus.SUCCESS
                     step.result = _format_tool_result(action_name, exec_result)
@@ -1577,10 +1636,22 @@ async def run_agent(
                     failure_signature = _agent_tool_call_signature(action_name, params)
                     repeat_failure_count = failed_tool_attempts.get(failure_signature, 0) + 1
                     failed_tool_attempts[failure_signature] = repeat_failure_count
+                    # Zusaetzlich pro Tool-Name zaehlen, damit minimale Arg-Variation
+                    # (z.B. anderes Whitespace) die harte Abbruchgrenze nicht umgeht.
+                    tool_failure_count = failed_tool_by_name.get(action_name, 0) + 1
+                    failed_tool_by_name[action_name] = tool_failure_count
                     if repeat_failure_count >= 2:
+                        tool_failure_limit_hit = True
                         step.error = (
                             f"{step.error} "
                             "(identischer Tool-Call ist zweimal fehlgeschlagen; Agent-Loop abgebrochen)"
+                        )
+                        step.result = _format_tool_result(action_name, {**exec_result, "error": step.error})
+                    elif tool_failure_count >= 3:
+                        tool_failure_limit_hit = True
+                        step.error = (
+                            f"{step.error} "
+                            f"('{action_name}' ist dreimal fehlgeschlagen; Agent-Loop abgebrochen)"
                         )
                         step.result = _format_tool_result(action_name, {**exec_result, "error": step.error})
 
@@ -1630,11 +1701,16 @@ async def run_agent(
                         "role": "user",
                         "content": _build_tool_self_correction_message(action_name, params, exec_result),
                     })
-                    if repeat_failure_count >= 2:
+                    if tool_failure_limit_hit:
                         run.status = "failed"
-                        run.summary = (
-                            f"Abgebrochen: '{action_name}' ist zweimal mit denselben Argumenten fehlgeschlagen."
-                        )
+                        if repeat_failure_count >= 2:
+                            run.summary = (
+                                f"Abgebrochen: '{action_name}' ist zweimal mit denselben Argumenten fehlgeschlagen."
+                            )
+                        else:
+                            run.summary = (
+                                f"Abgebrochen: '{action_name}' ist dreimal fehlgeschlagen."
+                            )
                 else:
                     formatted = _format_tool_result(action_name, exec_result)
                     agent_messages.append({
@@ -1651,6 +1727,12 @@ async def run_agent(
                 step_count += 1
                 if run.status == "failed":
                     break
+                # BEWUSSTES DESIGN: Pro LLM-Turn wird nur EIN Tool-Call ausgefuehrt.
+                # Liefert das Modell mehrere Calls, haengen wir nach dem ersten eine
+                # Mini-Reflexion an und brechen die Batch-Schleife ab, damit das LLM
+                # die uebrigen Calls nach dem Zwischenergebnis neu bewertet (Sicherheit
+                # vor blindem Parallel-Ausfuehren). Die verbleibenden Calls dieses
+                # Turns werden absichtlich verworfen, nicht ignoriert.
                 remaining_in_batch = len(tool_calls) - call_index - 1
                 if remaining_in_batch > 0 and step_count < AGENT_MAX_STEPS:
                     agent_messages.append({

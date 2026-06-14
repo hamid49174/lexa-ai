@@ -38,6 +38,21 @@ const LexaState = (() => {
     _listeners: {},
   };
 
+  // When the tab/window returns to the foreground, immediately run any
+  // non-critical intervals that were skipped while hidden, so views show
+  // fresh data instead of waiting up to a full interval (e.g. 30s) to refresh.
+  if (typeof document !== "undefined" && document.addEventListener) {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") return;
+      for (const name of Object.keys(_state._intervals)) {
+        const entry = _state._intervals[name];
+        if (entry && !entry.isCritical) {
+          try { entry.fn(); } catch (e) { console.error(`[State] Catch-up error for '${name}':`, e); }
+        }
+      }
+    });
+  }
+
   return {
     // Get any state value
     get(key) {
@@ -84,19 +99,26 @@ const LexaState = (() => {
         }
         fn();
       };
-      _state._intervals[name] = window.setInterval(wrappedFn, ms);
+      // Store fn + meta so we can immediately catch up non-critical intervals
+      // when the tab becomes visible again (see visibilitychange listener below).
+      _state._intervals[name] = {
+        id: window.setInterval(wrappedFn, ms),
+        fn,
+        isCritical,
+      };
     },
 
     clearInterval(name) {
-      if (_state._intervals[name]) {
-        window.clearInterval(_state._intervals[name]);
+      const entry = _state._intervals[name];
+      if (entry) {
+        window.clearInterval(entry.id);
         delete _state._intervals[name];
       }
     },
 
     clearAllIntervals() {
       for (const name of Object.keys(_state._intervals)) {
-        window.clearInterval(_state._intervals[name]);
+        window.clearInterval(_state._intervals[name].id);
       }
       _state._intervals = {};
     },

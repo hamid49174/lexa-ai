@@ -45,7 +45,19 @@ def _is_exit(text: str) -> bool:
     if not text:
         return False
     clean = text.lower().strip().rstrip(".!?")
-    return clean in EXIT_PHRASES or any(p in clean for p in EXIT_PHRASES)
+    if not clean:
+        return False
+    # Exact match on the whole utterance always counts as exit.
+    if clean in EXIT_PHRASES:
+        return True
+    # For multi-word phrases ("bis später", "das wars") allow a word-boundary
+    # substring match. Single-token phrases ("stop", "halt", "ende", "bye")
+    # must NOT match as substrings — otherwise "Halterung", "Endergebnis" etc.
+    # would falsely terminate the conversation.
+    for phrase in EXIT_PHRASES:
+        if " " in phrase and re.search(r"\b" + re.escape(phrase) + r"\b", clean):
+            return True
+    return False
 
 
 def _clean_for_tts(text: str) -> str:
@@ -63,8 +75,10 @@ def _clean_for_tts(text: str) -> str:
     text = re.sub(r'__([^_]*)__', r'\1', text)
     text = re.sub(r'\*([^*]*)\*', r'\1', text)
     text = re.sub(r'_([^_]*)_', r'\1', text)
-    # Convert bullet points to natural pauses
-    text = re.sub(r'^\s*[-*]\s+', '. ', text, flags=re.MULTILINE)
+    # Convert bullet points to natural pauses — only when a word follows the
+    # marker, so number/sign lines like "-5 Grad" or "- 20 % Rabatt" keep their
+    # content instead of becoming ". 5 Grad".
+    text = re.sub(r'^\s*[-*]\s+(?=[A-Za-zÄÖÜäöüß])', '. ', text, flags=re.MULTILINE)
     # Strip remaining markdown artifacts (e.g. horizontal rules)
     text = re.sub(r'^---+$', '', text, flags=re.MULTILINE)
     # Collapse whitespace
@@ -154,6 +168,26 @@ def _handle_tool_call(tool_call_result: dict, full_text: str,
     return reply or full_text, audio_paths
 
 
+# Words/markers that end a heuristically extracted argument phrase, so a
+# follow-up clause ("Word und schreibe einen Brief") is not swallowed.
+_ARG_STOP_WORDS = {"und", "dann", "danach", "sowie", "oder", "bitte"}
+
+
+def _extract_arg_phrase(words: list[str], start: int) -> str:
+    """Collect words from `start` until a stop word or sentence punctuation."""
+    collected: list[str] = []
+    for w in words[start:]:
+        if w.lower() in _ARG_STOP_WORDS:
+            break
+        # Stop at clause/sentence punctuation but keep the leading token.
+        cut = re.split(r"[,.;:!?]", w, maxsplit=1)[0]
+        if cut:
+            collected.append(cut)
+        if cut != w:  # punctuation was hit inside this token
+            break
+    return " ".join(collected).strip()
+
+
 def _detect_text_tool_call(full_text: str, command_text: str) -> tuple[str, list[str]] | None:
     """Detect when AI described a tool call in text instead of making one."""
     patterns = [
@@ -182,14 +216,18 @@ def _detect_text_tool_call(full_text: str, command_text: str) -> tuple[str, list
                 if "city" in props:
                     for i, w in enumerate(lower_words):
                         if w in ("in", "für", "von") and i + 1 < len(words):
-                            args["city"] = " ".join(words[i + 1:])
+                            phrase = _extract_arg_phrase(words, i + 1)
+                            if phrase:
+                                args["city"] = phrase
                             break
                 if "name" in props:
                     for trigger in ("öffne", "starte", "open", "start"):
                         if trigger in lower_words:
                             idx = lower_words.index(trigger)
                             if idx + 1 < len(words):
-                                args["name"] = " ".join(words[idx + 1:])
+                                phrase = _extract_arg_phrase(words, idx + 1)
+                                if phrase:
+                                    args["name"] = phrase
                             break
 
             from backend.action_parser import process_tool_call
@@ -227,7 +265,11 @@ class ConversationEngine:
         self._on_volume = on_volume
         self._active = False
         self._noise_floor = 0.0
-        self._history: collections.deque = collections.deque(maxlen=20)
+        # Cap kept even so the history always holds whole user/assistant pairs.
+        # Trimming happens manually (see _append_turn) to never leave a dangling
+        # entry that some LLM APIs reject as an invalid role sequence.
+        self._history_max = 20
+        self._history: collections.deque = collections.deque()
 
     @property
     def is_active(self) -> bool:
@@ -240,6 +282,20 @@ class ConversationEngine:
     def stop(self):
         self._active = False
         self.player.stop()
+
+    def _append_turn(self, user_text: str, assistant_text: str) -> None:
+        """Append a user/assistant turn and trim by whole pairs.
+
+        Trims two entries at a time so the history never starts with a dangling
+        assistant message or ends with an orphaned user message.
+        """
+        self._history.append({"role": "user", "content": user_text})
+        if assistant_text:
+            self._history.append({"role": "assistant", "content": assistant_text})
+        while len(self._history) > self._history_max:
+            self._history.popleft()
+            if self._history and self._history[0]["role"] == "assistant":
+                self._history.popleft()
 
     def _push_state(self, state: str):
         if self._on_state:
@@ -311,12 +367,13 @@ class ConversationEngine:
                     push_response(reply, tts_handled=True)
                     return {"reply": reply, "audio_paths": fb_audio}
 
-            # Flush remaining buffer
+            # Flush remaining buffer (last sentence without trailing punctuation)
             remaining = sentence_buffer.strip()
             if remaining:
                 sentence_count += 1
                 push_response_chunk(remaining)
 
+            # One TTS file per voice turn: synthesize the full reply text once.
             audio_paths = []
             path = _tts_for_text(full_text)
             if path:
@@ -357,7 +414,7 @@ class ConversationEngine:
 
         push_response(reply, tts_handled=True)
         audio_path = _tts_for_text(reply)
-        return {"reply": reply, "audio_path": audio_path, "audio_paths": [audio_path] if audio_path else []}
+        return {"reply": reply, "audio_paths": [audio_path] if audio_path else []}
 
     def run_conversation(self, initial_command: str, sd,
                          is_listening: Callable[[], bool]) -> None:
@@ -367,18 +424,26 @@ class ConversationEngine:
         from voice.config import (
             SAMPLE_RATE, LISTEN_TIMEOUT_S, MAX_UTTERANCE_S,
         )
-        from backend.voice_ws import push_state
+        from backend.voice_ws import push_state, push_response_chunk
 
         self._active = True
         command = initial_command
         turn = 0
         noise_floor = 0.0001
+        empty_retries = 0
+        MAX_EMPTY_RETRIES = 1
 
         # Try to calibrate (may already be done by wakeword)
         try:
             noise_floor, _ = calibrate_noise_floor(sd)
         except Exception:
             pass
+
+        # Keep the freshly calibrated noise floor as the engine-wide value so
+        # the barge-in threshold (play_files_with_bargein uses self._noise_floor)
+        # stays consistent with _record_utterance, which gets noise_floor directly.
+        if noise_floor:
+            self._noise_floor = noise_floor
 
         push_state("conversation_start")
 
@@ -402,16 +467,12 @@ class ConversationEngine:
                 push_state("conversation_end")
                 break
 
-            # Update history
+            # Update history (trimmed by whole user/assistant pairs)
             ai_reply = result.get("reply", "")
-            self._history.append({"role": "user", "content": command})
-            if ai_reply:
-                self._history.append({"role": "assistant", "content": ai_reply})
+            self._append_turn(command, ai_reply)
 
             # Playback with barge-in
             audio_paths = result.get("audio_paths") or []
-            if not audio_paths and result.get("audio_path"):
-                audio_paths = [result["audio_path"]]
 
             if audio_paths:
                 push_state("speaking")
@@ -448,6 +509,35 @@ class ConversationEngine:
 
             command = transcribe_audio_data(cmd_audio, SAMPLE_RATE).strip()
             _log_conversation_text_event("Conv Turn input", command, turn=turn)
+
+            # Empty transcript (STT failure / unintelligible) — ask the user to
+            # repeat once instead of silently ending the conversation. After the
+            # retry limit, fall through so the empty-command guard ends the loop.
+            if not command and empty_retries < MAX_EMPTY_RETRIES:
+                empty_retries += 1
+                logger.info("[Conv] Empty transcript — asking user to repeat")
+                clarify = "Entschuldigung, das habe ich nicht verstanden. Kannst du das wiederholen?"
+                push_response_chunk(clarify)
+                clarify_path = _tts_for_text(clarify)
+                if clarify_path:
+                    push_state("speaking")
+                    self.player.play_files_with_bargein(
+                        [clarify_path], sd,
+                        is_active=lambda: is_listening() and self._active,
+                        noise_floor=self._noise_floor,
+                    )
+                push_state("listening")
+                cmd_audio = self._record_utterance(
+                    sd, noise_floor, is_listening,
+                    timeout_s=LISTEN_TIMEOUT_S, max_s=MAX_UTTERANCE_S,
+                )
+                if cmd_audio is None:
+                    push_state("conversation_end")
+                    break
+                command = transcribe_audio_data(cmd_audio, SAMPLE_RATE).strip()
+                _log_conversation_text_event("Conv Turn retry input", command, turn=turn)
+            elif command:
+                empty_retries = 0
 
         self._active = False
         if self._on_volume:

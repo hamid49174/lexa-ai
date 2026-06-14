@@ -12,6 +12,7 @@ _PUBLIC_PATHS = {"/health"}
 _DEV_DOC_PATHS = {"/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"}
 _DEV_ENVS = {"dev", "development", "local", "test", "testing"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
+_TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 def get_local_auth_token() -> str:
@@ -29,11 +30,23 @@ def is_dev_mode() -> bool:
     return (os.environ.get("LEXA_ENV") or "").strip().lower() in _DEV_ENVS
 
 
+def are_docs_exposed() -> bool:
+    """Expose API docs without local auth only when explicitly opted in.
+
+    Requires BOTH dev mode (LEXA_ENV) AND an explicit LEXA_EXPOSE_DOCS opt-in.
+    This prevents an accidentally shipped LEXA_ENV=development from leaking the
+    full OpenAPI spec of the local control plane without a deliberate second flag.
+    """
+    if not is_dev_mode():
+        return False
+    return (os.environ.get("LEXA_EXPOSE_DOCS") or "").strip().lower() in _TRUE_VALUES
+
+
 def is_public_path(path: str) -> bool:
     clean_path = "/" + (path or "/").lstrip("/")
     if clean_path in _PUBLIC_PATHS:
         return True
-    return is_dev_mode() and clean_path in _DEV_DOC_PATHS
+    return are_docs_exposed() and clean_path in _DEV_DOC_PATHS
 
 
 def request_has_valid_local_token(request: Request) -> bool:

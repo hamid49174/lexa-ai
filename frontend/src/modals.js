@@ -246,14 +246,15 @@ function showToast(message, type = "info", duration = 3500) {
   text.className = "toast-text";
   text.textContent = message;
   toast.append(icon, text);
+  // Always log to notification center, even if the toast container is missing
+  // (e.g. early in bootstrap or in a reduced view) so the message is not lost.
+  _addToNotifCenter(message, type);
   if (!container) return;
   container.appendChild(toast);
   setTimeout(() => {
     toast.classList.add("toast-out");
     toast.addEventListener("animationend", () => toast.remove());
   }, duration);
-  // Also log to notification center
-  _addToNotifCenter(message, type);
 }
 
 // ── GENERIC INPUT MODAL ──────────────────────────
@@ -693,9 +694,9 @@ function renderPaletteResults(query) {
     type: "view", name: v, desc: t("modals.switchToView", { view: v }), icon: "\u{1F4CB}"
   }));
   viewItems.push(
-    { type: "action", name: "help", desc: t("modals.showHelp"), icon: "\u2753", action: "showHelp()" },
-    { type: "action", name: "onboarding", desc: t("modals.startOnboarding"), icon: "\u{1F44B}", action: "showOnboarding()" },
-    { type: "action", name: "shortcuts", desc: t("modals.showShortcuts"), icon: "\u2328", action: "showShortcutsOverlay()" },
+    { type: "action", name: "help", desc: t("modals.showHelp"), icon: "\u2753", action: showHelp },
+    { type: "action", name: "onboarding", desc: t("modals.startOnboarding"), icon: "\u{1F44B}", action: showOnboarding },
+    { type: "action", name: "shortcuts", desc: t("modals.showShortcuts"), icon: "\u2328", action: showShortcutsOverlay },
   );
   const cmdItems = getAllCommands().map(c => ({
     type: "cmd", name: c.name, desc: c.desc, icon: c.status === "confirm" ? "\u26A0" : "\u26A1", cat: c.cat
@@ -720,9 +721,9 @@ function renderPaletteResults(query) {
     const el = createPaletteResultItem(item, i);
     el.addEventListener("click", () => {
       if (item.type === "view") { switchView(item.name); closePalette({ restoreFocus: false }); }
-      else if (item.type === "action") { 
-        const fnName = item.action.replace("()", "");
-        if (typeof window[fnName] === "function") window[fnName]();
+      else if (item.type === "action") {
+        if (typeof item.action === "function") item.action();
+        else showToast(t("modals.nothingFound"), "error");
         closePalette({ restoreFocus: false });
       }
       else { insertCommand(item.name); closePalette({ restoreFocus: false }); }

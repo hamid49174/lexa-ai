@@ -32,6 +32,7 @@ YAML Plugin Format:
 import ast
 import asyncio
 import importlib.util
+import inspect
 import ipaddress
 import json
 import logging
@@ -242,9 +243,29 @@ def _is_local_or_private_host(host: str) -> bool:
     return bool(ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast)
 
 
+def _is_always_forbidden_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Adressbereiche, die NIE erreichbar sein duerfen -- auch nicht mit allow_private_hosts.
+
+    Deckt insbesondere die Cloud-Metadata-IP 169.254.169.254 (link-local) ab.
+    allow_private_hosts soll bewusst nur loopback/private LAN-Dienste oeffnen,
+    niemals link-local/metadata/multicast/reserved/unspecified Ziele.
+    """
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return bool(ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+
+
+def _is_always_forbidden_host(host: str) -> bool:
+    """Wie _is_always_forbidden_ip, aber fuer einen (literal) Host/IP-String."""
+    normalized = _normalize_host(host)
+    try:
+        ip = ipaddress.ip_address(normalized.strip("[]"))
+    except ValueError:
+        return False
+    return _is_always_forbidden_ip(ip)
+
+
 def _resolved_network_target_error(host: str, *, allow_private_hosts: bool) -> str | None:
-    if allow_private_hosts:
-        return None
     try:
         resolved = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
     except socket.gaierror:
@@ -252,7 +273,10 @@ def _resolved_network_target_error(host: str, *, allow_private_hosts: bool) -> s
 
     for _, _, _, _, sockaddr in resolved:
         ip = ipaddress.ip_address(sockaddr[0])
-        if is_dangerous_network_ip(ip):
+        # Link-local/Metadata/etc. werden auch mit allow_private_hosts blockiert.
+        if _is_always_forbidden_ip(ip):
+            return "Network target is in a forbidden range (link-local/metadata)"
+        if not allow_private_hosts and is_dangerous_network_ip(ip):
             return "Local/private network targets are denied"
     return None
 
@@ -389,6 +413,10 @@ class PluginPermissionPolicy:
         host = parsed.hostname or ""
         if not host:
             raise PluginPermissionError("URL host is required")
+        # Link-local/Metadata-Ziele (z.B. 169.254.169.254) sind selbst mit
+        # allow_private_hosts unzulaessig.
+        if _is_always_forbidden_host(host):
+            raise PluginPermissionError("Network target is in a forbidden range (link-local/metadata)")
         if _is_local_or_private_host(host) and not self.allow_private_hosts():
             raise PluginPermissionError("Local/private network targets are denied")
         if not _host_matches_allowed(host, self.allowed_hosts()):
@@ -1080,7 +1108,25 @@ class PluginManager:
         if not callable(execute_fn):
             return {"success": False, "result": None, "error": "Plugin hat keine execute()-Funktion"}
 
-        setattr(module, "LEXA_PLUGIN_HTTP_GET", lambda *call_args, **call_kwargs: self._python_plugin_http_get(info, *call_args, **call_kwargs))
+        # Jede Plugin-Datei erhaelt ihr eigenes Modul (lexa_plugin_<stem>), daher
+        # ist module <-> info 1:1 und das gebundene info aendert sich nie. Der
+        # HTTP-Helper wird deshalb nur einmal pro Plugin gesetzt statt bei jedem
+        # Aufruf -- das vermeidet wiederholte Mutation des geteilten Modul-Globals
+        # bei nebenlaeufigen Tool-Calls.
+        def http_get(*call_args, **call_kwargs):
+            return self._python_plugin_http_get(info, *call_args, **call_kwargs)
+
+        if getattr(module, "LEXA_PLUGIN_HTTP_GET", None) is None:
+            setattr(module, "LEXA_PLUGIN_HTTP_GET", http_get)
+
+        # Vorwaertskompatibilitaet: akzeptiert execute() einen http_get-Parameter,
+        # wird der Helper explizit uebergeben (sauberer als das Modul-Global).
+        extra_kwargs: dict[str, Any] = {}
+        try:
+            if "http_get" in inspect.signature(execute_fn).parameters:
+                extra_kwargs["http_get"] = http_get
+        except (TypeError, ValueError):
+            pass
 
         # In separatem Thread ausfuehren (Sandbox)
         try:
@@ -1094,12 +1140,12 @@ class PluginManager:
             )
             if asyncio.iscoroutinefunction(execute_fn):
                 result = await asyncio.wait_for(
-                    execute_fn(tool_name, args),
+                    execute_fn(tool_name, args, **extra_kwargs),
                     timeout=PLUGIN_LOAD_TIMEOUT_SEC,
                 )
             else:
                 result = await asyncio.wait_for(
-                    asyncio.to_thread(execute_fn, tool_name, args),
+                    asyncio.to_thread(lambda: execute_fn(tool_name, args, **extra_kwargs)),
                     timeout=PLUGIN_LOAD_TIMEOUT_SEC,
                 )
 
@@ -1131,7 +1177,10 @@ class PluginManager:
                 separator = "&" if "?" in str(url) else "?"
                 url = f"{url}{separator}{query}"
             url, target_host = info.policy.validate_url(url)
-            resolved_error = _resolved_network_target_error(
+            # DNS-Aufloesung in einen Thread auslagern -- socket.getaddrinfo() ist
+            # blockierend und wuerde sonst den gesamten Event-Loop anhalten.
+            resolved_error = await asyncio.to_thread(
+                _resolved_network_target_error,
                 target_host,
                 allow_private_hosts=info.policy.allow_private_hosts(),
             )
@@ -1234,7 +1283,10 @@ class PluginManager:
             headers_raw = self._resolve_template(action.get("headers", {}), args, policy)
             body_raw = self._resolve_template(action.get("body"), args, policy)
             url, target_host = policy.validate_url(url)
-            resolved_error = _resolved_network_target_error(
+            # DNS-Aufloesung in einen Thread auslagern -- socket.getaddrinfo() ist
+            # blockierend und wuerde sonst den gesamten Event-Loop anhalten.
+            resolved_error = await asyncio.to_thread(
+                _resolved_network_target_error,
                 target_host,
                 allow_private_hosts=policy.allow_private_hosts(),
             )
@@ -1246,6 +1298,12 @@ class PluginManager:
 
         if not url:
             return {"success": False, "result": None, "error": "Keine URL angegeben"}
+
+        # 'headers' muss ein Mapping sein -- sonst wuerden setdefault()/.items()
+        # weiter unten mit AttributeError abstuerzen (z.B. wenn die YAML einen
+        # String oder eine Liste fuer headers definiert).
+        if not isinstance(headers_raw, dict):
+            return {"success": False, "result": None, "error": "headers muss ein Objekt sein"}
 
         try:
             body_bytes = None

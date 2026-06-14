@@ -525,7 +525,7 @@
   flex: 1;
   background: transparent;
   border: none;
-  color: var(--text-primary);
+  color: var(--text);
   font-size: 18px;
   font-weight: 600;
   outline: none;
@@ -543,7 +543,7 @@
   line-height: 1;
   transition: color 0.2s;
 }
-.note-modal-close:hover { color: var(--text-primary); }
+.note-modal-close:hover { color: var(--text); }
 .note-modal-meta {
   padding: 6px 20px;
   font-size: 11px;
@@ -553,7 +553,7 @@
   flex: 1;
   background: transparent;
   border: none;
-  color: var(--text-primary);
+  color: var(--text);
   font-size: 14px;
   line-height: 1.6;
   padding: 12px 20px;

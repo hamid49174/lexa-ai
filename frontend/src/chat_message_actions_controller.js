@@ -250,7 +250,7 @@ function createVerifyAnswerButton(disabled = false) {
 }
 
 async function saveMessageAsMemory(btn, msg) {
-  if (btn?.disabled) return;
+  if (btn?.disabled || btn?.dataset.saved === "true") return;
   const msgText = getMessagePersistText(msg);
   const snippet = msgText.substring(0, 200).trim();
   if (!snippet) return;
@@ -262,6 +262,7 @@ async function saveMessageAsMemory(btn, msg) {
   try {
     await window.lexa.memoryAdd(t("chat.helpfulAnswer", {snippet}), "learned", 5);
     if (btn) {
+      btn.dataset.saved = "true";
       btn.dataset.icon = "\u2713";
       renderIconButtonVisual(btn, "\u2713");
       btn.setAttribute("aria-label", t("toast.savedAsMemory"));

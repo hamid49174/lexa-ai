@@ -5,7 +5,9 @@ the Personal OS MCP server, SDK, or read-only worker status command.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import re
 from typing import Any
 
@@ -39,6 +41,8 @@ PERSONAL_OS_ACTIONS = frozenset({
     "personal_os_draft_history",
     "personal_os_raw_inbox_status",
 })
+
+logger = logging.getLogger("lexa.personal_os_actions")
 
 _TAG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}")
 _DRAFT_APPROVALS = {"pending", "approved", "rejected", "conflict", "missing"}
@@ -469,9 +473,9 @@ async def execute_personal_os_action(command: str, params: dict[str, Any] | None
 
         elif command == "personal_os_query":
             area_path = _validate_os_relative_path(str(params.get("areaPath") or "."))
+            # _normalize_tag already guarantees a valid tag or raises ValueError
+            # (handled by the surrounding try/except), so no extra check is needed.
             tag = _normalize_tag(params.get("tag"))
-            if tag and not _TAG_RE.fullmatch(tag):
-                return {"success": False, "error": "Invalid tag filter"}
             arguments = {
                 "areaPath": area_path,
                 "maxMatches": _as_int(params.get("maxMatches"), 50, 1, 200),
@@ -514,7 +518,10 @@ async def execute_personal_os_action(command: str, params: dict[str, Any] | None
             )
 
         elif command == "personal_os_obsidian_context":
-            payload = build_obsidian_context_payload(
+            # Heavy blocking file I/O — offload to a thread so the FastAPI event
+            # loop stays responsive (mirrors the obsidian_context_os endpoint).
+            payload = await asyncio.to_thread(
+                build_obsidian_context_payload,
                 topic=str(params.get("topic") or ""),
                 max_files=_as_int(params.get("maxFiles"), 8, 1, 14),
                 body_chars=_as_int(params.get("bodyChars"), 800, 160, 1800),
@@ -522,9 +529,16 @@ async def execute_personal_os_action(command: str, params: dict[str, Any] | None
             )
 
         elif command == "personal_os_lexa_code_loop":
+            # Tag toleranter aufloesen: ist das uebergebene Tag nicht
+            # sanitisierbar, auf den Default 'lexa' zurueckfallen statt das
+            # gesamte Code-Loop-Briefing mit ValueError abzubrechen.
+            try:
+                loop_tag = _normalize_tag(params.get("tag") or "lexa") or None
+            except ValueError:
+                loop_tag = _normalize_tag("lexa") or None
             payload = await _build_lexa_code_loop_payload(
                 area_path=str(params.get("areaPath") or "00_System"),
-                tag=_normalize_tag(params.get("tag") or "lexa") or None,
+                tag=loop_tag,
                 max_files=_as_int(params.get("maxFiles"), 5, 1, 8),
                 body_chars=_as_int(params.get("bodyChars"), 650, 160, 1400),
                 include_graph=_as_bool(params.get("includeGraph"), True),
@@ -593,8 +607,12 @@ async def execute_personal_os_action(command: str, params: dict[str, Any] | None
         return {"success": False, "error": str(exc.detail)}
     except ValueError as exc:
         return {"success": False, "error": str(exc)}
-    except Exception as exc:
-        return {"success": False, "error": f"Personal OS Aktion fehlgeschlagen: {exc}"}
+    except Exception:
+        # Rohe Exception-Details nur ins Log schreiben, dem Chat-Nutzer eine
+        # generische, stabile Meldung zurueckgeben (keine internen Pfade/MCP-
+        # Interna in der Tool-Antwort leaken).
+        logger.exception("Personal OS Aktion '%s' fehlgeschlagen", command)
+        return {"success": False, "error": "Personal OS Aktion fehlgeschlagen (interner Fehler)."}
 
     if payload.get("ok") is False:
         return {"success": False, "data": payload, "error": payload.get("error") or "Personal OS returned ok=false"}

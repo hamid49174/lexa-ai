@@ -4,6 +4,7 @@ API Endpoints for Google Calendar integration.
 
 import asyncio
 import logging
+import threading
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from backend.security import check_rate_limit, audit_log
@@ -12,6 +13,13 @@ from companion import calendar_integration as calendar_int
 logger = logging.getLogger("lexa.router.calendar")
 
 router = APIRouter(prefix="/calendar", tags=["calendar"])
+
+# Guard against concurrent OAuth connect attempts. The OAuth flow opens a
+# browser window and blocks the worker thread until the user finishes (or
+# abandons) the consent. Allowing parallel connects would stack multiple
+# blocked threads and can exhaust the executor pool, so only one connect runs
+# at a time; further requests get a clear, immediate response instead.
+_connect_lock = threading.Lock()
 
 
 def _rate_limited() -> JSONResponse | None:
@@ -37,6 +45,12 @@ async def calendar_connect():
     limited = _rate_limited()
     if limited is not None:
         return limited
+    # Reject overlapping connect attempts instead of stacking blocked threads.
+    if not _connect_lock.acquire(blocking=False):
+        return JSONResponse(
+            {"success": False, "error": "Verbindung läuft bereits. Bitte schließe das geöffnete Browser-Fenster ab."},
+            status_code=409,
+        )
     audit_log("calendar_connect", "requested")
     try:
         # This will open a browser window for OAuth2 consent
@@ -52,6 +66,8 @@ async def calendar_connect():
     except Exception as e:
         logger.error("calendar_connect failed: %s", e, exc_info=True)
         return JSONResponse({"error": f"Verbindungsfehler: {e}"}, status_code=500)
+    finally:
+        _connect_lock.release()
 
 
 @router.get("/today")

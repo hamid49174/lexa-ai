@@ -13,18 +13,13 @@ class LexaOrb3D {
 
     this.options = Object.assign({
       baseScale: 3.5,
-      detail: 12,
       wobbleSpeed: 0.0005,
       baseWobble: 0.02,
       audioImpactMultiplier: 0.7,
       maxPixelRatio: 1.5,
       geometryUpdateMs: 0,
-      colorUpdateMs: 0,
-      normalUpdateMs: 0
+      colorUpdateMs: 0
     }, options);
-
-    // Dynamic runtime clamp to prevent millions of CPU loop calculations and eliminate main thread stutter
-    this.options.detail = 4;
 
     this.simplex = new SimplexNoise();
     this.originalVertices = [];
@@ -38,12 +33,10 @@ class LexaOrb3D {
     this._statePhase = Math.random() * Math.PI * 2;
     this._statePhaseB = Math.random() * Math.PI * 2;
     this._stateStartedAt = 0;
-    this._normalFrame = 0;
     this._motionSeed = Math.random() * 1000;
     this._lastFrameNow = 0;
     this._lastGeometryUpdate = 0;
     this._lastColorUpdate = 0;
-    this._lastNormalUpdate = 0;
     this._frameSpikeCount = 0;
     this._perfMode = 0;
     this._tmpColor = new THREE.Color();
@@ -336,6 +329,17 @@ class LexaOrb3D {
     if (document.hidden) return;
     if (!this.dots || !this.core) return;
 
+    // Skip the expensive geometry/color/render work while the orb is not visible
+    // (e.g. the chat view is hidden because another view is active). The rAF loop
+    // keeps running so the orb resumes automatically when the chat view returns.
+    const canvas = this.renderer && this.renderer.domElement;
+    if (canvas && canvas.offsetParent === null) {
+      // Reset the frame timer so the first visible frame is not counted as a
+      // spike (which would wrongly downgrade the performance mode).
+      this._lastFrameNow = 0;
+      return;
+    }
+
     const now = performance.now();
     const frameDelta = this._lastFrameNow ? now - this._lastFrameNow : 16;
     this._lastFrameNow = now;
@@ -426,7 +430,6 @@ class LexaOrb3D {
     // ── Performance: skip geometry updates when idle and no breathing change ──
     const geometryInterval = this.options.geometryUpdateMs + this._perfMode * 28;
     const colorInterval = this.options.colorUpdateMs + this._perfMode * 32;
-    const normalInterval = this.options.normalUpdateMs + this._perfMode * 380;
     const wantsGeometryUpdate = ev >= 0.005 || breathChanged || convState === "processing" || convState === "speaking" || convState === "listening";
     const needsGeometryUpdate = wantsGeometryUpdate && now - this._lastGeometryUpdate >= geometryInterval;
 
@@ -457,19 +460,9 @@ class LexaOrb3D {
       }
       dotPos.needsUpdate = true;
 
-      // Deform core and glass shell (Optimized out since they are hidden for the stardust particle sphere)
-      // const corePos = this.core.geometry.attributes.position;
-      // ...
-      // corePos.needsUpdate = true;
-      // if (glassPos) { glassPos.needsUpdate = true; }
-      this._normalFrame = (this._normalFrame + 1) % 3;
-      if (now - this._lastNormalUpdate >= normalInterval) {
-        this._lastNormalUpdate = now;
-        this.core.geometry.computeVertexNormals();
-        if (this.glassShell) {
-          this.glassShell.geometry.computeVertexNormals();
-        }
-      }
+      // Core and glass shell are permanently hidden for the stardust particle
+      // sphere, so their geometry is never deformed and no normal recomputation
+      // is required here.
     }
 
     // ── Audio-reactive vertex colors: hotspots expand and brighten ──
@@ -482,9 +475,6 @@ class LexaOrb3D {
 
     // ── Audio-reactive dot size ──
     this.dots.material.size = 0.08 + ev * 0.04;
-
-    // ── Audio-reactive core specular boost ──
-    this.core.material.shininess = 120 + ev * 70;
 
     // ── Swirling dynamic light orbits for organic reflections ──
     const tLight = now * 0.0006;
@@ -558,10 +548,6 @@ class LexaOrb3D {
 
     if (this.renderer) {
       this.renderer.dispose();
-    }
-
-    if (this.glowTexture) {
-      this.glowTexture.dispose();
     }
 
     if (this.container && this.renderer) {

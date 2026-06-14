@@ -36,6 +36,10 @@ from voice.config import (
     MAX_TTS_TEXT_CHARS,
 )
 
+# Single source of truth fuer den Default-Sensitivity-Wert, damit Request-Default,
+# Status-Default und Fallback nicht auseinanderlaufen.
+_DEFAULT_WAKE_SENSITIVITY = 0.015
+
 # ═══════════════════════════════════════════════════
 #  REQUEST MODELS
 # ═══════════════════════════════════════════════════
@@ -62,7 +66,7 @@ class DeepgramKeyRequest(BaseModel):
 
 
 class SensitivityRequest(BaseModel):
-    sensitivity: float = 0.015
+    sensitivity: float = _DEFAULT_WAKE_SENSITIVITY
 
 
 class ElevenLabsKeyRequest(BaseModel):
@@ -99,7 +103,7 @@ logger = logging.getLogger("lexa.voice")
 router = APIRouter(prefix="/voice", tags=["voice"])
 
 TEMP_DIR = Path(tempfile.gettempdir()) / "lexa_voice"
-TEMP_DIR.mkdir(exist_ok=True)
+TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 _MAX_AUDIO_SIZE = 25 * 1024 * 1024
 _UPLOAD_CHUNK_SIZE = 64 * 1024
@@ -458,13 +462,17 @@ async def voice_websocket(websocket: WebSocket):
             await asyncio.sleep(30)
             await websocket.send_json({"type": "ping", "ts": _time.time()})
 
+    tasks = [asyncio.ensure_future(_consume()), asyncio.ensure_future(_heartbeat())]
     try:
-        await asyncio.gather(_consume(), _heartbeat())
+        await asyncio.gather(*tasks)
     except WebSocketDisconnect:
         pass
     except Exception as e:
         logger.warning(f"[VoiceWS] Client {client_id} error: {e}")
     finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         unregister_ws_client(client_id)
 
 
@@ -563,14 +571,12 @@ async def speech_to_text(audio: UploadFile = File(...)):
         with open(audio_path, "wb") as f:
             while True:
                 if _time.time() - read_start > 30:
-                    audio_path.unlink(missing_ok=True)
                     return JSONResponse({"error": "Audio-Upload Timeout."}, status_code=408)
                 chunk = await audio.read(_UPLOAD_CHUNK_SIZE)
                 if not chunk:
                     break
                 total_size += len(chunk)
                 if total_size > _MAX_AUDIO_SIZE:
-                    audio_path.unlink(missing_ok=True)
                     return JSONResponse({"error": "Audiodatei zu gross."}, status_code=413)
                 f.write(chunk)
 
@@ -655,13 +661,13 @@ async def deepgram_delete_key():
 @router.post("/tts")
 async def text_to_speech(data: TTSRequest):
     """Convert text to speech. Returns audio file."""
+    if not check_rate_limit("voice"):
+        return JSONResponse({"error": "Rate limit erreicht."}, status_code=429)
     text = str(data.text or "").strip()
     if not text:
         return JSONResponse({"error": "Kein Text angegeben."}, status_code=400)
     if len(text) > MAX_TTS_TEXT_CHARS:
         return JSONResponse({"error": f"Text ist zu lang (max {MAX_TTS_TEXT_CHARS} Zeichen)."}, status_code=413)
-    if not check_rate_limit("voice"):
-        return JSONResponse({"error": "Rate limit erreicht."}, status_code=429)
 
     try:
         from voice.tts import speak_async
@@ -805,7 +811,7 @@ def _wakeword_default_status() -> dict:
         "ready": False,
         "in_conversation": False,
         "phrases": list(WAKE_PHRASES),
-        "sensitivity": 0.015,
+        "sensitivity": _DEFAULT_WAKE_SENSITIVITY,
         "thread_alive": False,
         "error": "",
         "last_transcript": "",
@@ -926,7 +932,7 @@ async def _stop_detector_with_timeout(detector, timeout: float = _STOP_TIMEOUT):
 async def wakeword_start():
     global _wake_detector
     with _detector_lock:
-        if _wake_detector and _wake_detector.is_listening:
+        if _wake_detector and getattr(_wake_detector, "is_listening", False):
             return {"status": "already_running", **_wakeword_status_payload(_wake_detector)}
         try:
             _wake_detector = _create_detector(streaming=True)
@@ -968,15 +974,22 @@ async def wakeword_status():
 async def wakeword_events(client_id: str = "default"):
     """HTTP polling fallback for wake word events."""
     now = _time.time()
+    # client_id auf sicheres Format/Laenge begrenzen, um unbegrenztes Dict-Wachstum
+    # ueber zufaellige IDs zu verhindern.
+    client_id = re.sub(r"[^A-Za-z0-9_-]+", "", str(client_id or ""))[:64] or "default"
+    # Bereinigung bei jedem Aufruf: veraltete Eintraege entfernen, danach hartes Limit erzwingen.
+    cutoff = now - 300
+    stale = [k for k, v in _last_poll_times.items() if v < cutoff]
+    for k in stale:
+        _last_poll_times.pop(k, None)
     last = _last_poll_times.get(client_id, 0.0)
     if now - last < _POLL_MIN_INTERVAL:
         return {"events": [], "throttled": True}
+    if client_id not in _last_poll_times and len(_last_poll_times) >= _MAX_POLL_CLIENTS:
+        # Aeltesten Eintrag verdraengen, damit das Gesamtlimit nie ueberschritten wird.
+        oldest = min(_last_poll_times, key=_last_poll_times.get)
+        _last_poll_times.pop(oldest, None)
     _last_poll_times[client_id] = now
-    if len(_last_poll_times) > _MAX_POLL_CLIENTS:
-        cutoff = now - 300
-        stale = [k for k, v in _last_poll_times.items() if v < cutoff]
-        for k in stale:
-            _last_poll_times.pop(k, None)
     return {"events": pop_fallback_events()}
 
 
@@ -984,7 +997,7 @@ async def wakeword_events(client_id: str = "default"):
 async def wakeword_get_sensitivity():
     if _wake_detector and hasattr(_wake_detector, "sensitivity"):
         return {"sensitivity": _wake_detector.sensitivity}
-    return {"sensitivity": 0.015}
+    return {"sensitivity": _DEFAULT_WAKE_SENSITIVITY}
 
 
 @router.post("/wakeword/sensitivity")
@@ -1004,7 +1017,7 @@ async def conversation_start():
     """Start direct conversation — skip wake word, immediately listen."""
     global _wake_detector
     with _detector_lock:
-        if _wake_detector and _wake_detector.is_listening:
+        if _wake_detector and getattr(_wake_detector, "is_listening", False):
             await _stop_detector_with_timeout(_wake_detector)
             _wake_detector = None
         try:

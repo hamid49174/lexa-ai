@@ -139,13 +139,32 @@ def load_whitelist() -> dict:
         }}
 
 
+def _normalize_whitelist_sets(whitelist: dict) -> dict[str, frozenset[str]]:
+    """Pre-compute lower-cased command sets once (avoids re-normalizing per call)."""
+    commands = whitelist.get("commands", {})
+
+    def _normalized(tier: str) -> frozenset[str]:
+        return frozenset(
+            c.strip().lower()
+            for c in commands.get(tier, {}).get("list", [])
+        )
+
+    return {
+        "always_allowed": _normalized("always_allowed"),
+        "confirmation_required": _normalized("confirmation_required"),
+        "always_blocked": _normalized("always_blocked"),
+    }
+
+
 _whitelist = load_whitelist()
+_whitelist_sets = _normalize_whitelist_sets(_whitelist)
 
 
 def reload_whitelist():
     """Reload whitelist from file (hot-reload)."""
-    global _whitelist
+    global _whitelist, _whitelist_sets
     _whitelist = load_whitelist()
+    _whitelist_sets = _normalize_whitelist_sets(_whitelist)
 
 
 def is_command_allowed(command: str) -> str:
@@ -154,15 +173,11 @@ def is_command_allowed(command: str) -> str:
     """
     command = command.strip().lower()
 
-    always_allowed = [c.strip().lower() for c in _whitelist["commands"]["always_allowed"]["list"]]
-    confirmation_required = [c.strip().lower() for c in _whitelist["commands"]["confirmation_required"]["list"]]
-    always_blocked = [c.strip().lower() for c in _whitelist["commands"]["always_blocked"]["list"]]
-
-    if command in always_blocked:
+    if command in _whitelist_sets["always_blocked"]:
         return "blocked"
-    if command in always_allowed:
+    if command in _whitelist_sets["always_allowed"]:
         return "allowed"
-    if command in confirmation_required:
+    if command in _whitelist_sets["confirmation_required"]:
         return "confirmation_required"
     return "unknown"
 
@@ -289,14 +304,18 @@ _COMPILED_PATTERNS: list[re.Pattern] = [
 ]
 
 
-def sanitize_input(user_input: str) -> str:
+def sanitize_input(user_input: str, max_chars: int = 2000) -> str:
     """Sanitize user input to prevent prompt injection.
 
     Applies:
     1. Unicode NFKC normalization (catches homoglyph attacks)
     2. Zero-width character stripping (catches invisible char smuggling)
     3. Injection pattern filtering (36 compiled regex patterns)
-    4. Length truncation (max 2000 chars)
+    4. Length truncation (default max 2000 chars)
+
+    max_chars: Truncation limit. Callers that allow longer payloads (e.g. the
+    chat router with MAX_CHAT_MESSAGE_LENGTH) can raise this to avoid silently
+    cutting valid input. Defaults to 2000 for backward compatibility.
     """
     # Normalize unicode to catch homoglyph attacks (e.g. ｉｇｎｏｒｅ → ignore)
     sanitized = unicodedata.normalize("NFKC", user_input)
@@ -308,8 +327,8 @@ def sanitize_input(user_input: str) -> str:
     for compiled in _COMPILED_PATTERNS:
         sanitized = compiled.sub("[FILTERED]", sanitized)
 
-    if len(sanitized) > 2000:
-        sanitized = sanitized[:2000]
+    if len(sanitized) > max_chars:
+        sanitized = sanitized[:max_chars]
     return sanitized
 
 
@@ -327,9 +346,17 @@ DANGEROUS_COMMANDS: list[str] = [
 
 
 def validate_command_output(output: str) -> str:
-    """Validate and sanitize KI output before executing as command."""
+    """Validate and sanitize KI output before executing as command.
+
+    Defense-in-depth scanner: matches against DANGEROUS_COMMANDS after
+    collapsing all whitespace runs (spaces, tabs, newlines) to a single space,
+    so trivial whitespace-padding bypasses like 'rm  -rf' or 'rm\\t-rf' are
+    still caught. This is a heuristic blocklist, not the primary gate — command
+    authorization happens via is_command_allowed / the whitelist.
+    """
+    normalized = re.sub(r"\s+", " ", output).lower()
     for cmd in DANGEROUS_COMMANDS:
-        if cmd.lower() in output.lower():
+        if re.sub(r"\s+", " ", cmd).lower() in normalized:
             raise ValueError(f"Dangerous command detected in AI output: {cmd}")
     return output
 
@@ -363,15 +390,18 @@ def validate_path(path_str: str) -> str:
     if not path_str:
         return path_str
 
-    resolved_path = Path(path_str).resolve()
+    raw_path = Path(path_str)
+    resolved_path = raw_path.resolve()
+
+    # Reject traversal only on real path segments ('..'), not on filenames that
+    # merely contain '..' as a substring (e.g. 'release..notes.txt').
+    if ".." in raw_path.parts:
+        raise ValueError("Pfad-Traversierung nicht erlaubt")
 
     for blocked in BLOCKED_PATHS:
         blocked_path = Path(blocked).resolve()
         if _is_same_or_child_path(resolved_path, blocked_path):
             raise ValueError(t("security.blockedDir", dir=blocked))
-
-    if ".." in path_str:
-        raise ValueError("Pfad-Traversierung nicht erlaubt")
 
     return str(resolved_path)
 
@@ -382,19 +412,15 @@ def validate_path(path_str: str) -> str:
 
 # Cloud metadata endpoints — SSRF protection
 _BLOCKED_HOSTS: frozenset[str] = frozenset({
-    # AWS metadata
+    # AWS / DigitalOcean / Oracle Cloud metadata (shared link-local IP)
     "169.254.169.254",
     # Azure metadata
     "169.254.169.253",
-    # GCP metadata
+    # GCP metadata (non-IP hostnames; IP literals are caught by is_dangerous_network_ip)
     "metadata.google.internal",
     "metadata.google",
     # Alibaba Cloud metadata
     "100.100.100.200",
-    # DigitalOcean metadata
-    "169.254.169.254",
-    # Oracle Cloud metadata
-    "169.254.169.254",
     # Generic link-local
     "169.254.0.1",
 })
@@ -692,7 +718,10 @@ def audit_log(command: str, status: str, details: str = "") -> None:
     except Exception as e:
         # Don't swallow errors — log to stderr as fallback
         print(f"[AUDIT FALLBACK] {entry.strip()} (write failed: {e})", file=sys.stderr)
-    logger.info(entry.strip())
+    # audit.log is the authoritative, rotated sink. Mirror to the general logger
+    # only at debug level so (already redacted) audit lines aren't duplicated into
+    # stdout/app log, which has different retention/rotation than audit.log.
+    logger.debug(entry.strip())
 
 
 def audit_safe_token(value: object, *, fallback: str = "unknown", max_chars: int = 80) -> str:

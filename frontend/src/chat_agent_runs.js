@@ -193,14 +193,41 @@ function agentAttentionStatusSummary(failed, blocked) {
   return t("chat.agentAttentionStatusClear");
 }
 
+// Render-scoped memo: das Prunen (inkl. Evidenz-Parsing der Meta-Caches) und der
+// JSON.stringify-Vergleich sind teuer und werden pro renderConversationList() mehrfach
+// angestossen (Header-Summary + Resolved-History-Panel). Wir cachen das Ergebnis nur fuer
+// den aktuellen synchronen Tick und verwerfen es im naechsten Microtask, damit spaetere
+// Renders/Mutationen nie auf veraltete Daten zugreifen. Schluessel ist der rohe
+// Storage-String: jede Mutation laeuft ueber saveAgentRunAttentionResolvedHistory und
+// aendert ihn, wodurch der Memo automatisch ungueltig wird.
+let _agentRunResolvedHistoryMemo = null;
+let _agentRunResolvedHistoryMemoScheduled = false;
+
+function scheduleAgentRunResolvedHistoryMemoReset() {
+  if (_agentRunResolvedHistoryMemoScheduled) return;
+  _agentRunResolvedHistoryMemoScheduled = true;
+  const reset = () => {
+    _agentRunResolvedHistoryMemo = null;
+    _agentRunResolvedHistoryMemoScheduled = false;
+  };
+  if (typeof queueMicrotask === "function") queueMicrotask(reset);
+  else Promise.resolve().then(reset);
+}
+
 function agentRunAttentionResolvedHistory() {
   try {
-    const parsed = JSON.parse(agentRunStateGetItem(agentRunAttentionResolvedHistoryCacheKey()) || "[]");
+    const raw = agentRunStateGetItem(agentRunAttentionResolvedHistoryCacheKey()) || "[]";
+    if (_agentRunResolvedHistoryMemo && _agentRunResolvedHistoryMemo.raw === raw) {
+      return _agentRunResolvedHistoryMemo.pruned;
+    }
+    const parsed = JSON.parse(raw);
     const normalized = normalizeAgentRunAttentionResolvedHistoryItems(parsed);
     const pruned = pruneAgentRunAttentionResolvedHistoryItems(normalized);
     if (JSON.stringify(pruned) !== JSON.stringify(normalized.slice(0, agentRunAttentionResolvedHistoryLimit()))) {
       saveAgentRunAttentionResolvedHistory(pruned);
     }
+    _agentRunResolvedHistoryMemo = { raw, pruned };
+    scheduleAgentRunResolvedHistoryMemoReset();
     return pruned;
   } catch (_e) {
     return [];
@@ -817,7 +844,6 @@ function startAgentCompletionContinue(btn) {
   syncChatInputSize();
   setChatDraft(prompt);
   chatInput.focus();
-  setTimeout(() => chatInput.focus(), 0);
   const cursorStart = Math.max(0, Number(btn?._lexaAgentContinueCursor || 0));
   if (typeof chatInput.setSelectionRange === "function") {
     chatInput.setSelectionRange(cursorStart, cursorStart);

@@ -137,6 +137,11 @@ function appendFormattedMessage(parent, text) {
   appendMarkdownSegment(parent, source.slice(lastIndex));
 }
 
+// SECURITY: formatMessage() returns a serialized HTML string and exists only as a
+// test/serialization helper (see tests/test_chat_rendering.js). It is NOT the runtime
+// rendering path. Never do `element.innerHTML = formatMessage(text)` — that re-parses the
+// already-sanitized DOM tree and reopens an injection surface. For live rendering always use
+// renderFormattedMessage()/appendFormattedMessage(), which build DOM nodes directly.
 function formatMessage(text) {
   const wrapper = document.createElement("div");
   appendFormattedMessage(wrapper, String(text || ""));

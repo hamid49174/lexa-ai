@@ -233,7 +233,14 @@ def _read_next_work_tasks(hermes: dict, limit: int = 6) -> list[str]:
 async def _safe_to_thread(fn, *args) -> dict:
     try:
         result = await asyncio.to_thread(fn, *args)
-        return result if isinstance(result, dict) else {}
+        if isinstance(result, dict):
+            return result
+        logger.warning(
+            "Hermes overview read for %s returned non-dict %s; using empty dict",
+            getattr(fn, "__name__", fn),
+            type(result).__name__,
+        )
+        return {}
     except Exception as exc:
         logger.warning("Hermes overview read failed for %s: %s", getattr(fn, "__name__", fn), exc)
         return {"status": "error", "error": _client_safe_error(exc)}
@@ -241,7 +248,9 @@ async def _safe_to_thread(fn, *args) -> dict:
 
 async def _safe_draft_queue() -> dict:
     try:
-        return await list_hermes_os_drafts("all", 50, True)
+        # Overview braucht nur die Counts, nicht die Draft-Liste selbst:
+        # maxDrafts=1 minimiert MCP-Roundtrip-Volumen und Serialisierung.
+        return await list_hermes_os_drafts("all", 1, True)
     except Exception as exc:
         logger.warning("Hermes overview draft read failed: %s", exc)
         return {"ok": False, "counts": {}, "drafts": [], "errors": [{"error": _client_safe_error(exc)}]}
@@ -309,7 +318,7 @@ async def build_hermes_overview(include_context: bool = True) -> dict:
         {"id": "logs", "label": "Gateway logs", "state": _state(logs_ok), "detail": logs.get("summary") or "no summary"},
         {"id": "drafts", "label": "Review drafts", "state": _state(drafts_ok), "detail": _draft_count_line(draft_counts)},
     ]
-    health_state = "ready" if all(check["state"] == "ok" for check in checks[:6]) and drafts_ok else "attention"
+    health_state = "ready" if all(check["state"] == "ok" for check in checks) and drafts_ok else "attention"
     next_action = next_tasks[0] if next_tasks else "Build the visible OS/Hermes cockpit in Lexa."
     summary = (
         "Lexa/Hermes/OS ist arbeitsfaehig: "
@@ -458,6 +467,8 @@ async def list_hermes_os_drafts(approval: str, max_drafts: int, hide_smoke: bool
 @router.get("/status")
 async def hermes_status():
     """Return Hermes integration readiness."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Hermes-Status-Anfragen.")
     return await asyncio.to_thread(get_hermes_status)
 
 
@@ -603,6 +614,8 @@ async def hermes_drafts(
 @router.get("/telegram/status")
 async def hermes_telegram_status():
     """Return Telegram readiness for the Lexa-local Hermes install."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Hermes-Telegram-Anfragen.")
     return await asyncio.to_thread(get_hermes_telegram_status)
 
 
@@ -618,12 +631,16 @@ async def hermes_telegram_commands_selftest(includeSamples: bool = Query(default
 @router.get("/gateway/autostart")
 async def hermes_gateway_autostart_status():
     """Return Windows-login autostart status for the Hermes gateway."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Hermes-Autostart-Anfragen.")
     return await asyncio.to_thread(get_hermes_gateway_autostart_status)
 
 
 @router.get("/gateway/logs")
 async def hermes_gateway_logs(lines: int = Query(160, ge=20, le=1000)):
     """Return a bounded, redacted Hermes gateway log summary."""
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Hermes-Gateway-Log-Anfragen.")
     return await asyncio.to_thread(get_hermes_gateway_log_summary, lines)
 
 

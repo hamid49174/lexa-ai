@@ -15,6 +15,7 @@ Thread-safe, asyncio-kompatibel.
 """
 
 import logging
+import os
 import shutil
 import threading
 import time
@@ -99,6 +100,7 @@ class ProactiveEngine:
         if self._initialized:
             return
         self._lock = threading.Lock()
+        self._generation_lock = threading.Lock()  # Serialisiert _generate_suggestions
         self._suggestions: list[Suggestion] = []
         self._dismissed: set[str] = set()  # Dismissed suggestion IDs
         self._cooldowns: dict[str, float] = {}  # type -> last_shown_timestamp
@@ -119,6 +121,7 @@ class ProactiveEngine:
         self._last_weather_check: float = 0.0                  # timestamp of last weather check
         self._last_email_check: float = 0.0                    # timestamp of last email check
         self._last_unread_count: int = 0                       # unread email count at last check
+        self._email_baseline_set: bool = False                 # True once the first email check ran
         self._last_disk_check: float = 0.0                     # timestamp of last disk check
 
         self._initialized = True
@@ -173,13 +176,13 @@ class ProactiveEngine:
 
     def get_suggestions(self, context: Optional[dict] = None) -> list[dict]:
         """Aktuelle Vorschlaege abrufen. Optional mit Kontext fuer On-Demand-Generierung."""
-        # On-Demand: Auch sofort generieren wenn genug Zeit vergangen
-        now = time.time()
-        if now - self._last_check >= self._check_interval:
-            try:
-                self._generate_suggestions(context)
-            except Exception as e:
-                logger.error(f"On-Demand Suggestion-Fehler: {e}", exc_info=True)
+        # On-Demand: Auch sofort generieren wenn genug Zeit vergangen.
+        # respect_interval=True verhindert doppelte teure Laeufe parallel zum
+        # Background-Loop (Lock + erneute Gate-Pruefung innerhalb des Locks).
+        try:
+            self._generate_suggestions(context, respect_interval=True)
+        except Exception as e:
+            logger.error(f"On-Demand Suggestion-Fehler: {e}", exc_info=True)
 
         with self._lock:
             # Abgelaufene Vorschlaege entfernen
@@ -216,8 +219,23 @@ class ProactiveEngine:
     #  SUGGESTION GENERATION (regelbasiert)
     # ──────────────────────────────────────────────
 
-    def _generate_suggestions(self, context: Optional[dict] = None) -> None:
-        """Generiert neue Vorschlaege basierend auf Regeln. KEIN AI-Call."""
+    def _generate_suggestions(
+        self, context: Optional[dict] = None, respect_interval: bool = False
+    ) -> None:
+        """Generiert neue Vorschlaege basierend auf Regeln. KEIN AI-Call.
+
+        Serialisiert ueber _generation_lock, damit On-Demand-Calls und der
+        Background-Loop die teuren Checks (Kalender/Wetter/IMAP) nicht doppelt
+        ausfuehren. Bei respect_interval=True wird das Zeit-Gate innerhalb des
+        Locks geprueft, sodass nur ein Lauf pro Intervall stattfindet.
+        """
+        with self._generation_lock:
+            if respect_interval and (time.time() - self._last_check) < self._check_interval:
+                return
+            self._generate_suggestions_locked(context)
+
+    def _generate_suggestions_locked(self, context: Optional[dict] = None) -> None:
+        """Eigentliche Generierung. Nur unter gehaltenem _generation_lock aufrufen."""
         self._last_check = time.time()
         new_suggestions: list[Suggestion] = []
 
@@ -252,18 +270,31 @@ class ProactiveEngine:
         if s.get("evening_summary", True):
             new_suggestions.extend(self._check_evening_summary())
 
-        # Cooldown-Filter: gleicher Typ maximal alle 30 Min
+        # Cooldown-Filter: gleicher Typ maximal alle 30 Min.
+        # Ausnahme: event-spezifische Typen (z.B. calendar_reminder) liefern
+        # mehrere inhaltlich verschiedene Vorschlaege mit gleichem Titel fuer
+        # verschiedene Termine. Hier wuerde der Typ-Cooldown jeden weiteren
+        # Termin-Hinweis unterdruecken; _reminded_events verhindert bereits die
+        # Wiederholung desselben Events. Daher Cooldown ueberspringen und den
+        # Dedup-Key um die message erweitern.
+        cooldown_exempt = {"calendar_reminder"}
         now = time.time()
         filtered: list[Suggestion] = []
         with self._lock:
             for s in new_suggestions:
+                exempt = s.type in cooldown_exempt
                 last_shown = self._cooldowns.get(s.type, 0)
-                if now - last_shown >= self._cooldown_seconds:
+                if exempt or now - last_shown >= self._cooldown_seconds:
                     # Nicht bereits als dismissed oder vorhanden
-                    existing_types = {es.type + es.title for es in self._suggestions}
-                    if s.type + s.title not in existing_types and s.id not in self._dismissed:
+                    dedup_key = s.type + s.title + (s.message if exempt else "")
+                    existing_keys = {
+                        es.type + es.title + (es.message if es.type in cooldown_exempt else "")
+                        for es in self._suggestions
+                    }
+                    if dedup_key not in existing_keys and s.id not in self._dismissed:
                         filtered.append(s)
-                        self._cooldowns[s.type] = now
+                        if not exempt:
+                            self._cooldowns[s.type] = now
 
             self._suggestions.extend(filtered)
 
@@ -728,8 +759,12 @@ class ProactiveEngine:
             prev = self._last_unread_count
             self._last_unread_count = current_count
 
-            # First check (prev == 0 at startup): just record baseline, no notification
-            if prev == 0:
+            # First check ever: just record baseline, no notification.
+            # Eigenes Flag statt `prev == 0`, sonst werden nach jedem Nullstand
+            # (alle Mails gelesen) neu eintreffende Mails faelschlich als Baseline
+            # eingestuft und nicht gemeldet.
+            if not self._email_baseline_set:
+                self._email_baseline_set = True
                 return []
 
             # Only notify when count increased (new unread mails arrived)
@@ -797,7 +832,10 @@ class ProactiveEngine:
         now = datetime.now()
 
         try:
-            usage = shutil.disk_usage("/")
+            # Windows-only App: explizit das Systemlaufwerk pruefen, da "/"
+            # je nach Arbeitsverzeichnis/Drive nicht zuverlaessig ist.
+            system_drive = os.environ.get("SystemDrive", "C:") + os.sep
+            usage = shutil.disk_usage(system_drive)
             used_pct = (usage.used / usage.total) * 100
 
             if used_pct > 90:

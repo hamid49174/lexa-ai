@@ -1778,36 +1778,36 @@ class TestModelSelection:
 
         original = ai_engine.get_ai_models()["current"]
         try:
-            result = ai_engine.set_ai_model("openai:gpt-4o")
+            result = ai_engine.set_ai_model("gemini:gemini-3.1-pro")
             current = ai_engine.get_ai_models()
-            assert "OpenAI" in result
-            assert current["current"] == "openai:gpt-4o"
-            assert current["current_provider"] == "openai"
+            assert "Gemini" in result
+            assert current["current"] == "gemini:gemini-3.1-pro"
+            assert current["current_provider"] == "gemini"
         finally:
             ai_engine.set_ai_model(original)
 
-    def test_set_ai_model_accepts_legacy_groq_ids(self):
+    def test_set_ai_model_accepts_legacy_raw_ids(self):
         from backend import ai_engine
 
         original = ai_engine.get_ai_models()["current"]
         try:
-            ai_engine.set_ai_model("llama-3.1-8b-instant")
+            ai_engine.set_ai_model("gemini-3.1-flash-lite")
             current = ai_engine.get_ai_models()
-            assert current["current"] == "groq:llama-3.1-8b-instant"
-            assert current["current_provider"] == "groq"
+            assert current["current"] == "gemini:gemini-3.1-flash-lite"
+            assert current["current_provider"] == "gemini"
         finally:
             ai_engine.set_ai_model(original)
 
-    def test_set_ai_model_accepts_anthropic_ids(self):
+    def test_set_ai_model_rejects_unknown_provider_ids(self):
         from backend import ai_engine
 
         original = ai_engine.get_ai_models()["current"]
         try:
             result = ai_engine.set_ai_model("anthropic:claude-sonnet-4-20250514")
             current = ai_engine.get_ai_models()
-            assert "Claude" in result
-            assert current["current"] == "anthropic:claude-sonnet-4-20250514"
-            assert current["current_provider"] == "anthropic"
+            assert "Unbekanntes Modell" in result
+            # Selection stays on the previously active model.
+            assert current["current"] == original
         finally:
             ai_engine.set_ai_model(original)
 
@@ -1816,11 +1816,8 @@ class TestModelSelection:
 
         models = get_ai_models()
         assert "grouped" in models
-        assert "openai" in models["grouped"]
         assert "gemini" in models["grouped"]
-        assert "anthropic" in models["grouped"]
-        assert models["grouped"]["openai"]["models"]
-        assert models["grouped"]["anthropic"]["models"]
+        assert models["grouped"]["gemini"]["models"]
 
 
 class TestProviderStatus:
@@ -1871,23 +1868,21 @@ class TestProviderStatus:
         assert isinstance(client, FakeGroq)
         assert client.api_key == "keyring-groq-key"
 
-    def test_get_ai_status_reports_all_providers(self, monkeypatch):
+    def test_get_ai_status_reports_gemini_provider(self, monkeypatch):
         from backend import ai_engine
 
         original = ai_engine.get_ai_models()["current"]
         try:
-            ai_engine.set_ai_model("gemini:gemini-2.5-flash")
-            monkeypatch.setattr(ai_engine, "_get_groq_client", lambda: object())
-            monkeypatch.setattr(ai_engine, "_get_openai_client", lambda: object())
+            ai_engine.set_ai_model("gemini:gemini-3.5-flash")
             monkeypatch.setattr(ai_engine, "_get_gemini_client", lambda: object())
-            monkeypatch.setattr(ai_engine, "_get_anthropic_api_key", lambda: "anthropic-key")
 
             status = ai_engine.get_ai_status()
-            assert status["groq"]["available"] is True
-            assert status["openai"]["available"] is True
+            # Phase 40+: Gemini-only registry — groq/openai/anthropic/ollama
+            # are no longer separate status entries.
             assert status["gemini"]["available"] is True
-            assert status["anthropic"]["available"] is True
-            # ollama removed in Phase 40+ (no longer a separate status entry)
+            assert "groq" not in status
+            assert "openai" not in status
+            assert "anthropic" not in status
             assert status["selected_provider"] == "gemini"
             assert status["active_provider"] == "gemini"
             assert status["fallback_enabled"] is True
@@ -1907,16 +1902,16 @@ class TestProviderFallback:
     def test_chat_fallback_tries_configured_provider_after_selected_failure(self, monkeypatch):
         from backend import ai_engine
 
-        selected = ai_engine.AI_MODEL_REGISTRY["gemini:gemini-2.5-flash"]
+        selected = ai_engine.AI_MODEL_REGISTRY["gemini:gemini-3.1-pro"]
         calls = []
 
         def fake_chat(messages, selected_model=None, tools=None):
             calls.append(selected_model["id"])
-            if selected_model["provider"] == "openai":
+            if selected_model["id"] == "gemini:gemini-3.5-flash":
                 return {"type": "text", "content": "Fallback antwortet."}
             return None
 
-        monkeypatch.setattr(ai_engine, "_provider_available_for_fallback", lambda provider: provider == "openai")
+        monkeypatch.setattr(ai_engine, "_provider_available_for_fallback", lambda provider: provider == "gemini")
         monkeypatch.setattr(ai_engine, "_chat_with_selected_provider", fake_chat)
 
         result = ai_engine._chat_with_provider_fallbacks(
@@ -1926,19 +1921,19 @@ class TestProviderFallback:
         )
 
         assert result == {"type": "text", "content": "Fallback antwortet."}
-        assert calls == ["openai:gpt-4o"]
+        assert calls == ["gemini:gemini-3.5-flash"]
 
     def test_stream_fallback_returns_first_configured_stream(self, monkeypatch):
         from backend import ai_engine
 
-        selected = ai_engine.AI_MODEL_REGISTRY["gemini:gemini-2.5-flash"]
+        selected = ai_engine.AI_MODEL_REGISTRY["gemini:gemini-3.1-pro"]
 
         def fake_stream(messages, selected_model=None, tools=None):
-            if selected_model["provider"] == "openai":
+            if selected_model["id"] == "gemini:gemini-3.5-flash":
                 return iter(["ok"])
             return None
 
-        monkeypatch.setattr(ai_engine, "_provider_available_for_fallback", lambda provider: provider == "openai")
+        monkeypatch.setattr(ai_engine, "_provider_available_for_fallback", lambda provider: provider == "gemini")
         monkeypatch.setattr(ai_engine, "_stream_with_selected_provider", fake_stream)
 
         stream, meta = ai_engine._stream_with_provider_fallbacks(
@@ -1947,7 +1942,7 @@ class TestProviderFallback:
             tools=None,
         )
 
-        assert meta["id"] == "openai:gpt-4o"
+        assert meta["id"] == "gemini:gemini-3.5-flash"
         assert list(stream) == ["ok"]
 
     def test_chat_stream_falls_back_after_empty_primary_stream(self, monkeypatch):
@@ -1967,8 +1962,8 @@ class TestProviderFallback:
             def __init__(self, content):
                 self.choices = [Choice(content)]
 
-        selected = ai_engine.AI_MODEL_REGISTRY["gemini:gemini-2.5-flash"]
-        fallback = ai_engine.AI_MODEL_REGISTRY["openai:gpt-4o"]
+        selected = ai_engine.AI_MODEL_REGISTRY["gemini:gemini-3.5-flash"]
+        fallback = ai_engine.AI_MODEL_REGISTRY["gemini:gemini-3.1-pro"]
         calls = []
 
         monkeypatch.setattr(config, "TOOL_USE_ENABLED", False)
@@ -1997,8 +1992,8 @@ class TestProviderFallback:
 
         assert result == ["Fallback antwortet."]
         assert calls == [
-            ("primary", "gemini:gemini-2.5-flash", None),
-            ("fallback", "gemini:gemini-2.5-flash", None),
+            ("primary", "gemini:gemini-3.5-flash", None),
+            ("fallback", "gemini:gemini-3.5-flash", None),
         ]
 
     def test_chat_stream_accepts_tool_delta_without_function_payload(self, monkeypatch):
@@ -2032,7 +2027,7 @@ class TestProviderFallback:
             id = None
             function = FunctionPayload()
 
-        selected = ai_engine.AI_MODEL_REGISTRY["groq:llama-3.3-70b-versatile"]
+        selected = ai_engine.AI_MODEL_REGISTRY["gemini:gemini-3.5-flash"]
 
         monkeypatch.setattr(config, "TOOL_USE_ENABLED", False)
         monkeypatch.setattr(ai_engine, "_get_selected_model_meta", lambda: selected)

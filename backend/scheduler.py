@@ -72,20 +72,46 @@ def _parse_schedule(schedule: str) -> bool:
     # Format: "Mo,Mi,Fr HH:MM" — specific days
     days_match = re.match(r"^([\w,]+)\s+(\d{2}:\d{2})$", schedule)
     if days_match:
-        day_list = days_match.group(1).split(",")
+        day_list = [d.strip() for d in days_match.group(1).split(",")]
         time_str = days_match.group(2)
-        day_nums = [day_map.get(d.strip()) for d in day_list]
+        # Ungültige Tageskürzel sichtbar machen, damit Tippfehler nicht
+        # stillschweigend dazu führen, dass die Routine nie läuft.
+        invalid = [d for d in day_list if day_map.get(d) is None]
+        if invalid:
+            logger.warning(
+                "Scheduler: unbekannte Tageskürzel %s im Schedule '%s' — werden ignoriert",
+                invalid,
+                schedule,
+            )
+        day_nums = [day_map[d] for d in day_list if day_map.get(d) is not None]
         if current_weekday in day_nums and time_str == current_time:
             return True
         return False
 
-    # Format: "interval:Xm" or "interval:Xs" — interval-based (approximated via minute check)
+    # Format: "interval:Xm" or "interval:Xs" — interval-based.
+    # WICHTIG: Der Scheduler tickt effektiv nur minütlich (Routinen laufen alle
+    # 60s) und dedupliziert last_run minutengenau. Daher wird ausschließlich
+    # Minuten-Granularität unterstützt. Sekunden-Intervalle < 60s oder solche,
+    # die kein ganzzahliges Vielfaches einer Minute sind, werden abgelehnt,
+    # damit keine still wirkungslose Konfiguration entsteht.
     interval_match = re.match(r"^interval:(\d+)([ms])$", schedule.lower())
     if interval_match:
         value = int(interval_match.group(1))
         unit = interval_match.group(2)
-        # Convert to minutes
-        interval_minutes = value if unit == "m" else max(1, value // 60)
+        if unit == "m":
+            interval_minutes = value
+        else:  # unit == "s"
+            if value < 60 or value % 60 != 0:
+                logger.warning(
+                    "Scheduler: Sekunden-Intervall '%s' nicht unterstützt — "
+                    "nur Minuten-Granularität (>= 60s, Vielfaches von 60s) möglich",
+                    schedule,
+                )
+                return False
+            interval_minutes = value // 60
+        if interval_minutes < 1:
+            logger.warning("Scheduler: ungültiges Intervall '%s' (< 1 Minute)", schedule)
+            return False
         # Fire if current minute is a multiple of interval
         current_minute_of_day = now.hour * 60 + now.minute
         return current_minute_of_day % interval_minutes == 0
@@ -162,15 +188,14 @@ async def _run_routine(routine: dict):
             audit_log("scheduler", "error", _routine_audit_details(name, command=command, error=e))
 
     # Update last_run
+    # Die thread-lokale Verbindung NICHT schließen — sie persistiert bewusst
+    # im thread_local (siehe memory._get_db).
     db = memory._get_db()
-    try:
-        db.execute(
-            "UPDATE routines SET last_run = ? WHERE name = ?",
-            (datetime.now().strftime("%Y-%m-%d %H:%M"), name),
-        )
-        db.commit()
-    finally:
-        db.close()
+    db.execute(
+        "UPDATE routines SET last_run = ? WHERE name = ?",
+        (datetime.now().strftime("%Y-%m-%d %H:%M"), name),
+    )
+    db.commit()
 
     audit_log("scheduler", "routine_done", _routine_audit_details(name))
     logger.info(f"Scheduler: Routine '{name}' abgeschlossen")
@@ -202,18 +227,16 @@ async def _scheduler_loop():
             if _tick % 2 != 0:
                 continue
 
+            # Thread-lokale Verbindung nicht schließen (persistiert im thread_local).
             db = memory._get_db()
-            try:
-                rows = db.execute(
-                    "SELECT * FROM routines WHERE enabled = 1"
-                ).fetchall()
-                routines = []
-                for r in rows:
-                    d = dict(r)
-                    d["actions"] = json.loads(d["actions"])
-                    routines.append(d)
-            finally:
-                db.close()
+            rows = db.execute(
+                "SELECT * FROM routines WHERE enabled = 1"
+            ).fetchall()
+            routines = []
+            for r in rows:
+                d = dict(r)
+                d["actions"] = json.loads(d["actions"])
+                routines.append(d)
 
             for routine in routines:
                 if _parse_schedule(routine["schedule"]):
@@ -257,12 +280,10 @@ def stop_scheduler():
 def get_scheduler_status() -> dict:
     """Get scheduler status."""
     running = _scheduler_task is not None and not _scheduler_task.done()
+    # Thread-lokale Verbindung nicht schließen (persistiert im thread_local).
     db = memory._get_db()
-    try:
-        total = db.execute("SELECT COUNT(*) as c FROM routines").fetchone()["c"]
-        active = db.execute("SELECT COUNT(*) as c FROM routines WHERE enabled=1").fetchone()["c"]
-    finally:
-        db.close()
+    total = db.execute("SELECT COUNT(*) as c FROM routines").fetchone()["c"]
+    active = db.execute("SELECT COUNT(*) as c FROM routines WHERE enabled=1").fetchone()["c"]
 
     return {
         "running": running,

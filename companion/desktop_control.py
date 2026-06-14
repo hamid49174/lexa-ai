@@ -210,17 +210,30 @@ def _key_input(vk: int, *, up: bool = False) -> INPUT:
     )
 
 
-def _unicode_input(char: str, *, up: bool = False) -> INPUT:
+def _unicode_input(code_unit: int, *, up: bool = False) -> INPUT:
+    # code_unit must be a single UTF-16 code unit (16 bit). Code points beyond
+    # the BMP have to be split into a surrogate pair by the caller, because
+    # wScan is a 16-bit WORD and would silently truncate larger values.
     return INPUT(
         type=1,
         union=INPUT_UNION(ki=KEYBDINPUT(
             wVk=0,
-            wScan=ord(char),
+            wScan=int(code_unit) & 0xFFFF,
             dwFlags=KEYEVENTF_UNICODE | (KEYEVENTF_KEYUP if up else 0),
             time=0,
             dwExtraInfo=None,
         )),
     )
+
+
+def _char_to_code_units(char: str) -> list[int]:
+    # Return the UTF-16 code units for a character. BMP characters yield a
+    # single unit; characters beyond the BMP (e.g. emoji) yield a surrogate
+    # pair so each unit can be sent as its own KEYEVENTF_UNICODE input.
+    if ord(char) <= 0xFFFF:
+        return [ord(char)]
+    encoded = char.encode("utf-16-le")
+    return [int.from_bytes(encoded[i:i + 2], "little") for i in range(0, len(encoded), 2)]
 
 
 def _mouse_event(flags: int, data: int = 0) -> None:
@@ -277,14 +290,61 @@ def _normalize_visible_text(value: str) -> str:
     return re.sub(r"\s+", " ", normalized).strip()
 
 
+def _window_capture_origin(window_title: str) -> tuple[int, int] | None:
+    """Return the screen top-left of the window OCR captured, or None.
+
+    ocr._capture_for_ocr grabs only the window region via GetWindowRect when a
+    window title is given, so OCR bbox coordinates are relative to that window's
+    top-left corner. To turn them into absolute screen coordinates we must add
+    exactly that corner. The window lookup mirrors ocr._capture_for_ocr (visible
+    windows, case-insensitive substring match) so the same hwnd is resolved.
+    Returns None when no window is targeted or no match is found, in which case
+    OCR fell back to the full virtual screen and _screen_bounds() applies.
+    """
+    target = str(window_title or "").strip()
+    if not target:
+        return None
+    api = _require_user32()
+    needle = target.lower()
+    hwnd = api.FindWindowW(None, None)
+    found_hwnd = None
+    while hwnd:
+        if api.IsWindowVisible(hwnd):
+            length = api.GetWindowTextLengthW(hwnd)
+            if length > 0:
+                buf = ctypes.create_unicode_buffer(length + 1)
+                api.GetWindowTextW(hwnd, buf, length + 1)
+                if needle in str(buf.value or "").lower():
+                    found_hwnd = hwnd
+                    break
+        hwnd = api.GetWindow(hwnd, 2)  # GW_HWNDNEXT
+    if not found_hwnd:
+        return None
+    rect = wintypes.RECT()
+    if not api.GetWindowRect(found_hwnd, ctypes.byref(rect)):
+        # GetWindowRect failed; rect would stay zero-filled and yield a bogus
+        # (0, 0) origin. Treat this like "no match" so the caller falls back to
+        # the full-screen origin from _screen_bounds() instead of misclicking.
+        return None
+    width = int(rect.right) - int(rect.left)
+    height = int(rect.bottom) - int(rect.top)
+    # Mirror ocr._capture_for_ocr: tiny windows fall back to full-screen capture.
+    if width <= 10 or height <= 10:
+        return None
+    return int(rect.left), int(rect.top)
+
+
 def _block_center(block: dict, *, offset_x: int = 0, offset_y: int = 0) -> tuple[int, int]:
     bbox = block.get("bbox") if isinstance(block, dict) else None
     if not isinstance(bbox, dict):
         raise ValueError("OCR block has no bbox")
-    left = float(bbox.get("left"))
-    top = float(bbox.get("top"))
-    right = float(bbox.get("right"))
-    bottom = float(bbox.get("bottom"))
+    try:
+        left = float(bbox["left"])
+        top = float(bbox["top"])
+        right = float(bbox["right"])
+        bottom = float(bbox["bottom"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("OCR block has invalid bbox") from exc
     return int(round(offset_x + (left + right) / 2)), int(round(offset_y + (top + bottom) / 2))
 
 
@@ -362,7 +422,8 @@ def desktop_click_text(text: str = "", button: str = "left", occurrence: int = 1
 
     from companion import ocr
 
-    result = ocr.ocr_screenshot(window_title=str(window or "").strip() or None)
+    window_title = str(window or "").strip()
+    result = ocr.ocr_screenshot(window_title=window_title or None)
     if not result.get("success"):
         raise RuntimeError(result.get("error") or "OCR failed")
     payload = result.get("data") or {}
@@ -371,7 +432,15 @@ def desktop_click_text(text: str = "", button: str = "left", occurrence: int = 1
     if match is None:
         raise ValueError(f"visible text not found: {target}")
 
-    offset_x, offset_y, _, _ = _screen_bounds()
+    # When a window is targeted, OCR captured only that window region, so block
+    # coordinates are relative to the window's top-left corner. Add the window
+    # origin in that case; only the full-screen capture is relative to the
+    # virtual screen origin from _screen_bounds().
+    window_origin = _window_capture_origin(window_title) if window_title else None
+    if window_origin is not None:
+        offset_x, offset_y = window_origin
+    else:
+        offset_x, offset_y, _, _ = _screen_bounds()
     x, y = _block_center(match, offset_x=offset_x, offset_y=offset_y)
     click_result = desktop_click(x=x, y=y, button=button, clicks=1)
     return {
@@ -385,7 +454,13 @@ def desktop_click_text(text: str = "", button: str = "left", occurrence: int = 1
 
 
 def desktop_scroll(clicks: int = -3) -> dict:
-    """Scroll the active window. Negative scrolls down, positive scrolls up."""
+    """Scroll at the current cursor position. Negative scrolls down, positive up.
+
+    Windows delivers mouse-wheel events to the window under the cursor, not to
+    the focused window. Callers that want to scroll a specific window must park
+    the cursor over it first (hermes_desktop._center_cursor_on_window does this
+    before invoking this function).
+    """
     amount = max(-MAX_SCROLL_CLICKS, min(MAX_SCROLL_CLICKS, int(clicks or 0)))
     if amount == 0:
         return {"scrolled": False, "clicks": 0}
@@ -401,7 +476,13 @@ def desktop_type(text: str = "", interval_ms: int = 0) -> dict:
         raise ValueError(f"text too long, max {MAX_TYPE_CHARS} characters")
     interval = max(0, min(500, int(interval_ms or 0))) / 1000.0
     for char in text:
-        _send_input(_unicode_input(char), _unicode_input(char, up=True))
+        code_units = _char_to_code_units(char)
+        # Surrogate pairs (non-BMP, e.g. emoji) must be delivered together: send
+        # all key-down units, then all key-up units, so Windows reassembles the
+        # full code point instead of receiving two truncated halves.
+        downs = [_unicode_input(unit) for unit in code_units]
+        ups = [_unicode_input(unit, up=True) for unit in code_units]
+        _send_input(*downs, *ups)
         if interval:
             time.sleep(interval)
     return {"typed": True, "characters": len(text)}
@@ -411,12 +492,22 @@ def desktop_hotkey(keys: str | list[str] = "") -> dict:
     """Press a bounded hotkey combination such as ctrl+l or alt+tab."""
     parsed = _parse_hotkey_keys(keys)
     vks = [_KEY_MAP[key] for key in parsed]
-    for vk in vks:
-        _send_input(_key_input(vk))
-        time.sleep(0.01)
-    for vk in reversed(vks):
-        _send_input(_key_input(vk, up=True))
-        time.sleep(0.01)
+    pressed: list[int] = []
+    try:
+        for vk in vks:
+            _send_input(_key_input(vk))
+            pressed.append(vk)
+            time.sleep(0.01)
+    finally:
+        # Always release every key we managed to press, even if a down/up event
+        # failed midway. Otherwise a modifier (ctrl/alt/shift) could stay stuck
+        # in the pressed state until the user presses it manually.
+        for vk in reversed(pressed):
+            try:
+                _send_input(_key_input(vk, up=True))
+            except OSError:
+                continue
+            time.sleep(0.01)
     return {"pressed": True, "keys": parsed}
 
 

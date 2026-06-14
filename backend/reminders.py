@@ -23,6 +23,9 @@ DB_PATH = LEXA_DATA_DIR / "lexa_memory.db"
 # Fired reminders waiting for frontend pickup (mirrors _timer_results pattern)
 _fired_reminders: list[dict] = []
 _fired_lock = threading.Lock()
+# Hard cap so the queue cannot grow unbounded if the frontend never acknowledges
+# (e.g. UI closed / polling inactive). Keeps only the most recent entries in RAM.
+_MAX_FIRED_REMINDERS = 200
 
 
 # ══════════════════════════════════════════════════
@@ -119,8 +122,8 @@ def _parse_time(time_str: str) -> Optional[datetime]:
 def _try_manual_patterns(time_str: str, now: datetime) -> Optional[datetime]:
     """Try manual regex patterns for common German/English time expressions."""
 
-    # "in X min/minuten"
-    m = re.match(r"^in\s+(\d{1,4})\s*(?:min(?:uten?)?|m)$", time_str, re.IGNORECASE)
+    # "in X min/minuten" (X >= 1, exclude "in 0 min" which would fire immediately)
+    m = re.match(r"^in\s+([1-9]\d{0,3})\s*(?:min(?:uten?)?|m)$", time_str, re.IGNORECASE)
     if m:
         return now + timedelta(minutes=int(m.group(1)))
 
@@ -256,6 +259,11 @@ def reminder_create(message: str, time: str, repeat: str = None) -> dict:
     fire_at = _parse_time(time)
     if fire_at is None:
         return {"error": f"Konnte die Zeit nicht verstehen: '{time}'. Versuche z.B. 'morgen um 9', 'in 2 Stunden', '14:30'."}
+
+    # Reject past or too-near times (need a minimal lead time, otherwise the
+    # reminder would fire on the very next scheduler tick or already be overdue)
+    if fire_at <= datetime.now() + timedelta(seconds=30):
+        return {"error": "Die Zeit liegt in der Vergangenheit oder zu nah. Bitte mindestens eine Minute in der Zukunft wählen."}
 
     fire_at_str = fire_at.isoformat()
 
@@ -397,7 +405,11 @@ def reminder_check() -> list[dict]:
             (reminder_id,),
         )
 
-        # If recurring, create next occurrence
+        # If recurring, create the next occurrence.
+        # NOTE: Missed intervals are intentionally collapsed — if the app was off
+        # for several intervals, the reminder fires only once and _calculate_next
+        # skips ahead to the next future occurrence (no catch-up / backfill of the
+        # in-between intervals).
         if repeat and repeat in VALID_REPEAT:
             next_fire = _calculate_next(reminder["fire_at"], repeat)
             if next_fire:
@@ -421,6 +433,9 @@ def reminder_check() -> list[dict]:
                     "fired_at": now.isoformat(),
                     "acknowledged": False,
                 })
+            # Bound memory even if the frontend never acknowledges: drop oldest entries
+            if len(_fired_reminders) > _MAX_FIRED_REMINDERS:
+                del _fired_reminders[:-_MAX_FIRED_REMINDERS]
 
     return fired
 

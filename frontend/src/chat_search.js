@@ -256,6 +256,7 @@ function appendHighlightedText(target, text, query) {
 async function exportConversation(convId, fmt = "markdown") {
   try {
     const cId = convId || LexaState.get("currentConversationId");
+    if (!cId) { showToast(t("toast.convNotFound"), "error"); return; }
     const data = await window.lexa.conversationExport(cId, fmt);
     if (!data.text) { showToast(t("toast.exportFailed"), "error"); return; }
     const ext = fmt === "markdown" ? "md" : "txt";

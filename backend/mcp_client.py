@@ -16,7 +16,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from backend.config import MCP_CONNECT_TIMEOUT, MCP_CALL_TIMEOUT
+from backend.config import LEXA_DATA_DIR, MCP_CONNECT_TIMEOUT, MCP_CALL_TIMEOUT
 
 logger = logging.getLogger("lexa.mcp_client")
 
@@ -69,6 +69,7 @@ class MCPClient:
         self._request_id = 0
         self._pending: dict[int, asyncio.Future] = {}
         self._reader_task: Optional[asyncio.Task] = None
+        self._stderr_task: Optional[asyncio.Task] = None
         self._initialized = False
         self._server_info: dict = {}
         self._server_capabilities: dict = {}
@@ -114,6 +115,11 @@ class MCPClient:
             logger.info(f"MCP [{self.name}] Starting: {self.command} {' '.join(self.args)}")
 
             try:
+                # Pin the working directory to a defined, writable location
+                # (LEXA_DATA_DIR) instead of inheriting the backend's cwd, which
+                # in packaged builds can be an OneDrive/PyInstaller path. This
+                # makes the behaviour of MCP servers that use relative paths
+                # deterministic regardless of how the backend was started.
                 self._process = await asyncio.wait_for(
                     asyncio.create_subprocess_exec(
                         self.command,
@@ -122,6 +128,7 @@ class MCPClient:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                         env=self.env,
+                        cwd=str(LEXA_DATA_DIR),
                         limit=MCP_STDIO_READ_LIMIT,
                     ),
                     timeout=MCP_CONNECT_TIMEOUT,
@@ -135,6 +142,12 @@ class MCPClient:
 
             # Start background reader for stdout
             self._reader_task = asyncio.create_task(self._read_loop())
+            # Drain stderr continuously so the OS pipe buffer can never fill up.
+            # Many MCP servers (e.g. Node-based ones) log heavily to stderr; if
+            # it is never read, the child blocks on write and stops answering on
+            # stdout, deadlocking every JSON-RPC call.
+            if self._process.stderr is not None:
+                self._stderr_task = asyncio.create_task(self._drain_stderr())
 
             # Perform MCP initialize handshake
             try:
@@ -177,7 +190,7 @@ class MCPClient:
             logger.info(f"MCP [{self.name}] Disconnected")
 
     async def _kill_process(self) -> None:
-        """Terminate the subprocess and cancel reader task."""
+        """Terminate the subprocess and cancel reader/stderr tasks."""
         if self._reader_task and not self._reader_task.done():
             self._reader_task.cancel()
             try:
@@ -185,6 +198,14 @@ class MCPClient:
             except (asyncio.CancelledError, Exception):
                 pass
             self._reader_task = None
+
+        if self._stderr_task and not self._stderr_task.done():
+            self._stderr_task.cancel()
+            try:
+                await self._stderr_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._stderr_task = None
 
         if self._process and self._process.returncode is None:
             try:
@@ -297,7 +318,7 @@ class MCPClient:
             "params": params,
         }
 
-        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[req_id] = future
 
         line = json.dumps(message, ensure_ascii=False) + "\n"
@@ -356,6 +377,12 @@ class MCPClient:
 
                 # Handle JSON-RPC response (has "id" field)
                 msg_id = msg.get("id")
+                # JSON-RPC 2.0 allows the id to be a string OR a number. We
+                # always send integer ids, but some servers echo them back as a
+                # numeric string ("id": "1"). Normalise such ids back to int so
+                # the lookup against our int-keyed _pending dict still matches.
+                if isinstance(msg_id, str) and msg_id.lstrip("-").isdigit():
+                    msg_id = int(msg_id)
                 if msg_id is not None and msg_id in self._pending:
                     future = self._pending.pop(msg_id)
                     if future.done():
@@ -390,3 +417,27 @@ class MCPClient:
                 if not fut.done():
                     fut.set_exception(MCPError("Connection lost"))
             self._pending.clear()
+
+    async def _drain_stderr(self) -> None:
+        """Background task that continuously reads the subprocess stderr.
+
+        Keeps the OS stderr pipe buffer empty (otherwise a chatty server would
+        block on write and deadlock its stdout responses). Lines are forwarded
+        to the log for diagnostics — including handshake failures, whose root
+        cause typically only appears on stderr.
+        """
+        stderr = self._process.stderr if self._process else None
+        if stderr is None:
+            return
+        try:
+            while True:
+                line = await stderr.readline()
+                if not line:
+                    break  # EOF — process exited
+                text = line.decode("utf-8", errors="replace").rstrip()
+                if text:
+                    logger.debug(f"MCP [{self.name}] stderr: {text[:500]}")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.debug(f"MCP [{self.name}] stderr drain error: {e}")

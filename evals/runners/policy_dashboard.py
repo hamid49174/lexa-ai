@@ -52,11 +52,20 @@ def _failed_checks(result: dict[str, Any]) -> list[dict[str, Any]]:
     for check in result.get("checks", []):
         if bool(check.get("passed")):
             continue
+        check_type = str(check.get("type", ""))
+        existing_hash = check.get("value_hash")
+        if existing_hash:
+            value_hash = str(existing_hash)
+        else:
+            # Fall back on type + value so externally fed reports without a
+            # precomputed value_hash still get a distinguishing hash instead of
+            # a constant empty-string hash shared by every check.
+            value_hash = stable_hash([check_type, check.get("value", "")])[:12]
         failed.append(
             {
-                "type": str(check.get("type", "")),
+                "type": check_type,
                 "passed": False,
-                "value_hash": str(check.get("value_hash") or stable_hash(check.get("value", ""))[:12]),
+                "value_hash": value_hash,
             }
         )
     return failed

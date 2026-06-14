@@ -73,16 +73,20 @@ def make_triage_entry(
     failed_checks: list[str] | None = None,
     evidence: dict[str, Any] | None = None,
     first_seen: str | None = None,
+    blocking: bool | None = None,
 ) -> dict[str, Any]:
     failed_checks = failed_checks or []
     safe_evidence = redact_secrets(evidence or {})
+    # Honour the blocking decision already made by the regression checker when it
+    # is supplied; only recompute it standalone if the caller has no verdict.
+    blocking_flag = bool(blocking) if blocking is not None else is_blocking(risk_level, failure_type, summary)
     entry = {
         "triage_id": f"triage-{stable_hash([case_id, suite, failure_type])[:12]}",
         "case_id": case_id,
         "suite": suite,
         "risk_level": risk_level,
         "failure_type": failure_type,
-        "blocking": is_blocking(risk_level, failure_type, summary),
+        "blocking": blocking_flag,
         "summary": safe_text(summary),
         "suspected_area": suspected_area_for_suite(suite, failed_checks),
         "first_seen": first_seen or utc_now_iso(),
@@ -142,6 +146,9 @@ def validate_triage_entry(entry: dict[str, Any]) -> None:
 def build_triage_entries(regression_report: dict[str, Any]) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     for failure in regression_report.get("blocking_failures", []):
+        # Preserve the regression checker's blocking verdict instead of
+        # recomputing a contradictory one; only fall back when it is absent.
+        reported_blocking = failure.get("blocking")
         entries.append(
             make_triage_entry(
                 case_id=str(failure.get("case_id", "unknown")),
@@ -151,6 +158,7 @@ def build_triage_entries(regression_report: dict[str, Any]) -> list[dict[str, An
                 summary=str(failure.get("summary", "Eval regression detected")),
                 failed_checks=[str(check) for check in failure.get("failed_checks", [])],
                 evidence={"failure": failure},
+                blocking=bool(reported_blocking) if reported_blocking is not None else None,
             )
         )
     return entries

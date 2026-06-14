@@ -25,7 +25,10 @@ async function checkHealth() {
       renderStatusBadge("online", `${t("app.statusOnline")}${uptimeLabel}`);
       setNavStatus(t("app.statusOnlineNav"), "online");
       connBanner.classList.remove("visible");
-      if (_wakeWordPreferenceOn() && !LexaState.get("wakeWordActive")) {
+      // Nur starten, wenn kein Backoff-Restart-Timer laeuft, damit der
+      // exponentielle Backoff in _scheduleWakeWordRestart nicht durch den
+      // 15s-Health-Tick unterlaufen wird.
+      if (_wakeWordPreferenceOn() && !LexaState.get("wakeWordActive") && !_wakeWordRestartTimer) {
         await _ensureWakeWordRunning("Backend healthy");
       }
     } else {
@@ -97,7 +100,7 @@ async function updateSystemStats() {
 
       // Also update dashboard bars if user is on dashboard
       if (LexaState.get("currentView") === "dashboard") {
-        const setBar = (id, val, isGood) => {
+        const setBar = (id, val) => {
           const el = document.getElementById(id);
           const bar = document.getElementById(id + "-bar");
           if (!el) return;

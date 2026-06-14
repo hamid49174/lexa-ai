@@ -96,7 +96,9 @@ _CONTEXTUAL_FILE_OPEN_RE = re.compile(
 
 
 def _clip_context_path(path: str) -> str:
-    return str(path or "").strip().rstrip(".,;:!?) ]}")
+    # Nur typische Satzendzeichen und ')' entfernen. ']' und '}' duerfen in
+    # Windows-Pfadnamen vorkommen (z.B. "C:\\Daten\\[2024]") und bleiben erhalten.
+    return str(path or "").strip().rstrip(".,;:!?) ")
 
 
 def _extract_context_paths(text: str) -> list[str]:
@@ -423,7 +425,7 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
                 "message": "Oeffne Spotify.",
             }
 
-    if has_spotify and not play_idx:
+    if has_spotify and play_idx is None:
         # Just "öffne spotify" without play
         # Check if there's a query after spotify
         spotify_idx = next(i for i, w in enumerate(words) if "spotify" in w)
@@ -468,7 +470,7 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
                     if search_word != "search":
                         return None
                     if search_word == "search":
-                        query = re.sub(r'^(?:such(?:e?)|search|google)\s+(?:nach\s+)?', '', second, flags=re.IGNORECASE).strip()
+                        query = re.sub(r'^(?:such(?:e?)|search|google)\b[\s:]*(?:nach\s+)?', '', second, flags=re.IGNORECASE).strip()
                         if query:
                             return {
                                 "action": "browser_open",
@@ -489,6 +491,14 @@ def _try_smart_intent(user_message: str) -> Optional[dict]:
                 city = re.sub(r'^(?:in|für|fuer|for|von|heute|gerade|aktuell|jetzt)\s+', '', rest, flags=re.IGNORECASE).strip()
                 break
         city = city.rstrip("?!.,")
+        # Nachgestellte Zeit-/Fuellwoerter entfernen ("wetter in hamburg morgen"
+        # -> Stadt "hamburg", nicht "hamburg morgen").
+        city = re.sub(
+            r'\s+(?:heute|morgen|gerade|jetzt|aktuell|draussen|draußen|bitte)$',
+            '',
+            city,
+            flags=re.IGNORECASE,
+        ).strip()
         if city and len(city) >= 2:
             return {
                 "action": "weather_current",
@@ -680,8 +690,10 @@ _RE_SCREENSHOT = re.compile(
 )
 
 # --- Spotify (intercept music requests before app_open) ---
+# Negative lookahead: "spiele X auf youtube" must fall through to _RE_YOUTUBE,
+# nicht hier als Spotify-Suche "X auf youtube" abgefangen werden.
 _RE_SPOTIFY = re.compile(
-    r"^(?:spiele?|play|hör)\s+(.+?)(?:\s+(?:auf|on|in)\s+spotify)?$",
+    r"^(?:spiele?|play|hör)\s+(?!.*\b(?:auf|on|in)\s+youtube\b)(.+?)(?:\s+(?:auf|on|in)\s+spotify)?$",
     re.IGNORECASE,
 )
 
@@ -922,15 +934,17 @@ def try_local_intent(user_message: str, context: ConversationIntentContext | dic
     if math_result:
         return math_result
 
+    # Skip messages that look like questions or conversations (multi-sentence)
+    # but allow simple queries like "wie spät ist es?".
+    # Muss VOR _try_smart_intent laufen, damit die fuzzy App-/Musik-/Such-Heuristik
+    # klar konversationelle Eingaben nicht faelschlich als Aktion abfaengt.
+    if msg.count(".") > 2 or msg.count("?") > 1:
+        return None
+
     smart = _try_smart_intent(msg)
     if smart:
         logger.info(f"[Intent:Smart] Matched: {smart['action']} for '{msg[:60]}'")
         return smart
-
-    # Skip messages that look like questions or conversations (multi-sentence)
-    # but allow simple queries like "wie spät ist es?"
-    if msg.count(".") > 2 or msg.count("?") > 1:
-        return None
 
     # --- Volume ---
     m = _RE_VOLUME_SET.match(msg)
@@ -1034,25 +1048,15 @@ def try_local_intent(user_message: str, context: ConversationIntentContext | dic
             # Delegate to AI — file_open needs path validation and resolution
             return None
 
-    # --- App Control (uses Smart Discovery for fuzzy matching) ---
+    # --- App Control ---
     m = _RE_APP_OPEN.match(msg)
     if m:
         app_name = m.group(1).strip()
         if app_name and len(app_name) <= 100:
-            # Resolve via Smart Discovery for better name → exe matching
-            try:
-                from companion.app_discovery import find_app
-                match = find_app(app_name)
-                if match:
-                    resolved_name = match.get("name", app_name)
-                    return {
-                        "action": "app_open",
-                        "params": {"name": app_name},
-                        "message": t("intent.openingApp", name=resolved_name),
-                    }
-            except Exception:
-                pass
-            # Fallback: pass name directly to app_open (which also uses discovery)
+            # Schnellpfad-Zusage einhalten (compiled regex only, kein blockierender
+            # Dateisystem-Scan): find_app() wurde hier nur fuer den Anzeigenamen der
+            # Nachricht genutzt; die eigentliche Aufloesung macht app_open -> launch_app
+            # ohnehin nachgelagert in der Companion-Schicht.
             return {
                 "action": "app_open",
                 "params": {"name": app_name},
@@ -1198,6 +1202,9 @@ def try_local_intent(user_message: str, context: ConversationIntentContext | dic
     m = _RE_YOUTUBE.match(msg)
     if m:
         query = (m.group(1) or m.group(2) or "").strip()
+        # "spiele lofi auf youtube" -> Gruppe enthaelt "lofi auf"; das offene
+        # Verbindungswort am Ende entfernen, damit die Suche nur "lofi" enthaelt.
+        query = re.sub(r'\s+(?:auf|on|in)$', '', query, flags=re.IGNORECASE).strip()
         if query and len(query) <= 200:
             return {
                 "action": "youtube_search",
@@ -1509,6 +1516,14 @@ def try_local_intent(user_message: str, context: ConversationIntentContext | dic
     m = _RE_WEATHER_CITY.match(msg)
     if m:
         city = m.group(1).strip()
+        # Nachgestellte Zeit-/Fuellwoerter entfernen ("wetter in hamburg morgen"
+        # -> Stadt "hamburg", nicht "hamburg morgen").
+        city = re.sub(
+            r"\s+(?:heute|morgen|gerade|jetzt|aktuell|draussen|draußen|bitte)$",
+            "",
+            city,
+            flags=re.IGNORECASE,
+        ).strip()
         if city and len(city) >= 2:
             return {
                 "action": "weather_current",

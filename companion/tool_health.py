@@ -30,6 +30,9 @@ class ToolStatus:
 # ── Global cache (built once at startup) ──
 _health_cache: dict[str, ToolStatus] = {}
 _health_ready = threading.Event()
+# Serializes cache rebuilds so parallel refresh()/init_async() calls
+# cannot overlap-write _health_cache.
+_refresh_lock = threading.Lock()
 
 
 def _check_binary(name: str, version_args: list[str] | None = None,
@@ -139,17 +142,19 @@ def _run_health_checks() -> dict[str, ToolStatus]:
 def _build_cache() -> None:
     """Build health cache in background."""
     global _health_cache
-    try:
-        _health_cache = _run_health_checks()
-        available = [k for k, v in _health_cache.items() if v.available]
-        missing = [k for k, v in _health_cache.items() if not v.available]
-        logger.debug(f"Tool health: {len(available)} available, {len(missing)} missing")
-        if missing:
-            logger.debug(f"Missing optional tools: {', '.join(missing)}")
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-    finally:
-        _health_ready.set()
+    # Serialize against concurrent refresh()/init_async() runs.
+    with _refresh_lock:
+        try:
+            _health_cache = _run_health_checks()
+            available = [k for k, v in _health_cache.items() if v.available]
+            missing = [k for k, v in _health_cache.items() if not v.available]
+            logger.debug(f"Tool health: {len(available)} available, {len(missing)} missing")
+            if missing:
+                logger.debug(f"Missing optional tools: {', '.join(missing)}")
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+        finally:
+            _health_ready.set()
 
 
 # ══════════════════════════════════════════════════
@@ -208,11 +213,16 @@ def get_available_tools() -> list[str]:
 
 
 def refresh() -> None:
-    """Force re-check of all tools (e.g., after user installs something)."""
-    global _health_cache
+    """Force re-check of all tools (e.g., after user installs something).
+
+    Runs in a background thread (analog to init_async) so the caller is not
+    blocked for the full duration of all checks (incl. Playwright browser
+    start, up to ~10s). Parallel refresh() calls are serialized via
+    _refresh_lock in _build_cache(), so the cache is never overlap-written.
+    """
     _health_ready.clear()
-    _health_cache = _run_health_checks()
-    _health_ready.set()
+    t = threading.Thread(target=_build_cache, daemon=True, name="tool-health-refresh")
+    t.start()
 
 
 # ══════════════════════════════════════════════════

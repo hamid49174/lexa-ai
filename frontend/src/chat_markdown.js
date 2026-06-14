@@ -1,5 +1,17 @@
 /* Low-level chat markdown helpers loaded before chat.js. Keep this file free of module syntax. */
 
+function splitChatLinkTarget(rawTarget) {
+  // Trennt das CommonMark-Linkziel von einem optionalen Titel:
+  // (url "titel") / (url 'titel') / (url (titel)). Ohne diese Trennung
+  // wuerde der Titel mit in die URL geraten und new URL() kaputt machen.
+  const value = String(rawTarget || "").trim();
+  if (!value) return { url: "", title: "" };
+  const match = /^(\S+)\s+(.*)$/.exec(value);
+  if (!match) return { url: value, title: "" };
+  const title = match[2].trim().replace(/^["'(]|[")']$/g, "").trim();
+  return { url: match[1], title };
+}
+
 function appendInlineMarkdown(parent, source) {
   const text = String(source || "");
   if (!text) return;
@@ -20,23 +32,27 @@ function appendInlineMarkdown(parent, source) {
       code.textContent = match[2] || "";
       parent.appendChild(code);
     } else if (raw.startsWith("![")) {
-      const safeUrl = normalizeChatUrl(match[4], { image: true });
+      const target = splitChatLinkTarget(match[4]);
+      const safeUrl = normalizeChatUrl(target.url, { image: true });
       if (safeUrl) {
         const img = document.createElement("img");
         img.className = "chat-img";
         img.src = safeUrl;
         img.alt = match[3] || "";
+        if (target.title) img.title = target.title;
         parent.appendChild(img);
       } else if (match[3]) {
         parent.appendChild(document.createTextNode(match[3]));
       }
     } else if (raw.startsWith("[")) {
-      const safeUrl = normalizeChatUrl(match[6]);
+      const target = splitChatLinkTarget(match[6]);
+      const safeUrl = normalizeChatUrl(target.url);
       if (safeUrl) {
         const link = document.createElement("a");
         link.className = "chat-link";
         link.href = safeUrl;
         link.rel = "noopener noreferrer";
+        if (target.title) link.title = target.title;
         if (!safeUrl.toLowerCase().startsWith("mailto:")) link.target = "_blank";
         link.textContent = match[5] || safeUrl;
         parent.appendChild(link);

@@ -20,7 +20,7 @@
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
-.toggle-switch input:focus-visible + .slider {
+.toggle-switch input:focus-visible + .toggle-slider {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

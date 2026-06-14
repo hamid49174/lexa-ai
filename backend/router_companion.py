@@ -263,9 +263,14 @@ async def recent_audit_entries(
 @router.get("/plugins")
 async def list_plugins_endpoint():
     """Alle geladenen Plugins auflisten."""
+    # Stable projection statt Durchreichen des privaten _loaded_plugins-Attributs:
+    # entkoppelt die API von der internen Struktur und liefert nur das
+    # serialisierbare Mapping command_name -> plugin_name (defensiver Copy).
+    loaded = getattr(companion, "_loaded_plugins", {}) or {}
+    plugin_commands = {str(cmd): str(name) for cmd, name in loaded.items()}
     return {
         "plugins": companion.get_plugin_info(),
-        "plugin_commands": companion._loaded_plugins,
+        "plugin_commands": plugin_commands,
     }
 
 
@@ -316,6 +321,7 @@ async def execute_batch(req: BatchCommandRequest):
 
     results = []
     all_ok = True
+    executed_count = 0  # nur tatsächlich ausgeführte Commands (ohne dry_run)
 
     for i, cmd in enumerate(req.commands):
         # Per-command rate limit check (prevent batch bypass of rate limits).
@@ -399,7 +405,9 @@ async def execute_batch(req: BatchCommandRequest):
                 break
             continue
 
-        # Dry-run in batch: validate only
+        # Dry-run in batch: validate only — wird NICHT als Ausführung gezählt.
+        # continue überspringt bewusst die abschließende success-Prüfung
+        # (dry_run gilt immer als ok) und den executed_count-Hochzähler.
         if cmd.dry_run:
             audit_log(cmd.command, "dry_run")
             entry = {"command": cmd.command, "success": True, "dry_run": True,
@@ -418,10 +426,11 @@ async def execute_batch(req: BatchCommandRequest):
             entry = {"command": cmd.command, "success": False, "error": GENERIC_EXECUTION_ERROR}
 
         results.append(entry)
+        executed_count += 1
 
         if not entry.get("success", False):
             all_ok = False
             if req.stop_on_error:
                 break
 
-    return {"success": all_ok, "results": results, "executed": len(results)}
+    return {"success": all_ok, "results": results, "executed": executed_count}

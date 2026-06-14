@@ -17,11 +17,15 @@ function posClipChatPrompt(value, limit = posChatPromptLimit()) {
 function personalOsReviewPromptMeta(draft, review) {
   const prompt = personalOsReviewPrompt(draft, review);
   const limit = posChatPromptLimit();
+  // Language-neutral compaction check: posClipChatPrompt appends the localized
+  // suffix when it truncates. Matching the English literal "Prompt compacted"
+  // wrongly reported false under non-English UIs (e.g. German).
+  const compactedSuffix = posUiText("pos.promptCompactedSuffix", "\n\n[Prompt compacted to fit Lexa chat limit.]\n\nMeine Frage dazu: Bitte gib mir eine knappe Review-Empfehlung.");
   return {
     length: prompt.length,
     limit,
     percent: Math.min(100, Math.round((prompt.length / limit) * 100)),
-    compacted: prompt.includes("Prompt compacted"),
+    compacted: prompt.includes(compactedSuffix),
   };
 }
 
@@ -37,11 +41,15 @@ function personalOsCodeLoopAgentPrompt(payload) {
 function personalOsCodeLoopPromptMeta(payload) {
   const prompt = posText(payload?.prompt);
   const limit = posChatPromptLimit();
+  // Language-neutral compaction check: posClipChatPrompt appends the localized
+  // suffix when it truncates. Matching the English literal "Prompt compacted"
+  // wrongly reported false under non-English UIs (e.g. German).
+  const compactedSuffix = posUiText("pos.promptCompactedSuffix", "\n\n[Prompt compacted to fit Lexa chat limit.]\n\nMeine Frage dazu: Bitte gib mir eine knappe Review-Empfehlung.");
   return {
     length: prompt.length,
     limit,
     percent: Math.min(100, Math.round((prompt.length / limit) * 100)),
-    compacted: personalOsCodeLoopPrompt(payload).includes("Prompt compacted"),
+    compacted: personalOsCodeLoopPrompt(payload).includes(compactedSuffix),
   };
 }
 

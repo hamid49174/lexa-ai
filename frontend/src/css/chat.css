@@ -992,11 +992,6 @@
   border-radius: 6px;
 }
 
-.tts-toggle.active {
-  color: var(--accent2);
-  background: var(--accent2-soft);
-}
-
 .msg-audio {
   margin-top: 8px;
 }
@@ -1054,7 +1049,7 @@
   gap: 8px;
   padding: 4px 0;
   font-size: 13px;
-  font-family: var(--mono);
+  font-family: var(--font-mono);
 }
 .agent-step-icon {
   width: 20px;

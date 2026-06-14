@@ -260,7 +260,7 @@ async function refreshDashboard() {
       if (battEl) {
         const bv = dashBatteryPercent(d.battery_percent);
         battEl.textContent = bv !== null ? bv + "%" : "--";
-        if (bv !== null) applyMetricTone(battEl, bv <= 30 ? 90 : 20, "metric-success");
+        if (bv !== null) applyMetricTone(battEl, bv, bv <= 30 ? "stat-danger" : "metric-success");
         const battBar = document.getElementById("dash-battery-bar");
         if (battBar && bv !== null) applyMeterClass(battBar, bv, bv > 30 ? "meter-success" : "meter-error");
       }

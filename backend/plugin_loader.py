@@ -1,6 +1,12 @@
-"""Lexa AI — Plugin Loader
+"""Lexa AI — Plugin Loader (LEGACY / DEPRECATED)
 Dynamisches Plugin-System: .py Dateien im plugins/ Ordner werden automatisch
 beim Serverstart geladen und ihre Befehle in die CompanionEngine registriert.
+
+DEPRECATED: Dieser Legacy-Loader ist standardmäßig DEAKTIVIERT und nur über die
+Umgebungsvariable LEXA_ENABLE_LEGACY_PLUGIN_LOADER=1 aktivierbar. Das kanonische,
+aktiv genutzte Plugin-System ist ``backend/plugin_manager.py`` (mit AST-Validierung
+und Permission-Policy). Neue Plugins sollten ausschließlich über plugin_manager
+genutzt werden; dieser Loader bleibt nur aus Kompatibilitätsgründen erhalten.
 
 Plugin-Format:
     Jedes Plugin ist eine .py Datei in plugins/ mit einem COMMANDS dict:

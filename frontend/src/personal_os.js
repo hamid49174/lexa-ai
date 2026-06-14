@@ -91,8 +91,10 @@ async function personalOsLoadContextPack() {
   }
 }
 
+const POS_OBSIDIAN_DEFAULT_AREA = "08_Lexa";
+
 async function personalOsLoadObsidianContext() {
-  const area = document.getElementById("pos-area-input")?.value?.trim() || "08_Lexa";
+  const area = document.getElementById("pos-area-input")?.value?.trim() || POS_OBSIDIAN_DEFAULT_AREA;
   const tagFilter = posTagFilter(document.getElementById("pos-tag-input")?.value);
   const target = document.getElementById("pos-query-results");
   if (tagFilter.invalid) {
@@ -110,7 +112,12 @@ async function personalOsLoadObsidianContext() {
   } catch (e) {
     console.warn("[PersonalOS] Shared context unavailable:", e.message || e);
   }
-  const topic = [area, tagFilter.tag, sharedTopic || "lexa hermes obsidian"].filter(Boolean).join(" ");
+  // Only fall back to a generic topic when no user-specific signal is present
+  // (no shared topic, no tag, area still at default). Otherwise the hardcoded
+  // term would pollute searches for vaults with a different vocabulary.
+  const hasUserSignal = Boolean(tagFilter.tag) || area !== POS_OBSIDIAN_DEFAULT_AREA;
+  const fallbackTopic = sharedTopic || (hasUserSignal ? "" : posUiText("pos.obsidianDefaultTopic", "lexa hermes obsidian"));
+  const topic = [area, tagFilter.tag, fallbackTopic].filter(Boolean).join(" ");
   setPersonalOsEmptyState(target, posUiText("pos.buildingObsidianContext", "Building Obsidian context..."));
   try {
     const payload = await window.lexa.personalOsObsidianContext({
@@ -194,7 +201,6 @@ async function decidePersonalOsDraft(decision) {
   if (!draft?.path) return;
 
   const review = PersonalOSState.selectedReview;
-  PersonalOSState.isDeciding = true;
   const blockedApproval = decision === "approve" && review?.assist?.status === "blocked";
   const actionLabel = decision === "approve"
     ? (blockedApproval ? posUiText("pos.decideApproveOverrideAction", "Approve Override") : posUiText("pos.decideApproveAction", "Approve"))
@@ -217,11 +223,9 @@ async function decidePersonalOsDraft(decision) {
       default: defaultReason,
     },
   ], actionLabel);
-  if (!result) {
-    PersonalOSState.isDeciding = false;
-    return;
-  }
+  if (!result) return;
 
+  PersonalOSState.isDeciding = true;
   const approveBtn = document.getElementById("pos-approve-btn");
   const rejectBtn = document.getElementById("pos-reject-btn");
   if (approveBtn) approveBtn.disabled = true;
@@ -257,7 +261,6 @@ async function applyPersonalOsDraft() {
   const applyHint = review?.applyHint || {};
   if (!draft?.path || !applyHint.enabled) return;
 
-  PersonalOSState.isApplying = true;
   const applyTarget = posText(applyHint.target, posUiText("pos.applyDefaultTarget", "its target"));
   const result = await showInputModal(posUiText("pos.applyDraftTitle", "Apply Draft"), [
     {
@@ -269,11 +272,9 @@ async function applyPersonalOsDraft() {
       default: posUiText("pos.applyReasonDefault", "Apply approved draft to {{target}}.", { target: applyTarget }),
     },
   ], posUiText("pos.applyDraftAction", "Apply"));
-  if (!result) {
-    PersonalOSState.isApplying = false;
-    return;
-  }
+  if (!result) return;
 
+  PersonalOSState.isApplying = true;
   const approveBtn = document.getElementById("pos-approve-btn");
   const rejectBtn = document.getElementById("pos-reject-btn");
   const applyBtn = document.getElementById("pos-apply-btn");

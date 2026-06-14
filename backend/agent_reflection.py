@@ -22,6 +22,18 @@ CONFIDENCE_MIN = 0.0
 CONFIDENCE_MAX = 1.0
 
 _FALSE_VALUES = {"0", "false", "no", "off", "disabled"}
+_TRUTHY_VALUES = {"1", "true", "yes", "on", "enabled"}
+# Draft-/apply-erzeugende Flags, die einen Personal-OS-Write auf "high" heben.
+# Beide Schreibweisen (camelCase wie vom LLM/Tool-Schema und snake_case wie intern
+# in os_agent_runtime gespeichert) muessen erfasst werden.
+_DRAFT_FLAG_KEYS = (
+    "createReviewDraft",
+    "create_review_draft",
+    "applyDraft",
+    "apply_draft",
+    "approveDraft",
+    "approve_draft",
+)
 _SENSITIVE_KEY_RE = re.compile(
     r"(api[_-]?key|token|secret|password|passphrase|credential|auth|authorization|bearer|private|path|file)",
     re.IGNORECASE,
@@ -186,6 +198,10 @@ def infer_reflection_risk(action_name: str, permission: str = "", params: dict[s
         return "critical"
     if permission == "confirmation_required":
         return "high"
+    # Draft-creating writes must be flagged before the prefix/marker branches,
+    # otherwise the createReviewDraft signal is shadowed by earlier returns.
+    if _has_draft_flag(params):
+        return "high"
     if normalized.startswith(("hermes_", "mcp_")) or "mcp" in normalized:
         return "high"
     if normalized.startswith(("os_agent_",)):
@@ -198,8 +214,6 @@ def infer_reflection_risk(action_name: str, permission: str = "", params: dict[s
         return "low"
     if any(marker in normalized for marker in _WRITE_MARKERS):
         return "medium"
-    if params.get("createReviewDraft") is True:
-        return "high"
     return "low"
 
 
@@ -412,6 +426,23 @@ def _has_sensitive_param_keys(params: dict[str, Any]) -> bool:
             for item in value:
                 if isinstance(item, dict) and _has_sensitive_param_keys(item):
                     return True
+    return False
+
+
+def _is_truthy_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in _TRUTHY_VALUES
+    return False
+
+
+def _has_draft_flag(params: dict[str, Any]) -> bool:
+    for key in _DRAFT_FLAG_KEYS:
+        if key in params and _is_truthy_flag(params[key]):
+            return True
     return False
 
 

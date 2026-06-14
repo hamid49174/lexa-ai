@@ -1,13 +1,17 @@
 """Lexa AI — KI Engine (Production Grade, Phase 40: Native Tool Use)
-Groq API (primary) + OpenAI + Gemini + Claude.
-Native function calling for Groq/OpenAI/Gemini/Claude.
+Gemini-only (gemini-3.5-flash / 3.1-flash-lite / 3.1-pro) ueber die
+OpenAI-kompatible Schnittstelle, inkl. nativem Function Calling.
 Singleton clients, exponential backoff, thread-safe, token budget awareness.
+
+Hinweis: Die Multi-Provider-Gerueste (Groq/OpenAI/Anthropic) existieren nur noch
+als Legacy/Reserve und sind durch das Gemini-only-Registry derzeit inaktiv.
 """
 
 try:
     import keyring
 except ImportError:
     keyring = None
+import functools
 import hashlib
 import json
 import logging
@@ -44,7 +48,12 @@ _gemini_client_key_hash: Optional[str] = None
 _GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 _ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 _ANTHROPIC_API_VERSION = "2023-06-01"
-_ANTHROPIC_MAX_TOKENS = 1024
+_ANTHROPIC_MAX_TOKENS = 4096
+_GROQ_MAX_TOKENS = 4096
+# Gemini laeuft sonst mit Provider-Defaults (ungedeckelt) — analog zu Groq begrenzen,
+# damit Latenz/Kosten beschraenkt bleiben und das Verhalten deterministisch ist.
+_GEMINI_MAX_TOKENS = 4096
+_GEMINI_TEMPERATURE = 0.7
 
 
 try:
@@ -159,7 +168,16 @@ _SYSTEM_PROMPT_TTL = 60  # seconds
 
 # ── Productivity Stats Cache (avoid DB queries on every message) ──
 _productivity_cache = {"data": None, "ts": 0}
+_productivity_cache_lock = threading.Lock()
 _PRODUCTIVITY_CACHE_TTL = 5  # seconds
+
+# ── Memory-Search Executor (langlebig, statt pro Request neu erzeugen) ──
+# Begrenzt die Hintergrund-Threads fuer die 0.5s-getimeoutete Memory-Suche:
+# ein haengender search_memory-Call belegt hoechstens diese Worker, statt bei
+# jeder Nachricht einen neuen Executor zu erzeugen/zu verwerfen.
+_memory_search_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="lexa-memsearch"
+)
 
 
 # ── Error Categories ──
@@ -227,7 +245,7 @@ def _check_token_budget(system_content: str, messages: list[dict]) -> list[dict]
     total_tokens = system_tokens
 
     for msg in message_snapshot:
-        total_tokens += _estimate_tokens(len(msg.get("content", "")))
+        total_tokens += _estimate_tokens(len(msg.get("content") or ""))
 
     if total_tokens <= _TOKEN_WARN_THRESHOLD:
         return message_snapshot
@@ -236,7 +254,7 @@ def _check_token_budget(system_content: str, messages: list[dict]) -> list[dict]
     trimmed = list(message_snapshot)
     while len(trimmed) > 2 and total_tokens > _TOKEN_WARN_THRESHOLD:
         removed = trimmed.pop(0)
-        total_tokens -= _estimate_tokens(len(removed.get("content", "")))
+        total_tokens -= _estimate_tokens(len(removed.get("content") or ""))
 
     logger.warning(
         f"Token budget trimmed: ~{total_tokens} tokens "
@@ -359,6 +377,13 @@ def _retry_api_call(
                 logger.error(f"{provider_label} auth error — not retrying")
                 return None
 
+            if category == _ErrorCategory.TOOL_USE_FAILED:
+                # Deterministischer 400 — identischer Retry mit Tools schlaegt
+                # garantiert erneut fehl. Sofort an den Aufrufer zurueck, der den
+                # Tools-freien Retry uebernimmt.
+                logger.info(f"{provider_label} tool_use_failed — not retrying with tools")
+                return None
+
             if category == _ErrorCategory.MODEL_ERROR:
                 break
 
@@ -428,7 +453,7 @@ def _groq_api_call(
         model=model,
         messages=messages,
         temperature=0.7,
-        max_tokens=1024,
+        max_tokens=_GROQ_MAX_TOKENS,
         stream=stream,
         timeout=timeout,
     )
@@ -503,6 +528,8 @@ def _openai_compatible_api_call(
     kwargs = dict(
         model=model,
         messages=messages,
+        temperature=_GEMINI_TEMPERATURE,
+        max_tokens=_GEMINI_MAX_TOKENS,
         stream=stream,
         timeout=timeout,
     )
@@ -679,8 +706,21 @@ def _anthropic_api_call(
     )
     response.raise_for_status()
     if stream:
-        return response.iter_lines(decode_unicode=True)
+        return _anthropic_iter_lines_closing(response)
     return response.json()
+
+
+def _anthropic_iter_lines_closing(response) -> Generator[str, None, None]:
+    """Yield SSE lines and guarantee the HTTP response is closed.
+
+    Bei vorzeitigem Abbruch des Generators (Client-Disconnect/Exception) wird
+    response.close() im finally aufgerufen, damit der Socket nicht leakt.
+    """
+    try:
+        for line in response.iter_lines(decode_unicode=True):
+            yield line
+    finally:
+        response.close()
 
 
 def _anthropic_with_retry(
@@ -793,6 +833,24 @@ def _anthropic_stream_to_openai_chunks(lines) -> Generator[object, None, None]:
 
 _MAX_CONVERSATION_HISTORY = 20  # truncate to prevent context overflow
 
+_PENDING_PARAM_VALUE_MAX = 100  # max chars per pending-confirmation param value
+
+
+def _sanitize_pending_param_value(value) -> str:
+    """Sanitize a pending-confirmation param value before system-prompt injection.
+
+    Werte stammen aus modellgenerierten Tool-Calls und koennen unvertrauenswuerdigen
+    Kontext (Web-/Datei-Inhalte) enthalten. Steuerzeichen/Zeilenumbrueche entfernen und
+    hart kuerzen, damit keine fremden Instruktionen in die SYSTEM-Rolle gelangen.
+    """
+    text = str(value)
+    text = re.sub(r"[\r\n\t]+", " ", text)
+    text = re.sub(r"[\x00-\x1f\x7f]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > _PENDING_PARAM_VALUE_MAX:
+        text = text[:_PENDING_PARAM_VALUE_MAX] + "…"
+    return text
+
 
 def _build_system_content_cached() -> tuple[str, str]:
     """Build and cache the static parts of the system prompt.
@@ -843,7 +901,11 @@ def _detect_conversation_mood(conversation_history: Optional[list], user_message
         return ""
 
     # Analyze user message style
-    if user_message == user_message.upper() and len(user_message) > 5:
+    if (
+        len(user_message) > 5
+        and any(c.isalpha() for c in user_message)
+        and user_message == user_message.upper()
+    ):
         hints.append("User schreibt in CAPS → möglicherweise aufgeregt/frustriert")
     if user_message.count("!") >= 2:
         hints.append("User nutzt viele Ausrufezeichen → aufgeregt oder enthusiastisch")
@@ -3053,15 +3115,17 @@ _SENIOR_CODE_MARKERS = (
 
 def _quality_text_normalized(text: str) -> str:
     value = str(text or "").lower()
+    # Mojibake-Schluessel bereits kleingeschrieben, da .lower() oben 'Ã' -> 'ã'
+    # bzw. 'Ÿ' -> 'ÿ' umwandelt (sonst koennten die Keys nie matchen).
     replacements = {
         "ä": "ae",
         "ö": "oe",
         "ü": "ue",
         "ß": "ss",
-        "Ã¤": "ae",
-        "Ã¶": "oe",
-        "Ã¼": "ue",
-        "ÃŸ": "ss",
+        "ã¤": "ae",
+        "ã¶": "oe",
+        "ã¼": "ue",
+        "ãÿ": "ss",
     }
     for source, target in replacements.items():
         value = value.replace(source, target)
@@ -3073,9 +3137,16 @@ def _quality_marker_text(text: str) -> str:
     return re.sub(r"[^\w]+", " ", _quality_text_normalized(text)).strip()
 
 
+# Marker-Konstanten aendern sich nie — normalisierte Form pro Marker cachen,
+# damit nicht bei jeder Chat-Nachricht tausende Regex-Operationen anfallen.
+@functools.lru_cache(maxsize=4096)
+def _quality_marker_padded(marker: str) -> str:
+    return f" {_quality_marker_text(marker)} "
+
+
 def _quality_has_any_marker(text: str, markers: tuple[str, ...]) -> bool:
     padded_text = f" {text} "
-    return any(f" {_quality_marker_text(marker)} " in padded_text for marker in markers)
+    return any(_quality_marker_padded(marker) in padded_text for marker in markers)
 
 
 _CODE_GENERATION_VERB_RE = re.compile(
@@ -3624,13 +3695,16 @@ def _build_messages(
     if user_message and len(user_message.split()) >= 3:
         try:
             from backend.memory import search_memory
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(search_memory, user_message, 3)
-                try:
-                    memory_results = future.result(timeout=0.5)
-                except concurrent.futures.TimeoutError:
-                    memory_results = []
-                    logger.warning("Memory search timed out (>0.5s) — skipping context")
+            # Langlebiger Modul-Executor statt pro Request einen neuen anzulegen:
+            # nur das Future mit 0.5s-Timeout abwarten. Ein haengender Such-Thread
+            # blockiert den Request-Pfad nicht (kein wait), belegt aber hoechstens
+            # einen der wenigen Worker des geteilten Executors.
+            future = _memory_search_executor.submit(search_memory, user_message, 3)
+            try:
+                memory_results = future.result(timeout=0.5)
+            except concurrent.futures.TimeoutError:
+                memory_results = []
+                logger.warning("Memory search timed out (>0.5s) — skipping context")
             if memory_results:
                 mem_text = "\n".join(
                     f"- [{m['category']}] {m['content']}" for m in memory_results
@@ -3646,7 +3720,10 @@ def _build_messages(
         if pending:
             action_name = pending.get("action", "?")
             params = pending.get("params", {})
-            params_str = ", ".join(f"{k}={v}" for k, v in params.items()) if params else "keine"
+            params_str = (
+                ", ".join(f"{k}={_sanitize_pending_param_value(v)}" for k, v in params.items())
+                if params else "keine"
+            )
             dynamic_parts.append(
                 f"\n\n[AUSSTEHENDE BESTÄTIGUNG]\n"
                 f"Aktion: {action_name}({params_str})\n"
@@ -3660,14 +3737,16 @@ def _build_messages(
     try:
         from backend.productivity import productivity_stats, pomodoro_status
         now_ts = _time.time()
-        if (now_ts - _productivity_cache["ts"]) > _PRODUCTIVITY_CACHE_TTL:
-            _productivity_cache["data"] = {
-                "stats": productivity_stats(),
-                "pomo": pomodoro_status(),
-            }
-            _productivity_cache["ts"] = now_ts
-        stats = _productivity_cache["data"]["stats"]
-        pomo = _productivity_cache["data"]["pomo"]
+        with _productivity_cache_lock:
+            if (now_ts - _productivity_cache["ts"]) > _PRODUCTIVITY_CACHE_TTL:
+                _productivity_cache["data"] = {
+                    "stats": productivity_stats(),
+                    "pomo": pomodoro_status(),
+                }
+                _productivity_cache["ts"] = now_ts
+            cached = _productivity_cache["data"]
+        stats = cached["stats"]
+        pomo = cached["pomo"]
         prod_lines = []
         if stats.get("open_todos"):
             count = stats["open_todos"]
@@ -3919,8 +3998,13 @@ def chat_stream(
             _save_interaction(user_message, partial)
             return
 
-        # If tool use caused failure, retry stream WITHOUT tools
-        if tools and _categorize_error(e) in (_ErrorCategory.TOOL_USE_FAILED, _ErrorCategory.UNKNOWN):
+        # If tools were sent, retry stream WITHOUT tools (conversational fallback).
+        # Konsistent zum non-streaming chat()-Pfad: dort wird IMMER ein Retry ohne
+        # Tools versucht. Die fruehere Bedingung haengte an Groq-spezifischer
+        # Fehlererkennung (TOOL_USE_FAILED) und griff bei Gemini-Tool-Fehlern
+        # praktisch nie. Da noch kein Text gestreamt wurde (siehe oben), ist der
+        # Retry gefahrlos und liefert dem User eine Textantwort statt nur ai_unavailable.
+        if tools:
             logger.info("Retrying stream without tools (tool_use may have caused failure)...")
             try:
                 stream_retry = _stream_with_selected_provider(messages, selected_model, tools=None)
@@ -3978,12 +4062,15 @@ def _save_interaction(user_msg: str, ai_reply: str) -> None:
         if interaction_hash == _last_saved_hash:
             logger.debug("Skipping duplicate interaction save")
             return
-        _last_saved_hash = interaction_hash
     try:
         from backend.memory import auto_remember
         auto_remember(user_msg, ai_reply)
     except Exception as e:
+        # Hash NICHT setzen, damit ein erneuter Speicherversuch moeglich bleibt.
         logger.error(f"Failed to save interaction: {e}", exc_info=True)
+        return
+    with _save_interaction_lock:
+        _last_saved_hash = interaction_hash
 
 
 def _save_chat_result(user_message: Optional[str], result: dict) -> None:
@@ -4025,172 +4112,49 @@ def generate_title(user_message: str) -> str:
 # ── MODEL SELECTION ──────────────────────────────
 _PROVIDER_LABELS = OrderedDict(
     [
-        ("groq", "Groq"),
-        ("openai", "OpenAI"),
         ("gemini", "Gemini"),
-        ("anthropic", "Claude"),
     ]
 )
 
 AI_MODEL_REGISTRY = OrderedDict(
     [
         (
-            "groq:llama-3.3-70b-versatile",
+            "gemini:gemini-3.5-flash",
             {
-                "id": "groq:llama-3.3-70b-versatile",
-                "provider": "groq",
-                "model": "llama-3.3-70b-versatile",
-                "name": "Groq - Llama 3.3 70B (Standard)",
-            },
-        ),
-        (
-            "groq:llama-3.1-8b-instant",
-            {
-                "id": "groq:llama-3.1-8b-instant",
-                "provider": "groq",
-                "model": "llama-3.1-8b-instant",
-                "name": "Groq - Llama 3.1 8B (Schnell)",
-            },
-        ),
-        (
-            "groq:llama-3.3-70b-specdec",
-            {
-                "id": "groq:llama-3.3-70b-specdec",
-                "provider": "groq",
-                "model": "llama-3.3-70b-specdec",
-                "name": "Groq - Llama 3.3 70B SpecDec (Schnell+)",
-            },
-        ),
-        (
-            "groq:deepseek-r1-distill-llama-70b",
-            {
-                "id": "groq:deepseek-r1-distill-llama-70b",
-                "provider": "groq",
-                "model": "deepseek-r1-distill-llama-70b",
-                "name": "Groq - DeepSeek R1 70B (Reasoning)",
-            },
-        ),
-        (
-            "groq:gemma2-9b-it",
-            {
-                "id": "groq:gemma2-9b-it",
-                "provider": "groq",
-                "model": "gemma2-9b-it",
-                "name": "Groq - Gemma 2 9B",
-            },
-        ),
-        (
-            "openai:gpt-4o",
-            {
-                "id": "openai:gpt-4o",
-                "provider": "openai",
-                "model": "gpt-4o",
-                "name": "OpenAI - GPT-4o (Standard)",
-            },
-        ),
-        (
-            "openai:gpt-4o-mini",
-            {
-                "id": "openai:gpt-4o-mini",
-                "provider": "openai",
-                "model": "gpt-4o-mini",
-                "name": "OpenAI - GPT-4o Mini (Schnell)",
-            },
-        ),
-        (
-            "openai:gpt-4.1",
-            {
-                "id": "openai:gpt-4.1",
-                "provider": "openai",
-                "model": "gpt-4.1",
-                "name": "OpenAI - GPT-4.1 (Neuestes)",
-            },
-        ),
-        (
-            "openai:gpt-4.1-mini",
-            {
-                "id": "openai:gpt-4.1-mini",
-                "provider": "openai",
-                "model": "gpt-4.1-mini",
-                "name": "OpenAI - GPT-4.1 Mini",
-            },
-        ),
-        (
-            "gemini:gemini-2.5-flash",
-            {
-                "id": "gemini:gemini-2.5-flash",
+                "id": "gemini:gemini-3.5-flash",
                 "provider": "gemini",
-                "model": "gemini-2.5-flash",
-                "name": "Gemini - 2.5 Flash",
+                "model": "gemini-3.5-flash",
+                "name": "Gemini - 3.5 Flash (Standard)",
             },
         ),
         (
-            "gemini:gemini-2.5-flash-lite",
+            "gemini:gemini-3.1-flash-lite",
             {
-                "id": "gemini:gemini-2.5-flash-lite",
+                "id": "gemini:gemini-3.1-flash-lite",
                 "provider": "gemini",
-                "model": "gemini-2.5-flash-lite",
-                "name": "Gemini - 2.5 Flash-Lite",
+                "model": "gemini-3.1-flash-lite",
+                "name": "Gemini - 3.1 Flash-Lite (Schnell)",
             },
         ),
         (
-            "gemini:gemini-2.5-pro",
+            "gemini:gemini-3.1-pro",
             {
-                "id": "gemini:gemini-2.5-pro",
+                "id": "gemini:gemini-3.1-pro",
                 "provider": "gemini",
-                "model": "gemini-2.5-pro",
-                "name": "Gemini - 2.5 Pro",
-            },
-        ),
-        (
-            "anthropic:claude-sonnet-4-20250514",
-            {
-                "id": "anthropic:claude-sonnet-4-20250514",
-                "provider": "anthropic",
-                "model": "claude-sonnet-4-20250514",
-                "name": "Claude - Sonnet 4 (Standard)",
-            },
-        ),
-        (
-            "anthropic:claude-opus-4-1-20250805",
-            {
-                "id": "anthropic:claude-opus-4-1-20250805",
-                "provider": "anthropic",
-                "model": "claude-opus-4-1-20250805",
-                "name": "Claude - Opus 4.1 (Reasoning)",
-            },
-        ),
-        (
-            "anthropic:claude-3-7-sonnet-20250219",
-            {
-                "id": "anthropic:claude-3-7-sonnet-20250219",
-                "provider": "anthropic",
-                "model": "claude-3-7-sonnet-20250219",
-                "name": "Claude - Sonnet 3.7",
-            },
-        ),
-        (
-            "anthropic:claude-3-5-haiku-20241022",
-            {
-                "id": "anthropic:claude-3-5-haiku-20241022",
-                "provider": "anthropic",
-                "model": "claude-3-5-haiku-20241022",
-                "name": "Claude - Haiku 3.5 (Schnell)",
+                "model": "gemini-3.1-pro",
+                "name": "Gemini - 3.1 Pro (Reasoning)",
             },
         ),
     ]
 )
 
 _PROVIDER_DEFAULT_MODEL_IDS = {
-    "groq": "groq:llama-3.3-70b-versatile",
-    "openai": "openai:gpt-4o",
-    "gemini": "gemini:gemini-2.5-flash",
-    "anthropic": "anthropic:claude-sonnet-4-20250514",
+    "gemini": "gemini:gemini-3.5-flash",
 }
 
-_PROVIDER_FALLBACK_ORDER = ("groq", "openai", "anthropic", "gemini")
+_PROVIDER_FALLBACK_ORDER = ("gemini",)
 
-_active_model_id = _PROVIDER_DEFAULT_MODEL_IDS["groq"]
+_active_model_id = _PROVIDER_DEFAULT_MODEL_IDS["gemini"]
 _active_model_lock = threading.Lock()
 AVAILABLE_MODELS = OrderedDict((model_id, meta["name"]) for model_id, meta in AI_MODEL_REGISTRY.items())
 
@@ -4209,7 +4173,7 @@ def _normalize_model_id(model_id: str) -> str:
 def _get_model_meta(model_id: Optional[str] = None) -> dict:
     """Return model metadata, falling back to the default OpenAI model."""
     normalized = _normalize_model_id(model_id or _active_model_id)
-    return AI_MODEL_REGISTRY.get(normalized, AI_MODEL_REGISTRY[_PROVIDER_DEFAULT_MODEL_IDS["groq"]])
+    return AI_MODEL_REGISTRY.get(normalized, AI_MODEL_REGISTRY[_PROVIDER_DEFAULT_MODEL_IDS["gemini"]])
 
 
 def _get_selected_model_meta() -> dict:
@@ -4439,37 +4403,13 @@ def get_ai_status() -> dict:
     """Get status of all AI providers plus the currently selected model."""
     selected = _get_selected_model_meta()
 
-    groq_ok = False
-    openai_ok = False
     gemini_ok = False
-    anthropic_ok = False
-
-    try:
-        groq_ok = _get_groq_client() is not None
-    except Exception:
-        groq_ok = False
-
-    try:
-        openai_ok = _get_openai_client() is not None
-    except Exception:
-        openai_ok = False
-
     try:
         gemini_ok = _get_gemini_client() is not None
     except Exception:
         gemini_ok = False
 
-    try:
-        anthropic_ok = _get_anthropic_api_key() is not None
-    except Exception:
-        anthropic_ok = False
-
-    provider_ok = {
-        "groq": groq_ok,
-        "openai": openai_ok,
-        "gemini": gemini_ok,
-        "anthropic": anthropic_ok,
-    }
+    provider_ok = {"gemini": gemini_ok}
 
     def _status_entry(provider: str, available: bool) -> dict:
         meta = selected if selected["provider"] == provider else AI_MODEL_REGISTRY[_PROVIDER_DEFAULT_MODEL_IDS[provider]]
@@ -4491,10 +4431,7 @@ def get_ai_status() -> dict:
     ]
 
     return {
-        "groq": _status_entry("groq", groq_ok),
-        "openai": _status_entry("openai", openai_ok),
         "gemini": _status_entry("gemini", gemini_ok),
-        "anthropic": _status_entry("anthropic", anthropic_ok),
         "active_provider": active_provider,
         "selected_provider": selected["provider"],
         "selected_model": selected["id"],

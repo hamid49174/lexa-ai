@@ -543,7 +543,12 @@ _INLINE_CONFIRM_PREFIX_RE = re.compile(
     r"^\s*(?:ja|yes|ok|okay|(?:ich\s+)?(?:bestaetige|bestatige)(?:\s+es)?|ausfuehren|ausfuhren|confirm)[,:\s-]+"
     r"(?=(?:" + "|".join(_ACTION_START_WORDS) + r")\b)",
 )
-_DEICTIC_TERMS = {"darauf", "drauf", "daruf", "das", "den", "die", "es", "ihn", "sie"}
+# Nur echte deiktische Verweiswoerter: Artikel (das/den/die) wurden entfernt,
+# weil sie bei kurzen Klickzielen wie "klicke das" faelschlich das zuletzt
+# gefundene Control referenziert und dabei die Mehrdeutigkeitspruefung
+# uebersprungen haben. Artikel werden jetzt als (ggf. unvollstaendiges) echtes
+# Ziel behandelt und durchlaufen weiterhin die Mehrdeutigkeitspruefung.
+_DEICTIC_TERMS = {"darauf", "drauf", "daruf", "es", "ihn", "sie"}
 _ACTION_SPLIT_RE = re.compile(
     r"\s*(?:[.;!?]\s+(?=(?:/?hermes\b|ja|yes|ok|okay|(?:ich\s+)?best(?:ae|a|\u00e4)tige(?:\s+es)?|ausf(?:ue|u|\u00fc)hren|confirm|klick|kilck|klcik|click|tippe|tipp|schreibe|schreib|"
     r"finde|find|suche|such|fokussiere|fokus|focus|zeige|pruefe|prufe|lies|lese|was|markiere|markier|waehle|wahle|select|ersetze|ersetz|replace|loesche|losche|leere|clear|speichere|speicher|speichern|sichere|save|rueckgaengig|rueckgangig|ruckgaengig|ruckgangig|undo|kopiere|kopier|copy|schneide|schneid|ausschneiden|cut|fuege|fuge|paste|print|ausdrucken|oeffne|offne|open|adressleiste|url|erstelle|erstell|create|ordner|folder|neue|neuer|neuen|neues|nachster|nachsten|naechster|naechsten|vorheriger|vorherigen|voriger|vorigen|wechsle|wechsele|wechsel|wechseln|neu|new|schlie(?:ss|\u00df)(?:e|en)?|schliess(?:e|en)?|close|aktualisiere|aktualisier|aktualisieren|refresh|reload|lade|gehe|geh|navigiere|navigate|zurueck|zuruck|back|vorwaerts|vorwarts|forward|zoome|zoom|vergroessere|vergroesser|verkleinere|verkleiner|vollbild|vollbildmodus|fullscreen|beende|verlasse|drueck|druecke|druck|drucke|"
@@ -1238,6 +1243,13 @@ def _extract_typed_text(instruction: str) -> str:
         if match:
             return match.group("text").strip()
     target = _extract_after_action_word(instruction, ("tippe", "tipp", "schreibe", "schreib"))
+    # Ohne Anfuehrungszeichen kann der Resttext noch eine Folge-Aktion
+    # enthalten (z. B. "Hallo Welt und speichere"), wenn der vorherige Split
+    # die Instruktion nicht getrennt hat. Damit niemals Steuerwoerter ins
+    # aktive Fenster getippt werden, am ersten Folge-Aktionswort abschneiden.
+    fragments = [frag.strip() for frag in _ACTION_SPLIT_RE.split(target) if frag.strip()]
+    if fragments:
+        target = fragments[0]
     target = _strip_target_window_hint(target, instruction)
     return target.strip()
 
@@ -1251,7 +1263,13 @@ def _extract_window_hint(instruction: str) -> str:
         rf"\b(?:in|im|bei|aus|von)\s+(?P<window>{known_app_window})(?=\s+(?:und|aber|mit|per|durch|aus|vor|um)\b|[.;,!?]|$)",
         r"\b(?:in|im|bei)\s+(?P<window>[A-Za-z0-9][A-Za-z0-9 _.,()+-]{1,80})$",
     )
-    for pattern in patterns:
+    # Lagewoerter/Strukturbegriffe sind keine Fensternamen. Das letzte (lose)
+    # Pattern faengt sonst Resttext wie "Menue oben rechts" als Fenstername.
+    location_words = {
+        "oben", "unten", "rechts", "links", "mitte", "ecke",
+        "menue", "menu", "leiste", "rand", "bereich", "seite",
+    }
+    for index, pattern in enumerate(patterns):
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
@@ -1261,6 +1279,13 @@ def _extract_window_hint(instruction: str) -> str:
             continue
         if len(window) > 80:
             continue
+        # Nur das letzte, bewusst lose Pattern (kein expliziter "fenster"-/
+        # App-Marker) strenger pruefen: hoechstens drei Tokens und keine
+        # Lagewoerter, damit Klickziel-Resttext nicht als Fenster gilt.
+        if index == len(patterns) - 1:
+            tokens = folded.split()
+            if len(tokens) > 3 or any(token in location_words for token in tokens):
+                continue
         return window
     return ""
 
@@ -1672,6 +1697,58 @@ def _focus_window_via_win32(window: str) -> dict[str, Any]:
 
     hwnd, title = matches[0]
     return _set_foreground_window(hwnd, title or window, "win32")
+
+
+def _center_cursor_on_window(window: str) -> dict[str, Any] | None:
+    """Move the cursor to the center of the matching window, best-effort.
+
+    Mouse-wheel events are delivered by Windows to the window under the cursor,
+    not to the focused window. Before a wheel scroll we therefore park the cursor
+    over the target window so the scroll lands where it was intended. Returns the
+    move result, or None when the window can't be resolved (then the caller keeps
+    the existing behavior of scrolling at the current cursor position).
+    """
+    target = str(window or "").strip()
+    if not target or not hasattr(ctypes, "windll"):
+        return None
+
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    query = _window_match_fold(target)
+    matches: list[tuple[int, str]] = []
+    enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def callback(hwnd: int, _lparam: int) -> bool:
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = int(user32.GetWindowTextLengthW(hwnd))
+        if length <= 0:
+            return True
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buffer, length + 1)
+        title = str(buffer.value or "").strip()
+        if title and _window_title_matches_query(title, query):
+            matches.append((int(hwnd), title))
+        return True
+
+    try:
+        user32.EnumWindows(enum_proc(callback), 0)
+        if not matches:
+            return None
+        hwnd, _title = matches[0]
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return None
+        width = int(rect.right) - int(rect.left)
+        height = int(rect.bottom) - int(rect.top)
+        if width <= 0 or height <= 0:
+            return None
+        center_x = int(rect.left) + width // 2
+        center_y = int(rect.top) + height // 2
+        return desktop_control.desktop_move(center_x, center_y)
+    except Exception:
+        return None
 
 
 def _focus_window_by_pid(pid: int, label: str = "") -> dict[str, Any]:
@@ -2144,7 +2221,32 @@ def hermes_desktop_commit(
     if action_kind == "scroll":
         focus_result = _focus_window_for_action(window)
         verify_window = str((focus_result or {}).get("window_title") or window or "").strip()
+        # Wheel events go to the window under the cursor, not the focused window.
+        # Park the cursor over the target window so the scroll lands there.
+        cursor_result = _center_cursor_on_window(verify_window)
+        # Wurde ein Zielfenster verlangt, der Cursor aber nicht darueber
+        # platziert (Fenster nicht aufloesbar), wuerde an der aktuellen
+        # Cursorposition gescrollt - moeglicherweise im falschen Fenster.
+        # Dann lieber nicht blind scrollen, sondern dem Nutzer melden.
+        window_requested = bool(str(window or "").strip())
+        if window_requested and cursor_result is None:
+            return {
+                "kind": "scroll",
+                "summary": (
+                    f'Nicht ausgefuehrt: Das Zielfenster "{window}" wurde nicht gefunden. '
+                    "Ich habe nicht gescrollt, um nicht im falschen Fenster zu landen."
+                ),
+                "result": {"scrolled": False, "reason": "target_window_not_found"},
+                "focus": focus_result,
+                "verification": _verification_payload(
+                    method="scroll_target_window_not_found",
+                    status="failed",
+                    summary=f'Zielfenster "{window}" konnte nicht aufgeloest werden; Scroll abgebrochen.',
+                ),
+            }
         result = desktop_control.desktop_scroll(clicks=scroll_clicks)
+        if isinstance(result, dict) and cursor_result is not None:
+            result["cursor_centered"] = True
         if verify:
             time.sleep(0.15)
             try:
@@ -2181,6 +2283,10 @@ def hermes_desktop_commit(
         verify_window = str((focus_result or {}).get("window_title") or window or "").strip()
         result = desktop_control.desktop_type(text=typing_text, interval_ms=typing_interval_ms)
         if verify:
+            # Manche Apps aktualisieren den UIA-Baum/Value erst nach einem kurzen
+            # Tick. Analog zu click/scroll/hotkey kurz warten, sonst meldet die
+            # Verifikation faelschlich "failed", obwohl der Text getippt wurde.
+            time.sleep(0.2)
             try:
                 after = ui_automation.ui_tree(window=verify_window, max_depth=2, max_controls=40)
                 ui_found = _tree_contains_text(after, typing_text)

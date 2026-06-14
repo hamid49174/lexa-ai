@@ -347,6 +347,21 @@ function isSensitivePersonalOsPath(value) {
   return SENSITIVE_OS_PATH_PATTERN.test(normalized);
 }
 
+// Backup-Dateinamen-Muster (gespiegelt aus router_backup.py:
+// _BACKUP_FILENAME_PREFIX/_SUFFIX) für eine clientseitige Defense-in-Depth-
+// Prüfung. Backup-Pfade sind legitim absolut (z.B. ~/.lexa/backups\...),
+// daher hier KEIN isPathTraversal (das absolute Pfade ablehnen würde) — nur
+// echte Traversal-Segmente (..) und das erwartete Dateinamensmuster prüfen.
+const BACKUP_DB_FILENAME_PATTERN = /^lexa-backup-[^\\/]*\.json$/i;
+
+function isAllowedBackupDbPath(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return false;
+  if (bridgePathInfo(raw).hasParentSegment) return false;
+  const basename = raw.replace(/\//g, "\\").split("\\").filter(Boolean).pop() || "";
+  return BACKUP_DB_FILENAME_PATTERN.test(basename);
+}
+
 function clampPositiveInteger(value, fallback, min, max) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) return fallback;
@@ -1437,7 +1452,10 @@ const lexaBridge = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),
     });
-    return res.json();
+    // apiJson prüft res.ok und liefert bei Rate-Limit/Backend-Fehler ein
+    // strukturiertes Objekt (inkl. detail) statt eines rohen Fehler-Bodys
+    // oder einer geworfenen Exception bei nicht-JSON-Antworten.
+    return apiJson(res, "Chat request failed");
   },
 
   // Chat with File
@@ -1449,7 +1467,7 @@ const lexaBridge = {
       method: "POST",
       body: formData,
     });
-    return res.json();
+    return apiJson(res, "Chat file request failed");
   },
 
   // Companion API
@@ -1522,7 +1540,10 @@ const lexaBridge = {
       method: "POST",
       body: formData,
     });
-    return res.json();
+    // apiJson liefert bei Rate-Limit/Backend-Fehler {ok:false,...} ohne
+    // success:true, sodass der Aufrufer (!stt.success) den Fehlerpfad nimmt
+    // statt an einer nicht-JSON-Antwort zu werfen.
+    return apiJson(res, "Speech-to-text request failed");
   },
 
   // Voice status
@@ -1938,7 +1959,9 @@ const lexaBridge = {
       return res.json();
     } catch (e) {
       console.warn("[Preload] generateTitle failed:", e.message || e);
-      return { title: message.substring(0, 40) };
+      // Defensiv: message kann null/undefined sein — String(...) verhindert,
+      // dass der Fallback selbst einen TypeError wirft und den Netzwerkfehler verdeckt.
+      return { title: String(message || "").substring(0, 40) };
     }
   },
 
@@ -2401,6 +2424,12 @@ const lexaBridge = {
     return r.json();
   },
   backupRestoreDb: async (path) => {
+    // Defense-in-Depth: nur erwartete Backup-Dateinamen ohne Traversal-Segmente
+    // zulassen (analog zur personalOs-Härtung). Das Backend validiert ebenfalls,
+    // aber der Bridge verlässt sich nicht allein darauf.
+    if (!isAllowedBackupDbPath(path)) {
+      throw bridgeSecurityError("", "bridge_privacy_denied");
+    }
     const r = await fetchWithTimeout(`${API}/backup/restore-db`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Lexa-Restore-Intent': 'confirmed' },

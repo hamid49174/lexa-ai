@@ -216,8 +216,10 @@ def _guarded_page_goto(page, url: str, **kwargs):
 SCREENSHOTS_DIR = LEXA_DATA_DIR / "screenshots"
 SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Lazy browser instance
-_browser = None
+# Lazy browser instances — one visible (open_url/play_youtube), one headless
+# (scrape_text/check_price/website_screenshot/website_to_pdf, no UI needed).
+_browser = None            # visible (headless=False)
+_headless_browser = None   # headless=True
 _playwright = None
 
 # yt-dlp availability cache
@@ -240,9 +242,29 @@ def _check_ytdlp() -> bool:
     return _ytdlp_available
 
 
+_MAX_YTDLP_QUERY_LEN = 200
+
+
+def _clean_ytdlp_query(query: str) -> str | None:
+    """Strip control characters and length-cap the query before passing to yt-dlp.
+
+    Returns None if nothing usable remains. shell=False already prevents
+    command injection; this guards against control chars and oversized input.
+    """
+    if not query:
+        return None
+    cleaned = "".join(ch for ch in query if ch.isprintable()).strip()
+    cleaned = cleaned[:_MAX_YTDLP_QUERY_LEN]
+    return cleaned or None
+
+
 def _ytdlp_search(query: str, max_results: int = 5) -> list[dict] | None:
     """Search YouTube via yt-dlp (community-maintained, robust gegen DOM-Änderungen)."""
     if not _check_ytdlp():
+        return None
+
+    query = _clean_ytdlp_query(query)
+    if not query:
         return None
 
     try:
@@ -277,7 +299,7 @@ def _ytdlp_search(query: str, max_results: int = 5) -> list[dict] | None:
                 continue
 
         return videos if videos else None
-    except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, json.JSONDecodeError) as e:
         logger.warning(f"yt-dlp Suche fehlgeschlagen: {e}")
         return None
 
@@ -285,6 +307,10 @@ def _ytdlp_search(query: str, max_results: int = 5) -> list[dict] | None:
 def _ytdlp_get_url(query: str) -> dict | None:
     """Get the best video URL for playback via yt-dlp."""
     if not _check_ytdlp():
+        return None
+
+    query = _clean_ytdlp_query(query)
+    if not query:
         return None
 
     try:
@@ -311,7 +337,7 @@ def _ytdlp_get_url(query: str) -> dict | None:
             "channel": data.get("channel", data.get("uploader", "Unbekannt")),
             "duration": data.get("duration_string", ""),
         }
-    except Exception as e:
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, json.JSONDecodeError) as e:
         logger.warning(f"yt-dlp URL-Abruf fehlgeschlagen: {e}")
         return None
 
@@ -320,62 +346,82 @@ def _ytdlp_get_url(query: str) -> dict | None:
 #  PLAYWRIGHT BROWSER
 # ══════════════════════════════════════════════════
 
-def _get_browser():
+def _get_browser(headless: bool = False):
     """Lazy-load Playwright browser with auto-detection of common issues.
+
+    headless=False: sichtbares Fenster (open_url/play_youtube — UI gewollt).
+    headless=True:  unsichtbar (scrape_text/check_price/website_screenshot/
+                    website_to_pdf — reine Datenoperationen, kein Fenster nötig).
+    Beide Modi werden getrennt gecacht; der Playwright-Treiber wird geteilt.
 
     Provides clear, actionable error messages for:
     - Playwright not installed (pip)
     - Browser binaries missing (playwright install)
     - Permission issues, crashes, display issues
     """
-    global _browser, _playwright
-    if _browser is None:
-        try:
-            from playwright.sync_api import sync_playwright
-        except ImportError:
-            logger.warning("Playwright nicht installiert — Browser-Features deaktiviert")
-            raise RuntimeError(
-                "Playwright ist nicht installiert.\n"
-                "Installation:\n"
-                "  1. pip install playwright\n"
-                "  2. playwright install chromium"
-            )
-        try:
-            _playwright = sync_playwright().start()
-            _browser = _playwright.chromium.launch(headless=False)
-            logger.info("Playwright browser launched")
-        except Exception as e:
-            err_str = str(e).lower()
-            if "executable doesn't exist" in err_str or "browsertype.launch" in err_str:
-                logger.error("Playwright browser binaries not found")
-                # Try to auto-install
-                try:
-                    import subprocess as _sp
-                    logger.info("Attempting automatic Playwright browser install...")
-                    result = _sp.run(
-                        ["playwright", "install", "chromium"],
-                        capture_output=True, text=True, timeout=120,
-                    )
-                    if result.returncode == 0:
-                        # Retry launch
-                        _playwright = sync_playwright().start()
-                        _browser = _playwright.chromium.launch(headless=False)
-                        logger.info("Playwright browser auto-installed and launched")
-                        return _browser
-                except Exception as install_err:
-                    logger.error(f"Auto-install failed: {install_err}")
+    global _browser, _headless_browser, _playwright
+    cached = _headless_browser if headless else _browser
+    if cached is not None:
+        return cached
 
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        logger.warning("Playwright nicht installiert — Browser-Features deaktiviert")
+        raise RuntimeError(
+            "Playwright ist nicht installiert.\n"
+            "Installation:\n"
+            "  1. pip install playwright\n"
+            "  2. playwright install chromium"
+        )
+
+    def _launch():
+        global _playwright
+        if _playwright is None:
+            _playwright = sync_playwright().start()
+        return _playwright.chromium.launch(headless=headless)
+
+    try:
+        launched = _launch()
+        logger.info("Playwright browser launched (headless=%s)", headless)
+    except Exception as e:
+        err_str = str(e).lower()
+        if "executable doesn't exist" in err_str or "browsertype.launch" in err_str:
+            logger.error("Playwright browser binaries not found")
+            # Try to auto-install
+            launched = None
+            try:
+                import subprocess as _sp
+                logger.info("Attempting automatic Playwright browser install...")
+                result = _sp.run(
+                    ["playwright", "install", "chromium"],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if result.returncode == 0:
+                    # Retry launch
+                    launched = _launch()
+                    logger.info("Playwright browser auto-installed and launched")
+            except Exception as install_err:
+                logger.error(f"Auto-install failed: {install_err}")
+
+            if launched is None:
                 raise RuntimeError(
                     "Playwright-Browser nicht gefunden.\n"
                     "Lösung: playwright install chromium\n"
                     "(Einmalig nötig — lädt ~150MB Chromium-Browser herunter)"
                 )
+        else:
             logger.error(f"Playwright Browser-Start fehlgeschlagen: {e}")
             raise RuntimeError(
                 f"Browser konnte nicht gestartet werden: {e}\n"
                 "Versuche: playwright install chromium"
             )
-    return _browser
+
+    if headless:
+        _headless_browser = launched
+    else:
+        _browser = launched
+    return launched
 
 
 def open_url(url: str) -> dict:
@@ -425,11 +471,11 @@ def search_youtube(query: str) -> dict:
 
     # Strategy 2: Playwright (can break if YouTube changes DOM)
     try:
-        try:
-            browser = _get_browser()
-        except RuntimeError as e:
-            return {"query": query, "results": [], "error": str(e)}
-        page = browser.new_page()
+        browser = _get_browser()
+    except RuntimeError as e:
+        return {"query": query, "results": [], "error": str(e)}
+    page = browser.new_page()
+    try:
         from urllib.parse import quote_plus
         search_url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
         _guarded_page_goto(page, search_url, timeout=30000)
@@ -438,18 +484,26 @@ def search_youtube(query: str) -> dict:
         results = page.evaluate("""
             () => {
                 const videos = document.querySelectorAll('ytd-video-renderer');
-                return Array.from(videos).slice(0, 5).map(v => ({
-                    title: v.querySelector('#video-title')?.textContent?.trim(),
-                    url: 'https://youtube.com' + v.querySelector('#video-title')?.getAttribute('href'),
-                    channel: v.querySelector('#channel-name')?.textContent?.trim(),
-                }));
+                return Array.from(videos).slice(0, 5).map(v => {
+                    const titleEl = v.querySelector('#video-title');
+                    const href = titleEl ? titleEl.getAttribute('href') : null;
+                    return {
+                        title: titleEl?.textContent?.trim(),
+                        url: href ? 'https://youtube.com' + href : null,
+                        channel: v.querySelector('#channel-name')?.textContent?.trim(),
+                    };
+                }).filter(r => r.url && r.title);
             }
         """)
-        page.close()
         return {"query": query, "results": results, "source": "playwright"}
     except Exception as e:
         logger.warning(f"YouTube Playwright-Suche fehlgeschlagen: {e}")
         return {"query": query, "results": [], "error": str(e)}
+    finally:
+        try:
+            page.close()
+        except Exception:
+            pass
 
 
 def play_youtube(query: str) -> dict:
@@ -516,7 +570,7 @@ def website_screenshot(url: str, filename: str = "") -> str:
     if err:
         return t("error.generic", error=str(err))
     try:
-        _get_browser()
+        browser = _get_browser(headless=True)
     except RuntimeError as e:
         return t("error.generic", error=str(e))
     if filename:
@@ -525,24 +579,26 @@ def website_screenshot(url: str, filename: str = "") -> str:
         filename = "".join(c for c in filename if c.isalnum() or c in "._-")[:100]
         if not filename:
             filename = ""  # will be regenerated below
-    browser = _get_browser()
     page = browser.new_page()
     try:
         _guarded_page_goto(page, url, timeout=30000)
-    except _UnsafeBrowserUrl as e:
-        page.close()
+        page.wait_for_load_state("networkidle")
+
+        if not filename:
+            from datetime import datetime
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"web_{ts}.png"
+
+        path = str(SCREENSHOTS_DIR / filename)
+        page.screenshot(path=path, full_page=True)
+        return path
+    except Exception as e:
         return t("error.generic", error=str(e))
-    page.wait_for_load_state("networkidle")
-
-    if not filename:
-        from datetime import datetime
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"web_{ts}.png"
-
-    path = str(SCREENSHOTS_DIR / filename)
-    page.screenshot(path=path, full_page=True)
-    page.close()
-    return path
+    finally:
+        try:
+            page.close()
+        except Exception:
+            pass
 
 
 def website_to_pdf(url: str, filename: str = "") -> str:
@@ -551,7 +607,7 @@ def website_to_pdf(url: str, filename: str = "") -> str:
     if err:
         return t("error.generic", error=str(err))
     try:
-        _get_browser()
+        browser = _get_browser(headless=True)
     except RuntimeError as e:
         return t("error.generic", error=str(e))
     if filename:
@@ -560,27 +616,31 @@ def website_to_pdf(url: str, filename: str = "") -> str:
         filename = "".join(c for c in filename if c.isalnum() or c in "._-")[:100]
         if not filename:
             filename = ""  # will be regenerated below
-    browser = _get_browser()
     context = browser.new_context()
     page = context.new_page()
     try:
         _guarded_page_goto(page, url, timeout=30000)
-    except _UnsafeBrowserUrl as e:
-        page.close()
-        context.close()
+        page.wait_for_load_state("networkidle")
+
+        if not filename:
+            from datetime import datetime
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"web_{ts}.pdf"
+
+        path = str(SCREENSHOTS_DIR / filename)
+        page.pdf(path=path)
+        return path
+    except Exception as e:
         return t("error.generic", error=str(e))
-    page.wait_for_load_state("networkidle")
-
-    if not filename:
-        from datetime import datetime
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"web_{ts}.pdf"
-
-    path = str(SCREENSHOTS_DIR / filename)
-    page.pdf(path=path)
-    page.close()
-    context.close()
-    return path
+    finally:
+        try:
+            page.close()
+        except Exception:
+            pass
+        try:
+            context.close()
+        except Exception:
+            pass
 
 
 def _scrape_lightweight(url: str, max_chars: int = 5000) -> dict | None:
@@ -704,7 +764,7 @@ def scrape_text(url: str, max_chars: int = 5000, use_browser: bool = False) -> d
 
     # Strategy 2+3: Playwright (for JS-rendered pages)
     try:
-        browser = _get_browser()
+        browser = _get_browser(headless=True)
     except RuntimeError as e:
         return {"error": str(e)}
     page = browser.new_page()
@@ -934,7 +994,7 @@ def check_price(url: str, selector: str = "") -> dict:
     if err:
         return {"url": url, "error": err}
     try:
-        browser = _get_browser()
+        browser = _get_browser(headless=True)
     except RuntimeError as e:
         return {"url": url, "error": str(e)}
     page = browser.new_page()
@@ -962,11 +1022,14 @@ def check_price(url: str, selector: str = "") -> dict:
 
 
 def close_browser():
-    """Close Playwright browser."""
-    global _browser, _playwright
+    """Close Playwright browser(s)."""
+    global _browser, _headless_browser, _playwright
     if _browser:
         _browser.close()
         _browser = None
+    if _headless_browser:
+        _headless_browser.close()
+        _headless_browser = None
     if _playwright:
         _playwright.stop()
         _playwright = None

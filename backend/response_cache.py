@@ -11,8 +11,24 @@ from collections import OrderedDict
 from difflib import SequenceMatcher
 from typing import Any
 
-_CACHE_TTL_SECONDS = int(os.environ.get("LEXA_RESPONSE_CACHE_TTL", "300") or "300")
-_CACHE_MAX_ENTRIES = int(os.environ.get("LEXA_RESPONSE_CACHE_MAX", "64") or "64")
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    """Parse a positive integer env var, falling back to default and clamping to a lower bound.
+
+    Invalid (non-numeric) values must never break the backend import, and values
+    below ``minimum`` would silently disable the cache, so clamp them instead.
+    """
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return max(minimum, default)
+    try:
+        parsed = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return max(minimum, default)
+    return max(minimum, parsed)
+
+
+_CACHE_TTL_SECONDS = _env_int("LEXA_RESPONSE_CACHE_TTL", 300)
+_CACHE_MAX_ENTRIES = _env_int("LEXA_RESPONSE_CACHE_MAX", 64)
 _SIMILARITY_THRESHOLD = 0.92
 _SHORT_QUERY_EXACT_LENGTH = 24
 _cache_lock = threading.Lock()
@@ -103,12 +119,24 @@ def get_cached_chat_response(message: str, history: list[dict] | None = None) ->
     normalized = normalize_cache_query(message)
     signature = _context_signature(history)
     context_free = _is_context_free_query(message)
+    exact_key = hashlib.sha256(f"{signature}\n{normalized}".encode("utf-8", errors="ignore")).hexdigest()[:24]
     now = time.time()
 
     with _cache_lock:
         expired = [key for key, entry in _response_cache.items() if now - float(entry.get("ts", 0)) > _CACHE_TTL_SECONDS]
         for key in expired:
             _response_cache.pop(key, None)
+
+        # Fast path: identical prompt+context hits the stored key directly,
+        # avoiding the O(n) similarity scan for the common repeated-question case.
+        exact_entry = _response_cache.get(exact_key)
+        if exact_entry is not None:
+            _response_cache.move_to_end(exact_key)
+            return {
+                "reply": exact_entry["reply"],
+                "similarity": 1.0,
+                "cached": True,
+            }
 
         best_key = ""
         best_entry: dict[str, Any] | None = None
@@ -123,6 +151,8 @@ def get_cached_chat_response(message: str, history: list[dict] | None = None) ->
                 best_key = key
                 best_entry = entry
                 best_score = score
+                if score >= 1.0:
+                    break
 
         if best_entry is None or best_score < _SIMILARITY_THRESHOLD:
             return None

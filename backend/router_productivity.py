@@ -42,6 +42,21 @@ def _validate_todo_fields(data: dict, *, require_title: bool = False) -> str | N
     return None
 
 
+def _result_response(result):
+    """Map a productivity-function result to a JSONResponse with the correct
+    HTTP status. Error-dicts carry their message under "error" (never a
+    "status_code" key), so derive 404 for not-found cases from the message
+    text and fall back to 400 for other validation errors."""
+    if isinstance(result, dict):
+        text = str(result.get("error", "")).lower()
+        if "nicht gefunden" in text:
+            return JSONResponse(result, status_code=result.get("status_code", 404))
+        return JSONResponse(result, status_code=result.get("status_code", 400))
+    if "nicht gefunden" in str(result).lower():
+        return JSONResponse({"status": result}, status_code=404)
+    return {"status": result}
+
+
 # ── TO-DO ────────────────────────────────────────
 
 @router.get("/todos")
@@ -108,13 +123,7 @@ async def update_todo(todo_id: int, req: Request):
         priority=data.get("priority", ""),
     )
 
-    if isinstance(result, dict):
-        return JSONResponse(result, status_code=result.get("status_code", 400))
-    result_lower = str(result).lower()
-    if "nicht gefunden" in result_lower or "id fehlt" in result_lower:
-        return JSONResponse({"status": result}, status_code=404)
-
-    return {"status": result}
+    return _result_response(result)
 
 
 @router.delete("/todos/completed")
@@ -142,13 +151,7 @@ async def delete_todo(todo_id: int):
 
     result = await asyncio.to_thread(prod.todo_delete, id=todo_id)
 
-    if isinstance(result, dict):
-        return JSONResponse(result, status_code=result.get("status_code", 400))
-    result_lower = str(result).lower()
-    if "nicht gefunden" in result_lower or "id fehlt" in result_lower:
-        return JSONResponse({"status": result}, status_code=404)
-
-    return {"status": result}
+    return _result_response(result)
 
 
 @router.post("/todos/{todo_id}/complete")
@@ -158,12 +161,7 @@ async def complete_todo(todo_id: int):
 
     result = await asyncio.to_thread(prod.todo_complete, id=todo_id)
 
-    if isinstance(result, dict):
-        return JSONResponse(result, status_code=result.get("status_code", 400))
-    if "nicht gefunden" in str(result).lower():
-        return JSONResponse({"status": result}, status_code=404)
-
-    return {"status": result}
+    return _result_response(result)
 
 
 # ── POMODORO ─────────────────────────────────────
@@ -272,12 +270,7 @@ async def log_habit(name: str, req: Request):
     count = max(1, min(100, count))
     result = await asyncio.to_thread(prod.habit_log, name=name, count=count)
 
-    if isinstance(result, dict):
-        return JSONResponse(result, status_code=result.get("status_code", 400))
-    if "nicht gefunden" in str(result).lower():
-        return JSONResponse({"status": result}, status_code=404)
-
-    return {"status": result}
+    return _result_response(result)
 
 
 @router.delete("/habits/{name}")
@@ -287,12 +280,7 @@ async def delete_habit(name: str):
 
     result = await asyncio.to_thread(prod.habit_delete, name=name)
 
-    if isinstance(result, dict):
-        return JSONResponse(result, status_code=result.get("status_code", 400))
-    if "nicht gefunden" in str(result).lower():
-        return JSONResponse({"status": result}, status_code=404)
-
-    return {"status": result}
+    return _result_response(result)
 
 
 @router.get("/habits/stats")

@@ -265,10 +265,24 @@ async def agent_run(req: AgentRequest):
     async with _history_lock:
         history_snapshot = list(conversation_history)
 
+    async def _save_agent_history(summary_text: str):
+        """Persist the agent reply to history under the lock.
+
+        Run via asyncio.shield in the finally-block so a client-side cancellation
+        does not abort the save mid-await.
+        """
+        async with _history_lock:
+            update_history(
+                conversation_history,
+                sanitized,
+                f"[{'Hermes' if worker == 'hermes' else 'Agent'}] {summary_text[:2000]}",
+            )
+
     async def event_stream():
         from backend.agent_loop import run_agent
 
         full_summary = ""
+        cancelled = False
         try:
             source = (
                 _hermes_system_status_events(sanitized)
@@ -287,21 +301,54 @@ async def agent_run(req: AgentRequest):
 
         except asyncio.CancelledError:
             logger.info("Agent stream cancelled by client")
+            cancelled = True
         except Exception as e:
             logger.exception("Agent stream error")
             yield f"data: {json.dumps({'type': 'error', 'message': _client_safe_agent_error(e)})}\n\n"
         finally:
-            # Save agent interaction to conversation history
+            # Save agent interaction to conversation history. Run the save as a
+            # shielded task so a client disconnect (cancellation) does not abort
+            # it mid-await; keep awaiting it even if this scope is cancelled.
             if full_summary:
-                try:
-                    async with _history_lock:
-                        update_history(
-                            conversation_history,
-                            sanitized,
-                            f"[{'Hermes' if worker == 'hermes' else 'Agent'}] {full_summary[:2000]}",
+                save_task = asyncio.ensure_future(_save_agent_history(full_summary))
+                # Bound the wait so a hanging save (e.g. SQLite lock) cannot block
+                # the stream cleanup forever, and use a per-attempt timeout instead
+                # of a tight continue-loop so repeated cancellation cannot busy-spin.
+                _SAVE_WAIT_TIMEOUT = 5.0  # seconds per attempt
+                _SAVE_MAX_ATTEMPTS = 3
+                for _ in range(_SAVE_MAX_ATTEMPTS):
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(save_task), timeout=_SAVE_WAIT_TIMEOUT
                         )
-                except Exception as e:
-                    logger.error(f"Failed to save agent history: {e}")
+                        break
+                    except asyncio.TimeoutError:
+                        if save_task.done():
+                            break
+                        # Save still running after the timeout — wait once more.
+                        continue
+                    except asyncio.CancelledError:
+                        cancelled = True
+                        if save_task.done():
+                            break
+                        # Cancellation hit the await, not the shielded save —
+                        # wait again (bounded) until the save completes.
+                        continue
+                    except Exception as e:
+                        logger.error(f"Failed to save agent history: {e}")
+                        break
+                else:
+                    # Exhausted all attempts without the save finishing: give up on
+                    # waiting so cleanup can proceed. The shielded task keeps running
+                    # in the background and is not cancelled here.
+                    logger.error(
+                        "Agent history save did not finish within "
+                        f"{_SAVE_MAX_ATTEMPTS} attempts ({_SAVE_WAIT_TIMEOUT}s each); "
+                        "continuing cleanup without blocking."
+                    )
+            # Propagate cancellation per asyncio convention (do not swallow it).
+            if cancelled:
+                raise asyncio.CancelledError()
 
     return StreamingResponse(
         event_stream(),

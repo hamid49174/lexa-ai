@@ -7,7 +7,6 @@ fast, bounded, and safe to run on every request.
 
 from __future__ import annotations
 
-import json
 import re
 import unicodedata
 from collections import Counter
@@ -41,7 +40,9 @@ STOP_WORDS = frozenset({
     "this", "that", "for", "with", "from", "you", "your",
 })
 
-_ACTION_PATTERN = re.compile(r'"action"\s*:\s*"([a-z_]+)"', re.IGNORECASE)
+# Aktionen erscheinen im History-Text als Marker "[Aktion: name(...) ...]"
+# (gesetzt in router_chat.py/router_agent.py), nicht als rohes JSON.
+_ACTION_MARKER_PATTERN = re.compile(r"\[Aktion:\s*([a-z_][a-z0-9_]*)", re.IGNORECASE)
 _FACT_PATTERNS = (
     re.compile(r"\b(\d{1,2}\.\d{1,2}\.\d{2,4})\b"),
     re.compile(r"\b(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)\b", re.I),
@@ -51,11 +52,6 @@ _FACT_PATTERNS = (
     ),
     re.compile(r"\b(deadline|termin|meeting|projekt|aufgabe)\s+[\"']?(\w[\w\s]{2,30})[\"']?\b", re.I),
 )
-_CREATED_ACTION_LABELS = {
-    "note_create": "Notiz",
-    "todo_create": "Todo",
-    "memory_add": "Erinnerung",
-}
 _UMLAUT_REPLACEMENTS = {
     "ä": "ae",
     "Ä": "ae",
@@ -106,7 +102,11 @@ def extract_keywords(user_message: str, max_keywords: int = 5) -> list[str]:
         return []
 
     # Prefer specific terms: frequency first, then length, then original order.
-    first_index = {word: words.index(word) for word in counts}
+    # Build first-occurrence index in a single pass instead of calling the
+    # O(n) list.index() per distinct word (which would be O(n*k) overall).
+    first_index: dict[str, int] = {}
+    for i, word in enumerate(words):
+        first_index.setdefault(word, i)
     ranked = sorted(
         counts,
         key=lambda word: (-counts[word], -min(len(word), 16), first_index[word]),
@@ -144,7 +144,6 @@ def summarize_messages_local(messages: list[dict[str, Any]]) -> str:
     user_topics: list[str] = []
     executed_actions: list[str] = []
     user_facts: list[str] = []
-    lexa_created: list[str] = []
 
     for msg in messages:
         role = str(msg.get("role", ""))
@@ -164,32 +163,21 @@ def summarize_messages_local(messages: list[dict[str, Any]]) -> str:
                         _dedupe_append(user_facts, fact, limit=80)
 
         elif role == "assistant":
-            for action in _ACTION_PATTERN.findall(content):
+            # Assistant-content sind formatierte Antworttexte (z.B. mit
+            # "[Hermes] ..."- oder "[Aktion: ...]"-Markern), niemals rohe
+            # JSON-Action-Objekte (siehe update_history in action_parser.py
+            # und alle Aufrufer in router_chat.py/router_agent.py). Aktionen
+            # werden daher hier ueber den realen Textmarker "[Aktion: name(...)]"
+            # erfasst statt ueber json.loads, das auf Freitext praktisch immer
+            # fehlschlaegt.
+            for action in _ACTION_MARKER_PATTERN.findall(content):
                 _dedupe_append(executed_actions, action, limit=80)
-
-            try:
-                parsed = json.loads(content)
-            except (json.JSONDecodeError, TypeError, ValueError):
-                continue
-            if not isinstance(parsed, dict):
-                continue
-
-            action_name = str(parsed.get("action", ""))
-            params = parsed.get("params", {})
-            if not isinstance(params, dict) or action_name not in _CREATED_ACTION_LABELS:
-                continue
-            item_name = params.get("title") or params.get("content", "")
-            if item_name:
-                label = _CREATED_ACTION_LABELS[action_name]
-                _dedupe_append(lexa_created, f'{label}: "{_clip_one_line(item_name, 40)}"', limit=80)
 
     lines = ["[Bisheriger Gespraechsverlauf]"]
     if user_topics:
         lines.append(f"- User fragte nach: {', '.join(user_topics[:12])}")
     if executed_actions:
-        lines.append(f"- Lexa fuehrte aus: {', '.join(executed_actions[:10])}")
-    if lexa_created:
-        lines.append(f"- Lexa erstellte: {'; '.join(lexa_created[:6])}")
+        lines.append(f"- Lexa schlug Aktionen vor: {', '.join(executed_actions[:10])}")
     if user_facts:
         lines.append(f"- User erwaehnte: {', '.join(user_facts[:8])}")
     if len(lines) == 1:

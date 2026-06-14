@@ -153,11 +153,18 @@ def get_spotify_status() -> dict[str, str]:
     import psutil as _ps
 
     try:
+        pid = None
         for proc in _ps.process_iter(["name", "pid"]):
-            if proc.info["name"] and proc.info["name"].lower() == "spotify.exe":
+            # Fluechtige Prozesse koennen zwischen Enumeration und Attributzugriff
+            # enden — einzeln abfangen, damit ein Fremdprozess die Erkennung nicht abbricht.
+            try:
+                name = proc.info["name"]
+            except (_ps.NoSuchProcess, _ps.AccessDenied, _ps.ZombieProcess):
+                continue
+            if name and name.lower() == "spotify.exe":
                 pid = proc.info["pid"]
                 break
-        else:
+        if pid is None:
             return {"playing": False, "artist": "", "song": "", "raw_title": "", "error": "Spotify nicht gestartet"}
 
         # Fenstertitel von Spotify holen

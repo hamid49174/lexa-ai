@@ -167,6 +167,7 @@ class CompanionEngine:
             "browser_open": self.open_url,
             "shutdown": self.shutdown_pc,
             "restart": self.restart_pc,
+            "shutdown_cancel": self.shutdown_cancel,
             # ── Phase 3: Browser ──
             "youtube_search": web.search_youtube,
             "youtube_play": web.play_youtube,
@@ -354,12 +355,26 @@ class CompanionEngine:
         return list_plugins()
 
     def execute(self, command: str, params: dict | None = None) -> dict:
-        """Execute a command with security checks."""
+        """Execute a command with security checks.
+
+        WARNUNG: Dies ist eine SYNCHRONE, potenziell langlaufende Methode. Viele
+        Befehle blockieren mehrere Sekunden (subprocess.run mit timeout, os.walk,
+        psutil.cpu_percent(interval=...), time.sleep in desktop_*). Aus einem
+        async-Kontext (FastAPI-Handler) IMMER via asyncio.to_thread(companion.execute, ...)
+        aufrufen, niemals direkt — sonst friert der gesamte Event-Loop für die
+        Dauer des Befehls ein und blockiert alle anderen Requests.
+        """
         params = _normalize_command_params(command, params)
 
         # Limit param count and key length to prevent abuse
         if len(params) > 20:
             return {"success": False, "error": "Zu viele Parameter angegeben (max 20)."}
+
+        # Central value-length cap (consistent with security.md body-cap of 50000):
+        # a single oversized string parameter must not reach subprocess/PowerShell/OCR.
+        for key, value in params.items():
+            if isinstance(value, str) and len(value) > 50000:
+                return {"success": False, "error": f"Parameter '{key}' zu lang (max 50000 Zeichen)."}
 
         # Security check
         permission = is_command_allowed(command)
@@ -373,18 +388,29 @@ class CompanionEngine:
             hint = f" Meintest du: {', '.join(similar[:3])}?" if similar else ""
             return {"success": False, "error": t("command.unknownEngine", command=command, hint=hint)}
 
+        import inspect
+        func = self.commands[command]
+
+        # Validate the call signature up front so that only *real* argument-binding
+        # errors are reported as parameter errors. A TypeError raised deep inside the
+        # command body (e.g. float(None)) must NOT be mistaken for wrong parameters —
+        # it falls through to the generic exception handler below.
         try:
-            result = self.commands[command](**params)
+            sig = inspect.signature(func)
+        except (TypeError, ValueError):
+            sig = None  # Introspection unavailable — skip pre-check, let the call surface errors.
+        if sig is not None:
+            try:
+                sig.bind(**params)
+            except TypeError as e:
+                audit_log(command, "param_error", audit_error_details(e))
+                logger.warning(f"Command {command} Parameter-Fehler: {e}")
+                return {"success": False, "error": t("error.paramError", command=command, sig=str(sig), error=str(e))}
+
+        try:
+            result = func(**params)
             audit_log(command, "executed", audit_param_keys_details(params))
             return {"success": True, "data": result}
-        except TypeError as e:
-            # Wrong parameters
-            import inspect
-            func = self.commands[command]
-            sig = str(inspect.signature(func))
-            audit_log(command, "param_error", audit_error_details(e))
-            logger.warning(f"Command {command} Paramter-Fehler: {e}")
-            return {"success": False, "error": t("error.paramError", command=command, sig=sig, error=str(e))}
         except Exception as e:
             audit_log(command, "error", audit_error_details(e))
             logger.error(f"Command {command} failed: {e}", exc_info=True)
@@ -511,8 +537,11 @@ class CompanionEngine:
         return "Kein PID oder Name angegeben."
 
     def read_clipboard(self) -> str:
-        """Clipboard-Inhalt lesen."""
-        return pyperclip.paste()
+        """Clipboard-Inhalt lesen (auf 50000 Zeichen begrenzt, vgl. body-Cap)."""
+        content = pyperclip.paste()
+        if len(content) > 50000:
+            return content[:50000] + "\n… (gekürzt)"
+        return content
 
     def write_clipboard(self, text: str = "") -> str:
         """Text in Clipboard schreiben."""
@@ -594,16 +623,33 @@ class CompanionEngine:
         Returns list of paths, or None if the index is unavailable.
         This is the same index used by Windows Explorer search — instant results.
         """
-        # Sanitize query for SQL LIKE (escape single quotes)
-        safe_query = query.replace("'", "''")[:200]
-        safe_path = path.replace("'", "''").replace("/", "\\")
+        # Two-layer sanitization for every user/model-controlled value:
+        #   1. SQL escaping (double single quotes) so the value cannot break out of
+        #      the SQL string literal inside SystemIndex.
+        #   2. PowerShell escaping (_sanitize_ps_arg neutralizes ", $ and backtick)
+        #      so the value cannot break out of the PS double-quoted string passed to
+        #      $conn.Execute(...) — closes the command-injection / RCE vector
+        #      (e.g. "$(calc.exe)" or '"; Start-Process calc; "').
+        def _safe_for_ps_sql(value: str, max_len: int) -> str:
+            # SQL-escape first (single quotes), then PowerShell-escape the result.
+            sql_escaped = value.replace("'", "''")[:max_len]
+            return systools._sanitize_ps_arg(sql_escaped, max_len=max_len)
+
+        # Escape SQL-LIKE wildcards so a literal % or _ in the query is matched
+        # verbatim instead of acting as a wildcard ('50%' / 'log_2024' would
+        # otherwise match far too broadly). Square-bracket escaping is the form
+        # understood by the Windows Search SystemIndex LIKE operator. Escape '['
+        # first so the brackets we add for % and _ are not themselves altered.
+        like_safe_query = query.replace("[", "[[]").replace("%", "[%]").replace("_", "[_]")
+        safe_query = _safe_for_ps_sql(like_safe_query, 200)
+        safe_path = _safe_for_ps_sql(path.replace("/", "\\"), 500)
 
         # Build SQL query for Windows Search Index
         where_clauses = [f"System.FileName LIKE '%{safe_query}%'"]
         if safe_path:
             where_clauses.append(f"SCOPE='file:{safe_path}'")
         if extension:
-            safe_ext = extension.lstrip(".").replace("'", "''")[:10]
+            safe_ext = _safe_for_ps_sql(extension.lstrip("."), 10)
             where_clauses.append(f"System.FileExtension = '.{safe_ext}'")
 
         sql = f"SELECT TOP {limit} System.ItemPathDisplay FROM SystemIndex WHERE {' AND '.join(where_clauses)}"
@@ -752,8 +798,9 @@ class CompanionEngine:
     def focus_window(self, title: str = "") -> str:
         """Fenster in den Vordergrund bringen."""
         try:
-            # Sanitize title to prevent PowerShell injection
-            safe_title = title.replace('"', '').replace("'", '').replace('`', '').replace('$', '').replace('{', '').replace('}', '')
+            # Escape title via the project-wide PowerShell sanitizer (backtick, $, quotes,
+            # newlines) instead of a fragile character blacklist — consistent with system_tools.
+            safe_title = systools._sanitize_ps_arg(title)
             ps = f'''
             Add-Type @"
             using System;
@@ -772,13 +819,15 @@ class CompanionEngine:
                 }}
             }}
 "@
-            [WinFocus]::Focus("{safe_title}")
+            if ([WinFocus]::Focus("{safe_title}")) {{ "OK" }} else {{ "NOT_FOUND" }}
             '''
-            subprocess.run(
-                ["powershell", "-Command", ps],
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps],
                 capture_output=True, text=True, timeout=10,
             )
-            return f"Fenster '{title}' fokussiert."
+            if "OK" in result.stdout:
+                return f"Fenster '{title}' fokussiert."
+            return f"Kein Fenster mit Titel '{title}' gefunden."
         except Exception as e:
             return t("error.generic", error=str(e))
 
@@ -988,13 +1037,26 @@ class CompanionEngine:
         """PC herunterfahren (braucht Bestätigung)."""
         delay = max(0, min(3600, int(delay)))  # Clamp 0–3600s
         subprocess.Popen(["shutdown", "/s", "/t", str(delay)], shell=False)
-        return f"PC fährt in {delay} Sekunden herunter."
+        return f"PC fährt in {delay} Sekunden herunter. Sage 'Abbrechen', dann stoppe ich das (shutdown_cancel)."
 
     def restart_pc(self, delay: int = 30) -> str:
         """PC neustarten (braucht Bestätigung)."""
         delay = max(0, min(3600, int(delay)))  # Clamp 0–3600s
         subprocess.Popen(["shutdown", "/r", "/t", str(delay)], shell=False)
-        return f"PC startet in {delay} Sekunden neu."
+        return f"PC startet in {delay} Sekunden neu. Sage 'Abbrechen', dann stoppe ich das (shutdown_cancel)."
+
+    def shutdown_cancel(self) -> str:
+        """Geplantes Herunterfahren/Neustarten abbrechen (shutdown /a)."""
+        result = subprocess.run(
+            ["shutdown", "/a"],
+            capture_output=True, text=True, timeout=10,
+            encoding="utf-8", errors="replace",
+        )
+        if result.returncode == 0:
+            return "Geplantes Herunterfahren/Neustarten abgebrochen."
+        # Exit code 1116 = no shutdown was scheduled
+        err = (result.stderr or result.stdout or "").strip()
+        return f"Kein geplantes Herunterfahren zum Abbrechen gefunden.{(' ' + err[:150]) if err else ''}"
 
     # ── Upgrade 6: Vision/OCR Commands ─────────────
 
@@ -1003,12 +1065,28 @@ class CompanionEngine:
         import asyncio
         from backend.vision import analyze_screenshot
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
+            # Companion commands run in a worker thread (asyncio.to_thread) without an
+            # event loop. get_event_loop() raises RuntimeError there on Python 3.10+,
+            # so detect a *running* loop explicitly and only then offload to a thread.
+            try:
+                asyncio.get_running_loop()
+                running_loop = True
+            except RuntimeError:
+                running_loop = False
+
+            if running_loop:
                 import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
+                # Don't use a `with` block here: its __exit__ calls shutdown(wait=True),
+                # which would block on the still-running Vision task even after the 30s
+                # timeout fired — effectively defeating the timeout. Instead shut down
+                # without waiting and try to cancel the future so a hanging Vision API
+                # does not freeze the worker thread.
+                pool = concurrent.futures.ThreadPoolExecutor()
+                try:
                     future = pool.submit(asyncio.run, analyze_screenshot(prompt, window_title=window or None))
                     result = future.result(timeout=30)
+                finally:
+                    pool.shutdown(wait=False, cancel_futures=True)
             else:
                 result = asyncio.run(analyze_screenshot(prompt, window_title=window or None))
             return result
@@ -1034,6 +1112,11 @@ class CompanionEngine:
         """Return timer results that fired within the last 60s and are not yet acknowledged."""
         import time as _time
         now = _time.time()
+        # Bound the global list independently of acknowledge_timers(): drop entries
+        # older than 5 minutes so polling without acknowledging cannot grow it unbounded.
+        _timer_results[:] = [
+            timer for timer in _timer_results if (now - timer["fired_at"]) < 300
+        ]
         pending = []
         for timer in _timer_results:
             if not timer["acknowledged"] and (now - timer["fired_at"]) < 60:
