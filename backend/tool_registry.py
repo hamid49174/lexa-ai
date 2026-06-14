@@ -95,6 +95,9 @@ def _register_basis_tools() -> list[dict]:
             _param("limit", "integer", "Max. Anzahl der Ergebnisse (Standard: 50)"),
         ]),
         _tool("app_list", "Listet alle aktuell laufenden Anwendungen/Prozesse auf mit CPU- und RAM-Verbrauch"),
+        _tool("web_search", "Durchsucht das LIVE-Web und liefert aktuelle Informationen mit echten Quellen. Nutze dies aktiv, wenn die Frage aktuelles Wissen, Ereignisse, Daten, Preise, Releases, Personen/Versionen oder irgendetwas nach deinem Trainingsstand betrifft — statt zu raten oder zu halluzinieren.", [
+            _param("query", "string", "Praezise Suchanfrage", required=True),
+        ]),
         _tool("system_info", "Zeigt CPU, RAM, Disk und Batterie Informationen"),
         _tool("screenshot", "Erstellt einen Screenshot des Desktops"),
         _tool("process_list", "Listet alle laufenden Prozesse auf"),
@@ -1173,6 +1176,17 @@ _CATEGORY_SELECTION_PRIORITY: dict[str, int] = {
 
 
 def get_tools_for_context(user_message: str, max_tools: int = 45) -> list[dict]:
+    """Wie die Kontext-Auswahl, stellt aber sicher, dass web_search IMMER angeboten
+    wird (modellgesteuertes Web-Grounding) — solange ueberhaupt Tools gesendet werden."""
+    tools = _select_tools_for_context(user_message, max_tools=max_tools)
+    if tools and not any(t.get("function", {}).get("name") == "web_search" for t in tools):
+        ws = get_tool("web_search")
+        if ws:
+            return [ws] + tools
+    return tools
+
+
+def _select_tools_for_context(user_message: str, max_tools: int = 45) -> list[dict]:
     """Return context-relevant tools based on the user message.
 
     Uses keyword matching to select only relevant tool categories,

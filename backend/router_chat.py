@@ -2024,6 +2024,7 @@ async def chat_stream_endpoint(req: ChatRequest):
                 yield f"data: {json.dumps({'error': lexa_user_error('ai_unavailable')})}\n\n"
                 return
 
+            web_hops = 0
             while True:
                 try:
                     chunk_future = loop.run_in_executor(
@@ -2039,6 +2040,36 @@ async def chat_stream_endpoint(req: ChatRequest):
 
                 # Phase 40: stream yields either str chunks or a tool_call dict
                 if isinstance(chunk, dict) and chunk.get("type") == "tool_call":
+                    tcs = chunk.get("tool_calls", []) or []
+                    web_tc = next((tc for tc in tcs if tc.get("name") == "web_search"), None)
+                    if web_tc:
+                        # Modellgesteuerte Websuche: server-seitig suchen, Generator auf
+                        # eine geerdete Antwort umschalten und weiterstreamen (bounded).
+                        # web_search wird NIE als Companion-Aktion ans Frontend gereicht.
+                        if grounding_extra is None and web_hops < 2:
+                            web_hops += 1
+                            wq = ((web_tc.get("arguments") or {}).get("query") or sanitized)[:300]
+                            yield f"data: {json.dumps({'status': 'web_search'})}\n\n"
+                            try:
+                                web_sources2 = await asyncio.to_thread(gather_sources, wq, 4)
+                            except Exception as we:
+                                logger.warning(f"agentic web_search failed: {we}")
+                                web_sources2 = []
+                            try:
+                                gen.close()
+                            except Exception:
+                                pass
+                            if web_sources2:
+                                grounding_extra = _build_web_grounding(wq, web_sources2)
+                                audit_log("chat_stream", "web_grounded_agentic", f"q={wq[:60]} n={len(web_sources2)}")
+                                yield f"data: {json.dumps({'sources': [{'title': s.get('title', ''), 'url': s.get('url', '')} for s in web_sources2]}, ensure_ascii=False)}\n\n"
+                                gen = chat_stream(sanitized, history_snapshot, system_extra=grounding_extra, disable_tools=True)
+                            else:
+                                yield f"data: {json.dumps({'status': 'web_search_empty'})}\n\n"
+                                gen = chat_stream(sanitized, history_snapshot, disable_tools=True)
+                            continue
+                        # Suche erschoepft -> hier beenden (kein Companion-Aktion-Pfad).
+                        break
                     tool_call_result = chunk
                     break
                 elif isinstance(chunk, str):
