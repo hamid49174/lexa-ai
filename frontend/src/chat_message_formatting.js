@@ -1,5 +1,48 @@
 /* High-level chat message formatting helpers loaded before chat.js. Keep this file free of module syntax. */
 
+function _listItemMatch(line) {
+  // Erkennt ein Listen-Item (auch eingerückt): {indent, ordered, content} oder null.
+  const m = /^(\s*)([-*]|\d+[.)])\s+(.*)$/.exec(String(line || ""));
+  if (!m) return null;
+  return {
+    indent: m[1].replace(/\t/g, "  ").length,
+    ordered: /\d/.test(m[2]),
+    content: m[3],
+  };
+}
+
+// Baut eine (ggf. verschachtelte) Liste ab Zeile `start`, liefert den neuen Index.
+function appendNestedList(parent, lines, start) {
+  let i = start;
+  const first = _listItemMatch(lines[i]);
+  const rootType = first.ordered ? "ol" : "ul";
+  const root = document.createElement(rootType);
+  root.className = rootType === "ol" ? "chat-ol" : "chat-ul";
+  const stack = [{ indent: first.indent, listEl: root, lastItem: null }];
+
+  while (i < lines.length) {
+    const m = _listItemMatch(lines[i]);
+    if (!m) break;
+    while (stack.length > 1 && m.indent < stack[stack.length - 1].indent) stack.pop();
+    let top = stack[stack.length - 1];
+    if (m.indent > top.indent) {
+      const nestedType = m.ordered ? "ol" : "ul";
+      const nested = document.createElement(nestedType);
+      nested.className = nestedType === "ol" ? "chat-ol" : "chat-ul";
+      (top.lastItem || top.listEl).appendChild(nested);
+      stack.push({ indent: m.indent, listEl: nested, lastItem: null });
+      top = stack[stack.length - 1];
+    }
+    const item = document.createElement("li");
+    appendInlineMarkdown(item, m.content);
+    top.listEl.appendChild(item);
+    top.lastItem = item;
+    i += 1;
+  }
+  parent.appendChild(root);
+  return i;
+}
+
 function appendMarkdownSegment(parent, segment) {
   const lines = String(segment || "").replace(/\r\n/g, "\n").split("\n");
   let i = 0;
@@ -11,19 +54,14 @@ function appendMarkdownSegment(parent, segment) {
       continue;
     }
 
-    if (/^###\s+/.test(line)) {
-      const h4 = document.createElement("h4");
-      h4.className = "chat-h4";
-      appendInlineMarkdown(h4, line.replace(/^###\s+/, ""));
-      parent.appendChild(h4);
-      i += 1;
-      continue;
-    }
-    if (/^##\s+/.test(line)) {
-      const h3 = document.createElement("h3");
-      h3.className = "chat-h3";
-      appendInlineMarkdown(h3, line.replace(/^##\s+/, ""));
-      parent.appendChild(h3);
+    const headingMatch = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const tag = level <= 1 ? "h2" : level === 2 ? "h3" : "h4";
+      const heading = document.createElement(tag);
+      heading.className = level <= 1 ? "chat-h2" : level === 2 ? "chat-h3" : "chat-h4";
+      appendInlineMarkdown(heading, headingMatch[2]);
+      parent.appendChild(heading);
       i += 1;
       continue;
     }
@@ -47,28 +85,8 @@ function appendMarkdownSegment(parent, segment) {
       parent.appendChild(quote);
       continue;
     }
-    if (/^\d+\.\s+/.test(line)) {
-      const list = document.createElement("ol");
-      list.className = "chat-ol";
-      while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
-        const item = document.createElement("li");
-        appendInlineMarkdown(item, lines[i].replace(/^\d+\.\s+/, ""));
-        list.appendChild(item);
-        i += 1;
-      }
-      parent.appendChild(list);
-      continue;
-    }
-    if (/^[-*]\s+/.test(line)) {
-      const list = document.createElement("ul");
-      list.className = "chat-ul";
-      while (i < lines.length && /^[-*]\s+/.test(lines[i])) {
-        const item = document.createElement("li");
-        appendInlineMarkdown(item, lines[i].replace(/^[-*]\s+/, ""));
-        list.appendChild(item);
-        i += 1;
-      }
-      parent.appendChild(list);
+    if (_listItemMatch(line)) {
+      i = appendNestedList(parent, lines, i);
       continue;
     }
     if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && isChatTableSeparator(lines[i + 1])) {

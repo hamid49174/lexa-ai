@@ -61,15 +61,15 @@ function appendInlineMarkdown(parent, source) {
       }
     } else if (raw.startsWith("**")) {
       const strong = document.createElement("strong");
-      strong.textContent = match[7] || "";
+      appendInlineMarkdown(strong, match[7] || ""); // recurse -> nested *italic*/`code` inside bold
       parent.appendChild(strong);
     } else if (raw.startsWith("~~")) {
       const strike = document.createElement("s");
-      strike.textContent = match[8] || "";
+      appendInlineMarkdown(strike, match[8] || "");
       parent.appendChild(strike);
     } else if (raw.startsWith("*")) {
       const em = document.createElement("em");
-      em.textContent = match[9] || "";
+      appendInlineMarkdown(em, match[9] || "");
       parent.appendChild(em);
     } else {
       parent.appendChild(document.createTextNode(raw));
@@ -160,6 +160,6 @@ function appendCodeBlock(parent, lang, codeText) {
 }
 
 function isMarkdownBlockStart(line) {
-  return /^(#{2,3}\s+|>\s+|-{3,}\s*$|\d+\.\s+|[-*]\s+)/.test(line)
+  return /^(#{1,6}\s+|>\s+|-{3,}\s*$|\s*\d+[.)]\s+|\s*[-*]\s+)/.test(line)
     || (/^\s*\|.*\|\s*$/.test(line));
 }

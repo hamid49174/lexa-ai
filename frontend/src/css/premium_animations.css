@@ -1016,12 +1016,12 @@ body {
   color: rgba(250, 250, 255, 0.96);
 }
 
-.message .msg-text :where(.chat-h3, .chat-h4, .chat-ol, .chat-ul, .chat-quote, .table-wrap, .code-block-wrap) {
+.message .msg-text :where(.chat-h2, .chat-h3, .chat-h4, .chat-ol, .chat-ul, .chat-quote, .table-wrap, .code-block-wrap) {
   margin-block-start: 12px;
   margin-block-end: 0;
 }
 
-.message .msg-text :where(.chat-h3, .chat-h4):first-child,
+.message .msg-text :where(.chat-h2, .chat-h3, .chat-h4):first-child,
 .message .msg-text :where(.chat-ol, .chat-ul, .chat-quote, .table-wrap, .code-block-wrap):first-child {
   margin-block-start: 0;
 }
@@ -1037,6 +1037,7 @@ body {
   font-weight: 650;
 }
 
+.message .msg-text .chat-h2,
 .message .msg-text .chat-h3,
 .message .msg-text .chat-h4 {
   color: rgba(255, 255, 255, 0.96);
@@ -1045,12 +1046,24 @@ body {
   line-height: 1.25;
 }
 
+.message .msg-text .chat-h2 {
+  font-size: 17px;
+}
+
 .message .msg-text .chat-h3 {
   font-size: 15px;
 }
 
 .message .msg-text .chat-h4 {
   font-size: 14px;
+}
+
+/* Verschachtelte Listen: enger Abstand statt 12px Block-Gap */
+.message .msg-text :where(.chat-ol, .chat-ul) :where(.chat-ol, .chat-ul) {
+  margin-block-start: 2px;
+}
+.message .msg-text :where(.chat-ol, .chat-ul) li {
+  margin: 2px 0;
 }
 
 .message .msg-text .chat-field {
