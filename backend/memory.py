@@ -1254,7 +1254,8 @@ def conversation_list(limit: int = 50, offset: int = 0) -> list[dict]:
                 if brace_idx >= 0:
                     snippet = snippet[:brace_idx + 1]
                     obj = json.loads(snippet)
-                    last_message = str(obj.get("content", ""))[:80]
+                    clean_preview, _ = _split_sources_fence(str(obj.get("content", "")))
+                    last_message = clean_preview[:80]
                     last_role = obj.get("role", "")
         except Exception:
             pass

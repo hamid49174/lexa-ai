@@ -1295,7 +1295,10 @@ async def chat_endpoint(req: ChatRequest):
         logger.info(f"Local intent resolved: {local_result.get('action', 'direct_reply')}")
         return ChatResponse(reply=reply_msg, action=action, requires_confirmation=requires_confirmation)
 
-    cached_reply = get_cached_chat_response(sanitized, history_snapshot)
+    # Live web research for current-event / explicit-web questions (parity with /chat/stream).
+    web_query = _web_search_query(sanitized, history_snapshot)
+
+    cached_reply = None if web_query else get_cached_chat_response(sanitized, history_snapshot)
     if cached_reply is not None:
         reply = cached_reply["reply"]
         audit_log("chat", "ai_response_cache_hit", f"similarity={cached_reply.get('similarity')}")
@@ -1303,9 +1306,20 @@ async def chat_endpoint(req: ChatRequest):
             update_history(conversation_history, sanitized, reply, MAX_HISTORY)
         return ChatResponse(reply=reply, action=None, requires_confirmation=False)
 
+    grounding_extra = None
+    if web_query:
+        try:
+            web_sources = await asyncio.to_thread(gather_sources, web_query, 4)
+        except Exception as e:
+            logger.warning(f"chat web grounding fetch failed: {e}")
+            web_sources = []
+        if web_sources:
+            grounding_extra = _build_web_grounding(web_query, web_sources)
+            audit_log("chat", "web_grounded", f"q={web_query[:60]} n={len(web_sources)}")
+
     # AI call in thread pool (blocking requests library)
     try:
-        ai_result = await asyncio.to_thread(chat, sanitized, history_snapshot)
+        ai_result = await asyncio.to_thread(chat, sanitized, history_snapshot, grounding_extra)
     except ConnectionError as e:
         logger.error(f"AI connection error: {e}")
         raise HTTPException(status_code=503, detail="AI service unavailable. Please try again later.")
@@ -1324,7 +1338,7 @@ async def chat_endpoint(req: ChatRequest):
 
     async with _history_lock:
         update_history(conversation_history, sanitized, reply, MAX_HISTORY)
-    if not action and not requires_confirmation and ai_result.get("type", "text") == "text":
+    if not action and not requires_confirmation and not web_query and ai_result.get("type", "text") == "text":
         remember_chat_response(sanitized, history_snapshot, reply)
 
     return ChatResponse(reply=reply, action=action, requires_confirmation=requires_confirmation)
@@ -2017,7 +2031,9 @@ async def chat_stream_endpoint(req: ChatRequest):
                     sanitized,
                     history_snapshot,
                     system_extra=grounding_extra,
-                    disable_tools=bool(grounding_extra),
+                    # Nach Heuristik-Grounding: nur web_search ausschliessen (kein Re-Search),
+                    # Companion-Tools bleiben verfuegbar ("suche X und mach Y").
+                    exclude_tools=({"web_search"} if grounding_extra else None),
                 )
             except Exception:
                 logger.exception("chat_stream() generator creation failed")
@@ -2063,10 +2079,10 @@ async def chat_stream_endpoint(req: ChatRequest):
                                 grounding_extra = _build_web_grounding(wq, web_sources2)
                                 audit_log("chat_stream", "web_grounded_agentic", f"q={wq[:60]} n={len(web_sources2)}")
                                 yield f"data: {json.dumps({'sources': [{'title': s.get('title', ''), 'url': s.get('url', '')} for s in web_sources2]}, ensure_ascii=False)}\n\n"
-                                gen = chat_stream(sanitized, history_snapshot, system_extra=grounding_extra, disable_tools=True)
+                                gen = chat_stream(sanitized, history_snapshot, system_extra=grounding_extra, exclude_tools={"web_search"})
                             else:
                                 yield f"data: {json.dumps({'status': 'web_search_empty'})}\n\n"
-                                gen = chat_stream(sanitized, history_snapshot, disable_tools=True)
+                                gen = chat_stream(sanitized, history_snapshot, exclude_tools={"web_search"})
                             continue
                         # Suche erschoepft -> hier beenden (kein Companion-Aktion-Pfad).
                         break

@@ -3887,6 +3887,7 @@ def chat_stream(
     conversation_history: Optional[list] = None,
     system_extra: Optional[str] = None,
     disable_tools: bool = False,
+    exclude_tools: Optional[set] = None,
 ) -> Generator[str | dict, None, None]:
     """Yield text chunks OR a tool_call dict from streaming providers.
 
@@ -3918,6 +3919,10 @@ def chat_stream(
                     logger.debug("Skipping stream tools for direct text/code generation request")
                 else:
                     tools = get_tools_for_context(tool_context, max_tools=20)
+                    if tools and exclude_tools:
+                        # z.B. nach einem Web-Grounding-Hop: web_search ausschliessen
+                        # (kein Re-Search), Companion-Tools aber verfuegbar lassen.
+                        tools = [t for t in tools if t.get("function", {}).get("name") not in exclude_tools]
         except Exception as e:
             logger.warning(f"Tool registry unavailable for stream: {e}")
 

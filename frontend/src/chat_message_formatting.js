@@ -22,7 +22,16 @@ function appendNestedList(parent, lines, start) {
 
   while (i < lines.length) {
     const m = _listItemMatch(lines[i]);
-    if (!m) break;
+    if (!m) {
+      // Loose list: einzelne/mehrere Leerzeilen tolerieren, wenn danach wieder ein
+      // Listen-Item folgt -> Liste (inkl. Nummerierung) laeuft weiter statt neu zu starten.
+      if (lines[i].trim() === "") {
+        let j = i + 1;
+        while (j < lines.length && lines[j].trim() === "") j += 1;
+        if (j < lines.length && _listItemMatch(lines[j])) { i = j; continue; }
+      }
+      break;
+    }
     while (stack.length > 1 && m.indent < stack[stack.length - 1].indent) stack.pop();
     let top = stack[stack.length - 1];
     if (m.indent > top.indent) {
