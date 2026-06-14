@@ -1603,6 +1603,9 @@ function syncChatInputSize() {
     const lineHeight = Number.parseFloat(metrics?.lineHeight) || 22;
     const paddingY = (Number.parseFloat(metrics?.paddingTop) || 0) + (Number.parseFloat(metrics?.paddingBottom) || 0);
     const maxRows = Math.max(1, Math.floor((maxHeight - paddingY) / lineHeight));
+    // Reset to 1 row first, otherwise scrollHeight reflects the previous (expanded)
+    // size and the box never shrinks back after sending a long message.
+    chatInput.rows = 1;
     const neededRows = Math.max(1, Math.ceil(((chatInput.scrollHeight || lineHeight) - paddingY) / lineHeight));
     chatInput.rows = Math.min(maxRows, neededRows);
     chatInput.classList.toggle("is-scrollable", neededRows > maxRows);
