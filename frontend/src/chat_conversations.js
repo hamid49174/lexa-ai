@@ -250,7 +250,7 @@ async function saveCurrentConversation(options = null) {
     if (!isPersistableChatMessage(msg)) return;
     const text = getMessagePersistText(msg);
     const role = msg.classList.contains("user-message") ? "user" : "assistant";
-    if (text) messages.push({ role, content: text });
+    if (text) messages.push({ role, content: serializeMessageForStorage(msg) });
   });
   try {
     await window.lexa.conversationUpdate(convId, { messages });

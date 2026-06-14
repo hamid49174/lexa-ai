@@ -60,6 +60,163 @@ function setMessagePersistText(msg, text) {
   else delete msg.dataset.persistText;
 }
 
+// ── Web sources (ChatGPT-style citation chips) ───────────────────────────────
+// Sources live in the message dataset (persistText stays clean, so copy/verify/
+// export are unaffected). On save they are embedded as a fenced ```lexa-sources
+// block; on restore addMessage extracts them back into the dataset + component.
+const LEXA_SOURCES_FENCE_RE = /\n*```lexa-sources\s*\n([\s\S]*?)\n```\s*$/;
+
+function getMessageSources(msg) {
+  const raw = msg?.dataset?.lexaSources;
+  if (!raw) return [];
+  try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; }
+  catch (e) { return []; }
+}
+
+function setMessageSources(msg, sources) {
+  if (!msg) return;
+  const list = Array.isArray(sources) ? sources.filter((s) => s && s.url) : [];
+  if (list.length) msg.dataset.lexaSources = JSON.stringify(list.map((s) => ({ title: s.title || "", url: s.url })));
+  else delete msg.dataset.lexaSources;
+}
+
+function encodeSourcesBlock(sources) {
+  const list = Array.isArray(sources) ? sources.filter((s) => s && s.url) : [];
+  if (!list.length) return "";
+  const slim = list.map((s) => ({ title: s.title || "", url: s.url }));
+  return "\n\n```lexa-sources\n" + JSON.stringify(slim) + "\n```";
+}
+
+function extractSourcesBlock(text) {
+  const str = String(text || "");
+  const m = str.match(LEXA_SOURCES_FENCE_RE);
+  if (!m) return { text: str, sources: [] };
+  try {
+    const v = JSON.parse(m[1]);
+    const sources = Array.isArray(v) ? v.filter((s) => s && s.url) : [];
+    return { text: str.slice(0, m.index).replace(/\s+$/, ""), sources };
+  } catch (e) {
+    return { text: str, sources: [] };
+  }
+}
+
+// Used by the save paths so the durable store carries the sources, while the
+// in-DOM persistText stays clean for copy/verify/continue/workspace.
+function serializeMessageForStorage(msg) {
+  return getMessagePersistText(msg) + encodeSourcesBlock(getMessageSources(msg));
+}
+
+function sourceDomain(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ""); }
+  catch (e) { return ""; }
+}
+
+function sourceFaviconUrl(url) {
+  const d = sourceDomain(url);
+  return d ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(d)}&sz=64` : "";
+}
+
+function appendSourceFavicon(parent, src, cls) {
+  const dom = sourceDomain(src.url);
+  const initial = (dom[0] || "?").toUpperCase();
+  const url = sourceFaviconUrl(src.url);
+  if (url) {
+    const img = document.createElement("img");
+    img.className = cls;
+    img.src = url;
+    img.alt = "";
+    img.loading = "lazy";
+    img.addEventListener("error", () => {
+      const fb = document.createElement("span");
+      fb.className = `${cls} src-favicon-fallback`;
+      fb.textContent = initial;
+      img.replaceWith(fb);
+    });
+    parent.appendChild(img);
+  } else {
+    const fb = document.createElement("span");
+    fb.className = `${cls} src-favicon-fallback`;
+    fb.textContent = initial;
+    parent.appendChild(fb);
+  }
+}
+
+// Build the collapsible ChatGPT-style sources widget and append it to a .msg-body.
+function renderChatSources(bodyEl, sources) {
+  if (!bodyEl) return;
+  bodyEl.querySelector(".chat-sources")?.remove();
+  const list = Array.isArray(sources) ? sources.filter((s) => s && s.url) : [];
+  if (!list.length) return;
+
+  const wrap = document.createElement("div");
+  wrap.className = "chat-sources";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "chat-sources-toggle";
+  toggle.setAttribute("aria-expanded", "false");
+
+  const favRow = document.createElement("span");
+  favRow.className = "chat-sources-favicons";
+  list.slice(0, 4).forEach((s) => appendSourceFavicon(favRow, s, "src-favicon"));
+
+  const label = document.createElement("span");
+  label.className = "chat-sources-label";
+  label.textContent = "Quellen";
+
+  const count = document.createElement("span");
+  count.className = "chat-sources-count";
+  count.textContent = String(list.length);
+
+  const chevron = document.createElement("span");
+  chevron.className = "chat-sources-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.textContent = "›";
+
+  toggle.append(favRow, label, count, chevron);
+
+  const panel = document.createElement("div");
+  panel.className = "chat-sources-list";
+  panel.hidden = true;
+
+  list.forEach((s, i) => {
+    const card = document.createElement("a");
+    card.className = "chat-source-card";
+    card.href = s.url;
+    card.target = "_blank";
+    card.rel = "noopener noreferrer";
+
+    const idx = document.createElement("span");
+    idx.className = "src-index";
+    idx.textContent = String(i + 1);
+
+    appendSourceFavicon(card, s, "src-favicon");
+
+    const meta = document.createElement("span");
+    meta.className = "src-meta";
+    const title = document.createElement("span");
+    title.className = "src-title";
+    title.textContent = (s.title || sourceDomain(s.url) || s.url).trim();
+    const dom = document.createElement("span");
+    dom.className = "src-domain";
+    dom.textContent = sourceDomain(s.url);
+    meta.append(title, dom);
+
+    card.append(idx, meta);
+    panel.appendChild(card);
+  });
+
+  toggle.addEventListener("click", () => {
+    const open = panel.hidden;
+    panel.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    wrap.classList.toggle("open", open);
+  });
+
+  wrap.append(toggle, panel);
+  bodyEl.appendChild(wrap);
+}
+
 // Agent run metadata and attention helpers live in chat_agent_runs.js.
 
 function isPersistableChatMessage(msg) {
@@ -75,7 +232,8 @@ function saveChatHistory() {
     const type = msg.classList.contains("user-message") ? "user" : "system";
     if (text) {
       const meta = getMessageAgentRunMeta(msg);
-      messages.push(meta ? { text, type, meta } : { text, type });
+      const stored = serializeMessageForStorage(msg);
+      messages.push(meta ? { text: stored, type, meta } : { text: stored, type });
     }
   });
   const toSave = messages.slice(-(LexaConfig.CHAT_HISTORY_LOCAL_MAX));
@@ -106,7 +264,7 @@ async function autoSaveConversation() {
       if (!isPersistableChatMessage(msg)) return;
       const text = getMessagePersistText(msg);
       const role = msg.classList.contains("user-message") ? "user" : "assistant";
-      if (text) messages.push({ role, content: text });
+      if (text) messages.push({ role, content: serializeMessageForStorage(msg) });
     });
     if (messages.length === 0) return;
     await window.lexa.conversationUpdate(convId, { messages });
@@ -268,6 +426,11 @@ function renderMessageAvatar(avatar, type = "system") {
 // compatibility (callers pass `silent`/`options` by position); the confirmation
 // flow was removed and the value is intentionally unused here.
 function addMessage(text, type = "system", action = null, requiresConfirmation = false, silent = false, options = {}) {
+  // Restored messages may carry an embedded ```lexa-sources block — split it off
+  // so persistText/render stay clean and the sources render as the chips widget.
+  const _parsedSources = extractSourcesBlock(text);
+  const _msgSources = _parsedSources.sources;
+  text = _parsedSources.text;
   const sleekGreeting = document.getElementById("sleek-greeting");
   if (sleekGreeting && !sleekGreeting.classList.contains("hidden")) sleekGreeting.classList.add("hidden");
   // Orb stays visible — don't hide voice-orb-container
@@ -279,6 +442,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   const msg = document.createElement("div");
   msg.className = `message ${type}-message`;
   setMessagePersistText(msg, text);
+  setMessageSources(msg, _msgSources);
   const isUser = type === "user";
   const agentRunMeta = !isUser ? setMessageAgentRunMeta(msg, options?.agentRunMeta) : null;
   const avatarClass = isUser ? "user" : "system";
@@ -384,6 +548,7 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   body.appendChild(header);
   if (agentRunMeta) renderPersistedAgentRunMeta(body, agentRunMeta, text);
   body.appendChild(msgTextEl);
+  if (_msgSources.length) renderChatSources(body, _msgSources);
 
   if (action && options?.showLocalActionCard) {
     appendToolConfirmationUi(body, action);
@@ -1704,13 +1869,10 @@ async function sendMessage() {
     if (actionData && typeof chatActionDisplayReply === "function") {
       fullText = chatActionDisplayReply({ reply: fullText, action: actionData });
     }
-    // Web-Grounding: echte, live abgerufene Quellen als klickbare Markdown-Liste
-    // anhaengen (rendert via chat_markdown als sichere externe <a>-Links).
-    if (fullText && webSources.length && !streamStoppedByUser && !streamTimedOut && !streamError) {
-      const list = webSources
-        .map((s, i) => `${i + 1}. [${(s.title || "").trim() || s.url}](${s.url})`)
-        .join("\n");
-      fullText += `\n\n---\n**🔍 Quellen (live aus dem Web):**\n${list}`;
+    // Web-Grounding: echte, live abgerufene Quellen als ChatGPT-artige Chip-Liste
+    // (in dataset; gerendert via renderChatSources weiter unten, persistiert beim Save).
+    if (webSources.length && !streamStoppedByUser && !streamTimedOut && !streamError) {
+      setMessageSources(msgEl, webSources);
     }
     if (fullText) {
       renderFormattedMessage(textEl, fullText);
@@ -1733,6 +1895,9 @@ async function sendMessage() {
       fullText = t("chat.emptyResponseFallback");
       renderFormattedMessage(textEl, fullText);
     }
+
+    // Quellen-Chips direkt unter der Antwort (vor den Vorschlags-Chips).
+    renderChatSources(body, getMessageSources(msgEl));
 
     if (actionData) {
       handleChatToolActionBlocked(actionData);
