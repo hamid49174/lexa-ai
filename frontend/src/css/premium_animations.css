@@ -480,7 +480,7 @@ body {
 }
 
 .sleek-input-container {
-  width: min(820px, 100%);
+  width: min(1080px, 100%);
 }
 
 .sleek-pill {
@@ -916,7 +916,7 @@ body {
   z-index: 2;
   order: 1;
   flex: 0 0 174px;
-  width: min(820px, calc(100% - 32px));
+  width: min(1080px, calc(100% - 48px));
   min-height: 174px;
   margin: 0 auto 22px;
   padding: 16px 0 18px;
@@ -933,7 +933,7 @@ body {
   z-index: 1;
   order: 10;
   flex: 1 1 0;
-  width: min(820px, calc(100% - 32px));
+  width: min(1080px, calc(100% - 48px));
   min-height: 0;
   margin: 0 auto;
   padding: 0 0 18px;
@@ -944,7 +944,7 @@ body {
 .chat-container.animated-ai-chat:has(.voice-orb-container.compact) .chat-input-area.sleek-input-area {
   order: 20;
   flex: 0 0 auto;
-  width: min(720px, calc(100% - 32px));
+  width: min(1080px, calc(100% - 48px));
   margin: 0 auto;
   padding: 14px 0 18px;
 }
