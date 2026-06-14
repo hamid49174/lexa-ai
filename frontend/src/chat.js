@@ -397,10 +397,29 @@ function addMessage(text, type = "system", action = null, requiresConfirmation =
   if (!silent) saveChatHistory();
 }
 
-function renderFormattedMessage(target, text) {
+function renderChatMath(target) {
+  // KaTeX: $...$, $$...$$, \(...\), \[...\] in den bereits gerenderten Knoten aufloesen.
+  // Code/Pre werden ignoriert (kein $ im Code zu Mathe machen).
+  if (!target || typeof window.renderMathInElement !== "function") return;
+  try {
+    window.renderMathInElement(target, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "$", right: "$", display: false },
+        { left: "\\(", right: "\\)", display: false },
+        { left: "\\[", right: "\\]", display: true },
+      ],
+      throwOnError: false,
+      ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"],
+    });
+  } catch (e) { /* Mathe-Render fehlgeschlagen -> roher Text bleibt erhalten */ }
+}
+
+function renderFormattedMessage(target, text, options = {}) {
   if (!target) return;
   target.replaceChildren();
   appendFormattedMessage(target, String(text || ""));
+  if (options.math !== false) renderChatMath(target);
 }
 
 function scrollChatMessageIntoCleanView(messageEl, options = {}) {
@@ -427,7 +446,7 @@ function renderStreamingFormatted(target, text) {
   // try/catch faengt unvollstaendiges Markdown (offene ```-Codeblocks) waehrend des Tippens ab.
   if (!target) return;
   try {
-    renderFormattedMessage(target, text);
+    renderFormattedMessage(target, text, { math: false });
   } catch (e) {
     target.textContent = String(text || "");
   }
