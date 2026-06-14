@@ -401,6 +401,22 @@
   color: var(--accent2);
 }
 
+.conv-rename-input {
+  width: 100%;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--bg, #14141c);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  padding: 2px 6px;
+  outline: none;
+}
+
+.conv-pin-btn { opacity: 0.5; filter: grayscale(1); }
+.conv-pin-btn.pinned { opacity: 1; filter: none; }
+.conv-item.pinned { border-left: 2px solid var(--accent); }
+
 .conv-preview {
   font-size: 10px;
   color: var(--text-muted);

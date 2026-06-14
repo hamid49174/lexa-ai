@@ -387,6 +387,15 @@ function classifyConversationUpdate(basePolicy, args) {
       classification_reason: "conversation_title_update",
     });
   }
+  if (hasOnlyKeys(payload, ["is_pinned"])) {
+    return effectiveBridgePolicy(basePolicy, {
+      risk: "low",
+      requires_user_presence: false,
+      requires_main_confirmation: false,
+      audit: false,
+      classification_reason: "conversation_pin_toggle",
+    });
+  }
   if (hasOnlyKeys(payload, ["messages"]) && Array.isArray(payload.messages)) {
     if (payload.messages.length > 0) {
       return effectiveBridgePolicy(basePolicy, {

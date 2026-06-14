@@ -79,7 +79,12 @@ async def update_conversation(conv_id: int, req: Request):
         if len(messages) > MAX_CONVERSATION_MESSAGES:
             raise HTTPException(status_code=400, detail=f"Too many messages (max {MAX_CONVERSATION_MESSAGES})")
         messages = _normalize_conversation_messages(messages)
-    result = await asyncio.to_thread(memory.conversation_update, conv_id, title=title, messages=messages)
+    is_pinned = data.get("is_pinned")
+    if is_pinned is not None:
+        is_pinned = bool(is_pinned)
+    result = await asyncio.to_thread(
+        memory.conversation_update, conv_id, title=title, messages=messages, is_pinned=is_pinned
+    )
     return {"status": result}
 
 

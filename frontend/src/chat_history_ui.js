@@ -119,6 +119,10 @@ function createConversationListItem(conversation, options = {}) {
   const titleEl = document.createElement("div");
   titleEl.className = "conv-title";
   titleEl.textContent = title;
+  titleEl.addEventListener("dblclick", (e) => {
+    e.stopPropagation();
+    startRenameConversation(conversation, titleEl);
+  });
   content.appendChild(titleEl);
 
   if (conversation.last_message) {
@@ -141,6 +145,24 @@ function createConversationListItem(conversation, options = {}) {
 
   const actions = document.createElement("div");
   actions.className = "conv-actions";
+
+  const pinned = Boolean(conversation.is_pinned);
+  if (pinned) item.classList.add("pinned");
+  const pinBtn = document.createElement("button");
+  pinBtn.type = "button";
+  pinBtn.className = "conv-action-btn conv-pin-btn" + (pinned ? " pinned" : "");
+  pinBtn.title = pinned ? "Loslösen" : "Anpinnen";
+  pinBtn.setAttribute("aria-label", pinned ? "Konversation loslösen" : "Konversation anpinnen");
+  pinBtn.textContent = "📌";
+  pinBtn.addEventListener("click", (e) => { e.stopPropagation(); togglePinConversation(conversation, pinBtn); });
+
+  const renameBtn = document.createElement("button");
+  renameBtn.type = "button";
+  renameBtn.className = "conv-action-btn conv-rename-btn";
+  renameBtn.title = "Umbenennen";
+  renameBtn.setAttribute("aria-label", "Konversation umbenennen");
+  renameBtn.textContent = "✎";
+  renameBtn.addEventListener("click", (e) => { e.stopPropagation(); startRenameConversation(conversation, titleEl); });
 
   const exportBtn = document.createElement("button");
   exportBtn.type = "button";
@@ -172,6 +194,8 @@ function createConversationListItem(conversation, options = {}) {
     actions.appendChild(resolveBtn);
   }
 
+  actions.appendChild(pinBtn);
+  actions.appendChild(renameBtn);
   actions.appendChild(exportBtn);
   actions.appendChild(delBtn);
   item.appendChild(content);
@@ -182,4 +206,66 @@ function createConversationListItem(conversation, options = {}) {
   });
 
   return item;
+}
+
+// Inline-Umbenennen einer Konversation (Doppelklick auf Titel oder ✎-Button).
+function startRenameConversation(conversation, titleEl) {
+  if (!titleEl || titleEl.parentElement?.querySelector(".conv-rename-input")) return;
+  const current = conversationListRawTitle(conversation);
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "conv-rename-input";
+  input.value = current;
+  input.maxLength = 120;
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = async (commit) => {
+    if (done) return;
+    done = true;
+    const next = input.value.trim();
+    if (input.parentElement) input.replaceWith(titleEl);
+    if (!commit || !next || next === current) return;
+    titleEl.textContent = next;
+    try {
+      await window.lexa.conversationUpdate(conversation.id, { title: next });
+      if (typeof updateConversationTitleLocally === "function") {
+        updateConversationTitleLocally(conversation.id, next);
+      }
+      conversation.title = next;
+    } catch (e) {
+      console.warn("[Chat] Rename failed:", e.message || e);
+      titleEl.textContent = current;
+      showToast(t("toast.conversationSaveFailed") || "Umbenennen fehlgeschlagen", "warning", 3000);
+    }
+  };
+
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("click", (e) => e.stopPropagation());
+}
+
+// Konversation an-/abpinnen (gepinnte sortieren oben).
+async function togglePinConversation(conversation, btn) {
+  const next = !conversation.is_pinned;
+  if (btn) btn.disabled = true;
+  try {
+    await window.lexa.conversationUpdate(conversation.id, { is_pinned: next });
+    conversation.is_pinned = next ? 1 : 0;
+    if (typeof refreshConversationSidebar === "function") {
+      await refreshConversationSidebar();
+    } else if (typeof renderConversationList === "function") {
+      renderConversationList();
+    }
+  } catch (e) {
+    console.warn("[Chat] Pin toggle failed:", e.message || e);
+    showToast(t("toast.conversationSaveFailed") || "Anpinnen fehlgeschlagen", "warning", 2500);
+    if (btn) btn.disabled = false;
+  }
 }

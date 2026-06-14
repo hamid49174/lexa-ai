@@ -194,6 +194,19 @@ def _init_tables(db: sqlite3.Connection) -> None:
                 _rebuild_fts(db)
 
     initialize_memory_schema(db, rebuild_fts_once=_rebuild_once)
+    _ensure_conversation_pin_column(db)
+
+
+def _ensure_conversation_pin_column(db: sqlite3.Connection) -> None:
+    """Idempotente Migration: conversations.is_pinned fuer bestehende DBs nachruesten."""
+    try:
+        cols = [r[1] for r in db.execute("PRAGMA table_info(conversations)").fetchall()]
+        if "is_pinned" not in cols:
+            db.execute("ALTER TABLE conversations ADD COLUMN is_pinned INTEGER DEFAULT 0")
+            db.commit()
+            logger.info("Migrated: added conversations.is_pinned column")
+    except Exception as e:
+        logger.warning(f"is_pinned migration skipped: {e}")
 
 
 def _rebuild_fts(db: Optional[sqlite3.Connection] = None) -> None:
@@ -1216,8 +1229,9 @@ def conversation_list(limit: int = 50, offset: int = 0) -> list[dict]:
     # Only select metadata columns — never fetch full messages for listing
     rows = db.execute(
         "SELECT id, title, message_count, created_at, updated_at, "
+        "COALESCE(is_pinned, 0) AS is_pinned, "
         "SUBSTR(messages, -500) AS tail_fragment "
-        "FROM conversations ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+        "FROM conversations ORDER BY COALESCE(is_pinned, 0) DESC, updated_at DESC LIMIT ? OFFSET ?",
         (limit, offset),
     ).fetchall()
     result: list[dict] = []
@@ -1266,8 +1280,9 @@ def conversation_get(conv_id: int) -> "dict | None":
     return None
 
 
-def conversation_update(conv_id: int, title: "str | None" = None, messages: "list | None" = None) -> str:
-    """Update conversation title and/or messages."""
+def conversation_update(conv_id: int, title: "str | None" = None, messages: "list | None" = None,
+                        is_pinned: "bool | None" = None) -> str:
+    """Update conversation title, messages and/or pinned state."""
     db = _get_db()
     if title is not None:
         db.execute(
@@ -1278,6 +1293,12 @@ def conversation_update(conv_id: int, title: "str | None" = None, messages: "lis
         db.execute(
             "UPDATE conversations SET messages = ?, message_count = ?, updated_at = datetime('now','localtime') WHERE id = ?",
             (json.dumps(messages, ensure_ascii=False), len(messages), conv_id),
+        )
+    if is_pinned is not None:
+        # Pin-Zustand aendern, ohne updated_at zu beruehren (Reihenfolge bleibt stabil).
+        db.execute(
+            "UPDATE conversations SET is_pinned = ? WHERE id = ?",
+            (1 if is_pinned else 0, conv_id),
         )
     db.commit()
     return "ok"
