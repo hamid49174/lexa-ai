@@ -1334,6 +1334,7 @@
   "chat.executing": "Wird ausgeführt...",
   "chat.executed": "Ausgeführt: {{data}}",
   "chat.backendUnreachable": "Backend nicht erreichbar. Ist der Server gestartet?",
+  "chat.noInternetConnection": "Keine Internetverbindung. Bitte Verbindung prüfen und erneut versuchen.",
   "chat.tooManyRequestsShort": "Zu viele Anfragen — bitte kurz warten.",
   "chat.backendOverloaded": "Ich komme gerade nicht stabil durch. Versuch es gleich nochmal.",
   "chat.connectionInterrupted": "Verbindung unterbrochen",

@@ -1813,6 +1813,8 @@ async function sendMessage() {
 
   const textEl = document.createElement("div");
   textEl.className = "msg-text streaming-text";
+  // Screenreader: streamende Antwort als höfliche Live-Region ankündigen.
+  textEl.setAttribute("aria-live", "polite");
   const cursor = document.createElement("span");
   cursor.className = "streaming-cursor";
   textEl.appendChild(cursor);
@@ -1850,13 +1852,22 @@ async function sendMessage() {
   };
 
   let _streamTimeout = null;
-  try {
-    window._lexaStreamAbort = new AbortController();
-    window._lexaStreamAbortReason = "";
+  let _lastStreamActivity = Date.now();
+  // Inaktivitäts-Timeout (60s OHNE neue Daten) statt absolutem 45s-Limit: lange, aber
+  // stetig streamende Antworten und Web-Recherche werden nicht mehr fälschlich abgebrochen.
+  const STREAM_INACTIVITY_MS = 60000;
+  const armStreamWatchdog = () => {
+    _lastStreamActivity = Date.now();
+    if (_streamTimeout) clearTimeout(_streamTimeout);
     _streamTimeout = setTimeout(() => {
       window._lexaStreamAbortReason = "timeout";
       if (window._lexaStreamAbort) window._lexaStreamAbort.abort();
-    }, 45000);
+    }, STREAM_INACTIVITY_MS);
+  };
+  try {
+    window._lexaStreamAbort = new AbortController();
+    window._lexaStreamAbortReason = "";
+    armStreamWatchdog();
     let response;
     try {
       response = await fetch(`${window.lexa.API_BASE}/chat/stream`, {
@@ -1917,8 +1928,6 @@ async function sendMessage() {
     let streamStoppedByUser = false;
     let streamTimedOut = false;
     let webSources = [];
-    const streamStart = Date.now();
-    const STREAM_TIMEOUT_MS = 45000;
     const handleStreamData = (data) => {
       if (!data) return;
       // Heuristik-Grounding-Pfad meldet status: "web_search".
@@ -1947,7 +1956,14 @@ async function sendMessage() {
       if (data.status === "web_search_empty" && !fullText) {
         textEl.textContent = "🔍 Keine Web-Quellen gefunden – ich antworte aus meinem Wissen …";
       }
-      if (Array.isArray(data.sources)) { webSources = data.sources; }
+      if (Array.isArray(data.sources)) {
+        // Mehrere sources-Events pro Antwort (Heuristik-Grounding + agentische web_search-Hops):
+        // mergen statt überschreiben, nach URL deduplizieren (sonst gehen frühe Quellen verloren).
+        const seen = new Set(webSources.map((s) => s && s.url));
+        data.sources.forEach((s) => {
+          if (s && s.url && !seen.has(s.url)) { seen.add(s.url); webSources.push(s); }
+        });
+      }
       if (data.c) { fullText += data.c; scheduleStreamRender(); }
       if (data.error) {
         streamEventError = chatStreamClientErrorText(data.error, t("chat.connectionLostRetry"));
@@ -1961,8 +1977,8 @@ async function sendMessage() {
     };
     try {
       while (true) {
-        if (Date.now() - streamStart > STREAM_TIMEOUT_MS) {
-          console.warn("[LEXA] Stream timeout after 45s");
+        if (Date.now() - _lastStreamActivity > STREAM_INACTIVITY_MS) {
+          console.warn("[LEXA] Stream inactivity timeout");
           streamTimedOut = true;
           window._lexaStreamAbortReason = "timeout";
           await reader.cancel();
@@ -1970,6 +1986,7 @@ async function sendMessage() {
         }
         const { done, value } = await reader.read();
         if (done) break;
+        armStreamWatchdog(); // neue Daten -> Inaktivitäts-Uhr zurücksetzen
         buffer += decoder.decode(value, { stream: true });
         const parsedBuffer = chatStreamBufferedLines(buffer);
         const lines = parsedBuffer.lines;
@@ -2056,7 +2073,12 @@ async function sendMessage() {
       if (suggestions.length > 0) body.appendChild(suggestDiv);
     }
     scrollChatMessageIntoCleanView(msgEl, { preferStartForLong: true });
-    setMessagePersistText(msgEl, fullText || textEl.textContent);
+    // Nur echte Antworten persistieren. Bei leerem fullText UND Fehler-/Abbruch-Status
+    // NICHT den Status-Text ("Timeout"/"Verbindung unterbrochen") als Assistenten-Antwort
+    // speichern (sonst landen Fehlermeldungen dauerhaft in der Konversations-History).
+    const hadFailure = streamStoppedByUser || streamTimedOut || streamError || Boolean(streamEventError);
+    const persistText = (fullText && fullText.trim()) ? fullText : (hadFailure ? "" : textEl.textContent);
+    setMessagePersistText(msgEl, persistText);
     if (getMessagePersistText(msgEl)) {
       copyBtn.disabled = false;
       memoryBtn.disabled = false;
@@ -2071,8 +2093,11 @@ async function sendMessage() {
     clearTimeout(_streamTimeout);
     streamRenderActive = false;
     textEl.classList.remove("streaming-text");
-    textEl.textContent = t("chat.backendUnreachable");
-    setMessagePersistText(msgEl, textEl.textContent);
+    // Offline (kein Internet) klar von "Backend down" unterscheiden.
+    const isOffline = (typeof navigator !== "undefined" && navigator.onLine === false)
+      || /networkerror|failed to fetch|network request failed/i.test(String((err && err.message) || ""));
+    textEl.textContent = isOffline ? t("chat.noInternetConnection") : t("chat.backendUnreachable");
+    setMessagePersistText(msgEl, "");
     copyBtn.disabled = false;
     memoryBtn.disabled = false;
     workspaceBtn.disabled = false;
@@ -2090,6 +2115,10 @@ async function sendMessage() {
   sendBtn.disabled = false;
   window._lexaStreamAbort = null;
   window._lexaStreamAbortReason = "";
+  // Fokus zurück ins Eingabefeld (Tastatur-/Screenreader-Nutzer), wie bei ChatGPT/Claude.
+  if (window._chatViewOpen && chatInput && document.activeElement !== chatInput) {
+    try { chatInput.focus({ preventScroll: true }); } catch (e) { chatInput.focus(); }
+  }
 }
 
 // ── AGENT MODE (Phase 46) ────────────────────────

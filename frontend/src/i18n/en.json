@@ -1393,6 +1393,7 @@
   "chat.executing": "Executing...",
   "chat.executed": "Executed: {{data}}",
   "chat.backendUnreachable": "Backend not reachable. Is the server running?",
+  "chat.noInternetConnection": "No internet connection. Please check your connection and try again.",
   "chat.tooManyRequestsShort": "Too many requests — please wait a moment.",
   "chat.backendOverloaded": "I cannot connect reliably right now. Try again in a moment.",
   "chat.connectionInterrupted": "Connection interrupted",
