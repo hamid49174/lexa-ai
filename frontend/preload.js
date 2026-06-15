@@ -204,6 +204,10 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("agentStreamCancel", "low", "write", "agent-stream:cancel"),
   bridgePolicy("agentChat", "critical", "execute", "/agent/chat"),
   bridgePolicy("agentStatus", "low", "read", "/agent/status", { batch_allowed: true }),
+  bridgePolicy("orchestratorRun", "medium", "execute", "/orchestrator/run"),
+  bridgePolicy("orchestratorStatus", "low", "read", "/orchestrator/status", { batch_allowed: true }),
+  bridgePolicy("orchestratorRuns", "low", "read", "/orchestrator/runs", { batch_allowed: true }),
+  bridgePolicy("orchestratorRunDetail", "low", "read", "/orchestrator/runs/{id}", { batch_allowed: true }),
   bridgePolicy("mcpServers", "low", "read", "/mcp/servers", { batch_allowed: true }),
   bridgePolicy("mcpConnect", "critical", "execute", "/mcp/servers/{name}/connect"),
   bridgePolicy("mcpDisconnect", "critical", "execute", "/mcp/servers/{name}/disconnect"),
@@ -1237,6 +1241,10 @@ if (isLexaSmokeMockAllowed()) {
     })),
     agentStreamRead: async (streamId) => runSmokeMock("agentStreamRead", [streamId], async () => ({ done: true, value: [] })),
     agentStreamCancel: async (streamId) => runSmokeMock("agentStreamCancel", [streamId], async () => ({ ok: true, cancelled: false })),
+    orchestratorRun: async (task = "", options = {}) => runSmokeMock("orchestratorRun", [task, options], async () => ({ ok: true, status: 200, statusText: "OK", streamId: "" })),
+    orchestratorStatus: async () => runSmokeMock("orchestratorStatus", [], async () => ({ enabled: true, modes: ["thorough", "fast"], roles: [] })),
+    orchestratorRuns: async (limit = 50) => runSmokeMock("orchestratorRuns", [limit], async () => ({ runs: [] })),
+    orchestratorRunDetail: async (runId) => runSmokeMock("orchestratorRunDetail", [runId], async () => null),
   };
   contextBridge.exposeInMainWorld("lexa", createGuardedBridge(smokeBridge, { disablePresenceChallenge: true }));
   contextBridge.exposeInMainWorld("lexaSmoke", smokeControlBridge);
@@ -2876,6 +2884,36 @@ const lexaBridge = {
       const r = await fetchWithTimeout(`${API}/agent/status`);
       return r.json();
     } catch (e) { return { enabled: false }; }
+  },
+
+  // ── Orchestrator / Multi-Agenten (Phase 48) ──
+  orchestratorRun: async (task, options = {}) => {
+    // SSE-Stream wie agentRun: serialisierbare streamId zurueck, Chunks via agentStreamRead().
+    const mode = options && options.mode === "fast" ? "fast" : "thorough";
+    const res = await fetchWithTimeout(`${API}/orchestrator/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task, mode }),
+    }, 15000);
+    return registerAgentStreamResponse(res);
+  },
+  orchestratorStatus: async () => {
+    try {
+      const r = await fetchWithTimeout(`${API}/orchestrator/status`);
+      return r.json();
+    } catch (e) { return { enabled: false }; }
+  },
+  orchestratorRuns: async (limit = 50) => {
+    try {
+      const r = await fetchWithTimeout(`${API}/orchestrator/runs?limit=${encodeURIComponent(limit)}`);
+      return r.json();
+    } catch (e) { return { runs: [] }; }
+  },
+  orchestratorRunDetail: async (runId) => {
+    try {
+      const r = await fetchWithTimeout(`${API}/orchestrator/runs/${encodeURIComponent(runId)}`);
+      return r.json();
+    } catch (e) { return null; }
   },
 
   voiceWebSocket: () => {

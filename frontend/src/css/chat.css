@@ -1570,6 +1570,107 @@
   text-align: right;
 }
 
+/* ── Multi-Agenten-Orchestrator (Phase 48) ── */
+.orchestrator-run {
+  margin: 10px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius, 14px);
+  background: var(--glass, rgba(255, 255, 255, 0.03));
+}
+.orchestrator-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.orchestrator-title {
+  font-weight: 600;
+  color: var(--text, #e8e6f0);
+}
+.orchestrator-mode {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft, rgba(139, 92, 246, 0.18));
+  color: var(--accent, #8b5cf6);
+}
+.orchestrator-status {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-dim, #9c98b3);
+}
+.orchestrator-status.done { color: var(--success, #34d399); }
+.orchestrator-status.error { color: var(--error, #f87171); }
+.orchestrator-status.issue { color: var(--warning, #fbbf24); }
+.orchestrator-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim, #9c98b3);
+  margin: 6px 0 4px;
+}
+.orchestrator-plan-list {
+  margin: 0 0 4px;
+  padding-left: 20px;
+  font-size: 13px;
+}
+.orchestrator-plan-role {
+  font-weight: 600;
+  color: var(--accent, #8b5cf6);
+}
+.orchestrator-agent {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border-left: 3px solid var(--border, rgba(255, 255, 255, 0.12));
+  background: rgba(255, 255, 255, 0.02);
+}
+.orchestrator-agent.running { border-left-color: var(--accent, #8b5cf6); }
+.orchestrator-agent.done { border-left-color: var(--success, #34d399); }
+.orchestrator-agent.issue { border-left-color: var(--warning, #fbbf24); }
+.orchestrator-agent-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.orchestrator-agent-role {
+  font-weight: 600;
+  color: var(--text, #e8e6f0);
+}
+.orchestrator-agent-state {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-dim, #9c98b3);
+}
+.orchestrator-agent-objective {
+  font-size: 12px;
+  color: var(--text-dim, #9c98b3);
+  margin: 2px 0 4px;
+}
+.orchestrator-agent-steps {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--text-dim, #9c98b3);
+}
+.orchestrator-step.failed .orchestrator-step-tool { color: var(--error, #f87171); }
+.orchestrator-step.blocked .orchestrator-step-tool { color: var(--warning, #fbbf24); }
+.orchestrator-step-tool {
+  font-family: var(--font-mono, monospace);
+  color: var(--accent, #8b5cf6);
+}
+.orchestrator-agent-summary {
+  font-size: 12px;
+  color: var(--text, #e8e6f0);
+  margin-top: 4px;
+}
+.orchestrator-verdict {
+  font-size: 12px;
+  margin: 2px 0;
+}
+.orchestrator-verdict.ok .orchestrator-verdict-tag { color: var(--success, #34d399); }
+.orchestrator-verdict.doubt .orchestrator-verdict-tag { color: var(--warning, #fbbf24); }
+
 /* Code-Block-Werkzeuge: Wrap-Toggle + Einklappen langer Bloecke */
 .code-actions {
   display: inline-flex;

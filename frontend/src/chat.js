@@ -1748,6 +1748,17 @@ async function sendMessage() {
   if (text.length > LexaConfig.MAX_CHAT_INPUT_LENGTH) { showToast(t("chat.messageTooLong", {max: LexaConfig.MAX_CHAT_INPUT_LENGTH}), "warning"); return; }
   if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return; }
 
+  // Phase 48: Multi-Agenten-Orchestrator (/orchestrate, /ultra) — Planner -> parallele
+  // Sub-Agenten -> Verifikation -> Synthese. Eigener Stream-Renderer (chat_orchestrator.js).
+  if ((text.startsWith("/orchestrate ") || text.startsWith("/ultra ")) && typeof sendOrchestratorMessage === "function") {
+    const orchTask = text.replace(/^\/(orchestrate|ultra)\s+/i, "").trim();
+    if (orchTask) {
+      const orchMode = /\bfast\b|\bschnell\b/i.test(text.slice(0, text.indexOf(orchTask))) ? "fast" : "thorough";
+      sendOrchestratorMessage(orchTask, { displayText: text, mode: orchMode });
+      return;
+    }
+  }
+
   // Phase 46: Auto-detect if this task needs the multi-step agent
   // Manual override: /agent prefix always triggers agent mode
   // Auto-detect: complex tasks with multiple actions, "und dann", etc.
