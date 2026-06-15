@@ -1321,6 +1321,8 @@
   "chat.helpfulAnswer": "Hilfreiche Antwort: {{snippet}}",
   "chat.regenerateTooltip": "Antwort neu generieren",
   "chat.regenerateMissingPrompt": "Kein vorheriger Prompt für Regenerate gefunden.",
+  "chat.regenPrevVersion": "Vorherige Version",
+  "chat.regenNextVersion": "Nächste Version",
   "chat.editTooltip": "Nachricht bearbeiten",
   "chat.editLoaded": "Nachricht zum Bearbeiten geladen",
   "chat.deleteTooltip": "Nachricht löschen",

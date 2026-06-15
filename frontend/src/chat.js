@@ -1711,6 +1711,10 @@ function hideTyping() {
 // ── SEND MESSAGE (streaming) ─────────────────────
 async function sendMessage() {
   if (LexaState.get("isLoading")) return;
+  // Regenerate-Versionen: anstehende Vorgänger-Versionen für DIESEN Lauf übernehmen und
+  // die globale Stash sofort freigeben (kein Leak in den nächsten, normalen Turn).
+  const _regenVersions = (window._lexaPendingRegen && window._lexaPendingRegen.versions) || null;
+  window._lexaPendingRegen = null;
   // Staged attachments: send the file(s) with the typed text as caption instead of a text turn.
   if (typeof getStagedUploads === "function" && getStagedUploads().length) {
     sendStagedUploads();
@@ -2087,6 +2091,11 @@ async function sendMessage() {
       verifyBtn.disabled = false;
       exportBtn.disabled = false;
       regenBtn.disabled = false;
+    }
+    // Regenerate-Versionen: neue (echte) Antwort an die Vorgänger-Versionen anhängen
+    // und ‹n/m›-Navigation rendern.
+    if (_regenVersions && getMessagePersistText(msgEl)) {
+      applyRegenVersions(msgEl, getMessagePersistText(msgEl), _regenVersions);
     }
     playTTS(actionData?.message || fullText);
   } catch (err) {
@@ -2637,13 +2646,80 @@ async function regenerateMessage(originalPrompt) {
   if (!LexaState.get("backendOnline")) { showToast(t("common.backendOffline"), "error"); return false; }
   const prompt = String(originalPrompt || "").trim();
   if (!prompt) { showToast(t("chat.regenerateMissingPrompt"), "warning", 2200); return false; }
-  // Remove last system message
+  // Letzte Antwort entfernen — aber vorher die bisherige(n) Version(en) sichern, damit die
+  // neue Antwort als weitere Version (‹n/m›) angehängt wird, statt die alte zu verwerfen.
   const msgs = chatMessages.querySelectorAll(".message.system-message");
-  if (msgs.length > 0) msgs[msgs.length - 1].remove();
+  if (msgs.length > 0) {
+    const oldMsg = msgs[msgs.length - 1];
+    const prev = Array.isArray(oldMsg._regenVersions) && oldMsg._regenVersions.length
+      ? oldMsg._regenVersions.slice()
+      : [getMessagePersistText(oldMsg)];
+    window._lexaPendingRegen = { versions: prev.filter((v) => v && String(v).trim()) };
+    oldMsg.remove();
+  }
   // Re-send the original message
   chatInput.value = prompt;
   await sendMessage();
   return true;
+}
+
+// ── Regenerate-Versionen (ChatGPT-Stil ‹n/m›) ───────────────────────────────
+// Versionen werden in-memory am Nachrichten-Element gehalten (msgEl._regenVersions).
+// Die jeweils AKTIVE Version steht via setMessagePersistText in der History -> nach
+// Reload bleibt die zuletzt angezeigte Version erhalten (Versionsliste ist session-scoped).
+function applyRegenVersions(msgEl, latestText, prevVersions) {
+  if (!msgEl) return;
+  const text = String(latestText || "").trim();
+  if (!text) return;
+  const prev = Array.isArray(prevVersions) ? prevVersions.filter((v) => v && String(v).trim()) : [];
+  msgEl._regenVersions = [...prev, text];
+  msgEl._regenIndex = msgEl._regenVersions.length - 1;
+  renderRegenNav(msgEl);
+}
+
+function renderRegenNav(msgEl) {
+  if (!msgEl) return;
+  const body = msgEl.querySelector(".msg-body");
+  const textEl = msgEl.querySelector(".msg-text");
+  if (!body || !textEl) return;
+  body.querySelector(".regen-nav")?.remove();
+  const versions = msgEl._regenVersions || [];
+  if (versions.length <= 1) return;
+  let idx = typeof msgEl._regenIndex === "number" ? msgEl._regenIndex : versions.length - 1;
+
+  const nav = document.createElement("div");
+  nav.className = "regen-nav";
+  const prevBtn = document.createElement("button");
+  prevBtn.type = "button";
+  prevBtn.className = "regen-nav-btn";
+  prevBtn.textContent = "‹";
+  prevBtn.setAttribute("aria-label", t("chat.regenPrevVersion") || "Vorherige Version");
+  const label = document.createElement("span");
+  label.className = "regen-nav-label";
+  const nextBtn = document.createElement("button");
+  nextBtn.type = "button";
+  nextBtn.className = "regen-nav-btn";
+  nextBtn.textContent = "›";
+  nextBtn.setAttribute("aria-label", t("chat.regenNextVersion") || "Nächste Version");
+
+  const sync = () => {
+    label.textContent = `${idx + 1}/${versions.length}`;
+    prevBtn.disabled = idx <= 0;
+    nextBtn.disabled = idx >= versions.length - 1;
+  };
+  const show = (next) => {
+    idx = Math.max(0, Math.min(versions.length - 1, next));
+    msgEl._regenIndex = idx;
+    renderFormattedMessage(textEl, versions[idx]);
+    setMessagePersistText(msgEl, versions[idx]);
+    sync();
+    if (typeof saveCurrentConversation === "function") saveCurrentConversation();
+  };
+  prevBtn.addEventListener("click", () => show(idx - 1));
+  nextBtn.addEventListener("click", () => show(idx + 1));
+  nav.append(prevBtn, label, nextBtn);
+  textEl.insertAdjacentElement("afterend", nav);
+  sync();
 }
 
 async function confirmAction(btn, actionStr) {

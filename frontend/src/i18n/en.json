@@ -1380,6 +1380,8 @@
   "chat.helpfulAnswer": "Helpful answer: {{snippet}}",
   "chat.regenerateTooltip": "Regenerate response",
   "chat.regenerateMissingPrompt": "No previous prompt found for regenerate.",
+  "chat.regenPrevVersion": "Previous version",
+  "chat.regenNextVersion": "Next version",
   "chat.editTooltip": "Edit message",
   "chat.editLoaded": "Message loaded for editing",
   "chat.deleteTooltip": "Delete message",
