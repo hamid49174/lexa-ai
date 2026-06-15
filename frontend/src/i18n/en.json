@@ -26,6 +26,10 @@
 
   "nav.dashboard": "Dashboard",
   "nav.chat": "Chat",
+  "nav.agents": "Agents",
+  "agents.title": "Agents",
+  "agents.subtitle": "Multi-agent runs: plan, research in parallel, verify, synthesize.",
+  "agents.recentRuns": "Recent runs",
   "nav.system": "System",
   "nav.commands": "Commands",
   "nav.productivity": "Productivity",
