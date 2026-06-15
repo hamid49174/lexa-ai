@@ -253,9 +253,11 @@ def _check_token_budget(system_content: str, messages: list[dict]) -> list[dict]
     if total_tokens <= _TOKEN_WARN_THRESHOLD:
         return message_snapshot
 
-    # Actively trim history from the front until under budget
+    # Actively trim history from the front until under budget. Keep at least the
+    # latest message (the current user turn) -> '> 1' statt '> 2', damit Trimming
+    # bei kurzen, aber sehr grossen Verlaeufen tatsaechlich unter das Budget kommt.
     trimmed = list(message_snapshot)
-    while len(trimmed) > 2 and total_tokens > _TOKEN_WARN_THRESHOLD:
+    while len(trimmed) > 1 and total_tokens > _TOKEN_WARN_THRESHOLD:
         removed = trimmed.pop(0)
         total_tokens -= _estimate_tokens(len(removed.get("content") or ""))
 
@@ -4075,19 +4077,24 @@ def _save_interaction(user_msg: str, ai_reply: str) -> None:
     """Save interaction to memory for future context. Thread-safe dedup."""
     global _last_saved_hash
     interaction_hash = hashlib.sha256(f"{user_msg}:{ai_reply}".encode()).hexdigest()[:16]
+    # Hash innerhalb des Locks PRUEFEN UND SOFORT BEANSPRUCHEN (vorher lagen Check und
+    # Set auseinander -> zwei Threads mit gleichem Hash konnten beide auto_remember
+    # aufrufen = Doppelspeicherung unter Last). Bei Fehler wird der Anspruch wieder
+    # freigegeben, damit ein erneuter Speicherversuch moeglich bleibt.
     with _save_interaction_lock:
         if interaction_hash == _last_saved_hash:
             logger.debug("Skipping duplicate interaction save")
             return
+        _last_saved_hash = interaction_hash
     try:
         from backend.memory import auto_remember
         auto_remember(user_msg, ai_reply)
     except Exception as e:
-        # Hash NICHT setzen, damit ein erneuter Speicherversuch moeglich bleibt.
+        with _save_interaction_lock:
+            if _last_saved_hash == interaction_hash:
+                _last_saved_hash = None
         logger.error(f"Failed to save interaction: {e}", exc_info=True)
         return
-    with _save_interaction_lock:
-        _last_saved_hash = interaction_hash
 
 
 def _save_chat_result(user_message: Optional[str], result: dict) -> None:
