@@ -116,10 +116,10 @@ def _make_chat_stream(script, calls):
     """script: Liste von Yield-Sequenzen pro Aufruf. calls: sammelt kwargs."""
     state = {"i": 0}
 
-    def stub(user_message, history=None, system_extra=None, exclude_tools=None, **kw):
+    def stub(user_message, history=None, system_extra=None, exclude_tools=None, disable_tools=False, **kw):
         idx = state["i"]
         state["i"] += 1
-        calls.append({"system_extra": system_extra, "exclude_tools": exclude_tools})
+        calls.append({"system_extra": system_extra, "exclude_tools": exclude_tools, "disable_tools": disable_tools})
         seq = script[idx] if idx < len(script) else script[-1]
         for item in seq:
             yield item
@@ -289,3 +289,39 @@ def test_web_search_hop_emits_sources_and_grounds(monkeypatch):
     # Grounding floss in den 2. Lauf
     assert len(calls) >= 2 and "example.com/fable" in (calls[1]["system_extra"] or "")
     assert any("Fable 5 erschien" in (e.get("c") or "") for e in evs)
+
+
+def test_explicit_web_request_disables_tools_and_grounds(monkeypatch):
+    # Live-Bug: "guck im internet wie man X loest" -> Modell rief eine Companion-Aktion
+    # (browser_open) -> generischer Fallback. Fix: bei web_query Tools abschalten + grounden.
+    calls = []
+    stub = _make_chat_stream([["Hier ist die Antwort aus den Quellen."]], calls)
+    client = _wire(monkeypatch, stub)
+    monkeypatch.setattr(router_chat, "_web_search_query", lambda m, h=None: "fix pak error")
+    monkeypatch.setattr(router_chat, "_obsidian_context_query", lambda m, h=None: None)
+    monkeypatch.setattr(router_chat, "gather_sources",
+                        lambda q, n=4: [{"title": "T", "url": "https://x.io", "snippet": "s", "content": "c"}])
+
+    r = client.post("/chat/stream", json={"message": "guck im internet wie ich diesen fehler fixe"})
+    assert r.status_code == 200
+    assert calls, "chat_stream should have been called"
+    assert calls[0]["disable_tools"] is True
+    assert "WEB-QUELLEN" in (calls[0]["system_extra"] or "")
+    # exactly one chat_stream call (no tool hops, da Tools aus)
+    assert len(calls) == 1
+
+
+def test_explicit_web_request_empty_sources_answers_without_tools(monkeypatch):
+    # Leersuche darf NICHT in den Tool-/Browser-Fallback abdriften -> Wissens-Antwort.
+    calls = []
+    stub = _make_chat_stream([["Aus meinem Wissen: …"]], calls)
+    client = _wire(monkeypatch, stub)
+    monkeypatch.setattr(router_chat, "_web_search_query", lambda m, h=None: "fix pak error")
+    monkeypatch.setattr(router_chat, "_obsidian_context_query", lambda m, h=None: None)
+    monkeypatch.setattr(router_chat, "gather_sources", lambda q, n=4: [])
+
+    r = client.post("/chat/stream", json={"message": "guck im internet wie ich diesen fehler fixe"})
+    assert r.status_code == 200
+    assert calls and calls[0]["disable_tools"] is True
+    # Wissens-Fallback-Prompt statt Tool-Abdriften
+    assert "live-quellen" in (calls[0]["system_extra"] or "").lower()

@@ -1475,6 +1475,26 @@ def _last_user_message(history: list | None) -> str:
     return ""
 
 
+def _last_assistant_message(history: list | None) -> str:
+    """Last assistant message (for context-enriching referential web follow-ups)."""
+    for msg in reversed(history or []):
+        if isinstance(msg, dict) and msg.get("role") == "assistant":
+            content = (msg.get("content") or "").strip()
+            if content:
+                return content
+    return ""
+
+
+# Referenzieller Folge-Wunsch: "wie man DIESES problem loest", "das zu fixen", "es beheben".
+# Solche Nachrichten tragen das Thema NICHT selbst -> Query mit vorherigem Kontext anreichern.
+_WEB_REFERENTIAL_RE = re.compile(
+    r"\b(?:diese[smnr]?|dieses|das|den|der|dem)\s+(?:problem|fehler|error|meldung|sache|thema)\b"
+    r"|\b(?:das|es|dies(?:es)?|dem)\s+(?:zu\s+)?(?:loes|lös|fix|beheb|reparier)"
+    r"|\bwie\s+(?:man\s+)?(?:das|es|diese[smnr]?|dieses)\b",
+    re.IGNORECASE,
+)
+
+
 def _web_search_query(message: str, history: list | None = None) -> str | None:
     """Decide whether a chat message warrants live web research; return the
     search query if so, else None. Conservative: only explicit web requests or
@@ -1490,6 +1510,13 @@ def _web_search_query(message: str, history: list | None = None) -> str | None:
     if explicit and len(query.split()) <= 3:
         # Thin command like "guck internet" -> research the previous question.
         query = _last_user_message(history) or query
+    elif explicit and _WEB_REFERENTIAL_RE.search(low):
+        # "guck im internet wie man DIESES problem loest" — das Thema steht NICHT in der
+        # Nachricht selbst, sondern im vorigen Kontext (oft die konkrete Fehlermeldung in
+        # Lexas letzter Antwort). Damit anreichern -> brauchbare Suchergebnisse.
+        ctx = _last_assistant_message(history) or _last_user_message(history)
+        if ctx:
+            query = (ctx[:180].strip() + " — " + query)[:300]
     return query[:300].strip() or None
 
 
@@ -1508,6 +1535,19 @@ _WEB_GROUNDING_SYSTEM = (
 )
 
 _WEB_GROUNDING_CONTENT_CHARS = 1500  # pro Quelle ins Prompt (schnell genug fuer Chat)
+
+# Wenn der Nutzer EXPLIZIT eine Websuche wollte, die Live-Suche aber keine Quellen lieferte:
+# trotzdem hilfreich aus dem Modellwissen antworten (statt generischem Tool-Fallback).
+_WEB_EMPTY_FALLBACK_SYSTEM = (
+    "Der Nutzer hat um eine Websuche gebeten, aber die Live-Suche lieferte gerade KEINE "
+    "abrufbaren Quellen.\n"
+    "- Beantworte die Frage trotzdem so konkret und hilfreich wie moeglich aus deinem Wissen.\n"
+    "- Bei einer Fehler-/Problemfrage: nenne die wahrscheinlichsten Ursachen und konkrete "
+    "Loesungsschritte.\n"
+    "- Weise am ENDE kurz darauf hin, dass gerade keine Live-Quellen abrufbar waren.\n"
+    "- Rufe KEIN Tool auf und oeffne keinen Browser; antworte direkt als Text.\n"
+    "- Antworte in der Sprache des Nutzers, sauberes Markdown."
+)
 
 
 def _build_web_grounding(query: str, sources: list[dict]) -> str:
@@ -2215,14 +2255,22 @@ async def chat_stream_endpoint(req: ChatRequest):
                     yield f"data: {json.dumps({'status': 'web_search_empty'})}\n\n"
             if ground_parts:
                 grounding_extra = "\n\n".join(ground_parts)
+            elif web_query:
+                # Web gewuenscht, aber keine Quellen abrufbar: Modell aus seinem Wissen
+                # antworten lassen, statt in eine Browser-/Tool-Aktion (generischer
+                # "Ich bin da…"-Fallback) abzudriften.
+                grounding_extra = _WEB_EMPTY_FALLBACK_SYSTEM
 
             try:
                 gen = chat_stream(
                     sanitized,
                     history_snapshot,
                     system_extra=grounding_extra,
-                    # Nach Heuristik-Grounding: nur web_search ausschliessen (kein Re-Search),
-                    # Companion-Tools bleiben verfuegbar ("suche X und mach Y").
+                    # Bei explizitem Web-Wunsch ODER Vault-Grounding: Tools fuer die Antwort
+                    # abschalten -> das (ggf. schwache) Modell MUSS eine Text-Antwort aus den
+                    # Quellen/seinem Wissen schreiben und kann nicht in eine Companion-Aktion
+                    # (browser_open o.ae.) abdriften, die nur den generischen Fallback zeigt.
+                    disable_tools=bool(web_query or obsidian_topic),
                     exclude_tools=({"web_search"} if grounding_extra else None),
                 )
             except Exception:
