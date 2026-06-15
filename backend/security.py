@@ -602,7 +602,8 @@ _AUDIT_DETAIL_PAIR_RE = re.compile(
 )
 _AUDIT_COMPONENT_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
 _AUDIT_LOCAL_PATH_RE = re.compile(
-    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
+    # Laufwerks-, UNC/Long-Path- und Unix-/WSL-Pfade (siehe router_chat._LOCAL_PATH_RE).
+    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|\\\\[^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc|mnt)/[^\s\"'<>|]+)"
 )
 _AUDIT_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _AUDIT_SECRET_ASSIGNMENT_RE = re.compile(

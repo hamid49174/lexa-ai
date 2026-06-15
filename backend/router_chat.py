@@ -72,7 +72,9 @@ _PENDING_CANCEL_WORDS = frozenset({
     "stop", "stopp", "verwerfen", "nicht ausfuehren",
 })
 _LOCAL_PATH_RE = re.compile(
-    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
+    # Laufwerkspfade (C:\..., C:/...), UNC/Long-Path (\\server\share, \\?\C:\...),
+    # sowie Unix-/WSL-Pfade (/home, /mnt/c/...). Schuetzt vor Pfad-Leaks in Fehlertexten.
+    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|\\\\[^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc|mnt)/[^\s\"'<>|]+)"
 )
 _GENERIC_UPLOAD_MIME_TYPES = frozenset({"application/octet-stream", "binary/octet-stream"})
 PDF_TEXT_MAX_PAGES = 25

@@ -1375,12 +1375,15 @@ def _split_sources_fence(content):
     m = _LEXA_SOURCES_FENCE_RE.search(s)
     if not m:
         return s, []
+    # Den Fence IMMER vom sichtbaren Text trennen — auch bei defektem JSON, sonst
+    # leakt der rohe ```lexa-sources-Block in Suche/Export/Vorschau.
+    clean = s[:m.start()].rstrip()
     try:
         data = json.loads(m.group(1))
     except Exception:
-        return s, []
+        return clean, []
     sources = [x for x in data if isinstance(x, dict) and x.get("url")] if isinstance(data, list) else []
-    return s[:m.start()].rstrip(), sources
+    return clean, sources
 
 
 def global_search(query: str, limit: int = 30, *, include_ranking: bool = False) -> dict:

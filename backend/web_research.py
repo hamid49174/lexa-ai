@@ -172,9 +172,23 @@ def fetch_readable(url: str) -> str:
     return text[:_MAX_TEXT_CHARS]
 
 
+def _source_domain(url: str) -> str:
+    """Registrierbare Host-Domain (ohne fuehrendes www.) fuer Quellen-Deduplizierung."""
+    try:
+        host = (urllib.parse.urlparse(url).hostname or "").lower()
+    except Exception:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
 def gather_sources(query: str, max_sources: int = 4) -> list[dict]:
-    """Suche + parallel fetchen. Liefert [{title, url, snippet, content}] (nur mit Inhalt)."""
-    hits = search_web(query, max_results=max_sources + 3)
+    """Suche + parallel fetchen. Liefert [{title, url, snippet, content}].
+
+    Dedupliziert nach Domain (eine Quelle je Domain, wie ChatGPT/Gemini) und akzeptiert
+    Quellen mit lesbarem Inhalt ODER Such-Snippet (JS-lastige Seiten ohne extrahierbaren
+    Text gehen nicht verloren; _build_web_grounding faellt auf den Snippet zurueck).
+    """
+    hits = search_web(query, max_results=max_sources + 4)
     if not hits:
         return []
 
@@ -182,10 +196,17 @@ def gather_sources(query: str, max_sources: int = 4) -> list[dict]:
         return {**hit, "content": fetch_readable(hit["url"])}
 
     out: list[dict] = []
+    seen_domains: set[str] = set()
     with ThreadPoolExecutor(max_workers=4) as ex:
         for res in ex.map(_one, hits):
-            if res.get("content"):
-                out.append(res)
+            if not (res.get("content") or res.get("snippet")):
+                continue
+            domain = _source_domain(res.get("url", ""))
+            if domain and domain in seen_domains:
+                continue
+            if domain:
+                seen_domains.add(domain)
+            out.append(res)
             if len(out) >= max_sources:
                 break
     return out

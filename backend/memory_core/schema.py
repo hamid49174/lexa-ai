@@ -27,7 +27,7 @@ VALID_COLUMNS = {
     "interactions": {"id", "user_message", "ai_reply", "had_action", "created_at"},
     "routines": {"id", "name", "description", "schedule", "actions", "enabled", "last_run", "created_at"},
     "snippets": {"name", "text", "use_count", "created_at"},
-    "conversations": {"id", "title", "messages", "message_count", "created_at", "updated_at"},
+    "conversations": {"id", "title", "messages", "message_count", "created_at", "updated_at", "is_pinned"},
     "clipboard_entries": {"id", "text", "created_at"},
     "session_state": {"key", "value", "updated_at"},
     "timers": {"id", "message", "fire_at", "fired", "acknowledged", "created_at"},
