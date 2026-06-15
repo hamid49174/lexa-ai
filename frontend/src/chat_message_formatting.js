@@ -43,7 +43,20 @@ function appendNestedList(parent, lines, start) {
       top = stack[stack.length - 1];
     }
     const item = document.createElement("li");
-    appendInlineMarkdown(item, m.content);
+    // GFM Task-Liste: "- [ ] offen" / "- [x] erledigt" -> Checkbox (read-only).
+    const taskMatch = /^\[([ xX])\]\s+(.*)$/.exec(m.content);
+    if (taskMatch) {
+      item.className = "chat-task-item";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.className = "chat-task-checkbox";
+      box.setAttribute("disabled", "");
+      if (taskMatch[1].toLowerCase() === "x") box.setAttribute("checked", "");
+      item.appendChild(box);
+      appendInlineMarkdown(item, taskMatch[2]);
+    } else {
+      appendInlineMarkdown(item, m.content);
+    }
     top.listEl.appendChild(item);
     top.lastItem = item;
     i += 1;
@@ -65,10 +78,10 @@ function appendMarkdownSegment(parent, segment) {
 
     const headingMatch = /^(#{1,6})\s+(.*)$/.exec(line);
     if (headingMatch) {
-      const level = headingMatch[1].length;
-      const tag = level <= 1 ? "h2" : level === 2 ? "h3" : "h4";
+      const level = Math.max(1, Math.min(6, headingMatch[1].length));
+      const tag = "h" + level;
       const heading = document.createElement(tag);
-      heading.className = level <= 1 ? "chat-h2" : level === 2 ? "chat-h3" : "chat-h4";
+      heading.className = "chat-h" + level;
       appendInlineMarkdown(heading, headingMatch[2]);
       parent.appendChild(heading);
       i += 1;

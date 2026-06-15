@@ -273,7 +273,7 @@ const functionTagMessage = formatMessage("before <function=tool>{\"x\":1}</funct
 assert("formatMessage strips model function tags", functionTagMessage === "before  after", functionTagMessage);
 
 const mixedMessage = formatMessage("## Title\n\n- **Item**\n\n```js\nalert('<x>')\n```\n\n[safe](https://example.com)");
-assert("formatMessage handles mixed markdown blocks", mixedMessage.includes('<h3 class="chat-h3">Title</h3>') && mixedMessage.includes("<ul") && mixedMessage.includes("<pre") && mixedMessage.includes("<a "), mixedMessage);
+assert("formatMessage handles mixed markdown blocks", mixedMessage.includes('<h2 class="chat-h2">Title</h2>') && mixedMessage.includes("<ul") && mixedMessage.includes("<pre") && mixedMessage.includes("<a "), mixedMessage);
 assert("formatMessage escapes mixed code content", mixedMessage.includes("&lt;x&gt;") && !mixedMessage.includes("<x>"), mixedMessage);
 
 const fieldMessage = formatMessage("*Farbe:* Dunkel\nKennzeichen:* A 005 AC");
@@ -359,6 +359,42 @@ assert(
   "renderFormattedMessage source avoids assigning formatMessage via innerHTML",
   !src.includes("target.innerHTML = formatMessage")
 );
+
+console.log("\nGFM rendering fidelity (scan round 1):");
+
+// Headings: full h1–h6 mapping (previously # -> h2, ###+ collapsed to h4)
+const h1 = formatMessage("# Title");
+assert("heading # renders h1", h1.includes('<h1 class="chat-h1">Title</h1>'), h1);
+const h5 = formatMessage("##### Deep");
+assert("heading ##### renders h5", h5.includes('<h5 class="chat-h5">Deep</h5>'), h5);
+const h6 = formatMessage("###### Deeper");
+assert("heading ###### renders h6", h6.includes('<h6 class="chat-h6">Deeper</h6>'), h6);
+
+// Task lists (GFM checkboxes)
+const tasks = formatMessage("- [ ] offen\n- [x] erledigt");
+assert("task list renders checkboxes", tasks.includes('class="chat-task-item"') && tasks.includes('type="checkbox"'), tasks);
+assert("task list marks disabled (read-only)", tasks.includes("disabled"), tasks);
+assert("task list reflects checked state", tasks.includes("checked"), tasks);
+
+// Table alignment directives
+const aligned = formatMessage("| A | B | C |\n| :--- | :---: | ---: |\n| 1 | 2 | 3 |");
+assert("table center alignment applied", aligned.includes("text-align: center"), aligned);
+assert("table right alignment applied", aligned.includes("text-align: right"), aligned);
+
+// Inline [n] citations -> clickable superscript
+const cited = formatMessage("Fakt[1] und mehr[2].");
+assert("inline citation renders sup", cited.includes('<sup class="citation-ref"'), cited);
+assert("inline citation carries source index", cited.includes('data-citation="1"') && cited.includes('data-citation="2"'), cited);
+assert("inline citation keeps surrounding text", cited.includes("Fakt") && cited.includes("und mehr"), cited);
+
+// Bare URL auto-linking (GFM)
+const bare = formatMessage("Siehe https://example.com hier");
+assert("bare url becomes link", bare.includes('<a ') && bare.includes('href="https://example.com'), bare);
+assert("bare url opens controlled target", bare.includes('target="_blank"') && bare.includes('rel="noopener noreferrer"'), bare);
+const bareTrail = formatMessage("Quelle: https://example.com/x.");
+assert("bare url drops trailing punctuation from href", bareTrail.includes('href="https://example.com/x"') && !bareTrail.includes('href="https://example.com/x."'), bareTrail);
+const bareUnsafe = formatMessage("javascript:alert(1) not linked");
+assert("bare non-http scheme is not auto-linked", !bareUnsafe.includes("<a "), bareUnsafe);
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

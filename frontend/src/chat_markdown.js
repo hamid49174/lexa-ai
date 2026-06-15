@@ -18,17 +18,50 @@ function splitChatLinkTarget(rawTarget) {
   return { url: match[1], title };
 }
 
+// Linkifiziert nackte URLs (https://… ohne Markdown-Klammern) im Klartext — GFM-Verhalten
+// wie bei ChatGPT/Claude. normalizeChatUrl() haelt es XSS-sicher; nachgestellte Satzzeichen
+// (".,;:!?)") bleiben Text, nicht Teil des Links.
+function appendTextWithBareUrls(parent, textChunk) {
+  const str = String(textChunk || "");
+  if (!str) return;
+  const urlPattern = /https?:\/\/[^\s<>()\[\]]+/g;
+  let last = 0;
+  let m;
+  while ((m = urlPattern.exec(str)) !== null) {
+    if (m.index > last) parent.appendChild(document.createTextNode(str.slice(last, m.index)));
+    let url = m[0];
+    let trailing = "";
+    const trail = /[.,;:!?)]+$/.exec(url);
+    if (trail) { trailing = trail[0]; url = url.slice(0, url.length - trailing.length); }
+    const safeUrl = normalizeChatUrl(url);
+    if (safeUrl) {
+      const link = document.createElement("a");
+      link.className = "chat-link";
+      link.href = safeUrl;
+      link.rel = "noopener noreferrer";
+      link.target = "_blank";
+      link.textContent = url;
+      parent.appendChild(link);
+    } else {
+      parent.appendChild(document.createTextNode(url));
+    }
+    if (trailing) parent.appendChild(document.createTextNode(trailing));
+    last = urlPattern.lastIndex;
+  }
+  if (last < str.length) parent.appendChild(document.createTextNode(str.slice(last)));
+}
+
 function appendInlineMarkdown(parent, source) {
   const text = String(source || "");
   if (!text) return;
 
-  const tokenPattern = /(`([^`\n]+)`|!\[([^\]\n]*)\]\(([^)\s]+(?:\s+[^)]*)?)\)|\[([^\]\n]+)\]\(([^)\s]+(?:\s+[^)]*)?)\)|\*\*([^*\n]+)\*\*|~~([^~\n]+)~~|\*([^*\n]+)\*)/g;
+  const tokenPattern = /(`([^`\n]+)`|!\[([^\]\n]*)\]\(([^)\s]+(?:\s+[^)]*)?)\)|\[([^\]\n]+)\]\(([^)\s]+(?:\s+[^)]*)?)\)|\*\*([^*\n]+)\*\*|~~([^~\n]+)~~|\*([^*\n]+)\*|\[(\d{1,3})\])/g;
   let lastIndex = 0;
   let match;
 
   while ((match = tokenPattern.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      parent.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+      appendTextWithBareUrls(parent, text.slice(lastIndex, match.index));
     }
 
     const raw = match[0];
@@ -55,6 +88,27 @@ function appendInlineMarkdown(parent, source) {
       } else if (match[3]) {
         parent.appendChild(document.createTextNode(match[3]));
       }
+    } else if (match[10] !== undefined) {
+      // Inline-Zitat [n] -> klickbare hochgestellte Quellennummer (wie ChatGPT/Gemini).
+      // Klick oeffnet das Quellen-Panel der zugehoerigen Nachricht.
+      const sup = document.createElement("sup");
+      sup.className = "citation-ref";
+      sup.dataset.citation = match[10];
+      sup.textContent = match[10];
+      sup.setAttribute("role", "button");
+      sup.setAttribute("tabindex", "0");
+      sup.title = "Quelle " + match[10];
+      const openCite = () => {
+        let el = sup.parentElement;
+        while (el && !(el.classList && el.classList.contains("message"))) el = el.parentElement;
+        const toggle = el && typeof el.querySelector === "function" ? el.querySelector(".chat-sources-toggle") : null;
+        if (toggle) toggle.click();
+      };
+      sup.addEventListener("click", openCite);
+      sup.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCite(); }
+      });
+      parent.appendChild(sup);
     } else if (raw.startsWith("[")) {
       const target = splitChatLinkTarget(match[6]);
       const safeUrl = normalizeChatUrl(target.url);
@@ -89,7 +143,7 @@ function appendInlineMarkdown(parent, source) {
   }
 
   if (lastIndex < text.length) {
-    parent.appendChild(document.createTextNode(text.slice(lastIndex)));
+    appendTextWithBareUrls(parent, text.slice(lastIndex));
   }
 }
 
@@ -105,19 +159,35 @@ function isChatTableSeparator(row) {
   return /^\s*\|?[\s:-]+\|[\s|:-]*\s*$/.test(String(row || ""));
 }
 
+// GFM-Spalten-Ausrichtung aus der Trennzeile: :--- = left, :---: = center, ---: = right.
+function chatTableAlignments(separatorRow) {
+  return chatTableCells(separatorRow).map((cell) => {
+    const c = cell.trim();
+    const left = c.startsWith(":");
+    const right = c.endsWith(":");
+    if (left && right) return "center";
+    if (right) return "right";
+    if (left) return "left";
+    return "";
+  });
+}
+
 function appendChatTable(parent, rows) {
   const tableWrap = document.createElement("div");
   tableWrap.className = "table-wrap";
   const table = document.createElement("table");
   table.className = "chat-table";
   const hasHeader = rows.length > 1 && isChatTableSeparator(rows[1]);
+  const aligns = hasHeader ? chatTableAlignments(rows[1]) : [];
   const dataRows = hasHeader ? [rows[0], ...rows.slice(2)] : rows;
 
   dataRows.forEach((row, index) => {
     const tr = document.createElement("tr");
     const tag = hasHeader && index === 0 ? "th" : "td";
-    chatTableCells(row).forEach((cell) => {
+    chatTableCells(row).forEach((cell, col) => {
       const el = document.createElement(tag);
+      const align = aligns[col];
+      if (align) el.setAttribute("style", "text-align: " + align);
       appendInlineMarkdown(el, cell.trim());
       tr.appendChild(el);
     });
