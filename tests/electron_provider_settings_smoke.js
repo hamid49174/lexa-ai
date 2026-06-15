@@ -148,10 +148,7 @@ async function main() {
       await waitFor(() => (document.getElementById("model-desc")?.textContent || "").includes("Smoke Model"), 4000);
 
       const providerStatuses = {
-        groq: document.getElementById("groq-status")?.textContent || "",
-        openai: document.getElementById("openai-status")?.textContent || "",
         gemini: document.getElementById("gemini-status")?.textContent || "",
-        anthropic: document.getElementById("anthropic-status")?.textContent || "",
       };
       const modelSelect = document.getElementById("model-select");
       const modelBefore = {
@@ -214,7 +211,7 @@ async function main() {
 
   console.log("\nProvider/model settings smoke:");
   const providerStatuses = result.providerStatuses || {};
-  assert("provider status rows render mocked availability", ["groq", "openai", "gemini", "anthropic"].every((name) => /Verbunden|Connected/i.test(providerStatuses[name] || "")), JSON.stringify(providerStatuses));
+  assert("provider status rows render mocked availability (Gemini-only)", ["gemini"].every((name) => /Verbunden|Connected/i.test(providerStatuses[name] || "")), JSON.stringify(providerStatuses));
 
   const modelBefore = result.modelBefore || {};
   assert("model selector hydrates mocked current model", modelBefore.desc === "Aktiv: Smoke Model", JSON.stringify(modelBefore));

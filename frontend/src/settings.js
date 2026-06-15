@@ -154,7 +154,7 @@ async function refreshSettingsView() {
   ]);
   if (requestId !== _settingsRefreshSeq || !LexaState.get("backendOnline")) return null;
 
-  const ai = aiRes.status === "fulfilled" ? aiRes.value : { groq: {}, openai: {}, gemini: {}, anthropic: {} };
+  const ai = aiRes.status === "fulfilled" ? aiRes.value : { gemini: {} };
   const voice = voiceRes.status === "fulfilled" ? voiceRes.value : { tts: {}, stt: {} };
   const health = healthRes.status === "fulfilled" ? healthRes.value : {};
   const mem = memRes.status === "fulfilled" ? memRes.value : {};
@@ -178,14 +178,9 @@ async function refreshSettingsView() {
   });
   renderSystemReadiness(readinessModel);
 
-  const groqEl = document.getElementById("groq-status");
-  const openaiEl = document.getElementById("openai-status");
+  // Gemini-only: nur der Gemini-Status wird angezeigt.
   const geminiEl = document.getElementById("gemini-status");
-  const anthropicEl = document.getElementById("anthropic-status");
-  if (groqEl) { groqEl.textContent = ai.groq?.available ? t("settings.connected") : t("settings.offline"); groqEl.className = "setting-status" + (ai.groq?.available ? "" : " offline"); }
-  if (openaiEl) { openaiEl.textContent = ai.openai?.available ? t("settings.connected") : t("settings.offline"); openaiEl.className = "setting-status" + (ai.openai?.available ? "" : " offline"); }
   if (geminiEl) { geminiEl.textContent = ai.gemini?.available ? t("settings.connected") : t("settings.offline"); geminiEl.className = "setting-status" + (ai.gemini?.available ? "" : " offline"); }
-  if (anthropicEl) { anthropicEl.textContent = ai.anthropic?.available ? t("settings.connected") : t("settings.offline"); anthropicEl.className = "setting-status" + (ai.anthropic?.available ? "" : " offline"); }
 
   // TTS Status — Cartesia (Primary) + ElevenLabs (Fallback)
   const cartesiaStatusEl = document.getElementById("cartesia-status");

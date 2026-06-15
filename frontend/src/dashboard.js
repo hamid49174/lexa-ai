@@ -30,11 +30,9 @@ function createDashboardAiRow(label, status, active = false) {
 
 function renderDashboardAiStatus(target, ai, hermes) {
   if (!target) return;
+  // Gemini-only: Lexa nutzt ausschließlich Gemini als KI-Anbieter.
   const providers = [
-    ["groq", "Groq"],
-    ["openai", "OpenAI"],
     ["gemini", "Gemini"],
-    ["anthropic", "Claude"],
   ];
   const activeProvider = String(ai?.active_provider || "");
   const activeLabel = providers.find(([key]) => key === activeProvider)?.[1] || activeProvider || t("dashboard.unknownProvider");

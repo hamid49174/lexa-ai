@@ -31,18 +31,18 @@ function assert(desc, ok) {
 console.log("\nHermes frontend:");
 
 assert("dashboard fetches backend health for Hermes state", dashboard.includes("window.lexa.health()") && dashboard.includes("healthRes"));
-assert("dashboard renders Anthropic provider status", dashboard.includes('["anthropic", "Claude"]'));
+assert("dashboard renders Gemini provider status (Gemini-only)", dashboard.includes('["gemini", "Gemini"]') && !dashboard.includes('["anthropic", "Claude"]'));
 assert("dashboard renders provider fallback status", dashboard.includes("fallback_available") && dashboard.includes('t("dashboard.aiFallback")'));
 assert("dashboard renders Hermes health row", dashboard.includes("const hermes = healthRes.status") && dashboard.includes('createDashboardAiRow("Hermes", hermesLabel, hermesReady)'));
 
-assert("settings tracks Anthropic provider status", settings.includes("anthropic-status") && settings.includes("ai.anthropic?.available"));
+assert("settings tracks Gemini provider status (Gemini-only)", settings.includes("gemini-status") && settings.includes("ai.gemini?.available") && !settings.includes("anthropic-status"));
 assert("settings builds Hermes readiness signal", settings.includes("function hermesReadinessSignal") && settings.includes("diagnostics?.hermes") && settings.includes("health?.hermes"));
 assert("settings includes Hermes in readiness checks and cards", settings.includes('label: "Hermes"') && settings.includes("hermes.checkState") && settings.includes("diagnosticsLabel(hermes.state)"));
-assert("settings counts four AI providers", settings.includes('const providers = ["groq", "openai", "gemini", "anthropic"]') && settings.includes("`${aiReadyCount}/4`"));
+assert("settings counts only the Gemini provider (Gemini-only)", settings.includes('const providers = ["gemini"]') && settings.includes("${aiReadyCount}/${providers.length}"));
 assert("settings renders Hermes gateway autostart control", settings.includes("function renderHermesGatewayAutostart") && settings.includes("hermesGatewayAutostartSet") && settings.includes("setupHermesGatewayAutostartControls"));
 assert("settings Hermes gateway autostart cannot stay busy after toggle", settings.includes("let _hermesGatewayAutostartRunning = false") && settings.includes("let _hermesGatewayAutostartLastPayload = null") && settings.includes("_hermesGatewayAutostartLastPayload = payload") && settings.includes("_hermesGatewayAutostartRunning || !canToggle") && settings.includes('toggle.setAttribute("aria-busy", "true")') && settings.includes('toggle.removeAttribute("aria-busy")') && settings.includes("if (_hermesGatewayAutostartRunning)") && settings.includes("finally") && settings.includes("renderHermesGatewayAutostart(_hermesGatewayAutostartLastPayload)"));
 
-assert("settings page exposes Anthropic status row", html.includes('id="anthropic-status"') && html.includes('data-i18n="settings.anthropicApiKey"'));
+assert("settings page exposes Gemini status row (Gemini-only)", html.includes('id="gemini-status"') && html.includes('data-i18n="settings.geminiApiKey"') && !html.includes('id="anthropic-status"'));
 assert("settings page exposes Hermes gateway autostart toggle", html.includes('id="hermes-gateway-autostart-status"') && html.includes('id="hermes-gateway-autostart-toggle"'));
 assert("system page exposes Startup Health panel", html.includes('id="startup-health-panel"') && html.includes('id="startup-health-content"') && html.includes('data-action="refreshStartupHealth"'));
 assert("system page exposes Hermes overview cockpit", html.includes('id="hermes-overview-panel"') && html.includes('id="hermes-overview-content"') && html.includes('data-action="refreshHermesOverview"'));

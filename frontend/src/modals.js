@@ -778,8 +778,6 @@ function showOnboarding() {
         try {
           const status = await window.lexa.aiStatus();
           const providers = [
-            ["groq", "Groq"],
-            ["openai", "OpenAI"],
             ["gemini", "Gemini"],
           ];
           const activeCloud = providers.find(([key]) => status[key]?.available);

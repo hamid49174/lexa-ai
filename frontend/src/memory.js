@@ -937,15 +937,12 @@ async function refreshMemoryView() {
   } catch (e) { console.warn("[Memory] Failed to render snippets:", e.message || e); }
 
   const aiStatus = aiRes.status === "fulfilled" ? aiRes.value : {
-    groq: { available: false },
-    openai: { available: false },
     gemini: { available: false },
   };
   const aiPanel = document.getElementById("ai-status-panel");
   if (aiPanel) {
+    // Gemini-only: nur Gemini als KI-Anbieter.
     const providers = [
-      ["groq", "Groq API", aiStatus.groq?.model_name || t("memory.groqFallback")],
-      ["openai", "OpenAI API", aiStatus.openai?.model_name || t("memory.openaiFallback")],
       ["gemini", "Gemini API", aiStatus.gemini?.model_name || t("memory.geminiFallback")],
     ];
     const fragment = document.createDocumentFragment();
