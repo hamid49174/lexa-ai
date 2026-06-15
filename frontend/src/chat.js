@@ -2747,7 +2747,15 @@ function trimChatMessages() {
   const msgs = chatMessages.querySelectorAll(".message");
   if (msgs.length > LexaConfig.MAX_DOM_MESSAGES) {
     const toRemove = msgs.length - LexaConfig.MAX_DOM_MESSAGES;
+    const beforeHeight = chatMessages.scrollHeight;
+    const beforeTop = chatMessages.scrollTop;
     for (let i = 0; i < toRemove; i++) msgs[i].remove();
+    // Scroll-Position erhalten: um die entfernte Höhe nach oben korrigieren, damit der
+    // sichtbare Inhalt nicht springt (kein Jank, wenn ältere Nachrichten weggetrimmt werden).
+    const removedHeight = beforeHeight - chatMessages.scrollHeight;
+    if (removedHeight > 0 && beforeTop > 0) {
+      chatMessages.scrollTop = Math.max(0, beforeTop - removedHeight);
+    }
   }
 }
 

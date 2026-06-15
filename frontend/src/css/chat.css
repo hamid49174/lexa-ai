@@ -368,6 +368,27 @@
   margin-top: 6px;
 }
 
+/* Param-Werte in der Tool-Bestätigungskarte (informierte Freigabe) */
+.msg-action .action-params {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.msg-action .action-param-row {
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.msg-action .action-param-key {
+  color: var(--text-muted);
+  font-family: var(--font);
+}
+.msg-action .action-param-value {
+  color: var(--accent2);
+  font-family: var(--font-mono);
+}
+
 /* Confirmation buttons */
 .confirm-btn {
   background: var(--gradient);

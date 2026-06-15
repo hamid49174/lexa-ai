@@ -13,6 +13,24 @@ function chatToolActionParamKeys(action) {
   return Object.keys(params).sort();
 }
 
+// Param-Schlüssel UND -Werte (gekappt), damit der Nutzer VOR der Freigabe sieht, was
+// genau ausgeführt wird (z.B. WELCHE Datei gelöscht wird). Werte werden ausschließlich
+// via textContent gesetzt -> XSS-sicher.
+function chatToolActionParamEntries(action) {
+  const params = action?.params;
+  if (!params || typeof params !== "object" || Array.isArray(params)) return [];
+  return Object.keys(params).sort().map((key) => {
+    let value = params[key];
+    if (value && typeof value === "object") {
+      try { value = JSON.stringify(value); } catch (e) { value = String(value); }
+    } else {
+      value = String(value);
+    }
+    if (value.length > 300) value = value.slice(0, 300) + "…";
+    return { key, value };
+  });
+}
+
 function chatActionReplyLooksLikeToolExecution(reply, action) {
   const text = String(reply || "").trim();
   if (!text) return true;
@@ -64,6 +82,29 @@ function appendToolConfirmationUi(body, action) {
 
   actionDiv.appendChild(actionLabel);
   actionDiv.appendChild(actionCmd);
+
+  // Param-Werte sichtbar machen (informierte Freigabe): zeigt z.B. welche Datei/welcher
+  // Pfad betroffen ist, statt nur die Schlüsselnamen.
+  const paramEntries = chatToolActionParamEntries(action);
+  if (paramEntries.length) {
+    const paramList = document.createElement("div");
+    paramList.className = "action-params";
+    paramEntries.forEach(({ key, value }) => {
+      const row = document.createElement("div");
+      row.className = "action-param-row";
+      const k = document.createElement("span");
+      k.className = "action-param-key";
+      k.textContent = `${key}: `;
+      const v = document.createElement("span");
+      v.className = "action-param-value";
+      v.textContent = value;
+      row.appendChild(k);
+      row.appendChild(v);
+      paramList.appendChild(row);
+    });
+    actionDiv.appendChild(paramList);
+  }
+
   actionDiv.appendChild(actionDetail);
   body.appendChild(actionDiv);
 
