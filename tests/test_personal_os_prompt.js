@@ -568,7 +568,7 @@ assert("builds Obsidian prompt with quick-find routes", obsidianPrompt.includes(
 assert("keeps Obsidian prompt under chat limit", obsidianPrompt.length <= posChatPromptLimit(), `len=${obsidianPrompt.length}`);
 assert("personal OS view exposes Obsidian context action", html.includes('data-action="personalOsLoadObsidianContext"') && src.includes("function personalOsLoadObsidianContext") && src.includes("personalOsObsidianContext"));
 assert("preload exposes Obsidian context endpoint", preload.includes("personalOsObsidianContext") && preload.includes("/personal-os/obsidian-context"));
-assert("Obsidian context uses shared chat context when available", src.includes("personalOsSharedContext") && src.includes("shared?.fresh") && src.includes('sharedTopic || "lexa hermes obsidian"'));
+assert("Obsidian context uses shared chat context when available", src.includes("personalOsSharedContext") && src.includes("shared?.fresh") && src.includes("const fallbackTopic = sharedTopic ||") && src.includes('posUiText("pos.obsidianDefaultTopic", "lexa hermes obsidian")'));
 assert("renders Obsidian context card and chat handoff", src.includes("function renderPersonalOsObsidianContext") && src.includes("personalOsSendObsidianContextToChat") && src.includes("selectedObsidianContext"));
 assert("i18n includes Obsidian context labels", i18nDe.includes('"pos.titleObsidianContext"') && i18nEn.includes('"pos.obsidianContextPromptReady"'));
 

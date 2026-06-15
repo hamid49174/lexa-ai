@@ -6,62 +6,32 @@
 const fs = require("fs");
 const path = require("path");
 
-const chatCoreSrc = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "chat.js"),
-  "utf8"
-);
-const chatVoiceSrc = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "chat_voice.js"),
-  "utf8"
-);
-const chatConversationsSrc = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "chat_conversations.js"),
-  "utf8"
-);
-const chatAgentRunsSrc = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "chat_agent_runs.js"),
-  "utf8"
-);
-const chatStateSrc = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "chat_state.js"),
-  "utf8"
-);
-const chatFileUploadSrc = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "chat_file_upload.js"),
-  "utf8"
-);
+// Source files ship with CRLF line endings on Windows. The string assertions below
+// use \n in their multi-line needles, so normalize EOL on read to keep matching
+// EOL-agnostic without weakening any structural invariant.
+function readSource(...segments) {
+  return fs
+    .readFileSync(path.join(__dirname, "..", "frontend", "src", ...segments), "utf8")
+    .replace(/\r\n/g, "\n");
+}
+
+const chatCoreSrc = readSource("chat.js");
+const chatVoiceSrc = readSource("chat_voice.js");
+const chatConversationsSrc = readSource("chat_conversations.js");
+const chatAgentRunsSrc = readSource("chat_agent_runs.js");
+const chatStateSrc = readSource("chat_state.js");
+const chatFileUploadSrc = readSource("chat_file_upload.js");
 const src = [chatCoreSrc, chatVoiceSrc, chatAgentRunsSrc, chatConversationsSrc].join("\n");
 const chatBundleSrc = [src, chatStateSrc, chatFileUploadSrc].join("\n");
-const chatConstantsSrc = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "chat_constants.js"),
-  "utf8"
-);
-const chatExportSrc = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "chat_export.js"),
-  "utf8"
-);
-const chatComposerSrc = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "chat_composer_helpers.js"),
-  "utf8"
-);
-const chatMessageActionsSrc = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "chat_message_actions.js"),
-  "utf8"
-);
-const chatMessageActionsControllerSrc = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "chat_message_actions_controller.js"),
-  "utf8"
-);
-const chatInputHelpersSrc = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "chat_input_helpers.js"),
-  "utf8"
-);
-const chatHistoryUiSrc = fs.readFileSync(
-  path.join(__dirname, "..", "frontend", "src", "chat_history_ui.js"),
-  "utf8"
-);
-const deI18n = fs.readFileSync(path.join(__dirname, "..", "frontend", "src", "i18n", "de.json"), "utf8");
-const enI18n = fs.readFileSync(path.join(__dirname, "..", "frontend", "src", "i18n", "en.json"), "utf8");
+const chatConstantsSrc = readSource("chat_constants.js");
+const chatExportSrc = readSource("chat_export.js");
+const chatComposerSrc = readSource("chat_composer_helpers.js");
+const chatMessageActionsSrc = readSource("chat_message_actions.js");
+const chatMessageActionsControllerSrc = readSource("chat_message_actions_controller.js");
+const chatInputHelpersSrc = readSource("chat_input_helpers.js");
+const chatHistoryUiSrc = readSource("chat_history_ui.js");
+const deI18n = readSource("i18n", "de.json");
+const enI18n = readSource("i18n", "en.json");
 
 function extractFn(source, name) {
   const needles = [`async function ${name}(`, `function ${name}(`];
@@ -94,6 +64,7 @@ const sandbox = new Function(`
   let backendOnline = true;
   let loading = false;
   const events = [];
+  const window = { _lexaPendingRegen: null, _chatViewOpen: true };
   const chatInput = { get value() { return inputValue; }, set value(value) { inputValue = String(value); } };
   const LexaConfig = { MAX_CHAT_INPUT_LENGTH: 10 };
   const LexaState = {
@@ -136,7 +107,6 @@ const sandbox = new Function(`
   ${extractFn(chatMessageActionsSrc, "messageActionPromptWithSource")}
   ${extractFn(chatMessageActionsSrc, "workspaceDraftPromptFromText")}
   ${extractFn(chatMessageActionsSrc, "continuePromptFromText")}
-  ${extractFn(chatMessageActionsSrc, "verifyAnswerPromptFromText")}
   ${extractFn(chatExportSrc, "messageExportMarkdownFromText")}
   ${extractFn(chatExportSrc, "messageExportFilename")}
   ${extractConstArray(chatConstantsSrc, "_AGENT_PATTERNS")}
@@ -161,7 +131,6 @@ const sandbox = new Function(`
     expandComposerSlashAlias,
     workspaceDraftPromptFromText,
     continuePromptFromText,
-    verifyAnswerPromptFromText,
     messageExportMarkdownFromText,
     messageExportFilename,
     _needsAgentMode,
@@ -301,15 +270,6 @@ function assert(desc, ok, detail = "") {
   assert("continue-from-answer prompt skips empty source", emptyContinuePrompt.text === "" && emptyContinuePrompt.cursorStart === 0);
   assert("continue-from-answer prompt preserves multiline special text", sandbox.continuePromptFromText("Line <one>\nLine & two").text.includes("Line <one>\nLine & two"));
   sandbox.setMaxLength(4000);
-  const verifyPrompt = sandbox.verifyAnswerPromptFromText("Alpha answer");
-  assert("verify-answer prompt wraps answers as source-backed research", verifyPrompt.includes("source-backed research") && verifyPrompt.includes("checkable claims") && verifyPrompt.includes("Source answer:") && verifyPrompt.includes("Alpha answer"));
-  sandbox.setMaxLength(1200);
-  const longVerifySource = `VERIFY-HEAD ${"x".repeat(5000)} VERIFY-TAIL`;
-  const clippedVerifyPrompt = sandbox.verifyAnswerPromptFromText(longVerifySource);
-  assert("verify-answer prompt clips long answers within chat limit", clippedVerifyPrompt.includes("chat.verifyAnswerClipMarker") && clippedVerifyPrompt.length <= 1200);
-  assert("verify-answer clipped source preserves answer head and tail", clippedVerifyPrompt.includes("VERIFY-HEAD") && clippedVerifyPrompt.includes("VERIFY-TAIL"));
-  assert("verify-answer prompt skips empty source", sandbox.verifyAnswerPromptFromText(" ") === "");
-  assert("verify-answer prompt preserves multiline special text", sandbox.verifyAnswerPromptFromText("Line <one>\nLine & two").includes("Source answer:\nLine <one>\nLine & two"));
   const exportedMarkdown = sandbox.messageExportMarkdownFromText("Alpha answer", { title: "Lexa Note", exportedAt: "2026-05-18T04:58:14.627Z" });
   assert("message markdown export keeps source and metadata", exportedMarkdown.includes("# Lexa Note") && exportedMarkdown.includes("Exported: 2026-05-18T04:58:14.627Z") && exportedMarkdown.includes("Source: Lexa chat") && exportedMarkdown.endsWith("Alpha answer\n"));
   assert("message markdown export skips empty source", sandbox.messageExportMarkdownFromText("   ") === "");
@@ -534,6 +494,11 @@ function assert(desc, ok, detail = "") {
   const saveChatSource = extractFn(src, "saveChatHistory");
   const autoSaveSource = extractFn(src, "autoSaveConversation");
   const saveCurrentSource = extractFn(src, "saveCurrentConversation");
+  // saveCurrentConversation is now a thin serialized-chain wrapper; the actual
+  // persistence logic lives in _performConversationSave, and the DOM->{role,content}
+  // serialization lives in collectPersistableMessages.
+  const performSaveSource = extractFn(src, "_performConversationSave");
+  const collectMessagesSource = extractFn(src, "collectPersistableMessages");
   const loadHistorySource = extractFn(src, "loadChatHistory");
   const clearChatSource = extractFn(src, "clearChat");
   const trimChatSource = extractFn(src, "trimChatMessages");
@@ -545,15 +510,15 @@ function assert(desc, ok, detail = "") {
   const deleteConversationSource = extractFn(src, "deleteConversation");
   const autoTitleSource = extractFn(src, "autoTitleConversation");
   assert("chat persistence prefers raw markdown before rendered text", persistTextSource.includes("dataset?.persistText") && persistTextSource.includes('querySelector(".agent-summary")'));
-  assert("chat messages store raw markdown for reuse", src.includes("setMessagePersistText(msg, text)") && src.includes("setMessagePersistText(msgEl, fullText || textEl.textContent)") && src.includes("setMessagePersistText(msgEl, finalSummary)"));
-  assert("agent run metadata survives reload without entering backend messages", src.includes("function normalizeAgentRunMeta") && src.includes("function setMessageAgentRunMeta") && src.includes("function saveAgentRunMetaForConversation") && src.includes("function createAgentRunMetaResolver") && src.includes("function renderPersistedConversationMessages") && src.includes("renderPersistedAgentRunMeta(body, agentRunMeta, text)") && saveChatSource.includes("getMessageAgentRunMeta(msg)") && saveChatSource.includes("messages.push(meta ? { text, type, meta } : { text, type })") && saveCurrentSource.includes("const convId = LexaState.get(\"currentConversationId\")") && saveCurrentSource.includes("saveAgentRunMetaForConversation(convId)") && autoSaveSource.includes("const convId = LexaState.get(\"currentConversationId\")") && autoSaveSource.includes("saveAgentRunMetaForConversation(convId)") && saveCurrentSource.includes("messages.push({ role, content: text })") && !saveCurrentSource.includes("meta }"));
+  assert("chat messages store raw markdown for reuse", src.includes("setMessagePersistText(msg, text)") && src.includes("setMessagePersistText(msgEl, persistText)") && src.includes("setMessagePersistText(msgEl, finalSummary)"));
+  assert("agent run metadata survives reload without entering backend messages", src.includes("function normalizeAgentRunMeta") && src.includes("function setMessageAgentRunMeta") && src.includes("function saveAgentRunMetaForConversation") && src.includes("function createAgentRunMetaResolver") && src.includes("function renderPersistedConversationMessages") && src.includes("renderPersistedAgentRunMeta(body, agentRunMeta, text)") && saveChatSource.includes("getMessageAgentRunMeta(msg)") && saveChatSource.includes("messages.push(meta ? { text: stored, type, meta } : { text: stored, type })") && performSaveSource.includes("const convId = LexaState.get(\"currentConversationId\")") && performSaveSource.includes("saveAgentRunMetaForConversation(convId)") && autoSaveSource.includes("return saveCurrentConversation()") && collectMessagesSource.includes("messages.push({ role, content: serializeMessageForStorage(msg) })") && !performSaveSource.includes("meta }"));
   assert("chat persistence skips only transient typing messages", persistableSource.includes("typing-message"));
   assert("local chat cache uses shared persisted text helper", saveChatSource.includes("getMessagePersistText(msg)"));
-  assert("conversation autosave uses shared persisted text helper and stable conversation id", autoSaveSource.includes("const convId = LexaState.get(\"currentConversationId\")") && autoSaveSource.includes("getMessagePersistText(msg)") && autoSaveSource.includes("await window.lexa.conversationUpdate(convId, { messages })") && saveCurrentSource.includes("getMessagePersistText(msg)"));
+  assert("conversation autosave uses shared persisted text helper and stable conversation id", autoSaveSource.includes("return saveCurrentConversation()") && collectMessagesSource.includes("getMessagePersistText(msg)") && performSaveSource.includes("const convId = LexaState.get(\"currentConversationId\")") && performSaveSource.includes("await window.lexa.conversationUpdate(convId, { messages })"));
   assert("conversation autosave pauses during conversation switching", chatBundleSrc.includes("let _conversationSwitchInFlight = 0") && autoSaveSource.includes("if (_conversationSwitchInFlight > 0) return") && switchSource.includes("_conversationSwitchInFlight += 1") && switchSource.includes("_conversationSwitchInFlight = Math.max(0, _conversationSwitchInFlight - 1)"));
   assert("auto title updates local sidebar title by stable string id", src.includes("function updateConversationTitleLocally") && src.includes("String(conv?.id) !== String(convId)") && src.includes("LexaState.set(\"conversationsList\", next)") && autoTitleSource.includes("String(userMessage || \"\").trim()") && autoTitleSource.includes("const generatedTitle = String(result?.title || \"\").trim()") && autoTitleSource.includes("updateConversationTitleLocally(convId, title)"));
-  assert("manual conversation changes warn when pre-change save fails", saveCurrentSource.includes("options = null") && saveCurrentSource.includes("const opts = options || {}") && saveCurrentSource.includes("return true") && saveCurrentSource.includes('if (opts.notifyFailure) showToast(t("toast.conversationSaveFailed"), "warning"') && saveCurrentSource.includes("return false") && switchSource.includes("await saveCurrentConversation({ notifyFailure: notify })") && newConversationSource.includes("await saveCurrentConversation({ notifyFailure: true })") && deI18n.includes('"toast.conversationSaveFailed"') && enI18n.includes('"toast.conversationSaveFailed"'));
-  assert("conversation save separates update success from sidebar refresh failure", saveCurrentSource.includes("await window.lexa.conversationUpdate(convId, { messages })") && saveCurrentSource.includes("console.warn(\"[Chat] Saved conversation but failed to refresh sidebar:\"") && saveCurrentSource.includes('showToast(t("toast.conversationRefreshFailed"), "warning"') && saveCurrentSource.includes("return true") && deI18n.includes('"toast.conversationRefreshFailed"') && enI18n.includes('"toast.conversationRefreshFailed"'));
+  assert("manual conversation changes warn when pre-change save fails", saveCurrentSource.includes("options = null") && saveCurrentSource.includes("const opts = options || {}") && performSaveSource.includes("return true") && performSaveSource.includes('if (opts.notifyFailure) showToast(t("toast.conversationSaveFailed"), "warning"') && performSaveSource.includes("return false") && switchSource.includes("await saveCurrentConversation({ notifyFailure: notify })") && newConversationSource.includes("await saveCurrentConversation({ notifyFailure: true })") && deI18n.includes('"toast.conversationSaveFailed"') && enI18n.includes('"toast.conversationSaveFailed"'));
+  assert("conversation save separates update success from update failure", performSaveSource.includes("await window.lexa.conversationUpdate(convId, { messages })") && performSaveSource.includes("console.warn(\"[Chat] Failed to save conversation:\"") && performSaveSource.includes('showToast(t("toast.conversationSaveFailed"), "warning"') && performSaveSource.includes("return false") && performSaveSource.includes("return true") && deI18n.includes('"toast.conversationSaveFailed"') && enI18n.includes('"toast.conversationSaveFailed"'));
   assert("persisted conversation reloads use shared renderer", src.includes("function renderPersistedConversationMessages") && src.includes("const text = msg?.content ?? msg?.text ?? \"\"") && src.includes("msg?.meta || (agentMetaForMessage ? agentMetaForMessage(msg?.role || \"assistant\", text) : null)") && src.includes("const activeConvId = conv.id || convId") && src.includes("renderPersistedConversationMessages(conv.messages, activeConvId)") && src.includes("saveAgentRunMetaForConversation(activeConvId)") && src.includes("renderPersistedConversationMessages(messages, convId)") && src.includes("if (convId) saveAgentRunMetaForConversation(convId)") && switchSource.includes("renderPersistedConversationMessages(messages, convId)") && switchSource.includes("saveAgentRunMetaForConversation(convId)"));
   assert("conversation reload clears old rendered messages before hydrating", src.includes("function clearRenderedChatMessages") && src.includes("querySelectorAll(\".message\").forEach((msg) => msg.remove())") && loadHistorySource.includes("if (conv && !conv.detail && Array.isArray(conv.messages))") && loadHistorySource.includes("clearRenderedChatMessages();\n        LexaState.set(\"currentConversationId\", activeConvId)") && loadHistorySource.includes("if (!Array.isArray(messages)) return;") && loadHistorySource.includes("clearRenderedChatMessages();\n    renderPersistedConversationMessages(messages, convId)") && !loadHistorySource.includes("messages.length === 0"));
   assert("failed conversation switch restores previous active selection", src.includes("function restoreActiveConversationSelection") && chatBundleSrc.includes("function chatSetActiveConversationId") && chatBundleSrc.includes("function clearChatActiveConversationId") && switchSource.includes('const previousConvId = LexaState.get("currentConversationId")') && switchSource.includes("const previousActiveConversation = chatGetActiveConversationId()") && switchSource.includes("restoreActiveConversationSelection(previousConvId, previousActiveConversation)") && switchSource.includes('showToast(t("toast.convNotFound")') && switchSource.includes('console.warn("[Chat] Failed to switch conversation:'));
@@ -577,13 +542,13 @@ function assert(desc, ok, detail = "") {
   assert("first-message edit removes the edited message too", !src.includes("Keep greeting (index 0)") && !src.includes("if (i > 0) allMsgs[i].remove()"));
   assert("edit and delete persist only after transcript DOM mutation", src.includes("function persistChatAfterDomMutation") && src.includes("persistChatAfterDomMutation();\n      }\n      showToast(t(\"chat.editLoaded\")") && src.includes("msg.remove();\n        persistChatAfterDomMutation();") && !src.includes("setTimeout(() => msg.remove(), 200);\n      saveChatHistory();"));
   assert("regenerate has guarded prompt recovery and user feedback", chatMessageActionsControllerSrc.includes("function previousUserPromptForMessage") && chatMessageActionsControllerSrc.includes("async function startRegenerateMessage") && chatMessageActionsControllerSrc.includes('showToast(t("chat.uploadBusy"), "warning")') && chatMessageActionsControllerSrc.includes('showToast(t("chat.regenerateMissingPrompt"), "warning", 2200)') && src.includes('regenBtn.addEventListener("click", () => startRegenerateMessage(regenBtn, msg))') && src.includes('regenBtn.addEventListener("click", () => startRegenerateMessage(regenBtn, msgEl, text))') && deI18n.includes('"chat.regenerateMissingPrompt"') && enI18n.includes('"chat.regenerateMissingPrompt"'));
-  assert("loaded chat messages put copy before assistant actions", src.includes("header.appendChild(timeSpan);\n  header.appendChild(copyBtn);\n\n  if (!isUser)") && src.includes("header.appendChild(createContinueFromMessageButton())") && src.includes("header.appendChild(createVerifyAnswerButton())") && src.includes("header.appendChild(createMessageActionOverflowMenu(moreActions))"));
-  assert("streaming assistant answers enable full action set after completion", src.includes("copyBtn.disabled = true") && src.includes("memoryBtn.disabled = true") && src.includes("const workspaceBtn = createWorkspaceHandoffButton();\n  workspaceBtn.disabled = true") && src.includes("const continueBtn = createContinueFromMessageButton(true)") && src.includes("const verifyBtn = createVerifyAnswerButton(true)") && src.includes("const exportBtn = createMessageExportButton(true)") && src.includes("header.appendChild(createMessageActionOverflowMenu([memoryBtn, workspaceBtn, regenBtn]))") && src.includes("if (getMessagePersistText(msgEl))") && src.includes("verifyBtn.disabled = false;\n      exportBtn.disabled = false;\n      regenBtn.disabled = false;"));
+  assert("loaded chat messages put copy before assistant actions", src.includes("header.appendChild(timeSpan);\n  header.appendChild(copyBtn);\n\n  if (!isUser)") && src.includes("header.appendChild(createVerifyAnswerButton());") && src.includes("header.appendChild(createMessageExportButton());") && src.includes("header.appendChild(createMessageActionOverflowMenu([\n      createContinueFromMessageButton(),\n      createWorkspaceHandoffButton(),\n      thumbsBtn,\n    ]))"));
+  assert("streaming assistant answers enable full action set after completion", src.includes("copyBtn.disabled = true") && src.includes("memoryBtn.disabled = true") && src.includes("const workspaceBtn = createWorkspaceHandoffButton();\n  workspaceBtn.disabled = true") && src.includes("const continueBtn = createContinueFromMessageButton(true)") && src.includes("const verifyBtn = createVerifyAnswerButton(true)") && src.includes("const exportBtn = createMessageExportButton(true)") && src.includes("header.appendChild(createMessageActionOverflowMenu([continueBtn, workspaceBtn, memoryBtn]))") && src.includes("if (getMessagePersistText(msgEl))") && src.includes("verifyBtn.disabled = false;\n      exportBtn.disabled = false;\n      regenBtn.disabled = false;"));
   assert("agent summaries enable copy, memory, continue, and verify actions after completion", src.includes('memoryBtn.addEventListener("click", () => saveMessageAsMemory(memoryBtn, msgEl))') && src.includes("const continueBtn = createContinueFromMessageButton(true)") && src.includes("const verifyBtn = createVerifyAnswerButton(true)") && src.includes("header.appendChild(createMessageActionOverflowMenu([memoryBtn, workspaceBtn]))") && agentDoneSource.includes("copyBtn.disabled = false;") && agentDoneSource.includes("memoryBtn.disabled = false;") && agentDoneSource.includes("continueBtn.disabled = false;") && agentDoneSource.includes("verifyBtn.disabled = false;") && agentSource.includes("copyBtn.disabled = false;") && agentSource.includes("memoryBtn.disabled = false;") && agentSource.includes("workspaceBtn.disabled = false;") && agentSource.includes("exportBtn.disabled = false;") && agentSource.includes("setMessagePersistText(msgEl, summaryEl.textContent)"));
   assert("agent completion resolve uses local attention keys", src.includes("function startAgentCompletionResolve") && src.includes("agentCompletionAttentionKeyFromText(text)") && src.includes("getMessageAgentRunMeta(msg)") && src.includes("const hasAttention = Number(counts?.failed || 0) > 0 || Number(counts?.blocked || 0) > 0") && src.includes("saveAgentRunMetaForConversation(convId)") && src.includes("resolved.add(key)") && src.includes("markAgentCompletionResolveButtonDone(btn)") && src.includes('resolveButton.className = "agent-completion-resolve-btn"') && src.includes("attentionResolved: isAgentCompletionAttentionResolved") && deI18n.includes('"chat.agentCompletionResolveDone"') && enI18n.includes('"chat.agentCompletionResolveTooltip"'));
   assert("agent completion resolve can be undone locally", src.includes("function undoAgentCompletionResolve") && src.includes("resolved.delete(key)") && src.includes("markAgentCompletionResolveButtonOpen(btn)") && src.includes('if (btn?.dataset?.resolved === "true") return undoAgentCompletionResolve(btn)') && src.includes('btn.dataset.resolved = "true"') && src.includes('btn.dataset.resolved = "false"') && src.includes('showToast(t("chat.agentAttentionRestored")') && deI18n.includes('"chat.agentCompletionResolveUndoTooltip"') && enI18n.includes('"chat.agentCompletionResolveUndoButton"'));
   assert("conversation sidebar refresh is shared", refreshSidebarSource.includes("window.lexa.conversations()") && refreshSidebarSource.includes("renderConversationList()"));
-  assert("saved conversations refresh sidebar counts", saveCurrentSource.includes("await refreshConversationSidebar()"));
+  assert("conversation save runs through the serialized chain decoupled from sidebar refresh", chatBundleSrc.includes("let _convSaveChain = Promise.resolve()") && saveCurrentSource.includes("_convSaveChain = _convSaveChain") && saveCurrentSource.includes(".then(() => _performConversationSave(opts))") && saveCurrentSource.includes("return _convSaveChain") && performSaveSource.includes("await window.lexa.conversationUpdate(convId, { messages })") && performSaveSource.includes("if (!messages.length) return true") && !saveCurrentSource.includes("refreshConversationSidebar") && !performSaveSource.includes("refreshConversationSidebar"));
   assert("cleared conversations refresh sidebar counts", src.includes("function markConversationClearedLocally") && src.includes("return { ...conv, message_count: 0, last_message: \"\", messages: [] }") && clearChatSource.includes("markConversationClearedLocally(convId);\n    renderConversationList();") && clearChatSource.includes(".then(() => refreshConversationSidebar())") && clearChatSource.includes('showToast(t("toast.chatClearSyncFailed"), "warning"') && deI18n.includes('"toast.chatClearSyncFailed"') && enI18n.includes('"toast.chatClearSyncFailed"'));
   assert("initial conversation loading uses shared sidebar refresh", loadConversationsSource.includes("await refreshConversationSidebar()"));
   assert("conversation delete blocks duplicate clicks and restores on failure", chatHistoryUiSrc.includes("deleteConversation(conversation.id, delBtn)") && deleteConversationSource.includes('triggerBtn?.getAttribute("aria-busy") === "true"') && deleteConversationSource.includes('triggerBtn.setAttribute("aria-busy", "true")') && deleteConversationSource.includes("finally") && deleteConversationSource.includes("triggerBtn.removeAttribute(\"aria-busy\")"));
@@ -602,7 +567,7 @@ function assert(desc, ok, detail = "") {
   assert("file upload opens the chat transcript before rendering attachment", uploadSource.includes('if (!window._chatViewOpen && typeof toggleChatView === "function") toggleChatView()') && uploadSource.indexOf('if (!window._chatViewOpen && typeof toggleChatView === "function") toggleChatView()') < uploadSource.indexOf("addFileUploadMessage(file, userMsg)"));
   assert("file upload renders card through DOM helper", uploadSource.includes("addFileUploadMessage(file, userMsg)") && !uploadSource.includes("fileCardHtml"));
   assert("file upload card avoids raw HTML string rendering", uploadCardSource.includes("document.createElement") && uploadCardSource.includes("textContent = file.name") && !uploadCardSource.includes("innerHTML"));
-  assert("file upload image card renders local preview safely", chatFileUploadSrc.includes("function buildFileUploadIcon") && uploadCardSource.includes("buildFileUploadPreview(file, ext)") && uploadCardSource.includes('card.classList.add("file-card-with-preview")') && uploadPreviewSource.includes("fileUploadCanPreview(file)") && uploadPreviewSource.includes('img.className = "file-card-preview"') && uploadPreviewSource.includes("URL.createObjectURL(file)") && uploadPreviewSource.includes("URL.revokeObjectURL(previewUrl)") && uploadPreviewSource.includes("img.replaceWith(buildFileUploadIcon(ext))"));
+  assert("file upload image card renders local preview safely", chatFileUploadSrc.includes("function buildFileUploadIcon") && uploadCardSource.includes("buildFileUploadPreview(file, ext)") && uploadCardSource.includes('card.classList.add("file-card-with-preview", "file-card-clickable")') && uploadPreviewSource.includes("fileUploadCanPreview(file)") && uploadPreviewSource.includes('img.className = "file-card-preview"') && uploadPreviewSource.includes("URL.createObjectURL(file)") && uploadPreviewSource.includes("URL.revokeObjectURL(previewUrl)") && uploadPreviewSource.includes("img.replaceWith(buildFileUploadIcon(ext))"));
   assert("file upload message inserts card into user bubble", uploadMessageSource.includes('querySelectorAll(".message.user-message")') && uploadMessageSource.includes("buildFileUploadCard(file)"));
   assert("file upload busy label is translated", deI18n.includes('"chat.uploadBusy"') && enI18n.includes('"chat.uploadBusy"'));
   assert("file upload response uses DOM badge helper", uploadSource.includes("addFileUploadResponse(res)") && uploadResponseSource.includes("buildFileInfoBadge(res.file_info)"));
