@@ -1024,6 +1024,45 @@ function renderAgentStepOutcome(stepEl, step) {
   stepEl.setAttribute("aria-label", `${visibleLabel}. ${badge.textContent}`);
 }
 
+// Einklappbares Tool-Ergebnis pro Agent-Schritt (Fehler bei failed, sonst result).
+// Vorher wurden result/error verschluckt -> der Nutzer sah nie, was ein Tool zurückgab.
+// Standardmäßig eingeklappt; Text XSS-sicher via textContent.
+function renderAgentStepResult(stepEl, step) {
+  if (!stepEl) return;
+  stepEl.querySelector(".agent-step-result")?.remove();
+  const isError = Boolean(step && step.error);
+  let text = String((step && (step.error || step.result)) || "").trim();
+  if (!text) return;
+  if (text.length > 1500) text = text.slice(0, 1500) + "…";
+
+  const wrap = document.createElement("div");
+  wrap.className = "agent-step-result" + (isError ? " is-error" : "");
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "agent-step-result-toggle";
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.textContent = t("chat.agentStepShowResult") || "Ergebnis anzeigen";
+
+  const pre = document.createElement("pre");
+  pre.className = "agent-step-result-body";
+  pre.textContent = text;
+  pre.hidden = true;
+
+  toggle.addEventListener("click", () => {
+    const open = pre.hidden;
+    pre.hidden = !open;
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    toggle.textContent = open
+      ? (t("chat.agentStepHideResult") || "Ergebnis ausblenden")
+      : (t("chat.agentStepShowResult") || "Ergebnis anzeigen");
+  });
+
+  wrap.appendChild(toggle);
+  wrap.appendChild(pre);
+  stepEl.appendChild(wrap);
+}
+
 function renderPersistedAgentRunMeta(body, meta, summaryText) {
   const normalized = normalizeAgentRunMeta(meta);
   if (!body || !normalized) return;

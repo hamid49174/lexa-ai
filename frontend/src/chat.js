@@ -2480,6 +2480,8 @@ async function sendAgentMessage(text, options) {
         stepEl.appendChild(dur);
       }
       renderAgentStepOutcome(stepEl, normalizedStep);
+      // Tool-Ergebnis/Fehler des Schritts einklappbar anzeigen (raw step trägt result/error).
+      if (typeof renderAgentStepResult === "function") renderAgentStepResult(stepEl, step);
       return normalizedStep;
     };
 

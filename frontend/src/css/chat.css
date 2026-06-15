@@ -1139,10 +1139,46 @@
 .agent-step {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 4px 0;
   font-size: 13px;
   font-family: var(--font-mono);
+}
+/* Einklappbares Tool-Ergebnis pro Schritt (eigene Zeile via flex-basis:100%) */
+.agent-step-result {
+  flex-basis: 100%;
+  margin: 2px 0 4px 28px;
+}
+.agent-step-result-toggle {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: var(--font);
+  padding: 1px 4px;
+  border-radius: 5px;
+}
+.agent-step-result-toggle:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+.agent-step-result-body {
+  margin: 4px 0 0 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-muted);
+}
+.agent-step-result.is-error .agent-step-result-body {
+  color: var(--error);
 }
 .agent-step-icon {
   width: 20px;

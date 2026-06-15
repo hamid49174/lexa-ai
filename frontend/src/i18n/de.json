@@ -1568,6 +1568,8 @@
   "chat.agentStepHermesDesktop": "Desktop-Aktion vorbereiten",
   "chat.agentStepTool": "Schritt bearbeiten",
   "chat.agentStepUnknown": "Schritt",
+  "chat.agentStepShowResult": "Ergebnis anzeigen",
+  "chat.agentStepHideResult": "Ergebnis ausblenden",
   "chat.agentOutcomeFound": "Gefunden",
   "chat.agentOutcomeChanged": "Aktualisiert",
   "chat.agentOutcomeDone": "Erledigt",

@@ -1630,6 +1630,8 @@
   "chat.agentStepHermesDesktop": "Prepare desktop action",
   "chat.agentStepTool": "Work on step",
   "chat.agentStepUnknown": "Step",
+  "chat.agentStepShowResult": "Show result",
+  "chat.agentStepHideResult": "Hide result",
   "chat.agentOutcomeFound": "Found",
   "chat.agentOutcomeChanged": "Updated",
   "chat.agentOutcomeDone": "Done",
