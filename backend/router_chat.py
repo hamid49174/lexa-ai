@@ -58,7 +58,6 @@ from backend.security import (
     get_rate_limit_info,
     audit_log,
     is_command_allowed,
-    is_read_only_action,
 )
 
 # Words that indicate the user is confirming a pending action
@@ -1521,17 +1520,46 @@ def _build_web_grounding(query: str, sources: list[dict]) -> str:
 _STREAM_AUTO_DENY = {"http_request"}  # SSRF: nicht ohne weitere Haertung server-auto
 _STREAM_TOOL_RESULT_MAX_CHARS = 2000
 _STREAM_TOOL_CONTEXT_MAX_CHARS = 6000
+# EXPLIZITE Positiv-Allowlist statt read-only-Prefix-Heuristik (Confused-Deputy-Schutz).
+# Nur garantiert zustandsfreie, privacy-neutrale Read-Tools duerfen im Stream OHNE
+# Bestaetigung server-seitig laufen. BEWUSST NICHT enthalten:
+#   - hermes_desktop_task  -> setzt mutierende Desktop-Pending-Confirmation
+#   - screenshot           -> schreibt PNG + Bildschirm-Exfil-Risiko
+#   - clipboard_read       -> Zwischenablage-Exfil-Risiko
+#   - desktop_wait         -> modellgesteuerte Selbst-Verzoegerung (mini-DoS), kein Nutzen
+#   - email_*/note_*/calendar_*/telegram_* -> private Daten (Exfil via Prompt-Injection)
+#   - ping/port_check/traceroute/dns_lookup -> netzwerkgesteuert (SSRF/Portscan)
+# Jede Erweiterung ist sicherheitsrelevant und braucht eigenen Review.
+_STREAM_AUTO_ALLOW = frozenset({
+    "system_info",
+    "battery_status",
+    "ui_tree",
+    "ui_find",
+    "desktop_engine_status",
+    "desktop_engine_observe",
+    "desktop_position",
+    "window_list",
+    "process_list",
+    "memory_search",
+    "file_search",
+    "app_list",
+    "app_search",
+    "app_list_installed",
+    "wifi_status",
+    "brightness_get",
+})
 
 
 def _classify_stream_tool(name: str) -> str:
-    """server_auto = read-only + erlaubt -> im Loop ausfuehren. Sonst companion
-    (bestaetigungspflichtig/mutierend/unbekannt -> Frontend-Pfad, unveraendert)."""
+    """server_auto = explizit gelistetes, zustandsfreies Read-Tool -> im Loop ausfuehren.
+    Sonst companion (bestaetigungspflichtig/mutierend/privacy/unbekannt -> Frontend-Pfad,
+    unveraendert). Doppelte Absicherung: Allowlist UND Whitelist-Tier 'allowed'."""
     n = str(name or "").strip().lower()
     if not n or n in _STREAM_AUTO_DENY:
         return "companion"
     if n == "web_search":
         return "server_auto"
-    if is_command_allowed(n) == "allowed" and is_read_only_action(n):
+    if n in _STREAM_AUTO_ALLOW and is_command_allowed(n) == "allowed":
         return "server_auto"
     return "companion"
 
@@ -2122,10 +2150,32 @@ async def chat_stream_endpoint(req: ChatRequest):
                 # Phase 40+: stream yields either str chunks or a tool_call dict.
                 if isinstance(chunk, dict) and chunk.get("type") == "tool_call":
                     tcs = chunk.get("tool_calls", []) or []
-                    tc0 = tcs[0] if tcs else {}
+                    if not tcs:
+                        # Leerer tool_call -> wie Stream-Ende behandeln (kein Companion-Pfad
+                        # mit leerer Liste, sonst landet "Keine Aktion erkannt." als Antwort).
+                        break
+                    tc0 = tcs[0]
                     tname = str(tc0.get("name") or "").strip()
-                    targs = tc0.get("arguments") if isinstance(tc0.get("arguments"), dict) else {}
+                    # Argument-Parsing identisch zum Companion-Pfad (allow_json_string):
+                    # native Provider liefern arguments teils als JSON-String.
+                    _raw_args = tc0.get("arguments")
+                    if isinstance(_raw_args, dict):
+                        targs = _raw_args
+                    elif isinstance(_raw_args, str):
+                        try:
+                            _parsed = json.loads(_raw_args)
+                            targs = _parsed if isinstance(_parsed, dict) else {}
+                        except Exception:
+                            targs = {}
+                    else:
+                        targs = {}
                     klass = _classify_stream_tool(tname)
+                    # Multi-Tool-Antwort ("suche X UND oeffne Y"): nur tcs[0] wird in diesem
+                    # Hop bearbeitet. Rest wird protokolliert und dem Modell als Hinweis
+                    # mitgegeben, damit es die uebrigen Tools im naechsten Hop einzeln nachzieht.
+                    extra_tcs = [str(t.get("name") or "?") for t in tcs[1:]]
+                    if extra_tcs:
+                        audit_log("chat_stream", "multi_tool", f"first={tname} deferred={','.join(extra_tcs)}")
 
                     if klass == "server_auto":
                         # Mehrstufiger agentischer Loop: read-only Tool server-seitig
@@ -2149,9 +2199,13 @@ async def chat_stream_endpoint(req: ChatRequest):
                                 logger.warning(f"agentic web_search failed: {we}")
                                 ws = []
                             if ws:
-                                tool_blocks.append(_build_web_grounding(wq, ws))
+                                # Web-Block hart kappen (umgeht sonst _sanitize_tool_output).
+                                _wb = _build_web_grounding(wq, ws)
+                                if len(_wb) > _STREAM_TOOL_RESULT_MAX_CHARS * 2:
+                                    _wb = _wb[: _STREAM_TOOL_RESULT_MAX_CHARS * 2] + "… [gekuerzt]"
+                                tool_blocks.append(_wb)
                                 audit_log("chat_stream", "tool_web_search", f"q={wq[:60]} n={len(ws)}")
-                                ui_src = [{"title": s.get("title", ""), "url": s.get("url", "")} for s in ws]
+                                ui_src = [{"title": s.get("title", ""), "url": s.get("url", ""), "snippet": (s.get("snippet") or "")[:300]} for s in ws]
                                 yield f"data: {json.dumps({'sources': ui_src}, ensure_ascii=False)}\n\n"
                             else:
                                 yield f"data: {json.dumps({'status': 'web_search_empty'})}\n\n"
@@ -2163,14 +2217,35 @@ async def chat_stream_endpoint(req: ChatRequest):
                                 )
                             except Exception as te:
                                 logger.warning(f"agentic tool {tname} failed: {te}")
-                                res = {"success": False, "error": str(te)}
+                                res = {"success": False, "error": _client_safe_chat_error(te)}
+                            # Reflexion/Policy verlangt Bestaetigung -> NICHT still als
+                            # Tool-Fehler verschlucken, sondern ueber den sichtbaren
+                            # Companion-Bestaetigungspfad fuehren (Confirmation-Bypass-Schutz).
+                            if isinstance(res, dict) and res.get("requires_confirmation"):
+                                audit_log("chat_stream", "tool_needs_confirm", f"name={tname}")
+                                hops -= 1
+                                used_read_tools.discard(tname)
+                                tool_sigs.discard(sig)
+                                tool_call_result = chunk
+                                break
                             tool_blocks.append(_format_tool_result_block(tname, _stringify_tool_result(res)))
                             audit_log("chat_stream", "tool_auto", f"name={tname} ok={bool(isinstance(res, dict) and res.get('success'))}")
 
-                        # Token-Budget: aelteste Bloecke droppen, bis unter dem Cap.
-                        while len(tool_blocks) > 1 and len("\n\n".join(tool_blocks)) > _STREAM_TOOL_CONTEXT_MAX_CHARS:
+                        if extra_tcs:
+                            tool_blocks.append(_format_tool_result_block(
+                                "_hinweis",
+                                f"Es wurde nur '{tname}' ausgefuehrt. Falls fuer die Aufgabe "
+                                f"weitere Tools noetig sind ({', '.join(extra_tcs)}), rufe sie "
+                                "jetzt EINZELN nacheinander auf.",
+                            ))
+
+                        # Token-Budget: aelteste Bloecke droppen, bis (inkl. grounding_extra)
+                        # unter dem Cap. Bewusst kein '>1'-Guard: auch der letzte Block faellt,
+                        # wenn er allein das Budget sprengt.
+                        _gpfx = (grounding_extra + "\n\n") if grounding_extra else ""
+                        while tool_blocks and len(_gpfx) + len("\n\n".join(tool_blocks)) > _STREAM_TOOL_CONTEXT_MAX_CHARS:
                             tool_blocks.pop(0)
-                        combined_extra = ((grounding_extra + "\n\n") if grounding_extra else "") + "\n\n".join(tool_blocks)
+                        combined_extra = _gpfx + "\n\n".join(tool_blocks)
 
                         try:
                             gen.close()

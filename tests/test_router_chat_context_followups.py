@@ -459,7 +459,7 @@ def test_write_me_prompt_routes_to_chat_not_desktop_control(monkeypatch):
     monkeypatch.setattr(router_chat, "audit_log", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(router_chat, "conversation_history", [])
 
-    def fake_chat(prompt, history):
+    def fake_chat(prompt, history, grounding_extra=None):
         assert "Schreibe mir eine lange Analyse" in prompt
         assert history == []
         return {"type": "text", "content": "Normale Chat-Antwort"}

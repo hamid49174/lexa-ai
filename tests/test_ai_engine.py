@@ -1971,7 +1971,7 @@ class TestProviderFallback:
         monkeypatch.setattr(
             ai_engine,
             "_build_messages",
-            lambda user_message, conversation_history=None: [
+            lambda user_message, conversation_history=None, system_extra=None: [
                 {"role": "user", "content": user_message or ""}
             ],
         )
@@ -2034,7 +2034,7 @@ class TestProviderFallback:
         monkeypatch.setattr(
             ai_engine,
             "_build_messages",
-            lambda user_message, conversation_history=None: [
+            lambda user_message, conversation_history=None, system_extra=None: [
                 {"role": "user", "content": user_message or ""}
             ],
         )

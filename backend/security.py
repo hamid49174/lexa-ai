@@ -89,7 +89,9 @@ _READ_ONLY_ACTIONS: frozenset[str] = frozenset({
     "ui_find",
     "desktop_engine_status",
     "desktop_engine_observe",
-    "hermes_desktop_task",
+    # hermes_desktop_task ist NICHT read-only: es bereitet ueber set_pending_confirmation
+    # mutierende Desktop-Aktionen (Klick/Tippen/Hotkey) vor -> darf nie als read-only
+    # zaehlen (weder Rate-Limit-Rabatt noch Stream-Auto-Ausfuehrung). Confused-Deputy-Schutz.
     "desktop_position",
     "desktop_wait",
     "window_list",

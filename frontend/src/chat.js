@@ -1921,8 +1921,28 @@ async function sendMessage() {
     const STREAM_TIMEOUT_MS = 45000;
     const handleStreamData = (data) => {
       if (!data) return;
+      // Heuristik-Grounding-Pfad meldet status: "web_search".
       if (data.status === "web_search" && !fullText) {
         textEl.textContent = "🔍 Ich durchsuche das Web …";
+      }
+      // Agentischer Loop meldet pro Hop status: "tool:<name>" (web_search + Read-Tools).
+      if (typeof data.status === "string" && data.status.startsWith("tool:") && !fullText) {
+        const toolName = data.status.slice(5);
+        const TOOL_STATUS = {
+          web_search: "🔍 Ich durchsuche das Web …",
+          system_info: "⚙️ Ich lese Systeminfos …",
+          battery_status: "🔋 Ich prüfe den Akku …",
+          window_list: "🪟 Ich sehe mir offene Fenster an …",
+          process_list: "📊 Ich prüfe laufende Prozesse …",
+          memory_search: "🧠 Ich durchsuche mein Gedächtnis …",
+          file_search: "📁 Ich suche Dateien …",
+          app_search: "📱 Ich suche Apps …",
+          app_list: "📱 Ich sehe mir Apps an …",
+          app_list_installed: "📱 Ich liste installierte Apps …",
+          wifi_status: "📶 Ich prüfe das WLAN …",
+          brightness_get: "💡 Ich prüfe die Helligkeit …",
+        };
+        textEl.textContent = TOOL_STATUS[toolName] || `⚙️ Ich nutze ein Werkzeug: ${toolName} …`;
       }
       if (data.status === "web_search_empty" && !fullText) {
         textEl.textContent = "🔍 Keine Web-Quellen gefunden – ich antworte aus meinem Wissen …";
