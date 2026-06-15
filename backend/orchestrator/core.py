@@ -177,7 +177,9 @@ def _planner_user_prompt(task: str, max_subagents: int) -> str:
         "parallele, read-only Sub-Agenten. Effort-Scaling: einfache Faktenfrage = 1 Teilaufgabe, "
         f"Vergleich = 2-3, breite Recherche = bis {max_subagents}. Vermeide Ueberschneidungen. "
         "Jede Teilaufgabe braucht 'role' und 'objective'. Rollen: 'research' (Live-Web), "
-        "'knowledge' (Obsidian/Personal-OS/Gedaechtnis des Nutzers), 'general' (gemischt). "
+        "'knowledge' (Obsidian/Personal-OS/Gedaechtnis des Nutzers), 'code' (Code/Repo read-"
+        "only analysieren), 'planning' (Todos/Gewohnheiten/Fokus lesen + Plan vorschlagen), "
+        "'general' (gemischt). Waehle die Rolle passend zur Teilaufgabe. "
         "Antworte AUSSCHLIESSLICH mit einem JSON-Array wie "
         '[{"role":"research","objective":"..."}]. KEIN weiterer Text.\n\nAUFGABE:\n' + task.strip()
     )

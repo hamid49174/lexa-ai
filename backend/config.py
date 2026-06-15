@@ -162,6 +162,9 @@ ORCHESTRATOR_MAX_CONCURRENCY = _env_int("LEXA_ORCHESTRATOR_MAX_CONCURRENCY", 3, 
 ORCHESTRATOR_SUBAGENT_MAX_STEPS = _env_int("LEXA_ORCHESTRATOR_SUBAGENT_MAX_STEPS", 6, minimum=1, maximum=20)
 ORCHESTRATOR_STEP_TIMEOUT = _env_int("LEXA_ORCHESTRATOR_STEP_TIMEOUT", 45, minimum=5, maximum=600)
 ORCHESTRATOR_RUN_TIMEOUT = _env_int("LEXA_ORCHESTRATOR_RUN_TIMEOUT", 600, minimum=30, maximum=3600)
+# Browser-Agent (browser-use, optional+schwer): startet echten Chromium -> bewusst NICHT im
+# autonomen Parallel-Orchestrator, sondern explizit opt-in. Default AUS (Ressourcen/Sicherheit).
+ORCHESTRATOR_BROWSER_ENABLED = _env_bool("LEXA_ORCHESTRATOR_BROWSER_ENABLED", False)
 
 # ── MCP — Model Context Protocol (Phase 47) ───
 MCP_ENABLED = _env_bool("LEXA_MCP_ENABLED", True)            # Enable MCP server integration

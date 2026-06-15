@@ -37,12 +37,18 @@ class OrchestratorRequest(BaseModel):
 @router.get("/status")
 async def orchestrator_status():
     """Feature-Status + Caps fuer das Frontend."""
+    try:
+        from backend.orchestrator.browser_agent import browser_status
+        browser = browser_status()
+    except Exception:
+        browser = {"available": False, "reason": "nicht verfuegbar"}
     return {
         "enabled": ORCHESTRATOR_ENABLED,
         "max_subagents": ORCHESTRATOR_MAX_SUBAGENTS,
         "max_concurrency": ORCHESTRATOR_MAX_CONCURRENCY,
         "modes": ["thorough", "fast"],
         "roles": [{"id": rid, "label": spec.get("label", rid)} for rid, spec in ORCHESTRATOR_ROLES.items()],
+        "browser": browser,
     }
 
 

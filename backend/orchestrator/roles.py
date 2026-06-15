@@ -45,6 +45,29 @@ ORCHESTRATOR_ROLES: dict[str, dict[str, Any]] = {
             "note_list",
         ],
     },
+    "code": {
+        "label": "Code",
+        "persona": (
+            "Du bist ein CODE-Sub-Agent in einem Multi-Agenten-Team. Du analysierst Code und "
+            "technische Fragen READ-ONLY: lokalisiere relevante Dateien (file_search), schlage "
+            "technische Doku/Loesungen via web_search nach, nutze das Gedaechtnis. Du AENDERST "
+            "keinen Code — konkrete Aenderungen passieren spaeter ueber den bestaetigungs-"
+            "gegateten Coding-Pfad. Fasse Befunde + empfohlene naechste Schritte knapp zusammen."
+        ),
+        "tools": ["file_search", "web_search", "memory_search"],
+    },
+    "planning": {
+        "label": "Planung",
+        "persona": (
+            "Du bist ein PLANUNGS-Sub-Agent in einem Multi-Agenten-Team (Lexa als 'zweites "
+            "Gehirn'). Du liest READ-ONLY den Stand: offene Todos (todo_list), Gewohnheiten "
+            "(habit_list), Fokus/Pomodoro (pomodoro_status), plus Gedaechtnis/Web bei Bedarf. "
+            "Du AENDERST nichts — du schlaegst einen konkreten Plan/Vorschlag vor (das tatsaech"
+            "liche Anlegen von Todos/Terminen passiert spaeter bestaetigungs-gegatet). Fasse "
+            "einen klaren, priorisierten Vorschlag zusammen."
+        ),
+        "tools": ["todo_list", "habit_list", "pomodoro_status", "memory_search", "web_search"],
+    },
     "general": {
         "label": "Allgemein",
         "persona": (
