@@ -3815,6 +3815,7 @@ def chat(
     user_message: Optional[str],
     conversation_history: Optional[list] = None,
     system_extra: Optional[str] = None,
+    tools_override: Optional[list] = None,
 ) -> dict:
     """Send message through provider chain with native tool use.
 
@@ -3827,6 +3828,11 @@ def chat(
 
     Phase 46: system_extra appends agent-mode instructions to the system prompt.
     user_message=None means the last user message is already in conversation_history.
+
+    Phase 48 (Orchestrator): tools_override gibt dem Aufrufer exakte Kontrolle ueber die
+    Tool-Liste. None = bisheriges kontext-basiertes Verhalten; [] = KEINE Tools (reiner
+    Text, z.B. Planner/Synthese/Judge); eine Liste = genau diese Tool-Defs (z.B. das
+    read-only Toolset eines Sub-Agenten). So bleibt der Orchestrator provider-agnostisch.
     """
     selected_model = _get_selected_model_meta()
 
@@ -3835,22 +3841,26 @@ def chat(
 
     # Get context-relevant tools for native function calling
     tools = None
-    try:
-        from backend.config import TOOL_USE_ENABLED
-        if TOOL_USE_ENABLED:
-            from backend.tool_registry import get_tools_for_context
-            # Phase 46: when user_message is None (agent mode), derive context from history.
-            tool_context = _latest_user_context(user_message, conversation_history)
-            if not _system_extra_requests_tool_mode(system_extra) and _should_disable_tools_for_text_generation(tool_context):
-                logger.debug("Skipping tools for direct text/code generation request")
-            else:
-                tools = get_tools_for_context(tool_context)
-                # Coding-Kontext: Tools verbundener MCP-Server (git/filesystem/serena) anhaengen.
-                from backend.mcp_chat_bridge import coding_mcp_tools
-                tools = (tools or []) + coding_mcp_tools(tool_context)
-                logger.debug(f"Sending {len(tools)} tools to {selected_model['provider']}")
-    except Exception as e:
-        logger.warning(f"Tool registry unavailable: {e}")
+    if tools_override is not None:
+        # Explizite Tool-Kontrolle (Orchestrator): [] -> keine Tools, sonst genau diese.
+        tools = list(tools_override) or None
+    else:
+        try:
+            from backend.config import TOOL_USE_ENABLED
+            if TOOL_USE_ENABLED:
+                from backend.tool_registry import get_tools_for_context
+                # Phase 46: when user_message is None (agent mode), derive context from history.
+                tool_context = _latest_user_context(user_message, conversation_history)
+                if not _system_extra_requests_tool_mode(system_extra) and _should_disable_tools_for_text_generation(tool_context):
+                    logger.debug("Skipping tools for direct text/code generation request")
+                else:
+                    tools = get_tools_for_context(tool_context)
+                    # Coding-Kontext: Tools verbundener MCP-Server (git/filesystem/serena) anhaengen.
+                    from backend.mcp_chat_bridge import coding_mcp_tools
+                    tools = (tools or []) + coding_mcp_tools(tool_context)
+                    logger.debug(f"Sending {len(tools)} tools to {selected_model['provider']}")
+        except Exception as e:
+            logger.warning(f"Tool registry unavailable: {e}")
 
     # Try selected provider
     result = _chat_with_selected_provider(messages, selected_model, tools=tools)

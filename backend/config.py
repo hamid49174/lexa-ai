@@ -152,6 +152,17 @@ AGENT_CONFIRM_TIMEOUT = _env_int("LEXA_AGENT_CONFIRM_TIMEOUT", 300, minimum=1, m
 # kept low for free-API rate limits + latency). Lower than AGENT_MAX_STEPS by design.
 AGENT_STREAM_MAX_HOPS = _env_int("LEXA_AGENT_STREAM_MAX_HOPS", 4, minimum=1, maximum=8)
 
+# ── Orchestrator — Multi-Agenten (Phase 48) ───
+# Claude-ultracode-artiges Orchestrator-Worker-System: Planner -> parallele read-only
+# Sub-Agenten -> adversarische Verifikation -> Synthese. Provider-agnostisch (Gemini).
+ORCHESTRATOR_ENABLED = _env_bool("LEXA_ORCHESTRATOR_ENABLED", True)
+# Harte Caps gegen Kosten/Rate-Limit-Explosion (Multi-Agent ~15x Tokens eines Chats).
+ORCHESTRATOR_MAX_SUBAGENTS = _env_int("LEXA_ORCHESTRATOR_MAX_SUBAGENTS", 4, minimum=1, maximum=12)
+ORCHESTRATOR_MAX_CONCURRENCY = _env_int("LEXA_ORCHESTRATOR_MAX_CONCURRENCY", 3, minimum=1, maximum=8)
+ORCHESTRATOR_SUBAGENT_MAX_STEPS = _env_int("LEXA_ORCHESTRATOR_SUBAGENT_MAX_STEPS", 6, minimum=1, maximum=20)
+ORCHESTRATOR_STEP_TIMEOUT = _env_int("LEXA_ORCHESTRATOR_STEP_TIMEOUT", 45, minimum=5, maximum=600)
+ORCHESTRATOR_RUN_TIMEOUT = _env_int("LEXA_ORCHESTRATOR_RUN_TIMEOUT", 600, minimum=30, maximum=3600)
+
 # ── MCP — Model Context Protocol (Phase 47) ───
 MCP_ENABLED = _env_bool("LEXA_MCP_ENABLED", True)            # Enable MCP server integration
 MCP_CONNECT_TIMEOUT = _env_int("LEXA_MCP_CONNECT_TIMEOUT", 10, minimum=1, maximum=120)
