@@ -100,6 +100,30 @@ def mcp_chat_tools() -> list[dict]:
         return []
 
 
+# Coding-Kontext: nur dann werden die (schwergewichtigen, maschinen-nahen) Coding-MCP-
+# Server verbunden und ihre Tools dem Modell angeboten — sonst kein Tool-Bloat / kein
+# unnötiger Subprozess-Start bei normalen Fragen.
+_CODING_HINT_RE = re.compile(
+    r"\b(?:code|coden|codest|coding|programmier|refactor|refaktor|debug|stacktrace|"
+    r"git|commit|branch|merge|pull\s*request|\bpr\b|repo|repository|quellcode|sourcecode|"
+    r"funktion|function|methode|method|klasse|\bclass\b|symbol|variable|import|"
+    r"implementier|bugfix|unit\s*test|linter?|\.py\b|\.js\b|\.ts\b|\.json\b)",
+    re.IGNORECASE,
+)
+
+
+def is_coding_context(message: str) -> bool:
+    """Heuristic: does this message warrant connecting + offering the coding MCP tools?"""
+    return bool(message) and bool(_CODING_HINT_RE.search(message))
+
+
+def coding_mcp_tools(message: str) -> list[dict]:
+    """MCP tool defs to add to the chat tool list — only in a coding context."""
+    if not is_coding_context(message):
+        return []
+    return mcp_chat_tools()
+
+
 async def ensure_coding_servers_connected(servers: tuple[str, ...] = CODING_MCP_SERVERS) -> dict[str, str]:
     """Lazily connect the configured coding MCP servers. Tolerates failures
     (e.g. missing uv/node) — returns {server: status}. Never raises."""
@@ -111,8 +135,12 @@ async def ensure_coding_servers_connected(servers: tuple[str, ...] = CODING_MCP_
     except Exception:
         configs = {}
     for name in servers:
-        if name not in configs:
+        cfg = configs.get(name)
+        if cfg is None:
             status[name] = "not_configured"
+            continue
+        if cfg.get("enabled", True) is False:
+            status[name] = "disabled"
             continue
         if mcp_registry.get_server_status(name) == "connected":
             status[name] = "connected"

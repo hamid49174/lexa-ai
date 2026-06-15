@@ -940,6 +940,17 @@ def validate_tool_arguments(name: str, arguments: dict) -> dict:
     types, arrays with simple item schemas, and enums. Runtime safety checks such
     as path and URL policy still happen later in `backend.security.validate_params`.
     """
+    # MCP-bridged tools (mcp_<server>_<tool>) haben dynamische, serverseitige Schemas,
+    # die NICHT in dieser statischen Registry liegen. Detailvalidierung macht der
+    # MCP-Server selbst; hier nur die gefaehrlichen Argument-Keys pruefen und das dict
+    # durchreichen. Sicherheits-Gate ist die Pflicht-Bestaetigung (alle mcp_* sind
+    # confirmation-required) + die Filesystem-Whitelist.
+    if isinstance(name, str) and name.startswith("mcp_"):
+        if not isinstance(arguments, dict):
+            raise ToolSchemaValidationError("arguments must be an object")
+        _validate_no_dangerous_argument_keys(arguments)
+        return dict(arguments)
+
     tool = get_tool(name)
     if not tool:
         raise ToolSchemaValidationError(f"unknown tool: {name}")

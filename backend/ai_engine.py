@@ -3845,6 +3845,9 @@ def chat(
                 logger.debug("Skipping tools for direct text/code generation request")
             else:
                 tools = get_tools_for_context(tool_context)
+                # Coding-Kontext: Tools verbundener MCP-Server (git/filesystem/serena) anhaengen.
+                from backend.mcp_chat_bridge import coding_mcp_tools
+                tools = (tools or []) + coding_mcp_tools(tool_context)
                 logger.debug(f"Sending {len(tools)} tools to {selected_model['provider']}")
     except Exception as e:
         logger.warning(f"Tool registry unavailable: {e}")
@@ -3925,6 +3928,9 @@ def chat_stream(
                         # z.B. nach einem Web-Grounding-Hop: web_search ausschliessen
                         # (kein Re-Search), Companion-Tools aber verfuegbar lassen.
                         tools = [t for t in tools if t.get("function", {}).get("name") not in exclude_tools]
+                    # Coding-Kontext: Tools verbundener MCP-Server (git/filesystem/serena) anhaengen.
+                    from backend.mcp_chat_bridge import coding_mcp_tools
+                    tools = (tools or []) + coding_mcp_tools(tool_context)
         except Exception as e:
             logger.warning(f"Tool registry unavailable for stream: {e}")
 

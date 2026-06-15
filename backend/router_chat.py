@@ -428,9 +428,36 @@ def _hermes_verification_failed(result: dict) -> bool:
     return str(verification.get("status") or "").strip().lower() == "failed"
 
 
+_MCP_WARM_TASKS: set = set()
+
+
+def _warm_coding_mcp_if_relevant(message: str) -> None:
+    """Fire-and-forget: bei Coding-Kontext die Coding-MCP-Server (git/filesystem/serena)
+    im Hintergrund verbinden. Blockt den Stream NICHT (langsamer Erst-Download von uvx-
+    Tools wuerde sonst den Inaktivitaets-Watchdog ausloesen). Erster Coding-Turn waermt
+    auf; ab dem naechsten Turn sind die Tools verfuegbar."""
+    try:
+        from backend.mcp_chat_bridge import is_coding_context, ensure_coding_servers_connected
+        if not is_coding_context(message):
+            return
+        task = asyncio.create_task(ensure_coding_servers_connected())
+        _MCP_WARM_TASKS.add(task)
+        task.add_done_callback(_MCP_WARM_TASKS.discard)
+    except Exception:
+        pass
+
+
 async def _execute_pending_confirmation(pending: dict, source: str) -> str:
     action_name = str(pending.get("action") or "")
     action = {"action": action_name, "params": pending.get("params") or {}}
+
+    # MCP-gebrückte Coding-Tools (git/filesystem/serena/…) laufen async über die
+    # MCP-Registry, NICHT über companion.execute. Bestätigung ist bereits erfolgt.
+    from backend.mcp_chat_bridge import is_mcp_action, execute_mcp_action
+    if is_mcp_action(action_name):
+        result = await execute_mcp_action(action_name, action["params"])
+        return _format_confirmed_action_reply(action_name, result)
+
     from backend.action_executor import execute_action
 
     result = await asyncio.to_thread(execute_action, action, source=source, confirmed=True)
@@ -1302,6 +1329,7 @@ async def chat_endpoint(req: ChatRequest):
     # Live web research + persoenliches Obsidian/OS-Grounding (parity with /chat/stream).
     web_query = _web_search_query(sanitized, history_snapshot)
     obsidian_topic = _obsidian_context_query(sanitized, history_snapshot)
+    _warm_coding_mcp_if_relevant(sanitized)
 
     cached_reply = None if (web_query or obsidian_topic) else get_cached_chat_response(sanitized, history_snapshot)
     if cached_reply is not None:
@@ -2188,6 +2216,7 @@ async def chat_stream_endpoint(req: ChatRequest):
     # Beide umgehen den Antwort-Cache (zeit- bzw. vault-abhaengig).
     web_query = _web_search_query(sanitized, history_snapshot)
     obsidian_topic = _obsidian_context_query(sanitized, history_snapshot)
+    _warm_coding_mcp_if_relevant(sanitized)
 
     cached_reply = None if (web_query or obsidian_topic) else get_cached_chat_response(sanitized, history_snapshot)
     if cached_reply is not None:

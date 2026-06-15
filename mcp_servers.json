@@ -13,7 +13,34 @@
     },
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/documents"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:\\Users\\admin\\OneDrive - Office\\lexa\\lexa-ai"
+      ],
+      "enabled": true
+    },
+    "git": {
+      "command": "C:\\Users\\admin\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\uvx.EXE",
+      "args": [
+        "mcp-server-git",
+        "--repository",
+        "C:\\Users\\admin\\OneDrive - Office\\lexa\\lexa-ai"
+      ],
+      "enabled": true
+    },
+    "serena": {
+      "command": "C:\\Users\\admin\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\uvx.EXE",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena",
+        "serena",
+        "start-mcp-server",
+        "--context",
+        "ide-assistant",
+        "--project",
+        "C:\\Users\\admin\\OneDrive - Office\\lexa\\lexa-ai"
+      ],
       "enabled": false
     }
   }
