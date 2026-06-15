@@ -90,6 +90,13 @@ def _stringify(value: Any) -> str:
 
 # ── LLM-/Tool-Invocation (sync ODER async Fakes erlaubt) ─────────────────
 async def _invoke(fn: Callable, *args: Any, timeout: Optional[float] = None) -> Any:
+    """Ruft fn auf; awaitet das Ergebnis mit optionalem Timeout, wenn es awaitable ist.
+
+    Hinweis: Ein SYNCHRONER fn laeuft vor der Awaitable-Pruefung komplett durch — der
+    timeout greift dann NICHT und ein langsamer Sync-Call wuerde den Event-Loop blockieren.
+    Synchrone fns sind daher nur fuer schnelle Test-Fakes vorgesehen; die Produktiv-Defaults
+    (_default_chat_fn/_default_execute_tool_fn) sind async (to_thread) und timeout-tragend.
+    """
     result = fn(*args)
     if inspect.isawaitable(result):
         if timeout:
@@ -103,7 +110,35 @@ async def _default_chat_fn(messages: list, system_extra: str, tools_override: li
     return await asyncio.to_thread(chat, None, messages, system_extra, tools_override)
 
 
+# web_search ist KEIN Companion-Command (nur im Chat-Pfad ueber gather_sources verdrahtet).
+# Im Orchestrator muss es separat ausgefuehrt werden, sonst scheitert der research-Agent
+# (is_command_allowed='unknown' -> "Unbekannter Befehl") an seinem Haupt-Werkzeug.
+_WEB_SEARCH_TOOLS = frozenset({"web_search", "web_search_news"})
+
+
+async def _execute_web_search(params: dict) -> dict:
+    query = ""
+    if isinstance(params, dict):
+        query = str(params.get("query") or params.get("q") or params.get("text") or "").strip()
+    if not query:
+        return {"success": False, "error": "web_search benoetigt eine 'query'."}
+    try:
+        from backend.web_research import gather_sources
+        sources = await asyncio.to_thread(gather_sources, query[:300], 4)
+    except Exception as exc:
+        return {"success": False, "error": _safe(exc) or "Websuche fehlgeschlagen."}
+    cleaned = [
+        {"title": s.get("title", ""), "url": s.get("url", ""), "snippet": (s.get("snippet") or s.get("content") or "")[:500]}
+        for s in (sources or []) if isinstance(s, dict)
+    ]
+    if not cleaned:
+        return {"success": True, "data": {"query": query, "sources": [], "note": "keine Treffer"}}
+    return {"success": True, "data": {"query": query, "sources": cleaned}}
+
+
 async def _default_execute_tool_fn(name: str, params: dict) -> dict:
+    if name in _WEB_SEARCH_TOOLS:
+        return await _execute_web_search(params if isinstance(params, dict) else {})
     from backend.agent_loop import _execute_tool
     return await _execute_tool(name, params)
 
@@ -278,7 +313,14 @@ async def _run_subagent(
             status, summary = "error", _safe(result.get("content"), 400) or "LLM-Fehler."
             break
         if rtype == "tool_call":
-            tool_calls = result.get("tool_calls") or []
+            raw_calls = result.get("tool_calls")
+            # Robust gegen abweichende Provider-Formen: Liste erzwingen (Nicht-Liste -> [eintrag]).
+            if isinstance(raw_calls, list):
+                tool_calls = raw_calls
+            elif raw_calls:
+                tool_calls = [raw_calls]
+            else:
+                tool_calls = []
             if not tool_calls:
                 summary = (result.get("content") or "").strip() or summary
                 break
@@ -534,24 +576,51 @@ async def run_orchestration(
                 remaining -= 1
 
         if timed_out:
+            # Durch Timeout abgebrochene Sub-Agenten deterministisch auffuellen, damit
+            # subagent_count/agents die Plangroesse widerspiegeln (statt stillem Fehlen).
+            seen_idx = {r.get("index") for r in results}
+            for i, st in enumerate(subtasks):
+                if i not in seen_idx:
+                    results.append({
+                        "agent_id": f"a{i + 1}", "role": normalize_role(st.get("role")),
+                        "objective": st.get("objective", ""), "summary": "Nicht abgeschlossen (Zeitlimit).",
+                        "status": "timeout", "steps": [], "index": i,
+                    })
             yield {"type": "error", "run_id": run_id, "message": "Zeitlimit des Laufs erreicht — Teilergebnisse werden zusammengefasst.", "partial": True}
 
         results.sort(key=lambda r: r.get("index", 0))
 
-        # Verifikation (nur Modus "gruendlich"): LLM-as-Judge je Ergebnis, adversarisch
-        # bei niedrigem Score. Lazy import gegen Zirkularitaet (verify importiert core).
+        def _remaining() -> float:
+            return max(0.0, deadline - time.monotonic())
+
+        def _phase_timeout() -> Optional[float]:
+            rem = _remaining()
+            if step_timeout:
+                return min(float(step_timeout), rem)
+            return rem
+
+        # Verifikation (nur Modus "gruendlich"): LLM-as-Judge je Ergebnis, adversarisch bei
+        # niedrigem Score. Auch die Verifikation respektiert die Run-Deadline (nicht nur die
+        # Queue-Schleife). Lazy import gegen Zirkularitaet (verify importiert core).
         verdicts: list[dict] = []
-        if mode == "thorough":
+        if mode == "thorough" and _remaining() > 1.0:
             try:
                 from backend.orchestrator.verify import verify_results
-                verdicts = await verify_results(task, results, mode=mode, chat_fn=chat_fn, step_timeout=step_timeout)
+                verdicts = await asyncio.wait_for(
+                    verify_results(task, results, mode=mode, chat_fn=chat_fn, step_timeout=_phase_timeout()),
+                    timeout=_remaining(),
+                )
             except Exception as exc:
-                logger.warning("orchestrator verification failed: %s", _safe(exc))
+                logger.warning("orchestrator verification skipped/failed: %s", _safe(exc))
                 verdicts = []
             for verdict in verdicts:
                 yield {"type": "verification", "run_id": run_id, "verdict": verdict}
 
-        answer = await synthesize_results(task, results, chat_fn=chat_fn, step_timeout=step_timeout, verdicts=verdicts)
+        # Synthese: bei aufgebrauchtem Budget nur noch der lokale Fallback (kein LLM-Call mehr).
+        if _remaining() > 1.0:
+            answer = await synthesize_results(task, results, chat_fn=chat_fn, step_timeout=_phase_timeout(), verdicts=verdicts)
+        else:
+            answer = _fallback_synth(task, results)
         yield {"type": "synthesis", "run_id": run_id, "content": answer}
         yield {
             "type": "done",
@@ -574,6 +643,13 @@ async def run_orchestration(
         logger.error("orchestration failed: %s", _safe(exc), exc_info=True)
         yield {"type": "error", "run_id": run_id, "message": _safe(exc)}
     finally:
-        for task_obj in pending:
-            if not task_obj.done():
-                task_obj.cancel()
+        # Offene Sub-Agenten-Tasks abbrechen UND einsammeln (sonst verwaiste Tasks /
+        # "Task was destroyed but it is pending"). gather schluckt CancelledError der Tasks.
+        leftover = [task_obj for task_obj in pending if not task_obj.done()]
+        for task_obj in leftover:
+            task_obj.cancel()
+        if leftover:
+            try:
+                await asyncio.gather(*leftover, return_exceptions=True)
+            except Exception:
+                pass

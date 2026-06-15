@@ -126,8 +126,8 @@ def role_tool_defs(role: str) -> list[dict]:
         return []
     defs: list[dict] = []
     for name in role_tool_names(role):
-        if _is_blocked(name):
-            logger.debug("orchestrator: skipping blocked tool %s for role %s", name, role)
+        if _is_disallowed_tier(name):
+            logger.debug("orchestrator: skipping mutating/blocked tool %s for role %s", name, role)
             continue
         tool = get_tool(name)
         if tool:
@@ -135,14 +135,21 @@ def role_tool_defs(role: str) -> list[dict]:
     return defs
 
 
-def _is_blocked(tool_name: str) -> bool:
+def _is_disallowed_tier(tool_name: str) -> bool:
+    """True, wenn das Tool 'blocked' ODER 'confirmation_required' ist (also mutierend/riskant).
+
+    Defense-in-depth: read-only Sub-Agenten duerfen NIE ein bestaetigungspflichtiges Tool
+    erhalten — sonst koennte ein Sub-Agent ueber den globalen pending_confirmation-Slot eine
+    Mutation einschleusen (Confused-Deputy). 'unknown' (z.B. web_search, das chat-/
+    orchestrator-seitig gesondert ausgefuehrt wird) bleibt erlaubt.
+    """
     try:
         from backend.security import is_command_allowed
-        return is_command_allowed(tool_name) == "blocked"
+        return is_command_allowed(tool_name) in {"blocked", "confirmation_required"}
     except Exception:  # pragma: no cover - defensive
         return False
 
 
 def is_role_tool_allowed(role: str, tool_name: str) -> bool:
-    """True, wenn tool_name in der kurierten read-only Allowlist der Rolle ist und nicht blocked."""
-    return bool(tool_name) and tool_name in role_tool_names(role) and not _is_blocked(tool_name)
+    """True, wenn tool_name in der kurierten Allowlist der Rolle ist und nicht mutierend/blocked."""
+    return bool(tool_name) and tool_name in role_tool_names(role) and not _is_disallowed_tier(tool_name)

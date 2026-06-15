@@ -1751,10 +1751,12 @@ async function sendMessage() {
   // Phase 48: Multi-Agenten-Orchestrator (/orchestrate, /ultra) — Planner -> parallele
   // Sub-Agenten -> Verifikation -> Synthese. Eigener Stream-Renderer (chat_orchestrator.js).
   if ((text.startsWith("/orchestrate ") || text.startsWith("/ultra ")) && typeof sendOrchestratorMessage === "function") {
-    const orchTask = text.replace(/^\/(orchestrate|ultra)\s+/i, "").trim();
+    let orchTask = text.replace(/^\/(orchestrate|ultra)\s+/i, "").trim();
+    // Optionales fuehrendes "fast"/"schnell" als Modus interpretieren und aus der Aufgabe entfernen.
+    const orchFast = /^(fast|schnell)\b/i.test(orchTask);
+    if (orchFast) orchTask = orchTask.replace(/^(fast|schnell)\s*/i, "").trim();
     if (orchTask) {
-      const orchMode = /\bfast\b|\bschnell\b/i.test(text.slice(0, text.indexOf(orchTask))) ? "fast" : "thorough";
-      sendOrchestratorMessage(orchTask, { displayText: text, mode: orchMode });
+      sendOrchestratorMessage(orchTask, { displayText: text, mode: orchFast ? "fast" : "thorough" });
       return;
     }
   }

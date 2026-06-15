@@ -144,72 +144,134 @@
     }
   }
 
+  // Inaktivitaets-Timeout pro Read: stallt der Backend-Stream, wird die Schleife verlassen
+  // (sonst bliebe das Panel fuer immer auf "laeuft …" und die Connection wuerde leaken).
+  const ORCH_STREAM_TIMEOUT_MS = 180000;
+
+  function _readWithTimeout(reader, ms) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) { settled = true; reject(new Error("orch_stream_timeout")); }
+      }, ms);
+      reader.read().then(
+        (r) => { if (!settled) { settled = true; clearTimeout(timer); resolve(r); } },
+        (e) => { if (!settled) { settled = true; clearTimeout(timer); reject(e); } },
+      );
+    });
+  }
+
+  async function _ensureConversation() {
+    if (typeof LexaState === "undefined" || LexaState.get("currentConversationId")) return;
+    try {
+      const title = typeof t === "function" ? t("chat.newChatTitle") : "Neuer Chat";
+      const c = await window.lexa.conversationCreate(title);
+      if (c && c.id) {
+        LexaState.set("currentConversationId", c.id);
+        if (typeof chatSetActiveConversationId === "function") chatSetActiveConversationId(c.id);
+        try {
+          const d = await window.lexa.conversations();
+          LexaState.set("conversationsList", (d && d.conversations) || []);
+          if (typeof renderConversationList === "function") renderConversationList();
+        } catch (_) { /* Liste optional */ }
+      }
+    } catch (_) { /* ohne Konversation laeuft es weiter, nur ohne Persistenz */ }
+  }
+
+  // Re-Entrancy-Guard: verhindert mehrere parallele Laeufe durch wiederholtes Absenden.
+  let _running = false;
+
   async function sendOrchestratorMessage(task, options) {
     options = options || {};
     const taskText = String(task || "").trim();
     if (!taskText) return;
+    if (_running) {
+      if (typeof showToast === "function") showToast("Ein Agenten-Lauf laeuft bereits.", "warning");
+      return;
+    }
+    _running = true;
     const displayText = String(options.displayText || taskText).trim();
     const mode = options.mode === "fast" ? "fast" : "thorough";
 
-    if (typeof addMessage === "function") addMessage(displayText, "user");
-    if (typeof pushChatHistory === "function") pushChatHistory(displayText);
-
-    const container = _messagesEl();
-    const panel = buildOrchestratorPanel(taskText, mode);
-    if (container) { container.appendChild(panel); _scroll(); }
-
-    let resp;
     try {
-      resp = await window.lexa.orchestratorRun(taskText, { mode });
-    } catch (e) {
-      _setStatus(panel, "Start fehlgeschlagen", "error");
-      return;
-    }
-    if (!resp || !resp.streamId) {
-      _setStatus(panel, "Stream nicht verfuegbar", "error");
-      if (typeof addMessage === "function") {
-        addMessage((resp && resp.statusText) || "Orchestrator nicht erreichbar.", "system");
+      await _ensureConversation();
+      if (typeof addMessage === "function") addMessage(displayText, "user");
+      if (typeof pushChatHistory === "function") pushChatHistory(displayText);
+      // Eingabefeld + Draft leeren (sonst bleibt der /ultra-Text stehen -> versehentlicher Re-Run).
+      if (typeof chatInput !== "undefined" && chatInput) {
+        chatInput.value = "";
+        if (typeof syncChatInputSize === "function") syncChatInputSize();
       }
-      return;
-    }
+      if (typeof clearChatDraft === "function") clearChatDraft();
 
-    let reader;
-    try {
-      reader = createAgentStreamReader(resp);
-    } catch (e) {
-      _setStatus(panel, "Stream nicht verfuegbar", "error");
-      return;
-    }
-    const decoder = new TextDecoder();
-    let buffer = "";
-    try {
-      while (true) {
-        const chunk = await reader.read();
-        const value = chunk && chunk.value;
-        if (value && value.length) buffer += decoder.decode(value, { stream: true });
-        let idx;
-        while ((idx = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, idx).trim();
-          buffer = buffer.slice(idx + 1);
-          if (!line || line.indexOf("data:") !== 0) continue;
-          const payload = line.slice(5).trim();
-          if (!payload) continue;
-          let ev;
-          try { ev = JSON.parse(payload); } catch (_) { continue; }
-          orchestratorHandleEvent(panel, ev);
-          _scroll();
+      const container = _messagesEl();
+      const panel = buildOrchestratorPanel(taskText, mode);
+      if (container) { container.appendChild(panel); _scroll(); }
+
+      let resp;
+      try {
+        resp = await window.lexa.orchestratorRun(taskText, { mode });
+      } catch (e) {
+        _setStatus(panel, "Start fehlgeschlagen", "error");
+        return;
+      }
+      if (!resp || !resp.streamId) {
+        _setStatus(panel, "Stream nicht verfuegbar", "error");
+        if (typeof addMessage === "function") {
+          addMessage((resp && resp.statusText) || "Orchestrator nicht erreichbar.", "system");
         }
-        if (chunk && chunk.done) break;
+        return;
       }
-    } catch (e) {
-      _setStatus(panel, "Verbindungsfehler", "error");
-    }
 
-    const answer = panel._orch && panel._orch.synthesis;
-    if (answer && typeof addMessage === "function") {
-      addMessage(answer, "system");
+      let reader;
+      try {
+        reader = createAgentStreamReader(resp);
+      } catch (e) {
+        _setStatus(panel, "Stream nicht verfuegbar", "error");
+        return;
+      }
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        while (true) {
+          let chunk;
+          try {
+            chunk = await _readWithTimeout(reader, ORCH_STREAM_TIMEOUT_MS);
+          } catch (e) {
+            _setStatus(panel, e && e.message === "orch_stream_timeout" ? "Zeitlimit (keine Antwort)" : "Verbindungsfehler", "error");
+            break;
+          }
+          const value = chunk && chunk.value;
+          if (value && value.length) buffer += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buffer.indexOf("\n")) >= 0) {
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (!line || line.indexOf("data:") !== 0) continue;
+            const payload = line.slice(5).trim();
+            if (!payload) continue;
+            let ev;
+            try { ev = JSON.parse(payload); } catch (_) { continue; }
+            orchestratorHandleEvent(panel, ev);
+            _scroll();
+          }
+          if (chunk && chunk.done) break;
+        }
+      } finally {
+        // Reader/HTTP-Connection in JEDEM Fall freigeben (nach done idempotent/no-op).
+        try { if (reader && typeof reader.cancel === "function") await reader.cancel(); } catch (_) { /* idempotent */ }
+      }
+
+      const answer = panel._orch && panel._orch.synthesis;
+      if (answer && typeof addMessage === "function") addMessage(answer, "system");
+      _scroll();
+      // Lauf (User-Prompt + Antwort) in der Konversation persistieren.
+      if (typeof saveCurrentConversation === "function") {
+        try { await saveCurrentConversation(); } catch (_) { /* Save best-effort */ }
+      }
+    } finally {
+      _running = false;
     }
-    _scroll();
   }
 
   // Globals fuer chat.js (Routing) + Tests.

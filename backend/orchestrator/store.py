@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import threading
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -58,15 +59,21 @@ def save_run(run: dict) -> bool:
     if isinstance(events, list) and len(events) > _MAX_EVENTS:
         payload["events"] = events[-_MAX_EVENTS:]
     with _LOCK:
+        path = _run_path(run_id)
+        # Eindeutiger Temp-Name (PID+uuid) gegen .tmp-Kollision/Restmuell; Cleanup im Fehlerfall.
+        tmp = path.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
         try:
-            path = _run_path(run_id)
-            tmp = path.with_suffix(".tmp")
             tmp.write_text(json.dumps(payload, ensure_ascii=False, default=str), encoding="utf-8")
             os.replace(tmp, path)
             _prune_locked()
             return True
         except OSError as exc:
             logger.error("orchestrator store save failed: %s", exc)
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
             return False
 
 
