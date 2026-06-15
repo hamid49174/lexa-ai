@@ -141,7 +141,7 @@ _AUDIO_CONTENT_TYPE_EXTS = {
     "video/webm": ".webm",
 }
 _LOCAL_PATH_RE = re.compile(
-    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
+    r"(?:(?<![A-Za-z])[A-Za-z]:[\\/][^\s\"'<>|]+|\\\\[^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc|mnt)/[^\s\"'<>|]+)"
 )
 
 

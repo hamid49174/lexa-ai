@@ -38,7 +38,7 @@ _MAX_UPLOAD_SIZE = 10 * 1024 * 1024
 _UPLOAD_CHUNK_SIZE = 64 * 1024
 
 _LOCAL_PATH_RE = re.compile(
-    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
+    r"(?:(?<![A-Za-z])[A-Za-z]:[\\/][^\s\"'<>|]+|\\\\[^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc|mnt)/[^\s\"'<>|]+)"
 )
 _VISION_PROVIDER_MISSING_RE = re.compile(
     r"(?:Kein Vision-Provider|API-Key im Keyring|keyring\.set_password|no vision provider)",

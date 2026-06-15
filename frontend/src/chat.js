@@ -2115,8 +2115,11 @@ async function sendMessage() {
   sendBtn.disabled = false;
   window._lexaStreamAbort = null;
   window._lexaStreamAbortReason = "";
-  // Fokus zurück ins Eingabefeld (Tastatur-/Screenreader-Nutzer), wie bei ChatGPT/Claude.
-  if (window._chatViewOpen && chatInput && document.activeElement !== chatInput) {
+  // Fokus zurück ins Eingabefeld (Tastatur-/Screenreader-Nutzer), wie bei ChatGPT/Claude —
+  // aber NICHT, wenn ein Modal/Dialog offen ist (sonst würde dem User die Eingabe im Modal
+  // entrissen / der Dialog implizit geschlossen).
+  const _modalOpen = Boolean(document.querySelector('[aria-modal="true"]'));
+  if (window._chatViewOpen && chatInput && !_modalOpen && document.activeElement !== chatInput) {
     try { chatInput.focus({ preventScroll: true }); } catch (e) { chatInput.focus(); }
   }
 }

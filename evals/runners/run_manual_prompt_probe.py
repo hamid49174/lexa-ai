@@ -38,7 +38,7 @@ MODEL_DISABLED_REPLY = (
 )
 _SECTION_RE = re.compile(r"^##\s+([A-Z])\.\s+(.+?)\s*$")
 _PROMPT_RE = re.compile(r'^\s*(\d+)\.\s+"(.*)"\s*$')
-_LOCAL_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)")
+_LOCAL_PATH_RE = re.compile(r"(?:(?<![A-Za-z])[A-Za-z]:[\\/][^\s\"'<>|]+|\\\\[^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc|mnt)/[^\s\"'<>|]+)")
 _SECRET_RE = re.compile(
     r"(?i)(?:\bsk-[A-Za-z0-9_-]{8,}\b|\b(api[_-]?key|token|secret|password|authorization)\b\s*[:=]\s*[^\s,;]+)"
 )

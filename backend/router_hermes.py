@@ -36,7 +36,7 @@ router = APIRouter(prefix="/hermes", tags=["hermes"])
 
 _DRAFT_APPROVALS = {"pending", "approved", "rejected", "conflict", "missing"}
 _LOCAL_PATH_RE = re.compile(
-    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
+    r"(?:(?<![A-Za-z])[A-Za-z]:[\\/][^\s\"'<>|]+|\\\\[^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc|mnt)/[^\s\"'<>|]+)"
 )
 _TELEGRAM_TOKEN_RE = re.compile(r"\b\d{5,20}:[A-Za-z0-9_-]{20,120}\b")
 _LEXA_LICENSE_RE = re.compile(r"\bLEXA-[A-Z0-9]{5}(?:-[A-Z0-9]{5}){3}\b", re.IGNORECASE)

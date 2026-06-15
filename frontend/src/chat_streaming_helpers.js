@@ -37,8 +37,8 @@ function chatStreamClientErrorText(value, fallback = "") {
   const base = raw || String(fallback || "").replace(/\s+/g, " ").trim();
   if (!base) return "";
   const redacted = base
-    .replace(/[A-Za-z]:[\\/][^\s"'<>|)]+/g, "[local-path-redacted]")
-    .replace(/(^|\s)\/(?:Users|home|tmp|var|etc)\/[^\s"'<>|)]+/g, "$1[local-path-redacted]");
+    .replace(/(?<![A-Za-z])[A-Za-z]:[\\/][^\s"'<>|)]+/g, "[local-path-redacted]")
+    .replace(/(^|\s)\/(?:Users|home|tmp|var|etc|mnt)\/[^\s"'<>|)]+/g, "$1[local-path-redacted]");
   if (redacted.length <= 220) return redacted;
   return redacted.slice(0, 217).trimEnd() + "...";
 }

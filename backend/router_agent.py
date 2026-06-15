@@ -54,7 +54,7 @@ _AGENT_CONFIRMATION_WORDS = frozenset(_AGENT_CONFIRMATION_WORDS | {
 })
 _AGENT_CANCEL_WORDS = frozenset(_AGENT_CANCEL_WORDS | {"nicht ausfuhren", "nicht ausfuehren"})
 _LOCAL_PATH_RE = re.compile(
-    r"(?:[A-Za-z]:[\\/][^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc)/[^\s\"'<>|]+)"
+    r"(?:(?<![A-Za-z])[A-Za-z]:[\\/][^\s\"'<>|]+|\\\\[^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc|mnt)/[^\s\"'<>|]+)"
 )
 
 
