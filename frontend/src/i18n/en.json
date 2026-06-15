@@ -1411,6 +1411,7 @@
   "chat.openConversationLabel": "Open chat: {{title}}. {{count}} messages",
   "chat.exportConversationLabel": "Export chat: {{title}}",
   "chat.deleteConversationLabel": "Delete chat: {{title}}",
+  "chat.deleteConfirm": "Delete conversation \"{{title}}\"? This cannot be undone.",
   "chat.conversationsLabel": "Conversations",
   "chat.renameConversationLabel": "Rename conversation",
   "chat.searchPlaceholder": "Search chats, notes, memories...",

@@ -315,6 +315,14 @@ async function deleteConversation(convId, triggerBtn = null) {
     triggerBtn.disabled = true;
     triggerBtn.setAttribute("aria-busy", "true");
   }
+  // Bestätigung vor dem destruktiven Löschen (kein Auto-Fokus auf "Löschen" ->
+  // kein versehentliches Bestätigen via Enter). Abbruch lässt alles unverändert.
+  if (typeof showInputModal === "function") {
+    const conv = (LexaState.get("conversationsList") || []).find((c) => String(c.id) === String(convId));
+    const convTitle = ((conv && conv.title) || "").trim() || t("chat.newChatTitle");
+    const confirmed = await showInputModal(t("chat.deleteConfirm", { title: convTitle }), [], t("common.delete"));
+    if (!confirmed) { restoreTrigger(); return; }
+  }
   try {
     await window.lexa.conversationDelete(convId);
   } catch (e) {

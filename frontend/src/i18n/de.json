@@ -1352,6 +1352,7 @@
   "chat.openConversationLabel": "Chat oeffnen: {{title}}. {{count}} Nachrichten",
   "chat.exportConversationLabel": "Chat exportieren: {{title}}",
   "chat.deleteConversationLabel": "Chat löschen: {{title}}",
+  "chat.deleteConfirm": "Konversation \"{{title}}\" wirklich löschen? Das kann nicht rückgängig gemacht werden.",
   "chat.conversationsLabel": "Konversationen",
   "chat.renameConversationLabel": "Konversation umbenennen",
   "chat.searchPlaceholder": "Chats, Notizen, Erinnerungen durchsuchen...",
