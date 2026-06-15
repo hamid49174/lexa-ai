@@ -51,5 +51,5 @@ const LexaConfig = Object.freeze({
   // (dashboard/system/commands/productivity/memory/personal-os) sind ausgeblendet,
   // bis sie auf hohem Niveau fertig sind. CORE_ONLY=false blendet alles wieder ein.
   CORE_ONLY: true,
-  CORE_VIEWS: ["chat", "settings"],
+  CORE_VIEWS: ["chat", "settings", "agents"],
 });

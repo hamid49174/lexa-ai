@@ -401,6 +401,9 @@ function switchView(view) {
   } else if (view === "settings") {
     document.getElementById("settings-view").classList.add("active");
     refreshSettingsView();
+  } else if (view === "agents") {
+    document.getElementById("agents-view").classList.add("active");
+    if (typeof refreshAgentsView === "function") refreshAgentsView();
   }
 }
 
