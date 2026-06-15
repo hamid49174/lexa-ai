@@ -17,6 +17,11 @@ from backend.orchestrator.roles import (
     role_persona,
     role_tool_defs,
 )
+from backend.orchestrator.verify import (
+    adversarial_judge,
+    judge_result,
+    verify_results,
+)
 
 __all__ = [
     "OrchestratorError",
@@ -27,4 +32,7 @@ __all__ = [
     "normalize_role",
     "role_persona",
     "role_tool_defs",
+    "judge_result",
+    "adversarial_judge",
+    "verify_results",
 ]

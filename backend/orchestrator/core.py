@@ -348,12 +348,33 @@ async def _run_subagent(
 
 
 # ── Synthese ─────────────────────────────────────────────────────────────
-def _synth_user_prompt(task: str, results: list[dict]) -> str:
+def _verdict_note(verdict: Optional[dict]) -> str:
+    if not isinstance(verdict, dict):
+        return ""
+    passed = verdict.get("passed")
+    score = verdict.get("score")
+    tag = "GEPRUEFT-OK" if passed else "GEPRUEFT-ZWEIFELHAFT"
+    extra = ""
+    adv = verdict.get("adversarial")
+    if isinstance(adv, dict) and adv.get("refuted"):
+        extra = " (adversarisch widerlegt)"
+    return f" [{tag} score={score}{extra}]"
+
+
+def _synth_user_prompt(task: str, results: list[dict], verdicts: Optional[list[dict]] = None) -> str:
+    vmap = {v.get("agent_id"): v for v in (verdicts or []) if isinstance(v, dict)}
     parts = [f"URSPRUENGLICHE AUFGABE:\n{task.strip()}\n", "BEFUNDE DER SUB-AGENTEN:"]
     for r in results:
         parts.append(
-            f"\n[{r.get('agent_id', '?')} · {r.get('role', '?')} · {r.get('status', '?')}] "
+            f"\n[{r.get('agent_id', '?')} · {r.get('role', '?')} · {r.get('status', '?')}]"
+            f"{_verdict_note(vmap.get(r.get('agent_id')))} "
             f"Ziel: {r.get('objective', '')}\nErgebnis: {r.get('summary', '')}"
+        )
+    if vmap:
+        parts.append(
+            "\n\nHINWEIS: Befunde, die als ZWEIFELHAFT oder adversarisch widerlegt markiert "
+            "sind, gewichte gering oder erwaehne ihre Unsicherheit. Stuetze die Antwort auf "
+            "die geprueft-okay Befunde."
         )
     parts.append("\n\nErstelle jetzt die finale, zusammengefasste Antwort fuer den Nutzer.")
     return "\n".join(parts)[:_SYNTH_INPUT_CAP]
@@ -372,6 +393,7 @@ async def synthesize_results(
     *,
     chat_fn: Optional[ChatFn] = None,
     step_timeout: Optional[float] = None,
+    verdicts: Optional[list[dict]] = None,
 ) -> str:
     chat_fn = chat_fn or _default_chat_fn
     if not results:
@@ -379,7 +401,7 @@ async def synthesize_results(
     try:
         res = await _invoke(
             chat_fn,
-            [{"role": "user", "content": _synth_user_prompt(task, results)}],
+            [{"role": "user", "content": _synth_user_prompt(task, results, verdicts)}],
             _SYNTH_PERSONA,
             [],
             timeout=step_timeout,
@@ -513,7 +535,21 @@ async def run_orchestration(
             yield {"type": "error", "run_id": run_id, "message": "Zeitlimit des Laufs erreicht — Teilergebnisse werden zusammengefasst.", "partial": True}
 
         results.sort(key=lambda r: r.get("index", 0))
-        answer = await synthesize_results(task, results, chat_fn=chat_fn, step_timeout=step_timeout)
+
+        # Verifikation (nur Modus "gruendlich"): LLM-as-Judge je Ergebnis, adversarisch
+        # bei niedrigem Score. Lazy import gegen Zirkularitaet (verify importiert core).
+        verdicts: list[dict] = []
+        if mode == "thorough":
+            try:
+                from backend.orchestrator.verify import verify_results
+                verdicts = await verify_results(task, results, mode=mode, chat_fn=chat_fn, step_timeout=step_timeout)
+            except Exception as exc:
+                logger.warning("orchestrator verification failed: %s", _safe(exc))
+                verdicts = []
+            for verdict in verdicts:
+                yield {"type": "verification", "run_id": run_id, "verdict": verdict}
+
+        answer = await synthesize_results(task, results, chat_fn=chat_fn, step_timeout=step_timeout, verdicts=verdicts)
         yield {"type": "synthesis", "run_id": run_id, "content": answer}
         yield {
             "type": "done",
@@ -524,6 +560,7 @@ async def run_orchestration(
                 "goal": task.strip(),
                 "subagent_count": len(results),
                 "agents": [_result_public(r) for r in results],
+                "verdicts": verdicts,
                 "answer": answer,
                 "partial": timed_out,
                 "elapsed_seconds": round(time.monotonic() - started, 2),
