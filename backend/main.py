@@ -112,6 +112,7 @@ from backend.router_stripe import router as stripe_router
 from backend.router_agent import router as agent_router
 from backend.router_hermes import router as hermes_router
 from backend.router_os_agents import router as os_agents_router
+from backend.router_orchestrator import router as orchestrator_router
 from backend.router_embeddings import router as embeddings_router
 from backend.router_calendar import router as calendar_router
 from backend.router_health import router as health_router
@@ -312,6 +313,7 @@ app.include_router(stripe_router)
 app.include_router(agent_router)
 app.include_router(hermes_router)
 app.include_router(os_agents_router)
+app.include_router(orchestrator_router)
 app.include_router(embeddings_router)
 app.include_router(calendar_router)
 app.include_router(health_router)
