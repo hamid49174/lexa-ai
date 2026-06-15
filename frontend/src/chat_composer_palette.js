@@ -137,7 +137,9 @@ function updateComposerCommandPaletteFromInput() {
   const value = String(chatInput.value || "");
   if (value.startsWith("/") && !value.includes(" ")) {
     setComposerCommandPaletteOpen(true, { query: composerCommandQuery(), focusInput: false });
-  } else if (_composerCommandOpen && value.trim() !== "") {
+  } else if (_composerCommandOpen) {
+    // Schließen, sobald die Eingabe kein Slash-Präfix mehr ist — inkl. komplett geleert
+    // (vorher blieb die Palette bei leerem Feld sichtbar hängen).
     closeComposerCommandPalette();
   }
 }

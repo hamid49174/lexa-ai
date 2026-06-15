@@ -147,6 +147,19 @@ function createMessageActionOverflowMenu(actions) {
     if (event.key === "Escape") {
       setMessageActionMenuOpen(wrap, false);
       trigger.focus();
+      return;
+    }
+    // Pfeiltasten-Navigation durch die Menüeinträge (WAI-ARIA Menu-Pattern).
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && wrap.classList.contains("open")) {
+      event.preventDefault();
+      const items = [...menu.querySelectorAll("button:not(:disabled)")];
+      if (!items.length) return;
+      const dir = event.key === "ArrowDown" ? 1 : -1;
+      const current = items.indexOf(document.activeElement);
+      const next = current === -1
+        ? (dir === 1 ? 0 : items.length - 1)
+        : (current + dir + items.length) % items.length;
+      items[next]?.focus();
     }
   });
   menu.addEventListener("click", (event) => {

@@ -271,6 +271,9 @@ async function init() {
           }
         }
       });
+      // Gespeicherten Entwurf wiederherstellen (Crash-/Neustart-/View-Wechsel-Recovery).
+      // Nur wenn das Feld leer ist, um aktuelle Eingaben nie zu überschreiben.
+      if (typeof recoverDraft === "function" && !chatInput.value) recoverDraft();
     }
 
     if (sendBtn) {
