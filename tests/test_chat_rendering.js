@@ -376,10 +376,12 @@ assert("task list renders checkboxes", tasks.includes('class="chat-task-item"') 
 assert("task list marks disabled (read-only)", tasks.includes("disabled"), tasks);
 assert("task list reflects checked state", tasks.includes("checked"), tasks);
 
-// Table alignment directives
+// Table alignment directives (CSP-konform via Klasse statt Inline-Style)
 const aligned = formatMessage("| A | B | C |\n| :--- | :---: | ---: |\n| 1 | 2 | 3 |");
-assert("table center alignment applied", aligned.includes("text-align: center"), aligned);
-assert("table right alignment applied", aligned.includes("text-align: right"), aligned);
+assert("table center alignment applied", aligned.includes("md-align-center"), aligned);
+assert("table right alignment applied", aligned.includes("md-align-right"), aligned);
+assert("table left alignment applied", aligned.includes("md-align-left"), aligned);
+assert("table alignment uses no inline style", !aligned.includes("text-align:"), aligned);
 
 // Inline [n] citations -> clickable superscript
 const cited = formatMessage("Fakt[1] und mehr[2].");

@@ -1559,6 +1559,16 @@
 .chat-table tr:nth-child(even) td {
   background: rgba(255, 255, 255, 0.025);
 }
+/* GFM-Spalten-Ausrichtung (CSP-konform via Klasse statt Inline-Style) */
+.chat-table .md-align-left {
+  text-align: left;
+}
+.chat-table .md-align-center {
+  text-align: center;
+}
+.chat-table .md-align-right {
+  text-align: right;
+}
 
 /* Code-Block-Werkzeuge: Wrap-Toggle + Einklappen langer Bloecke */
 .code-actions {

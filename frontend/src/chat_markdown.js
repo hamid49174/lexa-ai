@@ -187,7 +187,10 @@ function appendChatTable(parent, rows) {
     chatTableCells(row).forEach((cell, col) => {
       const el = document.createElement(tag);
       const align = aligns[col];
-      if (align) el.setAttribute("style", "text-align: " + align);
+      // CSP-konform: Ausrichtung über Klasse statt Inline-Style (script-src 'self').
+      if (align === "left" || align === "center" || align === "right") {
+        el.classList.add("md-align-" + align);
+      }
       appendInlineMarkdown(el, cell.trim());
       tr.appendChild(el);
     });
