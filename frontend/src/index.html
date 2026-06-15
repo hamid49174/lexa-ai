@@ -106,7 +106,7 @@
     </div>
 
     <!-- Toast Container -->
-    <div class="toast-container" id="toast-container" aria-live="polite" role="status"></div>
+    <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true" role="status"></div>
 
     <!-- Notification Center Panel -->
     <div class="notif-center hidden" id="notif-center" role="dialog" aria-modal="true" aria-hidden="true" aria-label="Benachrichtigungen" data-i18n-aria-label="notifications.title">
@@ -180,7 +180,7 @@
               <button type="button" class="new-chat-btn" data-action="newConversation" title="Neuer Chat" data-i18n-title="chat.newChat" role="button" aria-label="Neuer Chat">+</button>
             </div>
           </div>
-          <div class="conversation-list" id="conversation-list"></div>
+          <div class="conversation-list" id="conversation-list" role="list" aria-label="Konversationen" data-i18n-aria-label="chat.conversationsLabel"></div>
         </div>
 
         <div class="sidebar-section" id="sidebar-advanced-tools" role="tablist" aria-label="Tools">

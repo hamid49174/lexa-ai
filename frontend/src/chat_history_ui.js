@@ -58,6 +58,8 @@ function renderConversationEmptyState(container, message) {
   if (!container) return;
   const empty = document.createElement("div");
   empty.className = "conv-empty";
+  empty.setAttribute("role", "status");
+  empty.setAttribute("aria-live", "polite");
   empty.textContent = message || "";
   container.replaceChildren(empty);
 }
@@ -204,6 +206,10 @@ function createConversationListItem(conversation, options = {}) {
   bindKeyboardAction(item, () => switchConversation(conversation.id), {
     label: t("chat.openConversationLabel", { title: accessibleTitle, count }) + (attention ? `. ${attentionStatus}` : ""),
   });
+  // Korrekte Listen-Semantik: Container ist role="list" -> Items als listitem
+  // markieren (ueberschreibt das von bindKeyboardAction gesetzte role="button";
+  // tabindex + Enter/Space-Handler bleiben erhalten, Aktivierung funktioniert weiter).
+  item.setAttribute("role", "listitem");
 
   return item;
 }
@@ -217,6 +223,7 @@ function startRenameConversation(conversation, titleEl) {
   input.className = "conv-rename-input";
   input.value = current;
   input.maxLength = 120;
+  input.setAttribute("aria-label", t("chat.renameConversationLabel") || "Konversation umbenennen");
   titleEl.replaceWith(input);
   input.focus();
   input.select();
@@ -235,6 +242,7 @@ function startRenameConversation(conversation, titleEl) {
         updateConversationTitleLocally(conversation.id, next);
       }
       conversation.title = next;
+      showToast(t("toast.conversationRenamed") || "Konversation umbenannt", "success", 2000);
     } catch (e) {
       console.warn("[Chat] Rename failed:", e.message || e);
       titleEl.textContent = current;

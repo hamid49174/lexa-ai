@@ -114,6 +114,10 @@ function openSearchOverlay() {
     searchRestoreFocusEl = active;
   }
   overlay.classList.add("visible");
+  // Hintergrund (App-Root) fuer Screenreader inert schalten, solange das Such-Modal
+  // offen ist (WAI-ARIA: aria-modal allein versteckt den Hintergrund nicht). Das
+  // Overlay ist Body-Kind ausserhalb von #app und bleibt erreichbar.
+  document.getElementById("app")?.setAttribute("aria-hidden", "true");
   searchRequestSeq += 1;
   if (searchDebounce) clearTimeout(searchDebounce);
   searchDebounce = null;
@@ -126,6 +130,7 @@ function openSearchOverlay() {
 }
 function closeSearchOverlay(options = {}) {
   document.getElementById("search-overlay")?.classList.remove("visible");
+  document.getElementById("app")?.removeAttribute("aria-hidden");
   if (searchDebounce) clearTimeout(searchDebounce);
   searchDebounce = null;
   searchRequestSeq += 1;
