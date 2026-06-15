@@ -195,6 +195,28 @@ function renderChatSources(bodyEl, sources) {
   bodyEl.appendChild(wrap);
 }
 
+// Provenienz-Zeile: welche Obsidian/OS-Dateien die Antwort geerdet haben.
+function renderOsContextFiles(bodyEl, files) {
+  if (!bodyEl) return;
+  bodyEl.querySelector(".chat-os-context")?.remove();
+  const list = Array.isArray(files) ? files.filter(Boolean) : [];
+  if (!list.length) return;
+  const wrap = document.createElement("div");
+  wrap.className = "chat-os-context";
+  const label = document.createElement("span");
+  label.className = "chat-os-context-label";
+  label.textContent = "📚 Aus deinem OS";
+  wrap.appendChild(label);
+  list.slice(0, 8).forEach((p) => {
+    const chip = document.createElement("span");
+    chip.className = "chat-os-context-file";
+    chip.textContent = p;
+    chip.title = p;
+    wrap.appendChild(chip);
+  });
+  bodyEl.appendChild(wrap);
+}
+
 // ── ChatGPT-style right-side sources panel ───────────────────────────────────
 let _sourcesPanelKeyHandler = null;
 
@@ -1932,6 +1954,7 @@ async function sendMessage() {
     let streamStoppedByUser = false;
     let streamTimedOut = false;
     let webSources = [];
+    let osContextFiles = [];
     const handleStreamData = (data) => {
       if (!data) return;
       // Heuristik-Grounding-Pfad meldet status: "web_search".
@@ -1959,6 +1982,17 @@ async function sendMessage() {
       }
       if (data.status === "web_search_empty" && !fullText) {
         textEl.textContent = "🔍 Keine Web-Quellen gefunden – ich antworte aus meinem Wissen …";
+      }
+      // Persönliches Obsidian/OS-Grounding.
+      if (data.status === "obsidian" && !fullText) {
+        textEl.textContent = "📚 Ich schaue in dein Obsidian/OS …";
+      }
+      if (data.status === "obsidian_empty" && !fullText) {
+        textEl.textContent = "📚 Nichts Passendes im OS – ich antworte aus meinem Wissen …";
+      }
+      if (Array.isArray(data.os_files) && data.os_files.length) {
+        const seenOs = new Set(osContextFiles);
+        data.os_files.forEach((f) => { if (f && !seenOs.has(f)) { seenOs.add(f); osContextFiles.push(f); } });
       }
       if (Array.isArray(data.sources)) {
         // Mehrere sources-Events pro Antwort (Heuristik-Grounding + agentische web_search-Hops):
@@ -2050,6 +2084,8 @@ async function sendMessage() {
 
     // Quellen-Chips direkt unter der Antwort (vor den Vorschlags-Chips).
     renderChatSources(body, getMessageSources(msgEl));
+    // Provenienz: welche OS-Dateien die Antwort geerdet haben.
+    renderOsContextFiles(body, osContextFiles);
 
     if (actionData) {
       handleChatToolActionBlocked(actionData);

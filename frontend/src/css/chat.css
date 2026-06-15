@@ -423,6 +423,31 @@
   text-align: center;
 }
 
+/* Obsidian/OS-Grounding: Provenienz-Zeile (welche Vault-Dateien geerdet haben) */
+.chat-os-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11.5px;
+}
+.chat-os-context-label {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.chat-os-context-file {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(139, 92, 246, 0.12);
+  color: var(--accent2, #c4b5fd);
+  font-family: var(--font-mono);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Confirmation buttons */
 .confirm-btn {
   background: var(--gradient);
