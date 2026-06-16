@@ -291,4 +291,8 @@ Phase 5B classifies every remaining PublicRC blocker as agent-solvable, user-dec
 
 ## Lizenz
 
-MIT
+MIT — siehe [LICENSE](LICENSE). © 2026 Hamid ([hamid49174](https://github.com/hamid49174)).
+
+## Credits
+
+Gebootstrapped mit dem [ai-coding-starter-kit](https://github.com/AlexPEClub/ai-coding-starter-kit) von Alex Sprogis (MIT) — genutzt fuer die Claude-Code-Skills- und Workflow-Struktur (`.claude/`). Die Lexa-Anwendung selbst (Backend, Companion, Voice, Frontend) wurde eigenstaendig entwickelt.
