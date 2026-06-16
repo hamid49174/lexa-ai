@@ -15,6 +15,27 @@ def _reset_stripe_config(router_stripe, monkeypatch):
         monkeypatch.setattr(router_stripe, name, None)
 
 
+def test_extract_plan_name_classifies_by_price_id_without_nickname(monkeypatch):
+    """Plan-Klassifizierung haengt an der price_id (zuverlaessig), nicht am optionalen nickname."""
+    from backend import router_stripe
+
+    # price_id mit 'ultra'-Substring, KEIN nickname -> trotzdem 'ultra' (kein Downgrade auf free)
+    sub_ultra = {"items": {"data": [{"price": {"id": "price_ultra_monthly", "product": "prod_x"}}]}}
+    assert router_stripe._extract_plan_name(sub_ultra) == "ultra"
+
+    sub_pro = {"items": {"data": [{"price": {"id": "price_pro_monthly", "product": "prod_y"}}]}}
+    assert router_stripe._extract_plan_name(sub_pro) == "pro"
+
+    # Opake price_id ohne Substring -> explizite ENV-Map entscheidet deterministisch
+    monkeypatch.setenv("STRIPE_PRICE_PLAN_MAP", "price_1AbcOpaque:ultra")
+    sub_opaque = {"items": {"data": [{"price": {"id": "price_1AbcOpaque", "product": "prod_z"}}]}}
+    assert router_stripe._extract_plan_name(sub_opaque) == "ultra"
+
+    # Unbekannt + kein nickname/Map -> bewusst 'free'
+    sub_unknown = {"items": {"data": [{"price": {"id": "price_1Unknown", "product": "prod_q"}}]}}
+    assert router_stripe._extract_plan_name(sub_unknown) == "free"
+
+
 def test_checkout_requires_price_allowlist_and_redirect_origin(monkeypatch):
     import backend.router_stripe as router_stripe
 

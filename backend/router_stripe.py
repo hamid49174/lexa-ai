@@ -160,6 +160,28 @@ def _get_allowed_price_ids() -> set[str]:
     return {item.strip() for item in raw.split(",") if item.strip()}
 
 
+def _get_price_plan_map() -> dict[str, str]:
+    """Deterministische price_id -> plan Zuordnung aus ENV/keyring.
+
+    Format: "price_xxx:ultra,price_yyy:pro". Vorrangige, zuverlaessige Quelle fuer die
+    Plan-Klassifizierung — unabhaengig vom optionalen Stripe-nickname.
+    """
+    raw = (
+        os.environ.get("STRIPE_PRICE_PLAN_MAP", "")
+        or _get_keyring_value("stripe_price_plan_map")
+    )
+    mapping: dict[str, str] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if ":" not in entry:
+            continue
+        pid, _, plan = entry.partition(":")
+        pid, plan = pid.strip(), plan.strip().lower()
+        if pid and plan in {"ultra", "pro", "free"}:
+            mapping[pid] = plan
+    return mapping
+
+
 def _get_allowed_checkout_origins() -> set[str]:
     raw = os.environ.get("LEXA_ALLOWED_CHECKOUT_ORIGINS", "") or os.environ.get("LEXA_APP_URL", "")
     origins = {item.strip().rstrip("/") for item in raw.split(",") if item.strip()}
@@ -849,8 +871,26 @@ async def _handle_subscription_deleted(subscription: dict):
 
 
 def _extract_plan_name(subscription) -> str:
-    """Extract plan name from Stripe subscription object."""
+    """Extract plan name from Stripe subscription object.
+
+    Klassifiziert zuerst deterministisch ueber die price_id (explizite ENV-Map bzw.
+    'pro'/'ultra'-Substring), erst danach ueber den OPTIONALEN nickname/product. Sonst
+    wuerde ein fehlender nickname zahlende Kunden bei jeder Verlaengerung auf 'free'
+    herabstufen (Webhook-product ist nur eine prod_-ID, nicht expandiert).
+    """
     try:
+        # 1) Deterministisch ueber die price_id (zuverlaessige, bereits allowlistete Quelle).
+        price_id = _price_id_from_subscription(subscription)
+        if price_id:
+            mapped = _get_price_plan_map().get(price_id)
+            if mapped:
+                return mapped
+            pid_l = price_id.lower()
+            if "ultra" in pid_l:
+                return "ultra"
+            if "pro" in pid_l:
+                return "pro"
+        # 2) Fallback: optionaler nickname/product.
         if isinstance(subscription, dict):
             items = subscription.get("items", {}).get("data", [])
         else:
@@ -858,15 +898,17 @@ def _extract_plan_name(subscription) -> str:
         if items:
             item = items[0] if isinstance(items, list) else items
             price = item.get("price", {}) if isinstance(item, dict) else item.price
-            product = price.get("product", "") if isinstance(price, dict) else price.product
             nickname = price.get("nickname", "") if isinstance(price, dict) else (price.nickname or "")
-            label = f"{nickname} {product}".lower()
+            # NUR der nickname taugt als Substring-Quelle. Die product-ID ist im Webhook
+            # unexpandiert (prod_xyz) und enthaelt "pro" -> wuerde JEDEN Plan faelschlich als
+            # "pro" einstufen (Gratis-Upgrade). Daher product NICHT mehr fuer die Klassifizierung.
+            label = str(nickname or "").lower()
             if "ultra" in label:
                 return "ultra"
             if "pro" in label:
                 return "pro"
             logger.warning(
-                "Could not classify plan from Stripe subscription (price_id=%s, label=%r); "
+                "Could not classify plan from Stripe subscription (price_id=%s, nickname=%r); "
                 "falling back to 'free'",
                 _price_id_from_subscription(subscription),
                 label.strip(),
