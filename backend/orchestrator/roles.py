@@ -55,9 +55,11 @@ ORCHESTRATOR_ROLES: dict[str, dict[str, Any]] = {
             "technische Fragen READ-ONLY und faktenbasiert: erfasse den Repo-Stand mit "
             "git_status, sieh dir die Historie (git_log), konkrete Aenderungen (git_diff) und "
             "Branches (git_branch_list) an, lokalisiere relevante Dateien (file_search) und "
-            "schlage technische Doku/Loesungen via web_search nach. Du AENDERST keinen Code — "
-            "konkrete Aenderungen passieren spaeter ueber den bestaetigungs-gegateten Coding-"
-            "Pfad. Fasse Befunde + empfohlene naechste Schritte konkret und belegt zusammen."
+            "schlage technische Doku/Loesungen via web_search nach. Falls MCP-Datei-Lese-"
+            "werkzeuge (mcp_filesystem_*) verfuegbar sind, lies damit konkrete Dateiinhalte/"
+            "Verzeichnisse, um deine Aussagen am echten Code zu belegen. Du AENDERST keinen "
+            "Code — konkrete Aenderungen passieren spaeter ueber den bestaetigungs-gegateten "
+            "Coding-Pfad. Fasse Befunde + empfohlene naechste Schritte konkret und belegt zusammen."
         ),
         "tools": ["git_status", "git_log", "git_diff", "git_branch_list", "file_search", "web_search", "memory_search"],
     },
@@ -123,6 +125,53 @@ ROLE_LOOPS: dict[str, dict[str, Any]] = {
     },
 }
 
+# ── MCP read-only Coding-Tools (Phase 49 #4/J) ───────────────────────────────
+# Echte Coding-Brücke: der read-only code-Sub-Agent darf — ZUSAETZLICH zu den lokalen
+# always_allowed git_*-Tools — ueber den bestehenden MCP-Bridge (mcp_chat_bridge) lesend
+# auf das Dateisystem zugreifen, WENN der filesystem-MCP-Server verbunden ist.
+#
+# WICHTIG (Sicherheit): mcp_*-Tools stehen NICHT in command_whitelist.json und sind dort als
+# 'confirmation_required' gedacht (Chat-Pfad zeigt eine Bestaetigungs-Karte). Im Orchestrator
+# fuehren wir mcp-Reads jedoch DIREKT (ohne Bestaetigungs-Karte) aus — deshalb ist diese
+# EXAKTE Namens-Allowlist die read-only Grenze: nur diese, nachweislich nicht-mutierenden
+# Tools (verifiziert gegen die filesystem-MCP-Server-Toolliste) duerfen so laufen. Schreib-
+# Tools (write_file, edit_file, move_file, ...) sind bewusst NICHT enthalten.
+_MCP_FILESYSTEM_READ_TOOLS = (
+    "mcp_filesystem_read_text_file",
+    "mcp_filesystem_read_file",
+    "mcp_filesystem_read_multiple_files",
+    "mcp_filesystem_list_directory",
+    "mcp_filesystem_list_directory_with_sizes",
+    "mcp_filesystem_directory_tree",
+    "mcp_filesystem_get_file_info",
+    "mcp_filesystem_search_files",
+)
+
+ROLE_MCP_READ_TOOLS: dict[str, tuple[str, ...]] = {
+    "code": _MCP_FILESYSTEM_READ_TOOLS,
+}
+
+# Vereinigung aller je-Rolle erlaubten MCP-Read-Tools — Safety-Belt im Orchestrator-Executor
+# (selbst wenn ein anderer Pfad mcp-Ausfuehrung anstoesst, laufen nur diese Lese-Tools).
+ALL_MCP_READ_TOOLS: frozenset[str] = frozenset(
+    name for tools in ROLE_MCP_READ_TOOLS.values() for name in tools
+)
+
+# Coding-MCP-Server, die der code-Sub-Agent (lesend) braucht. Bewusst NUR 'filesystem' —
+# git deckt der code-Agent ueber lokale git_*-Tools ab, serena ist standardmaessig disabled.
+ORCHESTRATOR_MCP_CODING_SERVERS: tuple[str, ...] = ("filesystem",)
+
+
+def role_mcp_read_tool_names(role: str) -> tuple[str, ...]:
+    """Exakte MCP-Read-Tool-Namen, die diese Rolle (lesend) nutzen darf."""
+    return ROLE_MCP_READ_TOOLS.get(normalize_role(role), ())
+
+
+def is_mcp_read_tool(name: str) -> bool:
+    """True, wenn name ein nachweislich read-only MCP-Tool aus der Allowlist ist."""
+    return bool(name) and name in ALL_MCP_READ_TOOLS
+
+
 # Read-only Contract, der jeder Sub-Agenten-Persona angehaengt wird.
 _READ_ONLY_CONTRACT = (
     "\n\nWICHTIG: Du bist read-only. Rufe NUR die dir bereitgestellten Werkzeuge auf, "
@@ -182,7 +231,31 @@ def role_tool_defs(role: str) -> list[dict]:
         tool = get_tool(name)
         if tool:
             defs.append(tool)
+    defs.extend(_role_mcp_read_defs(role))
     return defs
+
+
+def _role_mcp_read_defs(role: str) -> list[dict]:
+    """OpenAI-Defs der MCP-Read-Tools dieser Rolle — NUR die, die ein aktuell verbundener
+    MCP-Server tatsaechlich anbietet. Ohne verbundenen filesystem-Server (MCP aus, uvx/node
+    fehlt) bleibt die Liste leer -> die Rolle degradiert sauber auf ihre lokalen Tools.
+    """
+    allowed = set(role_mcp_read_tool_names(role))
+    if not allowed:
+        return []
+    try:
+        from backend.mcp_chat_bridge import mcp_chat_tools
+        available = mcp_chat_tools()
+    except Exception:  # pragma: no cover - MCP optional
+        return []
+    out: list[dict] = []
+    for tdef in (available or []):
+        if not isinstance(tdef, dict):
+            continue
+        fn = tdef.get("function") if isinstance(tdef.get("function"), dict) else {}
+        if fn.get("name") in allowed:
+            out.append(tdef)
+    return out
 
 
 def _is_disallowed_tier(tool_name: str) -> bool:
@@ -201,5 +274,16 @@ def _is_disallowed_tier(tool_name: str) -> bool:
 
 
 def is_role_tool_allowed(role: str, tool_name: str) -> bool:
-    """True, wenn tool_name in der kurierten Allowlist der Rolle ist und nicht mutierend/blocked."""
-    return bool(tool_name) and tool_name in role_tool_names(role) and not _is_disallowed_tier(tool_name)
+    """True, wenn tool_name fuer die Rolle erlaubt ist (lokal kuratiert ODER MCP-Read-Allowlist).
+
+    Zwei read-only Pfade: (1) kuratierte lokale Allowlist (nicht mutierend/blocked), (2) die
+    EXAKTE MCP-Read-Allowlist der Rolle (nachweislich nicht-mutierende mcp_filesystem_*-Tools).
+    Alles andere — insbesondere mcp_*-Schreib-Tools — ist NICHT erlaubt.
+    """
+    if not tool_name:
+        return False
+    if tool_name in role_tool_names(role) and not _is_disallowed_tier(tool_name):
+        return True
+    if tool_name in role_mcp_read_tool_names(role):
+        return True
+    return False

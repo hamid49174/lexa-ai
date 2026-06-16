@@ -82,6 +82,15 @@ const agentsBefore = panel._orch.agentsBox.children.length;
 win.orchestratorHandleEvent(panel, { type: "subagent_start", agent_id: "a1", role: "research" });
 check("agent card idempotent", panel._orch.agentsBox.children.length === agentsBefore);
 
+// ── MCP-Coding-Bruecke (Phase 49 #4/J) ──
+const panelM = win.buildOrchestratorPanel("Analysiere den Code", "fast");
+win.orchestratorHandleEvent(panelM, { type: "mcp", servers: { filesystem: "connected", serena: "disabled" } });
+const mText = allText(panelM);
+check("renders mcp servers", mText.includes("MCP-Coding") && mText.includes("filesystem") && mText.includes("serena"));
+// unbekanntes Event darf nicht crashen
+win.orchestratorHandleEvent(panelM, { type: "voellig_unbekannt", foo: 1 });
+check("unknown event is safe", panelM._orch.status._text === "laeuft …");
+
 // ── Quellen (zitierte Synthese, Phase 49 #3) ──
 const panelS = win.buildOrchestratorPanel("Recherche", "thorough");
 win.orchestratorHandleEvent(panelS, { type: "sources", sources: [

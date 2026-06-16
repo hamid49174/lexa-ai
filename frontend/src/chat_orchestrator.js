@@ -53,16 +53,18 @@
     });
     wrap.appendChild(phaseStrip);
 
+    const mcpBox = _el("div", "orchestrator-mcp");
     const planBox = _el("div", "orchestrator-plan");
     const agentsBox = _el("div", "orchestrator-agents");
     const verifyBox = _el("div", "orchestrator-verify");
     const sourcesBox = _el("div", "orchestrator-sources");
+    wrap.appendChild(mcpBox);
     wrap.appendChild(planBox);
     wrap.appendChild(agentsBox);
     wrap.appendChild(verifyBox);
     wrap.appendChild(sourcesBox);
 
-    wrap._orch = { status, counts, phases, planBox, agentsBox, verifyBox, sourcesBox, agents: {}, sources: [], synthesis: "", stepCount: 0, mode };
+    wrap._orch = { status, counts, phases, mcpBox, planBox, agentsBox, verifyBox, sourcesBox, agents: {}, sources: [], synthesis: "", stepCount: 0, mode };
     _setPhase(wrap, "plan", "active");
     return wrap;
   }
@@ -167,6 +169,24 @@
     refs.verifyBox.appendChild(line);
   }
 
+  function _renderMcp(panel, servers) {
+    const refs = panel._orch;
+    if (!refs || !servers || typeof servers !== "object") return;
+    const entries = Object.keys(servers);
+    if (!entries.length) return;
+    refs.mcpBox.replaceChildren();
+    const line = _el("div", "orchestrator-mcp-line");
+    line.appendChild(_el("span", "orchestrator-mcp-label", "MCP-Coding:"));
+    entries.forEach((name) => {
+      const status = String(servers[name] || "");
+      const ok = status === "connected";
+      const chip = _el("span", "orchestrator-mcp-chip " + (ok ? "ok" : "off"),
+        name + (ok ? " ✓" : " · " + (status || "n/a")));
+      line.appendChild(chip);
+    });
+    refs.mcpBox.appendChild(line);
+  }
+
   function _renderSources(panel, sources) {
     const refs = panel._orch;
     if (!refs || !Array.isArray(sources) || !sources.length) return;
@@ -213,6 +233,9 @@
         _renderPlan(panel, event.plan);
         _setPhase(panel, "plan", "done");
         _setPhase(panel, "agents", "active");
+        break;
+      case "mcp":
+        _renderMcp(panel, event.servers);
         break;
       case "subagent_start":
         _ensureAgentCard(panel, event.agent_id, event.role, event.label, event.objective);

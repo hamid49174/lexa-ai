@@ -143,9 +143,50 @@ async def _execute_web_search(params: dict) -> dict:
     return {"success": True, "data": {"query": query, "sources": cleaned}}
 
 
+async def _execute_mcp_read(name: str, params: dict) -> dict:
+    """Fuehre ein read-only MCP-Tool ueber den bestehenden mcp_chat_bridge aus.
+
+    SICHERHEIT: agent_loop._execute_tool routet mcp_*-Tools NICHT (sie fielen auf
+    'unbekannter Befehl' durch). execute_mcp_action umgeht zudem die Chat-Bestaetigungs-Karte
+    und wuerde JEDES aufgeloeste mcp-Tool sofort ausfuehren — deshalb hier harte Begrenzung
+    auf die read-only Allowlist (is_mcp_read_tool). Schreib-Tools werden abgelehnt, nicht
+    ausgefuehrt. Der eigentliche Rollen-Gate (is_role_tool_allowed) greift bereits frueher;
+    dies ist der Defense-in-depth-Safety-Belt im Executor selbst.
+    """
+    from backend.orchestrator.roles import is_mcp_read_tool
+    if not is_mcp_read_tool(name):
+        return {"success": False, "error": f"MCP-Werkzeug '{name}' ist im read-only Orchestrator nicht erlaubt."}
+    try:
+        from backend.mcp_chat_bridge import execute_mcp_action
+        return await execute_mcp_action(name, params)
+    except Exception as exc:
+        return {"success": False, "error": _safe(exc) or "MCP-Aufruf fehlgeschlagen."}
+
+
+async def _warm_coding_mcp(timeout: float) -> dict:
+    """Verbinde die Coding-MCP-Server (filesystem) tolerant + zeitbegrenzt vor code-Subagenten.
+
+    ensure_coding_servers_connected wirft nie; der wait_for-Wrapper schuetzt nur gegen einen
+    haengenden Subprozess-Start. Rueckgabe {server: status} oder {} bei Ausfall — der Lauf
+    laeuft in JEDEM Fall weiter (Degradation auf git_* + file_search).
+    """
+    try:
+        from backend.mcp_chat_bridge import ensure_coding_servers_connected
+        from backend.orchestrator.roles import ORCHESTRATOR_MCP_CODING_SERVERS
+        return await asyncio.wait_for(
+            ensure_coding_servers_connected(ORCHESTRATOR_MCP_CODING_SERVERS),
+            timeout=max(1.0, float(timeout)),
+        )
+    except Exception as exc:
+        logger.info("orchestrator coding MCP warmup skipped: %s", _safe(exc))
+        return {}
+
+
 async def _default_execute_tool_fn(name: str, params: dict) -> dict:
     if name in _WEB_SEARCH_TOOLS:
         return await _execute_web_search(params if isinstance(params, dict) else {})
+    if isinstance(name, str) and name.startswith("mcp_"):
+        return await _execute_mcp_read(name, params if isinstance(params, dict) else {})
     from backend.agent_loop import _execute_tool
     return await _execute_tool(name, params)
 
@@ -579,8 +620,8 @@ async def run_orchestration(
     run_id: Optional[str] = None,
 ) -> AsyncGenerator[dict, None]:
     """Fuehre einen Orchestrierungslauf aus. Yieldet SSE-kompatible Event-Dicts:
-    orchestrator_start | plan | subagent_start | subagent_step | subagent_done |
-    synthesis | done | error.
+    orchestrator_start | plan | mcp | subagent_start | subagent_step | subagent_done |
+    verification | sources | synthesis | done | error.
     """
     chat_fn = chat_fn or _default_chat_fn
     execute_tool_fn = execute_tool_fn or _default_execute_tool_fn
@@ -606,6 +647,19 @@ async def run_orchestration(
         )
         yield {"type": "plan", "run_id": run_id, "plan": plan}
         subtasks = plan["subtasks"]
+
+        # Echte Coding-Bruecke: hat der Plan einen code-Subtask, die Coding-MCP-Server
+        # (filesystem-Reads) einmalig + tolerant vorwaermen, damit role_tool_defs die
+        # verbundenen Lese-Tools sieht. Nur beim Default-Executor (der mcp_* ueber
+        # execute_mcp_action routet) — ein injizierter Executor ist selbst verantwortlich.
+        mcp_servers: dict = {}
+        if execute_tool_fn is _default_execute_tool_fn and any(
+            normalize_role(st.get("role")) == "code" for st in subtasks
+        ):
+            warm_budget = min(15.0, max(1.0, (started + float(run_timeout)) - time.monotonic()))
+            mcp_servers = await _warm_coding_mcp(warm_budget)
+            if mcp_servers:
+                yield {"type": "mcp", "run_id": run_id, "servers": mcp_servers}
 
         queue: asyncio.Queue = asyncio.Queue()
         sem = asyncio.Semaphore(max_concurrency)
@@ -742,6 +796,7 @@ async def run_orchestration(
                 "agents": [_result_public(r) for r in results],
                 "verdicts": verdicts,
                 "sources": sources,
+                "mcp_servers": mcp_servers,
                 "answer": answer,
                 "partial": timed_out,
                 "elapsed_seconds": round(time.monotonic() - started, 2),

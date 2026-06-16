@@ -1743,6 +1743,25 @@
 }
 .orchestrator-source-link:hover { text-decoration: underline; }
 
+/* MCP-Coding-Bruecke (Phase 49 #4/J) */
+.orchestrator-mcp { margin: 4px 0; }
+.orchestrator-mcp-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+}
+.orchestrator-mcp-label { color: var(--text-muted, #a8a4c0); }
+.orchestrator-mcp-chip {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-family: var(--font-mono, monospace);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+}
+.orchestrator-mcp-chip.ok { color: var(--success, #34d399); border-color: var(--success, #34d399); }
+.orchestrator-mcp-chip.off { color: var(--text-muted, #a8a4c0); }
+
 /* ── Agenten-Ansicht (Phase 48 F) ── */
 .agents-status-banner {
   display: flex;
