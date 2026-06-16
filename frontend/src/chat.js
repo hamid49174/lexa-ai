@@ -743,6 +743,35 @@ function isChatNearBottom(container, threshold = 140) {
   return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
 }
 
+// ── Scroll-to-latest FAB (ChatGPT/Claude-Stil) ────────────────────────────
+// Sichtbar nur, wenn der Nutzer nach oben gescrollt hat (nicht nahe am unteren Ende)
+// UND es ueberhaupt etwas zu scrollen gibt. Klick -> sanft ans Ende.
+function updateScrollBottomFab() {
+  const fab = document.getElementById("scroll-bottom-fab");
+  if (!fab) return;
+  const cm = chatMessages || document.getElementById("chat-messages");
+  const scrollable = cm && cm.scrollHeight - cm.clientHeight > 80;
+  const show = Boolean(scrollable && !isChatNearBottom(cm, 200));
+  fab.classList.toggle("hidden", !show);
+}
+
+function scrollChatToBottom() {
+  const cm = chatMessages || document.getElementById("chat-messages");
+  if (!cm) return;
+  try {
+    cm.scrollTo({ top: cm.scrollHeight, behavior: "smooth" });
+  } catch (e) {
+    cm.scrollTop = cm.scrollHeight;
+  }
+}
+window.scrollChatToBottom = scrollChatToBottom;
+window.updateScrollBottomFab = updateScrollBottomFab;
+
+document.addEventListener("DOMContentLoaded", () => {
+  const cm = document.getElementById("chat-messages");
+  if (cm) cm.addEventListener("scroll", updateScrollBottomFab, { passive: true });
+});
+
 function renderStreamingFormatted(target, text) {
   // Live-Markdown waehrend des Streams: voller, sicherer DOM-Render + Cursor.
   // try/catch faengt unvollstaendiges Markdown (offene ```-Codeblocks) waehrend des Tippens ab.
@@ -1915,6 +1944,8 @@ async function sendMessage() {
       const stick = isChatNearBottom(chatMessages);
       renderStreamingFormatted(textEl, fullText);
       if (stick) chatMessages.scrollTop = chatMessages.scrollHeight;
+      // FAB einblenden, wenn der Nutzer waehrend des Streams hochgescrollt ist.
+      updateScrollBottomFab();
     });
   };
 

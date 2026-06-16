@@ -925,6 +925,7 @@
   "chat.dropFile": "Drop file here",
   "chat.fileTypes": "Text, Code, Images, PDFs",
   "chat.attachFile": "Attach file",
+  "chat.scrollToLatest": "Jump to latest",
   "chat.listening": "Listening…",
   "chat.showChat": "Show chat",
   "chat.iAmLexa": "I am Lexa.",

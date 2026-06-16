@@ -881,6 +881,7 @@
   "chat.dropFile": "Datei hier ablegen",
   "chat.fileTypes": "Text, Code, Bilder, PDFs",
   "chat.attachFile": "Datei anhängen",
+  "chat.scrollToLatest": "Zur neuesten Nachricht",
   "chat.listening": "Ich höre zu…",
   "chat.showChat": "Chat anzeigen",
   "chat.iAmLexa": "Ich bin Lexa.",

@@ -616,6 +616,13 @@
           <!-- Chat Messages -->
           <div class="chat-messages hidden" id="chat-messages"></div>
 
+          <!-- Scroll-to-latest FAB (erscheint nur, wenn man nach oben gescrollt hat) -->
+          <button type="button" id="scroll-bottom-fab" class="scroll-bottom-fab hidden" data-action="scrollChatToBottom" aria-label="Zur neuesten Nachricht" title="Zur neuesten Nachricht" data-i18n-aria-label="chat.scrollToLatest" data-i18n-title="chat.scrollToLatest">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+
           <!-- Hidden compat elements -->
           <div id="voice-transcript-panel" class="hidden"><div id="voice-transcript-list"></div></div>
           <div id="floating-cards-container" class="hidden"><span id="nav-cpu-percent"></span><span id="nav-commands-count"></span></div>
