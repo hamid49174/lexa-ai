@@ -143,18 +143,39 @@ def _parse_ddg_html(raw_html: str, max_results: int) -> list[dict]:
     return results
 
 
-def search_web(query: str, max_results: int = 5) -> list[dict]:
-    """DuckDuckGo-HTML-Suche. Liefert [{title, url, snippet}] (leer bei Fehler)."""
-    if not query or not query.strip():
-        return []
-    max_results = max(1, min(int(max_results or 5), 15))
-    qs = urllib.parse.urlencode({"q": query.strip()})
+def _simplify_query(query: str) -> str:
+    """Entfernt Quotes/Klammern/Operatoren — fuer den Fallback, wenn die (oft ueber-
+    quotierte) LLM-Query 0 Treffer liefert (z.B. '"Tauri" "Electron"' -> 'Tauri Electron')."""
+    q = re.sub(r"[\"'()\[\]]+", " ", query or "")
+    q = re.sub(r"\s+", " ", q).strip()
+    return q
+
+
+def _ddg_search_once(query: str, max_results: int) -> list[dict]:
+    qs = urllib.parse.urlencode({"q": query})
     try:
         raw = _http_get(f"https://html.duckduckgo.com/html/?{qs}", _SEARCH_TIMEOUT, _SEARCH_MAX_BYTES)
     except Exception as e:
         logger.warning("web search failed: %s", e)
         return []
     return _parse_ddg_html(raw, max_results)
+
+
+def search_web(query: str, max_results: int = 5) -> list[dict]:
+    """DuckDuckGo-HTML-Suche. Liefert [{title, url, snippet}] (leer bei Fehler).
+
+    Bei 0 Treffern automatisch ein Fallback mit vereinfachter Query (ohne Quotes/Klammern),
+    damit ueber-quotierte LLM-Reformulierungen nicht in 'keine Treffer' enden.
+    """
+    if not query or not query.strip():
+        return []
+    max_results = max(1, min(int(max_results or 5), 15))
+    results = _ddg_search_once(query.strip(), max_results)
+    if not results:
+        simplified = _simplify_query(query)
+        if simplified and simplified != query.strip():
+            results = _ddg_search_once(simplified, max_results)
+    return results
 
 
 # ── Fetch (lesbarer Text einer beliebigen URL) ───────────────────────────────
