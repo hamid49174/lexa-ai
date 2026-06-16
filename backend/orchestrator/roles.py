@@ -21,10 +21,12 @@ ORCHESTRATOR_ROLES: dict[str, dict[str, Any]] = {
         "persona": (
             "Du bist ein RECHERCHE-Sub-Agent in einem Multi-Agenten-Team. Deine einzige "
             "Aufgabe ist die dir zugewiesene Teilfrage faktenbasiert zu beantworten. Nutze "
-            "web_search aktiv fuer aktuelle, belegte Informationen statt zu raten. Arbeite "
-            "NUR lesend. Fasse am Ende knapp zusammen, was du gefunden hast, mit Quellen."
+            "web_search fuer aktuelle, belegte Informationen statt zu raten und vertiefe "
+            "vielversprechende Treffer mit web_scrape (vollstaendigen Seiteninhalt lesen). "
+            "Ziehe dein Gedaechtnis (memory_search) fuer fruehere Befunde hinzu. Arbeite NUR "
+            "lesend. Fasse am Ende knapp zusammen, was du gefunden hast, mit Quellen."
         ),
-        "tools": ["web_search", "memory_search"],
+        "tools": ["web_search", "web_scrape", "memory_search"],
     },
     "knowledge": {
         "label": "Wissen",
@@ -40,6 +42,7 @@ ORCHESTRATOR_ROLES: dict[str, dict[str, Any]] = {
             "personal_os_read_file",
             "personal_os_context_pack",
             "personal_os_obsidian_context",
+            "personal_os_graph",
             "memory_search",
             "note_read",
             "note_list",
@@ -49,24 +52,32 @@ ORCHESTRATOR_ROLES: dict[str, dict[str, Any]] = {
         "label": "Code",
         "persona": (
             "Du bist ein CODE-Sub-Agent in einem Multi-Agenten-Team. Du analysierst Code und "
-            "technische Fragen READ-ONLY: lokalisiere relevante Dateien (file_search), schlage "
-            "technische Doku/Loesungen via web_search nach, nutze das Gedaechtnis. Du AENDERST "
-            "keinen Code — konkrete Aenderungen passieren spaeter ueber den bestaetigungs-"
-            "gegateten Coding-Pfad. Fasse Befunde + empfohlene naechste Schritte knapp zusammen."
+            "technische Fragen READ-ONLY und faktenbasiert: erfasse den Repo-Stand mit "
+            "git_status, sieh dir die Historie (git_log), konkrete Aenderungen (git_diff) und "
+            "Branches (git_branch_list) an, lokalisiere relevante Dateien (file_search) und "
+            "schlage technische Doku/Loesungen via web_search nach. Du AENDERST keinen Code — "
+            "konkrete Aenderungen passieren spaeter ueber den bestaetigungs-gegateten Coding-"
+            "Pfad. Fasse Befunde + empfohlene naechste Schritte konkret und belegt zusammen."
         ),
-        "tools": ["file_search", "web_search", "memory_search"],
+        "tools": ["git_status", "git_log", "git_diff", "git_branch_list", "file_search", "web_search", "memory_search"],
     },
     "planning": {
         "label": "Planung",
         "persona": (
             "Du bist ein PLANUNGS-Sub-Agent in einem Multi-Agenten-Team (Lexa als 'zweites "
-            "Gehirn'). Du liest READ-ONLY den Stand: offene Todos (todo_list), Gewohnheiten "
-            "(habit_list), Fokus/Pomodoro (pomodoro_status), plus Gedaechtnis/Web bei Bedarf. "
-            "Du AENDERST nichts — du schlaegst einen konkreten Plan/Vorschlag vor (das tatsaech"
-            "liche Anlegen von Todos/Terminen passiert spaeter bestaetigungs-gegatet). Fasse "
-            "einen klaren, priorisierten Vorschlag zusammen."
+            "Gehirn'). Du liest READ-ONLY den vollstaendigen Stand des Nutzers: offene Todos "
+            "(todo_list), Gewohnheiten (habit_list), Fokus/Pomodoro (pomodoro_status), erfasste "
+            "Zeiten (time_tracking_report), Erinnerungen (reminder_list), Routinen (routine_list) "
+            "und Termine (calendar_today/calendar_week/calendar_next), plus Gedaechtnis/Web bei "
+            "Bedarf. Du AENDERST nichts — du schlaegst einen konkreten, priorisierten Plan vor "
+            "(das tatsaechliche Anlegen von Todos/Terminen passiert spaeter bestaetigungs-"
+            "gegatet). Fasse einen klaren, realistisch terminierten Vorschlag zusammen."
         ),
-        "tools": ["todo_list", "habit_list", "pomodoro_status", "memory_search", "web_search"],
+        "tools": [
+            "todo_list", "habit_list", "pomodoro_status", "time_tracking_report",
+            "reminder_list", "routine_list", "calendar_today", "calendar_week",
+            "calendar_next", "memory_search", "web_search",
+        ],
     },
     "general": {
         "label": "Allgemein",
@@ -80,6 +91,37 @@ ORCHESTRATOR_ROLES: dict[str, dict[str, Any]] = {
 }
 
 DEFAULT_ROLE = "research"
+
+# Loop-Spezialisierung je Rolle: WIE der Sub-Agent vorgeht. 'hint' = rollenspezifischer
+# Vorgehens-Hinweis (an die Persona angehaengt, damit der erste Tool-Call sitzt); 'max_steps'
+# = rollen-eigene Schritt-Obergrenze (wird zusaetzlich mit dem globalen Cap ge-min-t). So
+# bekommt jeder Agententyp ein echtes, unterschiedliches Verhalten statt nur eine Persona.
+ROLE_LOOPS: dict[str, dict[str, Any]] = {
+    "research": {
+        "max_steps": 6,
+        "hint": "Starte mit web_search fuer aktuelle Belege, vertiefe die besten Treffer mit "
+                "web_scrape und fasse erst dann mit Quellen zusammen.",
+    },
+    "knowledge": {
+        "max_steps": 5,
+        "hint": "Starte mit personal_os_query bzw. memory_search, lies die relevantesten "
+                "Treffer (personal_os_read_file/note_read) und fasse dann zusammen.",
+    },
+    "code": {
+        "max_steps": 6,
+        "hint": "Starte mit git_status und file_search, um Repo-Stand und relevante Dateien zu "
+                "erfassen; nutze git_diff/git_log fuer konkrete Aenderungen, bevor du urteilst.",
+    },
+    "planning": {
+        "max_steps": 5,
+        "hint": "Lies zuerst den Stand (todo_list, habit_list, pomodoro_status, "
+                "time_tracking_report, calendar_today) und schlage dann einen priorisierten Plan vor.",
+    },
+    "general": {
+        "max_steps": 5,
+        "hint": "Waehle das passendste Lese-Werkzeug fuer die Teilaufgabe und fasse knapp zusammen.",
+    },
+}
 
 # Read-only Contract, der jeder Sub-Agenten-Persona angehaengt wird.
 _READ_ONLY_CONTRACT = (
@@ -111,6 +153,11 @@ def role_tool_names(role: str) -> list[str]:
     """Read-only Tool-Namen, die diese Rolle aufrufen darf."""
     spec = ORCHESTRATOR_ROLES.get(normalize_role(role), ORCHESTRATOR_ROLES["general"])
     return list(spec.get("tools", []))
+
+
+def role_loop_spec(role: str) -> dict:
+    """Loop-Spezialisierung (max_steps + Vorgehens-Hint) fuer eine Rolle."""
+    return dict(ROLE_LOOPS.get(normalize_role(role), ROLE_LOOPS["general"]))
 
 
 def role_tool_defs(role: str) -> list[dict]:

@@ -29,6 +29,7 @@ from backend.orchestrator.roles import (
     ORCHESTRATOR_ROLES,
     is_role_tool_allowed,
     normalize_role,
+    role_loop_spec,
     role_persona,
     role_tool_defs,
 )
@@ -326,6 +327,16 @@ async def _run_subagent(
     persona = role_persona(role)
     tools = role_tool_defs(role)
     label = ORCHESTRATOR_ROLES.get(role, {}).get("label", role)
+    # Rollen-spezifische Loop-Spezialisierung: Vorgehens-Hint an die Persona, eigener
+    # Schritt-Cap (mit dem globalen Cap ge-min-t). Macht die Agententypen echt verschieden.
+    loop = role_loop_spec(role)
+    hint = loop.get("hint") or ""
+    if hint:
+        persona = persona + "\n\nVORGEHEN: " + hint
+    role_max = loop.get("max_steps")
+    effective_max = max(1, int(max_steps))
+    if isinstance(role_max, int) and role_max > 0:
+        effective_max = max(1, min(effective_max, role_max))
     await emit({"type": "subagent_start", "agent_id": agent_id, "role": role, "label": label, "objective": objective})
 
     messages: list[dict] = [{"role": "user", "content": objective}]
@@ -336,7 +347,7 @@ async def _run_subagent(
     fail_counts: dict[str, int] = {}
     consecutive_fail = 0
 
-    for _ in range(max(1, int(max_steps))):
+    for _ in range(effective_max):
         try:
             result = await _invoke(chat_fn, messages, persona, tools, timeout=step_timeout)
         except asyncio.TimeoutError:
