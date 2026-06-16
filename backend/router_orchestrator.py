@@ -34,6 +34,10 @@ class OrchestratorRequest(BaseModel):
     mode: str = Field("thorough", max_length=20)
 
 
+class OrchestratorTriageRequest(BaseModel):
+    task: str = Field(..., min_length=1, max_length=MAX_CHAT_MESSAGE_LENGTH)
+
+
 @router.get("/status")
 async def orchestrator_status():
     """Feature-Status + Caps fuer das Frontend."""
@@ -50,6 +54,19 @@ async def orchestrator_status():
         "roles": [{"id": rid, "label": spec.get("label", rid)} for rid, spec in ORCHESTRATOR_ROLES.items()],
         "browser": browser,
     }
+
+
+@router.post("/triage")
+async def orchestrator_triage(req: OrchestratorTriageRequest):
+    """Entscheidet per guenstigem LLM-Call, ob eine Aufgabe einen Multi-Agenten-Lauf braucht.
+    Liefert {needs_agents, subagents, mode, reason}. Blockiert nie (Fallback: needs_agents=false)."""
+    if not ORCHESTRATOR_ENABLED:
+        return {"needs_agents": False, "subagents": 1, "mode": "fast", "reason": "deaktiviert", "source": "disabled"}
+    if not check_rate_limit("chat"):
+        raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
+    task = sanitize_input(req.task)
+    from backend.orchestrator.triage import triage_task
+    return await triage_task(task)
 
 
 @router.post("/run")

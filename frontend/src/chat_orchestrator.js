@@ -345,7 +345,7 @@
       const v = localStorage.getItem(_EFFORT_KEY);
       if (_EFFORT_LEVELS.indexOf(v) !== -1) return v;
     } catch (_) { /* localStorage evtl. nicht verfuegbar */ }
-    return "fast";
+    return "off";  // Default AUS: Auto-Agenten nur, wenn der Nutzer den Regler bewusst einschaltet
   }
 
   function setAgentEffort(level) {
@@ -391,8 +391,32 @@
     return false;
   }
 
+  // Auto-Orchestrierung: fragt den LLM-Triage-Endpoint (Modell entscheidet wie ultracode,
+  // OB Multi-Agent noetig) und startet ggf. den Lauf. Billiger Pre-Filter (Laenge) vermeidet
+  // Triage-Calls fuer Smalltalk; bei nicht erreichbarem Triage faellt es auf die lokale
+  // Heuristik zurueck. Gibt true zurueck, wenn der Orchestrator uebernommen hat.
+  async function maybeAutoOrchestrate(text) {
+    const s = String(text || "").trim();
+    if (s.length < 25) return false;  // Smalltalk/kurze Fragen -> kein Triage-Call, kein Agent
+    let decision = null;
+    try {
+      if (window.lexa && typeof window.lexa.orchestratorTriage === "function") {
+        decision = await window.lexa.orchestratorTriage(s);
+      }
+    } catch (_) { decision = null; }
+    const needs = decision && decision.source !== "error" && decision.source !== "disabled"
+      ? !!decision.needs_agents
+      : needsOrchestratorMode(s);  // Fallback: lokale Heuristik
+    if (!needs) return false;
+    const effort = typeof getAgentEffort === "function" ? getAgentEffort() : "fast";
+    if (effort === "off") return false;
+    sendOrchestratorMessage(s, { displayText: text, mode: effort === "thorough" ? "thorough" : "fast" });
+    return true;
+  }
+
   // Globals fuer chat.js (Routing) + Tests.
   window.sendOrchestratorMessage = sendOrchestratorMessage;
+  window.maybeAutoOrchestrate = maybeAutoOrchestrate;
   window.buildOrchestratorPanel = buildOrchestratorPanel;
   window.orchestratorHandleEvent = orchestratorHandleEvent;
   window.getAgentEffort = getAgentEffort;

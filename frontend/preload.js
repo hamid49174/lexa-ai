@@ -205,6 +205,7 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("agentChat", "critical", "execute", "/agent/chat"),
   bridgePolicy("agentStatus", "low", "read", "/agent/status", { batch_allowed: true }),
   bridgePolicy("orchestratorRun", "medium", "execute", "/orchestrator/run"),
+  bridgePolicy("orchestratorTriage", "low", "execute", "/orchestrator/triage", { batch_allowed: true }),
   bridgePolicy("orchestratorStatus", "low", "read", "/orchestrator/status", { batch_allowed: true }),
   bridgePolicy("orchestratorRuns", "low", "read", "/orchestrator/runs", { batch_allowed: true }),
   bridgePolicy("orchestratorRunDetail", "low", "read", "/orchestrator/runs/{id}", { batch_allowed: true }),
@@ -1242,6 +1243,7 @@ if (isLexaSmokeMockAllowed()) {
     agentStreamRead: async (streamId) => runSmokeMock("agentStreamRead", [streamId], async () => ({ done: true, value: [] })),
     agentStreamCancel: async (streamId) => runSmokeMock("agentStreamCancel", [streamId], async () => ({ ok: true, cancelled: false })),
     orchestratorRun: async (task = "", options = {}) => runSmokeMock("orchestratorRun", [task, options], async () => ({ ok: true, status: 200, statusText: "OK", streamId: "" })),
+    orchestratorTriage: async (task = "") => runSmokeMock("orchestratorTriage", [task], async () => ({ needs_agents: false, subagents: 1, mode: "fast", source: "smoke" })),
     orchestratorStatus: async () => runSmokeMock("orchestratorStatus", [], async () => ({ enabled: true, modes: ["thorough", "fast"], roles: [] })),
     orchestratorRuns: async (limit = 50) => runSmokeMock("orchestratorRuns", [limit], async () => ({ runs: [] })),
     orchestratorRunDetail: async (runId) => runSmokeMock("orchestratorRunDetail", [runId], async () => null),
@@ -2896,6 +2898,16 @@ const lexaBridge = {
       body: JSON.stringify({ task, mode }),
     }, 15000);
     return registerAgentStreamResponse(res);
+  },
+  orchestratorTriage: async (task) => {
+    try {
+      const res = await fetchWithTimeout(`${API}/orchestrator/triage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task }),
+      }, 25000);
+      return res.json();
+    } catch (e) { return { needs_agents: false, source: "error" }; }
   },
   orchestratorStatus: async () => {
     try {

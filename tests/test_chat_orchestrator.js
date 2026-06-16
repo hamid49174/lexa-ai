@@ -92,7 +92,7 @@ win.orchestratorHandleEvent(panel3, { type: "error", message: "kaputt" });
 check("error status", panel3._orch.status._text === "kaputt" && panel3._orch.status.className.includes("error"));
 
 // ── Agenten-Aufwand-Regler ──
-check("effort default is fast", win.getAgentEffort() === "fast");
+check("effort default is off", win.getAgentEffort() === "off");
 win.setAgentEffort("thorough");
 check("setAgentEffort persists", win.getAgentEffort() === "thorough");
 check("effort button label updated", _effortNodes["agent-effort-label"]._text === "Gruendlich");
@@ -111,5 +111,21 @@ check("triggers on multipart und-task", win.needsOrchestratorMode("Finde Infos z
 check("no trigger on simple question", win.needsOrchestratorMode("wie geht es dir heute?") === false);
 check("no trigger on short text", win.needsOrchestratorMode("hallo") === false);
 
-console.log("\n" + (passed + failed) + " tests: " + passed + " passed, " + failed + " failed");
-if (failed > 0) process.exit(1);
+// ── maybeAutoOrchestrate (LLM-Triage primaer, Regex-Fallback) ──
+(async () => {
+  win.setAgentEffort("fast");
+  win.lexa = {
+    orchestratorTriage: async (t) => ({ needs_agents: /AGENT/.test(t), mode: "fast", source: "llm" }),
+    orchestratorRun: async () => ({ ok: false, status: 503, statusText: "", streamId: "" }),
+    agentStreamRead: async () => ({ done: true, value: [] }),
+  };
+  check("auto: short text -> false (kein Triage)", (await win.maybeAutoOrchestrate("kurz")) === false);
+  check("auto: triage needs=false -> false", (await win.maybeAutoOrchestrate("Eine ganz normale laengere Frage ohne Treffer hier")) === false);
+  check("auto: triage needs=true -> true", (await win.maybeAutoOrchestrate("Bitte AGENT diese lange komplexe Aufgabe gruendlich bearbeiten")) === true);
+  win.setAgentEffort("off");
+  check("auto: effort off -> false", (await win.maybeAutoOrchestrate("Bitte AGENT diese lange komplexe Aufgabe bearbeiten")) === false);
+  win.setAgentEffort("fast");
+
+  console.log("\n" + (passed + failed) + " tests: " + passed + " passed, " + failed + " failed");
+  if (failed > 0) process.exit(1);
+})();

@@ -1778,14 +1778,13 @@ async function sendMessage() {
     }
   }
 
-  // Phase 48: Auto-Orchestrator ohne /-Befehl — nur wenn der Aufwand-Regler nicht "off" ist
-  // UND die Aufgabe klar komplex ist (Vergleich/Recherche/mehrteilig). Schont das Budget.
+  // Phase 49: Auto-Orchestrator ohne /-Befehl — der LLM-Triage-Endpoint entscheidet (wie
+  // ultracode), ob die Aufgabe Multi-Agent braucht. Nur aktiv, wenn der Aufwand-Regler an ist.
   if (!text.startsWith("/")
       && typeof getAgentEffort === "function" && getAgentEffort() !== "off"
-      && typeof needsOrchestratorMode === "function" && needsOrchestratorMode(text)
-      && typeof sendOrchestratorMessage === "function") {
-    sendOrchestratorMessage(text, { displayText: text, mode: getAgentEffort() === "thorough" ? "thorough" : "fast" });
-    return;
+      && typeof maybeAutoOrchestrate === "function") {
+    const handled = await maybeAutoOrchestrate(text);
+    if (handled) return;
   }
 
   // Phase 46: Auto-detect if this task needs the multi-step agent
