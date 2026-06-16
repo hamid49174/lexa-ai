@@ -13,11 +13,17 @@ from __future__ import annotations
 import html as _html
 import ipaddress
 import logging
+import os
 import re
 import socket
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+
+try:
+    from backend.config import SEARCH_PROVIDER as _SEARCH_PROVIDER
+except Exception:  # pragma: no cover - defensive
+    _SEARCH_PROVIDER = "auto"
 
 logger = logging.getLogger("lexa.web_research")
 
@@ -98,6 +104,133 @@ def _http_get(url: str, timeout: int, max_bytes: int) -> str:
     return raw[:max_bytes].decode("utf-8", errors="replace")
 
 
+# ── Such-API-Provider (High-End: strukturierte, ranked Treffer wie Perplexity) ──
+# Primaer-Pfad, wenn ein Key konfiguriert ist (keyring 'lexa-ai' oder env). Ohne Key
+# faellt search_web auf das key-freie DuckDuckGo-Scraping zurueck — Lexa bleibt voll
+# funktionsfaehig, der Key ist reine Qualitaets-/Zuverlaessigkeitsstufe.
+_SEARCH_KEY_MAP = {
+    "tavily": ("tavily_api_key", "TAVILY_API_KEY"),
+    "brave": ("brave_api_key", "BRAVE_API_KEY"),
+    "exa": ("exa_api_key", "EXA_API_KEY"),
+}
+
+
+def _get_search_secret(keyring_name: str, env_var: str) -> str:
+    val = (os.environ.get(env_var, "") or "").strip()
+    if val:
+        return val
+    try:
+        import keyring
+        return (keyring.get_password("lexa-ai", keyring_name) or "").strip()
+    except Exception:
+        return ""
+
+
+def _search_key_for(provider: str) -> str:
+    pair = _SEARCH_KEY_MAP.get(provider)
+    return _get_search_secret(*pair) if pair else ""
+
+
+def _search_tavily(query: str, max_results: int, key: str) -> list[dict]:
+    import requests
+    resp = requests.post(
+        "https://api.tavily.com/search",
+        json={"api_key": key, "query": query, "max_results": max_results,
+              "search_depth": "basic", "include_raw_content": True},
+        timeout=_SEARCH_TIMEOUT,
+    )
+    resp.raise_for_status()
+    out: list[dict] = []
+    for item in (resp.json().get("results") or []):
+        url = _safe_url(str(item.get("url", "")))
+        if not url:
+            continue
+        out.append({
+            "title": str(item.get("title", ""))[:200],
+            "url": url[:500],
+            "snippet": str(item.get("content", ""))[:300],
+            "content": str(item.get("raw_content") or item.get("content") or "")[:_MAX_TEXT_CHARS],
+            "score": item.get("score", 0),
+        })
+        if len(out) >= max_results:
+            break
+    return out
+
+
+def _search_brave(query: str, max_results: int, key: str) -> list[dict]:
+    import requests
+    resp = requests.get(
+        "https://api.search.brave.com/res/v1/web/search",
+        headers={"X-Subscription-Token": key, "Accept": "application/json"},
+        params={"q": query, "count": max_results},
+        timeout=_SEARCH_TIMEOUT,
+    )
+    resp.raise_for_status()
+    out: list[dict] = []
+    for item in ((resp.json().get("web") or {}).get("results") or []):
+        url = _safe_url(str(item.get("url", "")))
+        if not url:
+            continue
+        out.append({
+            "title": str(item.get("title", ""))[:200],
+            "url": url[:500],
+            "snippet": str(item.get("description", ""))[:300],
+        })
+        if len(out) >= max_results:
+            break
+    return out
+
+
+def _search_exa(query: str, max_results: int, key: str) -> list[dict]:
+    import requests
+    resp = requests.post(
+        "https://api.exa.ai/search",
+        headers={"x-api-key": key},
+        json={"query": query, "numResults": max_results, "contents": {"text": True}},
+        timeout=_SEARCH_TIMEOUT,
+    )
+    resp.raise_for_status()
+    out: list[dict] = []
+    for item in (resp.json().get("results") or []):
+        url = _safe_url(str(item.get("url", "")))
+        if not url:
+            continue
+        text = str(item.get("text", ""))
+        out.append({
+            "title": str(item.get("title", ""))[:200],
+            "url": url[:500],
+            "snippet": text[:300],
+            "content": text[:_MAX_TEXT_CHARS],
+        })
+        if len(out) >= max_results:
+            break
+    return out
+
+
+_SEARCH_PROVIDER_ORDER = ("tavily", "brave", "exa")
+
+
+def _api_search(query: str, max_results: int) -> list[dict]:
+    """Versucht hochwertige Such-APIs (nur wenn Key konfiguriert). [] wenn keiner passt."""
+    provider = (_SEARCH_PROVIDER or "auto").lower()
+    order = [provider] if provider in _SEARCH_PROVIDER_ORDER else (list(_SEARCH_PROVIDER_ORDER) if provider == "auto" else [])
+    for name in order:
+        key = _search_key_for(name)
+        if not key:
+            continue
+        func = globals().get("_search_" + name)  # via globals() -> respektiert monkeypatch/Tests
+        if not func:
+            continue
+        try:
+            res = func(query, max_results, key)
+            if res:
+                logger.info("web search via %s: %d Treffer", name, len(res))
+                return res
+        except Exception as exc:
+            logger.warning("search provider %s failed: %s", name, exc)
+    return []
+
+
 # ── HTML-Hilfen ──────────────────────────────────────────────────────────────
 def _clean_html(text: str) -> str:
     clean = _html.unescape(str(text or ""))
@@ -169,11 +302,17 @@ def search_web(query: str, max_results: int = 5) -> list[dict]:
     """
     if not query or not query.strip():
         return []
+    q = query.strip()
     max_results = max(1, min(int(max_results or 5), 15))
-    results = _ddg_search_once(query.strip(), max_results)
+    # 1) Hochwertige Such-API (Tavily/Brave/Exa), falls ein Key konfiguriert ist.
+    api = _api_search(q, max_results)
+    if api:
+        return api
+    # 2) Key-freier Fallback: DuckDuckGo (+ vereinfachte Query bei 0 Treffern).
+    results = _ddg_search_once(q, max_results)
     if not results:
         simplified = _simplify_query(query)
-        if simplified and simplified != query.strip():
+        if simplified and simplified != q:
             results = _ddg_search_once(simplified, max_results)
     return results
 
@@ -214,6 +353,9 @@ def gather_sources(query: str, max_sources: int = 4) -> list[dict]:
         return []
 
     def _one(hit: dict) -> dict:
+        # API-Provider (Tavily/Exa) liefern Content oft schon mit -> spart den Fetch-Hop.
+        if hit.get("content"):
+            return hit
         return {**hit, "content": fetch_readable(hit["url"])}
 
     out: list[dict] = []

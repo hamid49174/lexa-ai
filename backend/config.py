@@ -166,6 +166,13 @@ ORCHESTRATOR_RUN_TIMEOUT = _env_int("LEXA_ORCHESTRATOR_RUN_TIMEOUT", 600, minimu
 # autonomen Parallel-Orchestrator, sondern explizit opt-in. Default AUS (Ressourcen/Sicherheit).
 ORCHESTRATOR_BROWSER_ENABLED = _env_bool("LEXA_ORCHESTRATOR_BROWSER_ENABLED", False)
 
+# ── Web-Recherche (Phase 49) ───────────────────────
+# High-End-Suche via API (Tavily/Brave/Exa) wenn ein Key konfiguriert ist; sonst DuckDuckGo.
+# 'auto' = nimm den ersten verfuegbaren Key (Tavily bevorzugt). Key liegt in keyring 'lexa-ai'
+# (tavily_api_key/brave_api_key/exa_api_key) oder env (TAVILY_API_KEY/BRAVE_API_KEY/EXA_API_KEY).
+SEARCH_PROVIDER = (os.environ.get("LEXA_SEARCH_PROVIDER", "auto") or "auto").strip().lower()
+SEARCH_MAX_RESULTS = _env_int("LEXA_SEARCH_MAX_RESULTS", 5, minimum=1, maximum=15)
+
 # ── MCP — Model Context Protocol (Phase 47) ───
 MCP_ENABLED = _env_bool("LEXA_MCP_ENABLED", True)            # Enable MCP server integration
 MCP_CONNECT_TIMEOUT = _env_int("LEXA_MCP_CONNECT_TIMEOUT", 10, minimum=1, maximum=120)
