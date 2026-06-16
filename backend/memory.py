@@ -967,7 +967,7 @@ def auto_remember(user_msg: str, ai_reply: str) -> None:
 
         db.execute(
             "INSERT INTO interactions (user_message, ai_reply, had_action) VALUES (?, ?, ?)",
-            (user_msg, ai_reply[:1000], has_action),
+            (user_msg[:2000], ai_reply[:1000], has_action),
         )
 
         msg_lower = user_msg.lower().strip()

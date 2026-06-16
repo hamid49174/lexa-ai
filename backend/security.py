@@ -502,10 +502,12 @@ def validate_url(url: str) -> str:
     if addr is not None and is_dangerous_network_ip(addr):
         raise ValueError(t("security.blockedPrivate", host=hostname))
 
-    # Nicht-kanonische Hosts (DNS-Namen + alternative IP-Notationen decimal/hex/octal/short)
-    # aufloesen und JEDE Adresse pruefen — sonst umgehen z.B. http://2130706433/ oder
-    # http://0x7f.0.0.1/ den Loopback-Schutz. Aufloesungsfehler sind nicht fatal.
-    if addr is None:
+    # Alternative IP-Notationen (decimal 2130706433, hex 0x7f.0.0.1, octal 0177.0.0.1,
+    # short 127.1, http://0/) parst ipaddress NICHT, der OS-Resolver aber schon -> sie
+    # umgingen sonst den Loopback-Schutz. NUR solche numerischen Notationen hier aufloesen
+    # (kein DNS fuer echte Hostnamen: das uebernehmen die aufrufenden Schichten). Erkennung:
+    # Host besteht ausschliesslich aus Ziffern/Hex/Punkten/x.
+    if addr is None and hostname_lower and re.fullmatch(r"[0-9a-fx.]+", hostname_lower):
         try:
             import socket
             infos = socket.getaddrinfo(hostname_lower, None)

@@ -554,7 +554,10 @@ async def _recover_timers():
         for ft in future_timers:
             remaining = ft["fire_at"] - now
             if remaining > 0:
+                # set_timer legt eine NEUE Timer-Zeile an -> die alte quittieren, sonst wird
+                # sie bei jedem Neustart erneut dupliziert (exponentiell wachsende Duplikate).
                 companion.set_timer(int(remaining), ft["message"])
+                await asyncio.to_thread(memory.timer_acknowledge, ft["id"])
                 logger.info(f"Timer neu geplant: '{ft['message']}' in {int(remaining)}s")
     except Exception as e:
         logger.debug(f"Timer-Recovery skipped: {e}")

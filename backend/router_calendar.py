@@ -4,13 +4,26 @@ API Endpoints for Google Calendar integration.
 
 import asyncio
 import logging
+import re
 import threading
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from backend.security import check_rate_limit, audit_log
+from backend.agent_protocol import redacted_summary
 from companion import calendar_integration as calendar_int
 
 logger = logging.getLogger("lexa.router.calendar")
+
+# Lokale Pfade aus Fehlertexten entfernen (wie router_vision/router_voice).
+_LOCAL_PATH_RE = re.compile(
+    r"(?:(?<![A-Za-z])[A-Za-z]:[\\/][^\s\"'<>|]+|\\\\[^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc|mnt)/[^\s\"'<>|]+)"
+)
+
+
+def _calendar_safe_error(exc, prefix: str = "Kalender-Fehler") -> str:
+    """Client-sichere Fehlermeldung: Secrets + lokale Pfade entfernt."""
+    text = _LOCAL_PATH_RE.sub("[pfad]", redacted_summary(str(exc or ""), max_chars=200))
+    return f"{prefix}: {text}" if text else prefix
 
 router = APIRouter(prefix="/calendar", tags=["calendar"])
 
@@ -36,7 +49,7 @@ async def calendar_status():
         return result
     except Exception as e:
         logger.error("calendar_status failed: %s", e, exc_info=True)
-        return JSONResponse({"error": f"Fehler: {e}"}, status_code=500)
+        return JSONResponse({"error": _calendar_safe_error(e)}, status_code=500)
 
 
 @router.post("/connect")
@@ -65,7 +78,7 @@ async def calendar_connect():
             )
     except Exception as e:
         logger.error("calendar_connect failed: %s", e, exc_info=True)
-        return JSONResponse({"error": f"Verbindungsfehler: {e}"}, status_code=500)
+        return JSONResponse({"error": _calendar_safe_error(e, "Verbindungsfehler")}, status_code=500)
     finally:
         _connect_lock.release()
 
@@ -83,7 +96,7 @@ async def calendar_today():
         return result
     except Exception as e:
         logger.error("calendar_today failed: %s", e, exc_info=True)
-        return JSONResponse({"error": f"Fehler: {e}"}, status_code=500)
+        return JSONResponse({"error": _calendar_safe_error(e)}, status_code=500)
 
 
 @router.get("/week")
@@ -99,4 +112,4 @@ async def calendar_week():
         return result
     except Exception as e:
         logger.error("calendar_week failed: %s", e, exc_info=True)
-        return JSONResponse({"error": f"Fehler: {e}"}, status_code=500)
+        return JSONResponse({"error": _calendar_safe_error(e)}, status_code=500)

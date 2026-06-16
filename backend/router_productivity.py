@@ -24,7 +24,7 @@ VALID_FREQUENCIES = {"daily", "weekly"}
 
 def _validate_todo_fields(data: dict, *, require_title: bool = False) -> str | None:
     """Validate todo fields. Returns error message or None if valid."""
-    if require_title and not data.get("title", "").strip():
+    if require_title and not str(data.get("title") or "").strip():
         return "Titel darf nicht leer sein."
 
     status = data.get("status", "")
@@ -85,6 +85,8 @@ async def create_todo(req: Request):
         data = await req.json()
     except Exception:
         return JSONResponse({"error": t("error.invalidJson")}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"error": t("error.invalidJson")}, status_code=400)
 
     error = _validate_todo_fields(data, require_title=True)
     if error:
@@ -109,6 +111,8 @@ async def update_todo(todo_id: int, req: Request):
     try:
         data = await req.json()
     except Exception:
+        return JSONResponse({"error": t("error.invalidJson")}, status_code=400)
+    if not isinstance(data, dict):
         return JSONResponse({"error": t("error.invalidJson")}, status_code=400)
 
     error = _validate_todo_fields(data)
@@ -180,6 +184,8 @@ async def pomodoro_start(req: Request):
         data = await req.json()
     except Exception:
         return JSONResponse({"error": t("error.invalidJson")}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"error": t("error.invalidJson")}, status_code=400)
     try:
         duration = int(data.get("duration", 25))
     except (ValueError, TypeError):
@@ -225,8 +231,10 @@ async def create_habit(req: Request):
         data = await req.json()
     except Exception:
         return JSONResponse({"error": t("error.invalidJson")}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"error": t("error.invalidJson")}, status_code=400)
 
-    name = data.get("name", "").strip()
+    name = str(data.get("name") or "").strip()
     if not name:
         return JSONResponse({"error": "Name darf nicht leer sein."}, status_code=400)
 

@@ -2465,6 +2465,7 @@ async def chat_stream_endpoint(req: ChatRequest):
                     history_reply = f"{reply} [Aktion: {action_name}({params_str}) wartet auf Bestaetigung]"
                 async with _history_lock:
                     update_history(conversation_history, sanitized, history_reply, MAX_HISTORY)
+                history_saved = True  # sonst speichert der Cancel-Handler den Verlauf doppelt
                 audit_log("chat_stream", "tool_call", f"ACTION={action.get('action') if action else 'none'}")
                 yield f"data: {json.dumps({'done': True, 'action': action, 'rc': requires_confirmation, 'reply': reply})}\n\n"
 
