@@ -56,11 +56,13 @@
     const planBox = _el("div", "orchestrator-plan");
     const agentsBox = _el("div", "orchestrator-agents");
     const verifyBox = _el("div", "orchestrator-verify");
+    const sourcesBox = _el("div", "orchestrator-sources");
     wrap.appendChild(planBox);
     wrap.appendChild(agentsBox);
     wrap.appendChild(verifyBox);
+    wrap.appendChild(sourcesBox);
 
-    wrap._orch = { status, counts, phases, planBox, agentsBox, verifyBox, agents: {}, synthesis: "", stepCount: 0, mode };
+    wrap._orch = { status, counts, phases, planBox, agentsBox, verifyBox, sourcesBox, agents: {}, sources: [], synthesis: "", stepCount: 0, mode };
     _setPhase(wrap, "plan", "active");
     return wrap;
   }
@@ -165,6 +167,44 @@
     refs.verifyBox.appendChild(line);
   }
 
+  function _renderSources(panel, sources) {
+    const refs = panel._orch;
+    if (!refs || !Array.isArray(sources) || !sources.length) return;
+    refs.sources = sources;
+    refs.sourcesBox.replaceChildren();
+    refs.sourcesBox.appendChild(_el("div", "orchestrator-section-title", "Quellen (" + sources.length + ")"));
+    const list = _el("ol", "orchestrator-source-list");
+    sources.forEach((s) => {
+      const li = _el("li", "orchestrator-source");
+      const num = _el("span", "orchestrator-source-id", "[" + (s.id != null ? s.id : "?") + "]");
+      li.appendChild(num);
+      if (s.url) {
+        const a = _el("a", "orchestrator-source-link", s.title || s.url);
+        a.href = s.url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        li.appendChild(document.createTextNode(" "));
+        li.appendChild(a);
+      } else {
+        li.appendChild(document.createTextNode(" " + (s.title || "Quelle")));
+      }
+      list.appendChild(li);
+    });
+    refs.sourcesBox.appendChild(list);
+  }
+
+  // Quellen als Markdown-Fussnote fuer die persistierte Antwort ([n] Titel — URL).
+  function _sourcesMarkdown(sources) {
+    if (!Array.isArray(sources) || !sources.length) return "";
+    const lines = ["", "**Quellen**"];
+    sources.forEach((s) => {
+      const id = s.id != null ? s.id : "?";
+      const title = (s.title || s.url || "Quelle").replace(/\s+/g, " ").trim();
+      lines.push(s.url ? `[${id}] ${title} — ${s.url}` : `[${id}] ${title}`);
+    });
+    return "\n" + lines.join("\n");
+  }
+
   // Pure Event-Dispatch (test-bar): mutiert nur das Panel-DOM.
   function orchestratorHandleEvent(panel, event) {
     if (!panel || !event) return;
@@ -186,6 +226,10 @@
         _setPhase(panel, "verify", "active");
         _addVerification(panel, event.verdict);
         break;
+      case "sources":
+        _setPhase(panel, "agents", "done");
+        _renderSources(panel, event.sources);
+        break;
       case "synthesis":
         _setPhase(panel, "agents", "done");
         _setPhase(panel, "verify", (panel._orch && panel._orch.mode === "fast") ? "skip" : "done");
@@ -195,6 +239,11 @@
       case "done":
         _setPhase(panel, "synth", "done");
         _setStatus(panel, "fertig", "done");
+        // Fallback: Quellen aus dem done-Payload rendern, falls das sources-Event fehlte.
+        if (panel._orch && (!panel._orch.sources || !panel._orch.sources.length)
+            && event.run && Array.isArray(event.run.sources) && event.run.sources.length) {
+          _renderSources(panel, event.run.sources);
+        }
         if (panel._orch && event.run && event.run.partial) _setStatus(panel, "teilweise (Zeitlimit)", "issue");
         break;
       case "error": _setStatus(panel, event.message || "Fehler", "error"); break;
@@ -320,8 +369,12 @@
         try { if (reader && typeof reader.cancel === "function") await reader.cancel(); } catch (_) { /* idempotent */ }
       }
 
-      const answer = panel._orch && panel._orch.synthesis;
-      if (answer && typeof addMessage === "function") addMessage(answer, "system");
+      let answer = panel._orch && panel._orch.synthesis;
+      if (answer && typeof addMessage === "function") {
+        // Quellen-Fussnote anhaengen, damit die [n]-Marken in der Antwort aufloesbar sind.
+        const srcMd = panel._orch ? _sourcesMarkdown(panel._orch.sources) : "";
+        addMessage(answer + srcMd, "system");
+      }
       _scroll();
       // Lauf (User-Prompt + Antwort) in der Konversation persistieren.
       if (typeof saveCurrentConversation === "function") {

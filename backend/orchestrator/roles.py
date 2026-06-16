@@ -87,6 +87,9 @@ _READ_ONLY_CONTRACT = (
     "niemals etwas, das Dateien aendert, schreibt, loescht oder das System steuert. "
     "Wenn du genug Informationen hast, antworte mit einer knappen Text-Zusammenfassung "
     "(kein Tool-Aufruf) — das beendet deinen Teilauftrag."
+    "\n\nQUELLEN-DISZIPLIN: Nenne zu jeder zentralen Tatsache, die aus einer externen Quelle "
+    "(Web-Treffer, Dokument) stammt, deren Titel und URL direkt in deiner Zusammenfassung. "
+    "Trenne klar zwischen Belegtem (mit Quelle) und eigener Einschaetzung. Erfinde nie Quellen."
 )
 
 

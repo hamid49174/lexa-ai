@@ -37,16 +37,38 @@ _REFUTE_PERSONA = (
 )
 
 
-def _judge_prompt(task: str, result: dict) -> str:
-    return (
+def _judge_prompt(task: str, result: dict, sources_block: str = "") -> str:
+    base = (
         "Bewerte das folgende Sub-Agenten-Ergebnis gegen seine Teilaufgabe. Kriterien: "
         "Relevanz, Faktentreue/Belegtheit, Vollstaendigkeit. Gib JSON: "
-        '{"score": 0.0-1.0, "passed": true|false, "reasons": ["..."]}. '
-        "passed=false wenn unbelegt, off-topic, leer oder widerspruechlich.\n\n"
-        f"GESAMTAUFGABE: {task}\n"
-        f"TEILAUFGABE: {result.get('objective', '')}\n"
-        f"ERGEBNIS:\n{result.get('summary', '')}"
+        '{"score": 0.0-1.0, "passed": true|false, "reasons": ["..."]'
     )
+    if sources_block:
+        base += (
+            ', "claims": [{"claim": "...", "source_ids": [1,2], "supported": true|false}], '
+            '"unsupported_count": 0'
+        )
+    base += (
+        "}. passed=false wenn unbelegt, off-topic, leer oder widerspruechlich."
+    )
+    if sources_block:
+        base += (
+            " Pruefe ZUSAETZLICH jede zentrale Tatsachenbehauptung des Ergebnisses gegen die "
+            "Quellenliste: trage sie in 'claims' ein, verweise mit 'source_ids' auf die "
+            "stuetzenden Quellennummern und setze 'supported'=false, wenn KEINE Quelle die "
+            "Behauptung belegt (= moegliche Halluzination). 'unsupported_count' = Anzahl der "
+            "nicht belegten claims. Senke den Score deutlich bei unbelegten Behauptungen."
+        )
+    parts = [
+        base,
+        "",
+        f"GESAMTAUFGABE: {task}",
+        f"TEILAUFGABE: {result.get('objective', '')}",
+        f"ERGEBNIS:\n{result.get('summary', '')}",
+    ]
+    if sources_block:
+        parts += ["", "QUELLEN (Nummern fuer source_ids):", sources_block]
+    return "\n".join(parts)
 
 
 def _refute_prompt(task: str, result: dict) -> str:
@@ -66,12 +88,46 @@ def _coerce_score(value: Any) -> float:
     return max(0.0, min(1.0, score))
 
 
+def _parse_claims(raw: Any, max_source_id: int) -> tuple[list[dict], int]:
+    """Normalisiere die claim-level Bewertung des Judges. Filtert erfundene source_ids."""
+    if not isinstance(raw, list):
+        return [], 0
+    claims: list[dict] = []
+    unsupported = 0
+    for c in raw:
+        if not isinstance(c, dict):
+            continue
+        ids = c.get("source_ids")
+        clean_ids: list[int] = []
+        if isinstance(ids, list):
+            for x in ids:
+                try:
+                    n = int(x)
+                except (TypeError, ValueError):
+                    continue
+                if 1 <= n <= max_source_id and n not in clean_ids:
+                    clean_ids.append(n)
+        supported = bool(c.get("supported")) and bool(clean_ids)
+        claims.append({
+            "claim": _safe(c.get("claim"), 240),
+            "source_ids": clean_ids,
+            "supported": supported,
+        })
+        if not supported:
+            unsupported += 1
+        if len(claims) >= 12:
+            break
+    return claims, unsupported
+
+
 async def judge_result(
     task: str,
     result: dict,
     *,
     chat_fn: Optional[ChatFn] = None,
     step_timeout: Optional[float] = None,
+    sources_block: str = "",
+    max_source_id: int = 0,
 ) -> dict:
     """LLM-as-Judge fuer EIN Sub-Agenten-Ergebnis. Gibt einen Verdict-Dict zurueck.
     Faellt wohlwollend auf bestanden zurueck (judge darf nie hart blockieren)."""
@@ -80,11 +136,12 @@ async def judge_result(
     # Fehlgeschlagene Sub-Agenten gar nicht erst bewerten.
     if result.get("status") in {"error", "failed", "timeout"}:
         return {"agent_id": agent_id, "passed": False, "score": 0.0,
-                "reasons": [f"Sub-Agent-Status: {result.get('status')}"], "adversarial": None}
+                "reasons": [f"Sub-Agent-Status: {result.get('status')}"], "adversarial": None,
+                "claims": [], "unsupported_count": 0}
     try:
         res = await _invoke(
             chat_fn,
-            [{"role": "user", "content": _judge_prompt(task, result)}],
+            [{"role": "user", "content": _judge_prompt(task, result, sources_block)}],
             _JUDGE_PERSONA,
             [],
             timeout=step_timeout,
@@ -95,11 +152,16 @@ async def judge_result(
             passed = bool(data.get("passed", score >= _PASS_THRESHOLD))
             reasons = data.get("reasons") if isinstance(data.get("reasons"), list) else []
             reasons = [_safe(r, 200) for r in reasons][:6]
-            return {"agent_id": agent_id, "passed": passed, "score": score, "reasons": reasons, "adversarial": None}
+            claims, unsupported = _parse_claims(data.get("claims"), max_source_id) if sources_block else ([], 0)
+            if unsupported:
+                reasons = ([f"{unsupported} unbelegte Behauptung(en)"] + reasons)[:6]
+            return {"agent_id": agent_id, "passed": passed, "score": score, "reasons": reasons,
+                    "adversarial": None, "claims": claims, "unsupported_count": unsupported}
     except Exception as exc:
         logger.warning("orchestrator judge failed: %s", _safe(exc))
     # Wohlwollender Fallback: nicht blockieren, aber markieren.
-    return {"agent_id": agent_id, "passed": True, "score": 0.5, "reasons": ["Judge nicht verfuegbar"], "adversarial": None}
+    return {"agent_id": agent_id, "passed": True, "score": 0.5, "reasons": ["Judge nicht verfuegbar"],
+            "adversarial": None, "claims": [], "unsupported_count": 0}
 
 
 async def adversarial_judge(
@@ -144,18 +206,26 @@ async def verify_results(
     step_timeout: Optional[float] = None,
     high_risk: bool = False,
     adversarial_rounds: int = _ADVERSARIAL_ROUNDS,
+    sources_block: str = "",
+    max_source_id: int = 0,
 ) -> list[dict]:
     """Verifiziere alle Sub-Agenten-Ergebnisse (nur Modus 'gruendlich'). Judges laufen
-    parallel; bei niedrigem Score oder high_risk folgt eine adversarische Runde."""
+    parallel; bei niedrigem Score, high_risk ODER unbelegten Behauptungen folgt eine
+    adversarische Runde."""
     if str(mode).strip().lower() != "thorough" or not results:
         return []
     chat_fn = chat_fn or _default_chat_fn
     verdicts = await asyncio.gather(
-        *[judge_result(task, r, chat_fn=chat_fn, step_timeout=step_timeout) for r in results]
+        *[judge_result(task, r, chat_fn=chat_fn, step_timeout=step_timeout,
+                       sources_block=sources_block, max_source_id=max_source_id) for r in results]
     )
     out: list[dict] = []
     for result, verdict in zip(results, verdicts):
-        needs_adv = high_risk or verdict.get("score", 1.0) < _PASS_THRESHOLD
+        needs_adv = (
+            high_risk
+            or verdict.get("score", 1.0) < _PASS_THRESHOLD
+            or verdict.get("unsupported_count", 0) > 0
+        )
         if needs_adv and result.get("status") not in {"error", "failed", "timeout"}:
             adv = await adversarial_judge(
                 task, result, chat_fn=chat_fn, rounds=adversarial_rounds, step_timeout=step_timeout

@@ -33,6 +33,7 @@ function makeNode(tag) {
 const _effortNodes = { "agent-effort-label": makeNode("span"), "agent-effort-btn": makeNode("button") };
 const documentStub = {
   createElement: (tag) => makeNode(tag),
+  createTextNode: (txt) => { const n = makeNode("#text"); n._text = String(txt); return n; },
   getElementById: (id) => _effortNodes[id] || null,
 };
 const localStorageStub = (() => {
@@ -80,6 +81,34 @@ check("counts show agents", panel._orch.counts._text.indexOf("Agenten") !== -1);
 const agentsBefore = panel._orch.agentsBox.children.length;
 win.orchestratorHandleEvent(panel, { type: "subagent_start", agent_id: "a1", role: "research" });
 check("agent card idempotent", panel._orch.agentsBox.children.length === agentsBefore);
+
+// ── Quellen (zitierte Synthese, Phase 49 #3) ──
+const panelS = win.buildOrchestratorPanel("Recherche", "thorough");
+win.orchestratorHandleEvent(panelS, { type: "sources", sources: [
+  { id: 1, title: "Beispiel A", url: "https://a.test" },
+  { id: 2, title: "Beispiel B", url: "https://b.test" },
+] });
+const sText = allText(panelS);
+check("renders sources section", sText.includes("Quellen") && sText.includes("Beispiel A"));
+check("stores sources on panel", panelS._orch.sources.length === 2);
+const linkNode = (function find(n) {
+  if (n && n.tag === "a") return n;
+  for (const c of (n && n.children) || []) { const r = find(c); if (r) return r; }
+  return null;
+})(panelS._orch.sourcesBox);
+check("source link has href + safe rel/target", linkNode && linkNode.href === "https://a.test"
+  && linkNode.target === "_blank" && linkNode.rel === "noopener noreferrer");
+
+// done-Fallback rendert Quellen, falls das sources-Event fehlte
+const panelSf = win.buildOrchestratorPanel("Recherche", "fast");
+win.orchestratorHandleEvent(panelSf, { type: "done", run: { partial: false, sources: [{ id: 1, title: "Nur im done", url: "https://c.test" }] } });
+check("done renders fallback sources", allText(panelSf).includes("Nur im done"));
+
+// kein sources-Event -> keine Quellen-Sektion
+const panelNo = win.buildOrchestratorPanel("x", "fast");
+win.orchestratorHandleEvent(panelNo, { type: "synthesis", content: "Antwort" });
+win.orchestratorHandleEvent(panelNo, { type: "done", run: { partial: false, sources: [] } });
+check("no sources -> empty box", panelNo._orch.sourcesBox.children.length === 0);
 
 // Partial-Run -> issue-Status
 const panel2 = win.buildOrchestratorPanel("x", "fast");

@@ -1714,6 +1714,35 @@
 .orchestrator-verdict.ok .orchestrator-verdict-tag { color: var(--success, #34d399); }
 .orchestrator-verdict.doubt .orchestrator-verdict-tag { color: var(--warning, #fbbf24); }
 
+/* Quellen (zitierte, fakten-gepruefte Synthese, Phase 49 #3) */
+.orchestrator-sources { margin-top: 6px; }
+.orchestrator-source-list {
+  margin: 4px 0 0;
+  padding-left: 0;
+  list-style: none;
+}
+.orchestrator-source {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted, #a8a4c0);
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+}
+.orchestrator-source-id {
+  font-family: var(--font-mono, monospace);
+  color: var(--accent, #8b5cf6);
+  flex: 0 0 auto;
+}
+.orchestrator-source-link {
+  color: var(--accent, #8b5cf6);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orchestrator-source-link:hover { text-decoration: underline; }
+
 /* ── Agenten-Ansicht (Phase 48 F) ── */
 .agents-status-banner {
   display: flex;
