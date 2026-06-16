@@ -274,8 +274,75 @@
     }
   }
 
+  // ── Agenten-Aufwand (User-Regler, wie Claude Codes Schneller<->Intelligenter) ──
+  // Steuert, OB komplexe Aufgaben automatisch (ohne /orchestrate) an die Agenten gehen
+  // und WIE gruendlich. off = nur /orchestrate; fast = auto + schnell; thorough = auto +
+  // adversarische Verifikation. Persistiert in localStorage.
+  const _EFFORT_KEY = "lexa_agent_effort";
+  const _EFFORT_LEVELS = ["off", "fast", "thorough"];
+  const _EFFORT_LABEL = { off: "Aus", fast: "Schnell", thorough: "Gruendlich" };
+
+  function getAgentEffort() {
+    try {
+      const v = localStorage.getItem(_EFFORT_KEY);
+      if (_EFFORT_LEVELS.indexOf(v) !== -1) return v;
+    } catch (_) { /* localStorage evtl. nicht verfuegbar */ }
+    return "fast";
+  }
+
+  function setAgentEffort(level) {
+    if (_EFFORT_LEVELS.indexOf(level) === -1) level = "fast";
+    try { localStorage.setItem(_EFFORT_KEY, level); } catch (_) { /* noop */ }
+    renderAgentEffortButton();
+    return level;
+  }
+
+  function cycleAgentEffort() {
+    const next = _EFFORT_LEVELS[(_EFFORT_LEVELS.indexOf(getAgentEffort()) + 1) % _EFFORT_LEVELS.length];
+    setAgentEffort(next);
+    if (typeof showToast === "function") {
+      const hint = next === "off" ? "nur /orchestrate" : (next === "fast" ? "Agenten automatisch, schnell" : "Agenten automatisch, gruendlich");
+      showToast("Agenten-Aufwand: " + _EFFORT_LABEL[next] + " (" + hint + ")", "info", 2000);
+    }
+  }
+
+  function renderAgentEffortButton() {
+    const level = getAgentEffort();
+    const lbl = document.getElementById("agent-effort-label");
+    const btn = document.getElementById("agent-effort-btn");
+    if (lbl) lbl.textContent = _EFFORT_LABEL[level];
+    if (btn) {
+      btn.setAttribute("data-effort", level);
+      btn.setAttribute("aria-label", "Agenten-Aufwand: " + _EFFORT_LABEL[level]);
+    }
+  }
+
+  // Heuristik: lohnt sich der Multi-Agenten-Orchestrator (Vergleich/breite Recherche/
+  // mehrteilige Aufgabe)? Bewusst KONSERVATIV — einfache Fragen bleiben normaler Chat.
+  // Stamm-Praefixe (kein schliessendes \b, damit "vergleiche"/"recherchiere"/"analysiere"
+  // mitmatchen). Fuehrendes \b verhindert Mid-Word-Treffer.
+  const _ORCH_TRIGGER_RE = /\b(vergleich|gegen[uü]ber|pro und contra|recherchier|umfassend|ausf[uü]hrlich|tiefgehend|deep ?research|analysier|evaluier|bewerte|untersuch|welche optionen|verschiedene (optionen|ans[aä]tze|tools|wege))/i;
+
+  function needsOrchestratorMode(text) {
+    const s = String(text || "").trim();
+    if (s.length < 25) return false;
+    if (_ORCH_TRIGGER_RE.test(s)) return true;
+    // Mehrteilige Aufgabe: mehrere "und"-Verknuepfungen in einer laengeren Anfrage.
+    const ands = (s.match(/\bund\b/gi) || []).length;
+    if (ands >= 2 && s.length > 60) return true;
+    return false;
+  }
+
   // Globals fuer chat.js (Routing) + Tests.
   window.sendOrchestratorMessage = sendOrchestratorMessage;
   window.buildOrchestratorPanel = buildOrchestratorPanel;
   window.orchestratorHandleEvent = orchestratorHandleEvent;
+  window.getAgentEffort = getAgentEffort;
+  window.setAgentEffort = setAgentEffort;
+  window.cycleAgentEffort = cycleAgentEffort;
+  window.renderAgentEffortButton = renderAgentEffortButton;
+  window.needsOrchestratorMode = needsOrchestratorMode;
+
+  // Button-Label initial setzen (Composer steht im DOM vor diesem Script).
+  try { renderAgentEffortButton(); } catch (_) { /* noop */ }
 })();

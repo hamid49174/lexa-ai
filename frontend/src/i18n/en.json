@@ -302,6 +302,7 @@
   "palette.title": "Command Palette",
   "palette.placeholder": "Search command or view...",
   "composer.paletteLabel": "Lexa work modes",
+  "composer.effortTitle": "Agent effort: Off = /orchestrate only · Fast = agents auto (cheap) · Thorough = agents + adversarial verification",
   "composer.buttonLabel": "Modes",
   "composer.buttonTitle": "Choose a work mode",
   "composer.empty": "No matching mode.",

@@ -1778,6 +1778,16 @@ async function sendMessage() {
     }
   }
 
+  // Phase 48: Auto-Orchestrator ohne /-Befehl — nur wenn der Aufwand-Regler nicht "off" ist
+  // UND die Aufgabe klar komplex ist (Vergleich/Recherche/mehrteilig). Schont das Budget.
+  if (!text.startsWith("/")
+      && typeof getAgentEffort === "function" && getAgentEffort() !== "off"
+      && typeof needsOrchestratorMode === "function" && needsOrchestratorMode(text)
+      && typeof sendOrchestratorMessage === "function") {
+    sendOrchestratorMessage(text, { displayText: text, mode: getAgentEffort() === "thorough" ? "thorough" : "fast" });
+    return;
+  }
+
   // Phase 46: Auto-detect if this task needs the multi-step agent
   // Manual override: /agent prefix always triggers agent mode
   // Auto-detect: complex tasks with multiple actions, "und dann", etc.

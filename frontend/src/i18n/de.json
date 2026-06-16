@@ -274,6 +274,7 @@
   "palette.title": "Befehlspalette",
   "palette.placeholder": "Befehl oder View suchen...",
   "composer.paletteLabel": "Lexa Arbeitsmodi",
+  "composer.effortTitle": "Agenten-Aufwand: Aus = nur /orchestrate · Schnell = Agenten automatisch (günstig) · Gründlich = Agenten + adversarische Prüfung",
   "composer.buttonLabel": "Modi",
   "composer.buttonTitle": "Arbeitsmodus wählen",
   "composer.empty": "Kein passender Modus.",

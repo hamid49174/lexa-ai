@@ -18,18 +18,26 @@ function makeNode(tag) {
     tag,
     className: "",
     _text: "",
+    attrs: {},
     children: [],
     lastChild: null,
     set textContent(v) { this._text = String(v); this.children = []; },
     get textContent() { return this._text; },
     appendChild(child) { this.children.push(child); this.lastChild = child; return child; },
     replaceChildren() { this.children = []; this._text = ""; this.lastChild = null; },
+    setAttribute(k, v) { this.attrs[k] = String(v); },
+    getAttribute(k) { return this.attrs[k]; },
   };
 }
+const _effortNodes = { "agent-effort-label": makeNode("span"), "agent-effort-btn": makeNode("button") };
 const documentStub = {
   createElement: (tag) => makeNode(tag),
-  getElementById: () => null,
+  getElementById: (id) => _effortNodes[id] || null,
 };
+const localStorageStub = (() => {
+  const m = {};
+  return { getItem: (k) => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); }, removeItem: (k) => { delete m[k]; } };
+})();
 function allText(node) {
   if (!node) return "";
   let t = node._text || "";
@@ -41,7 +49,7 @@ function allText(node) {
 const code = fs.readFileSync(path.join(__dirname, "..", "frontend", "src", "chat_orchestrator.js"), "utf8");
 const win = {};
 // eslint-disable-next-line no-new-func
-new Function("window", "document", "TextDecoder", code)(win, documentStub, function () {});
+new Function("window", "document", "TextDecoder", "localStorage", code)(win, documentStub, function () {}, localStorageStub);
 
 check("exposes sendOrchestratorMessage", typeof win.sendOrchestratorMessage === "function");
 check("exposes orchestratorHandleEvent", typeof win.orchestratorHandleEvent === "function");
@@ -78,6 +86,26 @@ check("partial run shows issue", panel2._orch.status._text.includes("teilweise")
 const panel3 = win.buildOrchestratorPanel("x", "fast");
 win.orchestratorHandleEvent(panel3, { type: "error", message: "kaputt" });
 check("error status", panel3._orch.status._text === "kaputt" && panel3._orch.status.className.includes("error"));
+
+// ── Agenten-Aufwand-Regler ──
+check("effort default is fast", win.getAgentEffort() === "fast");
+win.setAgentEffort("thorough");
+check("setAgentEffort persists", win.getAgentEffort() === "thorough");
+check("effort button label updated", _effortNodes["agent-effort-label"]._text === "Gruendlich");
+check("effort button data-effort updated", _effortNodes["agent-effort-btn"].attrs["data-effort"] === "thorough");
+win.cycleAgentEffort();
+check("cycle thorough->off", win.getAgentEffort() === "off");
+win.cycleAgentEffort();
+check("cycle off->fast", win.getAgentEffort() === "fast");
+win.setAgentEffort("bloedsinn");
+check("invalid effort falls back to fast", win.getAgentEffort() === "fast");
+
+// ── needsOrchestratorMode (Auto-Trigger-Heuristik) ──
+check("triggers on compare task", win.needsOrchestratorMode("Vergleiche Tauri und Electron fuer eine Desktop-App ausfuehrlich") === true);
+check("triggers on research task", win.needsOrchestratorMode("Recherchiere den aktuellen Stand zu Gemini 3.5 Flash bitte genau") === true);
+check("triggers on multipart und-task", win.needsOrchestratorMode("Finde Infos zu Thema A und zu Thema B und fasse beides sauber zusammen") === true);
+check("no trigger on simple question", win.needsOrchestratorMode("wie geht es dir heute?") === false);
+check("no trigger on short text", win.needsOrchestratorMode("hallo") === false);
 
 console.log("\n" + (passed + failed) + " tests: " + passed + " passed, " + failed + " failed");
 if (failed > 0) process.exit(1);
