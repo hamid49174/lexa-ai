@@ -242,6 +242,10 @@ def window_layout(layout: str = "left-half") -> str:
         "top-right": "$w/2, 0, $w/2, $h/2",
         "bottom-left": "0, $h/2, $w/2, $h/2",
         "bottom-right": "$w/2, $h/2, $w/2, $h/2",
+        # Aliase fuer alte Enum-Werte (Rueckwaerts-Kompatibilitaet).
+        "split": "0, 0, $w/2, $h",
+        "quad": "0, 0, $w/2, $h/2",
+        "stack": "$w/4, $h/4, $w/2, $h/2",
     }
     if layout not in layouts:
         return t("system.unknownLayout", layout=layout, available=', '.join(layouts.keys()))
@@ -426,9 +430,12 @@ def service_info(name: str = "") -> dict:
         return {"error": t("service.required")}
     try:
         safe_name = _sanitize_ps_arg(name, max_len=100)
+        # WQL nutzt EINFACHE Anfuehrungszeichen -> Single-Quotes zusaetzlich verdoppeln,
+        # sonst koennte ein ' im Namen aus dem WQL-Filter ausbrechen (Filter-Manipulation).
+        wql_name = safe_name.replace("'", "''")
         ps = f'''
         $s = Get-Service -Name "{safe_name}" -ErrorAction Stop
-        $wmi = Get-WmiObject Win32_Service -Filter "Name='{safe_name}'" -ErrorAction SilentlyContinue
+        $wmi = Get-WmiObject Win32_Service -Filter "Name='{wql_name}'" -ErrorAction SilentlyContinue
         @{{
             name = $s.Name
             display_name = $s.DisplayName
@@ -574,9 +581,11 @@ def env_set(name: str = "", value: str = "") -> str:
             capture_output=True, text=True, timeout=10,
         )
         if "OK" in result.stdout:
-            # Prozess-Sicht konsistent zum persistent geschriebenen Wert halten
-            # (PowerShell hat safe_value geschrieben, nicht den Rohwert).
-            os.environ[name] = safe_value
+            # Prozess-Sicht konsistent zum PERSISTIERTEN Rohwert halten: PowerShell
+            # entschaerft das Escaping im Double-Quoted-String wieder und schreibt den
+            # Rohwert in die Registry -> os.environ ebenfalls mit dem Rohwert setzen
+            # (safe_value enthielte literale Backticks o.ae.).
+            os.environ[name] = str(value)[:2000]
             return t("env.set", name=safe_name)
         return t("error.stderr", stderr=result.stderr.strip())
     except Exception as e:

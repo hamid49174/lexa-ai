@@ -95,6 +95,18 @@ def _hermes_error_detail(prefix: str, exc: Exception) -> str:
     return f"{prefix}: {_client_safe_error(exc)}"
 
 
+def _redact_hermes_result(result):
+    """Secrets/Tokens aus stdout/stderr/error eines Hermes-Run-Ergebnisses strippen, bevor es
+    an den Client geht. run_hermes_task liefert ROHE Ausgabe (kann API-Keys/Bearer-Token/
+    Telegram-Token enthalten); der os_agent_runtime-Pfad redigiert bereits, die direkten
+    Endpoints taten es bisher nicht. Reuse derselben Redaction-Logik."""
+    try:
+        from backend.os_agent_runtime import _redact_result
+        return _redact_result(result)
+    except Exception:  # pragma: no cover - defensive
+        return result
+
+
 def _draft_title(body: str, explicit: str = "") -> str:
     title = (explicit or "").strip()
     if title:
@@ -687,7 +699,8 @@ async def hermes_run(req: HermesTaskRequest):
     message = sanitize_input(req.message)
     audit_log("hermes", "run", f"mode={req.mode} chars={len(message)}")
     try:
-        return await asyncio.to_thread(run_hermes_task, message, req.mode, req.timeoutSeconds)
+        result = await asyncio.to_thread(run_hermes_task, message, req.mode, req.timeoutSeconds)
+        return _redact_hermes_result(result)
     except Exception as exc:
         logger.exception("Hermes run failed")
         raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes konnte nicht gestartet werden", exc))
@@ -702,7 +715,8 @@ async def hermes_improve_lexa(req: HermesImproveRequest):
     focus = sanitize_input(req.focus)
     audit_log("hermes", "improve_lexa", f"focusChars={len(focus)}")
     try:
-        return await asyncio.to_thread(improve_lexa_with_hermes, focus, req.timeoutSeconds)
+        result = await asyncio.to_thread(improve_lexa_with_hermes, focus, req.timeoutSeconds)
+        return _redact_hermes_result(result)
     except Exception as exc:
         logger.exception("Hermes improve failed")
         raise HTTPException(status_code=502, detail=_hermes_error_detail("Hermes-Verbesserung fehlgeschlagen", exc))

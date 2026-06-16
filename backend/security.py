@@ -462,8 +462,11 @@ _is_dangerous_ip = is_dangerous_network_ip
 def validate_url(url: str) -> str:
     """Validate a URL is safe to access (SSRF protection).
 
-    Uses Python's ipaddress module to detect ALL private/loopback/link-local/reserved
-    IPs regardless of notation (decimal, hex, octal, IPv6-mapped IPv4, etc.).
+    Detects private/loopback/link-local/reserved targets two ways: (1) direct parse of a
+    canonical IP host, and (2) for non-canonical hosts (DNS names AND alternate IP notations
+    like decimal/hex/octal/short-form, which the ipaddress module does NOT parse) by resolving
+    the host and checking every resolved address. Unresolvable hosts are left to fail at the
+    actual request layer (they cannot reach an internal target).
     """
     parsed = urlparse(url)
     if not parsed.scheme:
@@ -498,6 +501,23 @@ def validate_url(url: str) -> str:
 
     if addr is not None and is_dangerous_network_ip(addr):
         raise ValueError(t("security.blockedPrivate", host=hostname))
+
+    # Nicht-kanonische Hosts (DNS-Namen + alternative IP-Notationen decimal/hex/octal/short)
+    # aufloesen und JEDE Adresse pruefen — sonst umgehen z.B. http://2130706433/ oder
+    # http://0x7f.0.0.1/ den Loopback-Schutz. Aufloesungsfehler sind nicht fatal.
+    if addr is None:
+        try:
+            import socket
+            infos = socket.getaddrinfo(hostname_lower, None)
+        except Exception:
+            infos = []
+        for info in infos:
+            try:
+                resolved = ipaddress.ip_address(info[4][0])
+            except (ValueError, IndexError, TypeError):
+                continue
+            if is_dangerous_network_ip(resolved):
+                raise ValueError(t("security.blockedPrivate", host=hostname))
 
     return url
 

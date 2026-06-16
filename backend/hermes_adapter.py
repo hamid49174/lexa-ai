@@ -2655,6 +2655,16 @@ def _cap_argv_prompt(prompt: str) -> str:
 def _build_run_command(command: list[str], prompt: str) -> tuple[list[str], str | None]:
     run_args = os.environ.get("LEXA_HERMES_RUN_ARGS", "").strip()
     if not run_args:
+        # Windows .bat/.cmd: cmd.exe re-parst die Kommandozeile vor der Batch-Ausfuehrung
+        # (BatBadBut/CVE-2024-3220-Klasse). Den user-kontrollierten Prompt daher NICHT ueber
+        # argv (-z VALUE) uebergeben, sondern ueber stdin ("-z -"). So landet kein User-Text
+        # in der von cmd.exe geparsten Kommandozeile.
+        try:
+            is_batch = Path(str(command[0])).suffix.lower() in {".bat", ".cmd"}
+        except Exception:
+            is_batch = False
+        if is_batch:
+            return command + ["-z", "-"], prompt
         return command + ["-z", _cap_argv_prompt(prompt)], None
 
     replacements = {

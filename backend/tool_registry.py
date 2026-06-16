@@ -648,8 +648,8 @@ def _register_pc_control_tools() -> list[dict]:
         _tool("window_maximize", "Maximiert ein Fenster auf volle Bildschirmgröße", [
             _param("title", "string", "Fenstertitel", required=True),
         ]),
-        _tool("window_layout", "Ordnet alle Fenster in einem vordefinierten Layout an", [
-            _param("layout", "string", "Layout-Typ", required=True, enum=["split", "quad", "stack"]),
+        _tool("window_layout", "Ordnet das aktive Fenster in einem vordefinierten Layout an", [
+            _param("layout", "string", "Layout-Typ", required=True, enum=["left-half", "right-half", "top-half", "bottom-half", "center", "top-left", "top-right", "bottom-left", "bottom-right"]),
         ]),
         _tool("autostart_list", "Listet alle Programme die beim Windows-Start automatisch starten"),
         _tool("autostart_add", "Fügt ein Programm zum Windows-Autostart hinzu", [
