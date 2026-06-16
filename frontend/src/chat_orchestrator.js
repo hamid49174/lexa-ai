@@ -29,14 +29,29 @@
     return map[role] || role || "Agent";
   }
 
+  const _PHASES = [["plan", "Plan"], ["agents", "Agenten"], ["verify", "Verifikation"], ["synth", "Synthese"]];
+
   function buildOrchestratorPanel(task, mode) {
     const wrap = _el("div", "orchestrator-run");
     const head = _el("div", "orchestrator-head");
     head.appendChild(_el("span", "orchestrator-title", "Multi-Agenten-Lauf"));
     head.appendChild(_el("span", "orchestrator-mode", mode === "fast" ? "schnell" : "gruendlich"));
+    const counts = _el("span", "orchestrator-counts", "");
+    head.appendChild(counts);
     const status = _el("span", "orchestrator-status", "laeuft …");
     head.appendChild(status);
     wrap.appendChild(head);
+
+    // Phasen-Leiste (wie Claude Code): Plan -> Agenten -> Verifikation -> Synthese.
+    const phaseStrip = _el("div", "orchestrator-phases");
+    const phases = {};
+    _PHASES.forEach(([key, label]) => {
+      const chip = _el("span", "orchestrator-phase", label);
+      chip.setAttribute("data-phase", key);
+      phaseStrip.appendChild(chip);
+      phases[key] = chip;
+    });
+    wrap.appendChild(phaseStrip);
 
     const planBox = _el("div", "orchestrator-plan");
     const agentsBox = _el("div", "orchestrator-agents");
@@ -45,8 +60,22 @@
     wrap.appendChild(agentsBox);
     wrap.appendChild(verifyBox);
 
-    wrap._orch = { status, planBox, agentsBox, verifyBox, agents: {}, synthesis: "" };
+    wrap._orch = { status, counts, phases, planBox, agentsBox, verifyBox, agents: {}, synthesis: "", stepCount: 0, mode };
+    _setPhase(wrap, "plan", "active");
     return wrap;
+  }
+
+  function _setPhase(panel, key, state) {
+    const refs = panel && panel._orch;
+    if (!refs || !refs.phases || !refs.phases[key]) return;
+    refs.phases[key].className = "orchestrator-phase " + state;  // pending|active|done|skip
+  }
+
+  function _updateCounts(panel) {
+    const refs = panel && panel._orch;
+    if (!refs) return;
+    const n = Object.keys(refs.agents).length;
+    refs.counts.textContent = n ? (n + " Agenten · " + refs.stepCount + " Schritte") : "";
   }
 
   function _setStatus(panel, text, kind) {
@@ -81,10 +110,18 @@
     header.appendChild(_el("span", "orchestrator-agent-state", "laeuft"));
     card.appendChild(header);
     if (objective) card.appendChild(_el("div", "orchestrator-agent-objective", objective));
-    const steps = _el("ul", "orchestrator-agent-steps");
+    // Schritte standardmaessig eingeklappt (aufgeraeumt statt Tool-Dump) — Klick toggelt.
+    const stepsToggle = _el("button", "orchestrator-steps-toggle", "0 Schritte");
+    stepsToggle.type = "button";
+    const steps = _el("ul", "orchestrator-agent-steps collapsed");
+    stepsToggle.addEventListener("click", () => {
+      const open = steps.className.indexOf("collapsed") === -1;
+      steps.className = open ? "orchestrator-agent-steps collapsed" : "orchestrator-agent-steps";
+    });
+    card.appendChild(stepsToggle);
     card.appendChild(steps);
     refs.agentsBox.appendChild(card);
-    const entry = { card, header, steps, state: header.lastChild };
+    const entry = { card, header, steps, stepsToggle, state: header.lastChild, count: 0 };
     refs.agents[agentId] = entry;
     return entry;
   }
@@ -96,6 +133,9 @@
     li.appendChild(_el("span", "orchestrator-step-tool", step.tool || "?"));
     if (step.summary) li.appendChild(_el("span", "orchestrator-step-summary", " — " + step.summary));
     entry.steps.appendChild(li);
+    entry.count = (entry.count || 0) + 1;
+    if (entry.stepsToggle) entry.stepsToggle.textContent = entry.count + (entry.count === 1 ? " Schritt" : " Schritte");
+    if (panel._orch) { panel._orch.stepCount += 1; _updateCounts(panel); }
   }
 
   function _markAgentDone(panel, agentId, status, summary) {
@@ -129,13 +169,31 @@
   function orchestratorHandleEvent(panel, event) {
     if (!panel || !event) return;
     switch (event.type) {
-      case "plan": _renderPlan(panel, event.plan); break;
-      case "subagent_start": _ensureAgentCard(panel, event.agent_id, event.role, event.label, event.objective); break;
+      case "plan":
+        _renderPlan(panel, event.plan);
+        _setPhase(panel, "plan", "done");
+        _setPhase(panel, "agents", "active");
+        break;
+      case "subagent_start":
+        _ensureAgentCard(panel, event.agent_id, event.role, event.label, event.objective);
+        _setPhase(panel, "agents", "active");
+        _updateCounts(panel);
+        break;
       case "subagent_step": _addAgentStep(panel, event.agent_id, event.step); break;
       case "subagent_done": _markAgentDone(panel, event.agent_id, event.status, event.summary); break;
-      case "verification": _addVerification(panel, event.verdict); break;
-      case "synthesis": if (panel._orch) panel._orch.synthesis = event.content || ""; break;
+      case "verification":
+        _setPhase(panel, "agents", "done");
+        _setPhase(panel, "verify", "active");
+        _addVerification(panel, event.verdict);
+        break;
+      case "synthesis":
+        _setPhase(panel, "agents", "done");
+        _setPhase(panel, "verify", (panel._orch && panel._orch.mode === "fast") ? "skip" : "done");
+        _setPhase(panel, "synth", "active");
+        if (panel._orch) panel._orch.synthesis = event.content || "";
+        break;
       case "done":
+        _setPhase(panel, "synth", "done");
         _setStatus(panel, "fertig", "done");
         if (panel._orch && event.run && event.run.partial) _setStatus(panel, "teilweise (Zeitlimit)", "issue");
         break;

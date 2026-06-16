@@ -1603,6 +1603,49 @@
 .orchestrator-status.done { color: var(--success, #34d399); }
 .orchestrator-status.error { color: var(--error, #f87171); }
 .orchestrator-status.issue { color: var(--warning, #fbbf24); }
+.orchestrator-counts {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--text-dim, #9c98b3);
+}
+/* Phasen-Leiste (Plan -> Agenten -> Verifikation -> Synthese) */
+.orchestrator-phases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+.orchestrator-phase {
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
+  color: var(--text-dim, #9c98b3);
+}
+.orchestrator-phase.active {
+  color: var(--accent, #8b5cf6);
+  border-color: var(--accent, #8b5cf6);
+  background: var(--accent-soft, rgba(139, 92, 246, 0.14));
+}
+.orchestrator-phase.done {
+  color: var(--success, #34d399);
+  border-color: var(--success, #34d399);
+}
+.orchestrator-phase.done::before { content: "\2713 "; }
+.orchestrator-phase.skip {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+.orchestrator-steps-toggle {
+  background: none;
+  border: none;
+  color: var(--text-dim, #9c98b3);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.orchestrator-steps-toggle:hover { color: var(--accent, #8b5cf6); }
+.orchestrator-agent-steps.collapsed { display: none; }
 .orchestrator-section-title {
   font-size: 12px;
   font-weight: 600;

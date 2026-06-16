@@ -27,6 +27,7 @@ function makeNode(tag) {
     replaceChildren() { this.children = []; this._text = ""; this.lastChild = null; },
     setAttribute(k, v) { this.attrs[k] = String(v); },
     getAttribute(k) { return this.attrs[k]; },
+    addEventListener(ev, fn) { (this._handlers = this._handlers || {})[ev] = fn; },
   };
 }
 const _effortNodes = { "agent-effort-label": makeNode("span"), "agent-effort-btn": makeNode("button") };
@@ -71,6 +72,9 @@ check("renders agent step tool", text.includes("web_search") && text.includes("T
 check("renders verification", text.includes("Verifikation"));
 check("stores synthesis", panel._orch.synthesis === "FINALE ANTWORT");
 check("status done", panel._orch.status._text === "fertig");
+check("phase plan done", panel._orch.phases.plan.className.indexOf("done") !== -1);
+check("phase synth done", panel._orch.phases.synth.className.indexOf("done") !== -1);
+check("counts show agents", panel._orch.counts._text.indexOf("Agenten") !== -1);
 
 // Sub-Agent-Start ist idempotent (kein Doppel-Card bei gleicher agent_id)
 const agentsBefore = panel._orch.agentsBox.children.length;
