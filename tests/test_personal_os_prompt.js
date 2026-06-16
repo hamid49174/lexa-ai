@@ -4,6 +4,9 @@
  */
 
 const fs = require("fs");
+// CRLF-tolerant: das Repo wird unter Windows mit CRLF ausgecheckt; statische Quell-Checks
+// duerfen nicht an Zeilenenden scheitern (Needles sind LF).
+{ const _r = fs.readFileSync; fs.readFileSync = (p, e) => { const v = _r(p, e); return typeof v === "string" ? v.replace(/\r\n/g, "\n") : v; }; }
 const path = require("path");
 
 const personalOsSrc = fs.readFileSync(
