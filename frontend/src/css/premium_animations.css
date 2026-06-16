@@ -1033,8 +1033,16 @@ body {
 
 .message .msg-text em {
   color: rgba(235, 232, 247, 0.92);
-  font-style: normal;
-  font-weight: 650;
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* Trennlinie (---) — sichtbarer, weicher Verlauf statt unsichtbarem Default-<hr> */
+.message .msg-text .chat-hr {
+  border: none;
+  height: 1px;
+  margin: 16px 0;
+  background: linear-gradient(90deg, transparent, var(--glass-border, rgba(255, 255, 255, 0.12)) 50%, transparent);
 }
 
 .message .msg-text .chat-h1,

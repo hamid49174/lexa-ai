@@ -44,8 +44,16 @@
 .message {
   display: flex;
   gap: 12px;
-  max-width: 85%;
+  /* Feste Lesespalte (wie Claude/ChatGPT/Gemini): ~75-90 Zeichen, zentriert.
+     Verhindert die schmale ~350px-Spalte auf 1024px und Zeilen-Brei auf Ultrawide. */
+  width: 100%;
+  max-width: min(820px, 100%);
+  margin-inline: auto;
   animation: messagePop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@media (max-width: 768px) {
+  .message { max-width: calc(100% - 8px); }
 }
 
 @keyframes messagePop {
@@ -62,6 +70,14 @@
 .message.user-message {
   align-self: flex-end;
   flex-direction: row-reverse;
+}
+
+/* User-Bubble haengt content-breit rechts (ChatGPT/Claude-Stil), statt die Spalte zu fuellen. */
+.message.user-message .msg-body {
+  align-items: flex-end;
+}
+.message.user-message .msg-text {
+  max-width: 100%;
 }
 
 .msg-avatar {
@@ -267,6 +283,10 @@
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 1px;
+  background: var(--accent-soft, rgba(194, 77, 224, 0.1));
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 700;
 }
 
 .code-copy-btn {
@@ -282,13 +302,14 @@
 .code-copy-btn:hover { background: var(--accent-soft); color: var(--accent2); }
 
 .code-block {
-  background: var(--bg) !important;
+  background: var(--bg-surface2, #16161f) !important;
   border: none;
   border-radius: 0;
   padding: 12px 14px;
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
   overflow-x: auto;
   color: var(--accent2);
 }

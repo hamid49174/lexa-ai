@@ -749,7 +749,9 @@ function renderStreamingFormatted(target, text) {
   if (!target) return;
   if (typeof setStreamingRenderMode === "function") setStreamingRenderMode(true);
   try {
-    renderFormattedMessage(target, text, { math: false });
+    // math live mitrendern: KaTeX-Fehler bei noch offenen $-Delimitern faengt der catch ab,
+    // die naechste (balancierte) Frame rendert die Formel dann sauber. Kein Roh-TeX mehr.
+    renderFormattedMessage(target, text, { math: true });
   } catch (e) {
     target.textContent = String(text || "");
   } finally {
