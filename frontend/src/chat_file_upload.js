@@ -171,6 +171,12 @@ function clearStagedUploads() {
 async function sendStagedUploads() {
   const files = _stagedUploads.slice();
   if (!files.length) return;
+  // Backend-Guard ZUERST pruefen, bevor die Dateien verworfen werden — sonst sind die
+  // Anhaenge weg, falls die Upload-Handler am backendOnline-Check early-returnen (Datenverlust).
+  if (typeof LexaState !== "undefined" && !LexaState.get("backendOnline")) {
+    if (typeof showToast === "function") showToast(t("common.backendOffline"), "error");
+    return;  // _stagedUploads + Preview bleiben erhalten -> Nutzer kann erneut senden
+  }
   _stagedUploads = [];
   document.getElementById("chat-attachment-preview")?.remove();
   if (files.length === 1) {

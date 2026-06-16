@@ -479,7 +479,24 @@ async function loadChatHistory() {
 }
 
 // ── CHAT MESSAGE DISPLAY ─────────────────────────
+// Bricht einen laufenden /chat/stream sauber ab (gemeinsam genutzt von Stop-Button,
+// clearChat und Konversationswechsel). Verhindert, dass der Stream nach dem Entfernen
+// der Nachrichten weiter in detachte DOM-Knoten schreibt / in die falsche Konversation
+// speichert / die HTTP-Verbindung leakt.
+function stopActiveStream(reason) {
+  if (window._lexaStreamAbort) {
+    window._lexaStreamAbortReason = reason || "switch";
+    try { window._lexaStreamAbort.abort(); } catch (e) { /* noop */ }
+    window._lexaStreamAbort = null;
+  }
+  try { window.lexa?.cancelUpload?.(); } catch (e) { /* noop */ }
+  if (typeof LexaState !== "undefined") LexaState.set("isLoading", false);
+}
+window.stopActiveStream = stopActiveStream;
+
 function clearChat() {
+  // Laufenden Stream zuerst abbrechen, sonst schreibt er in die gleich entfernten Knoten.
+  stopActiveStream("clear");
   // Pendenten Auto-Save verwerfen, damit er nicht NACH dem Leeren die alten
   // Nachrichten zurueckschreibt (DOM ist gleich leer -> Wipe-Schutz greift ohnehin).
   cancelScheduledConversationSave();

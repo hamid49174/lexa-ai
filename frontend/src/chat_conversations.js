@@ -224,6 +224,9 @@ async function switchConversation(convId, notify = true) {
   // associated backend roundtrips / full DOM rebuild) regardless of the
   // notify flag. notify only governs user-facing toasts, not load avoidance.
   if (convId === LexaState.get("currentConversationId")) return true;
+  // Laufenden Stream abbrechen BEVOR gespeichert/DOM gewechselt wird — sonst schreibt der
+  // Stream in detachte Knoten und speichert in die falsche Konversation (Datenverlust).
+  if (typeof stopActiveStream === "function") stopActiveStream("switch");
   const switchSeq = ++_conversationSwitchSeq;
   _conversationSwitchInFlight += 1;
   try {
