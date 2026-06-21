@@ -623,6 +623,14 @@
             </svg>
           </button>
 
+          <!-- Persistenter Stop-Button (immer erreichbar waehrend des Streams; Esc stoppt ebenfalls) -->
+          <button type="button" id="stop-stream-fab" class="stop-stream-fab hidden" data-action="stopStream" aria-label="Antwort stoppen" title="Antwort stoppen (Esc)" data-i18n-aria-label="chat.stopResponseTooltip" data-i18n-title="chat.stopResponseTooltip">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <rect x="6" y="6" width="12" height="12" rx="2"/>
+            </svg>
+            <span data-i18n="chat.stopResponseButton">Stopp</span>
+          </button>
+
           <!-- Hidden compat elements -->
           <div id="voice-transcript-panel" class="hidden"><div id="voice-transcript-list"></div></div>
           <div id="floating-cards-container" class="hidden"><span id="nav-cpu-percent"></span><span id="nav-commands-count"></span></div>

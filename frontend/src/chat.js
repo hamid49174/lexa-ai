@@ -767,9 +767,39 @@ function scrollChatToBottom() {
 window.scrollChatToBottom = scrollChatToBottom;
 window.updateScrollBottomFab = updateScrollBottomFab;
 
+// ── Persistenter Stop-Button (immer erreichbar, P0.1) ─────────────────────
+// An den globalen isLoading-State gekoppelt -> sichtbar fuer die GESAMTE Stream-Dauer
+// (der Stop im Typing-Indicator verschwindet, sobald die Antwort gerendert wird / wegscrollt).
+function setStopFabVisible(active) {
+  const fab = document.getElementById("stop-stream-fab");
+  if (fab) fab.classList.toggle("hidden", !active);
+}
+window.setStopFabVisible = setStopFabVisible;
+
+function stopStream() {
+  if (typeof stopActiveStream === "function") stopActiveStream("user");
+  try { window.lexa?.cancelUpload?.(); } catch (e) { /* noop */ }
+  if (typeof hideTyping === "function") hideTyping();
+  if (typeof LexaState !== "undefined") LexaState.set("isLoading", false);
+  if (typeof sendBtn !== "undefined" && sendBtn) sendBtn.disabled = false;
+  setStopFabVisible(false);
+}
+window.stopStream = stopStream;
+
 document.addEventListener("DOMContentLoaded", () => {
   const cm = document.getElementById("chat-messages");
   if (cm) cm.addEventListener("scroll", updateScrollBottomFab, { passive: true });
+  // Stop-FAB folgt zentral dem Lade-Status (deckt alle Sende-/Stream-/Agent-Pfade ab).
+  if (typeof LexaState !== "undefined" && typeof LexaState.on === "function") {
+    LexaState.on("isLoading", (v) => setStopFabVisible(Boolean(v)));
+  }
+  // Escape stoppt einen laufenden Stream (Power-User-Shortcut; greift nur waehrend des Ladens).
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && window._lexaStreamAbort
+        && typeof LexaState !== "undefined" && LexaState.get("isLoading")) {
+      stopStream();
+    }
+  });
 });
 
 function renderStreamingFormatted(target, text) {
