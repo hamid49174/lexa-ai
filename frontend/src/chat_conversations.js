@@ -123,11 +123,27 @@ function renderConversationList() {
     renderConversationEmptyState(container, t("chat.noAgentAttentionConversations"));
     return;
   }
-  visibleConversations.forEach(c => {
+  // Nach Datum gruppieren (Angepinnt / Heute / Gestern / Letzte 7 Tage / Letzte 30 Tage /
+  // Aelter) mit kleinen Sektions-Ueberschriften — wie Top-Tier-Clients. Faellt auf eine
+  // flache Liste zurueck, falls die Gruppierungs-Helfer (chat_history_ui.js) fehlen.
+  const renderItem = (c) => {
     const attention = attentionById.get(String(c.id));
     const isActive = c.id === LexaState.get("currentConversationId");
     container.appendChild(createConversationListItem(c, { attention, isActive }));
-  });
+  };
+  if (typeof groupConversationsByDate === "function") {
+    for (const group of groupConversationsByDate(visibleConversations, Date.now())) {
+      const header = document.createElement("div");
+      header.className = "conv-group-header";
+      header.setAttribute("role", "presentation");
+      header.textContent = typeof conversationGroupLabel === "function"
+        ? conversationGroupLabel(group.key) : group.key;
+      container.appendChild(header);
+      group.items.forEach(renderItem);
+    }
+  } else {
+    visibleConversations.forEach(renderItem);
+  }
 }
 async function newConversation() {
   if (_newConversationInFlight) return false;

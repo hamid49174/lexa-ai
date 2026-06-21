@@ -70,6 +70,17 @@
   outline-offset: 2px;
 }
 
+/* Datums-Gruppen in der Konversationsliste (Heute/Gestern/… wie ChatGPT/Claude/Gemini). */
+.conv-group-header {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted, #827e96);
+  padding: 12px 8px 4px;
+}
+.conv-group-header:first-child { padding-top: 2px; }
+
 /* In-Konversation-Suche (Ctrl+F) — schwebende Leiste oben rechts + Treffer-Marks. */
 .chat-find-bar {
   position: absolute;

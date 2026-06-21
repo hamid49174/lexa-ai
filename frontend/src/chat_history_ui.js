@@ -3,6 +3,59 @@
  * Backend load/save/delete orchestration stays in chat.js.
  */
 
+// ── Datums-Gruppierung der Konversationsliste (Top-Tier wie ChatGPT/Claude/Gemini) ──
+// Pinned bleibt eine eigene Gruppe oben; der Rest wird nach updated_at gebucketet.
+// Pure + testbar (nowMs injizierbar).
+function _parseConvDate(value) {
+  const s = String(value || "").trim();
+  if (!s) return null;
+  // Backend liefert "YYYY-MM-DD HH:MM:SS" (localtime) -> ISO-tauglich machen.
+  const d = new Date(s.indexOf("T") === -1 ? s.replace(" ", "T") : s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function chatHistoryBucket(updatedAt, nowMs) {
+  const d = _parseConvDate(updatedAt);
+  if (!d) return "older";
+  const now = new Date(nowMs);
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dayMs = 86400000;
+  const ts = d.getTime();
+  if (ts >= startOfToday) return "today";
+  if (ts >= startOfToday - dayMs) return "yesterday";
+  if (ts >= startOfToday - 7 * dayMs) return "week";
+  if (ts >= startOfToday - 30 * dayMs) return "month";
+  return "older";
+}
+
+function groupConversationsByDate(conversations, nowMs) {
+  const pinned = [];
+  const buckets = { today: [], yesterday: [], week: [], month: [], older: [] };
+  for (const c of (conversations || [])) {
+    if (c && c.is_pinned) { pinned.push(c); continue; }
+    buckets[chatHistoryBucket(c && c.updated_at, nowMs)].push(c);
+  }
+  const groups = [];
+  if (pinned.length) groups.push({ key: "pinned", items: pinned });
+  for (const k of ["today", "yesterday", "week", "month", "older"]) {
+    if (buckets[k].length) groups.push({ key: k, items: buckets[k] });
+  }
+  return groups;
+}
+
+function conversationGroupLabel(key) {
+  const fallback = {
+    pinned: "Angepinnt", today: "Heute", yesterday: "Gestern",
+    week: "Letzte 7 Tage", month: "Letzte 30 Tage", older: "Älter",
+  };
+  return typeof t === "function" ? t("history.group." + key) : (fallback[key] || key);
+}
+
+if (typeof window !== "undefined") {
+  window.chatHistoryBucket = chatHistoryBucket;
+  window.groupConversationsByDate = groupConversationsByDate;
+}
+
 function conversationListRawTitle(conversation) {
   const title = String((conversation && conversation.title) || "").trim();
   return title || t("chat.newChatTitle");
