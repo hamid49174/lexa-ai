@@ -317,6 +317,20 @@ async function voiceStart() {
   }
   Voice.mediaRecorder.ondataavailable = e => { if (e.data.size > 0) Voice.audioChunks.push(e.data); };
   Voice.mediaRecorder.onstop = () => voiceProcess();
+  // Recorder-Fehler nicht still verschlucken (Geraet weg, Codec-Problem) -> aufraeumen + melden.
+  Voice.mediaRecorder.onerror = (ev) => {
+    console.warn("[Voice] MediaRecorder error:", ev && ev.error);
+    Voice.recording = false;
+    LexaState.set("isRecording", false);
+    if (Voice.silenceTimer) { clearInterval(Voice.silenceTimer); Voice.silenceTimer = null; }
+    voiceStopSilenceDetect();
+    if (Voice.stream) { Voice.stream.getTracks().forEach(tr => tr.stop()); Voice.stream = null; }
+    updateMicToggleA11y(false);
+    updateMicProcessingA11y(false);
+    if (typeof _updateOrbActionA11y === "function") _updateOrbActionA11y(false);
+    voiceStatusBarUpdate({ state: "error", transcript: t("chat.sttUnavailableMsg"), provider: "" });
+    showToast(t("chat.sttUnavailableMsg"), "error");
+  };
   Voice.mediaRecorder.start();
   Voice.recording = true;
   LexaState.set("isRecording", true);
@@ -368,6 +382,9 @@ function voiceStopSilenceDetect() {
 
 function voiceStartSilenceDetect(stream) {
   try {
+    // Verwaisten Interval einer vorherigen Aufnahme zuerst stoppen (rapid Stop->Start),
+    // sonst tickt ein alter Timer parallel weiter und koennte die neue Aufnahme abwuergen.
+    if (Voice.silenceTimer) { clearInterval(Voice.silenceTimer); Voice.silenceTimer = null; }
     // Den bereits in chat.js verwalteten Shared-AudioContext wiederverwenden
     // (mit Resume bei suspended + Wiederaufbau nach close), damit nicht ein
     // zweiter, paralleler AudioContext gehalten wird und das Browser-Limit
@@ -376,6 +393,11 @@ function voiceStartSilenceDetect(stream) {
       Voice.audioCtx = _getAudioCtx();
     } else if (!Voice.audioCtx || Voice.audioCtx.state === "closed") {
       Voice.audioCtx = new AudioContext();
+    }
+    // Suspendierten Kontext aufwecken — sonst liefert der Analyser nur Nullen und die
+    // Stille-Erkennung greift nie (Aufnahme laeuft bis zum 30s-Sicherheits-Timeout).
+    if (Voice.audioCtx && Voice.audioCtx.state === "suspended" && typeof Voice.audioCtx.resume === "function") {
+      Voice.audioCtx.resume().catch(() => {});
     }
     const src = Voice.audioCtx.createMediaStreamSource(stream);
     const analyser = Voice.audioCtx.createAnalyser();
