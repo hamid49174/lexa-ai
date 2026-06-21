@@ -2025,6 +2025,18 @@ async function sendMessage() {
       throw abortErr;
     }
 
+    // Abbruch (Stop/Timeout) traf zwischen fetch-Erfolg und Reader-Aufbau: sauber behandeln,
+    // statt beim getReader()/read() in den generischen catch zu laufen ("Backend nicht
+    // erreichbar"). Das finally raeumt isLoading/Abort/Save auf.
+    if (window._lexaStreamAbortReason) {
+      clearTimeout(_streamTimeout);
+      streamRenderActive = false;
+      textEl.classList.remove("streaming-text");
+      textEl.textContent = window._lexaStreamAbortReason === "user"
+        ? t("chat.responseStopped") : t("chat.connectionTimeout");
+      return;
+    }
+
     if (!response.ok) {
       clearTimeout(_streamTimeout);
       const errData = await response.json().catch(() => ({}));
