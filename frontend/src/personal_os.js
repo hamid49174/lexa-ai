@@ -197,6 +197,9 @@ async function selectPersonalOsDraft(path) {
 }
 
 async function decidePersonalOsDraft(decision) {
+  // Re-Entry-Guard: ein bereits laufender Entscheid (Modal offen oder Request unterwegs)
+  // darf nicht parallel ein zweites Mal starten.
+  if (PersonalOSState.isDeciding) return;
   const draft = PersonalOSState.selectedDraft;
   if (!draft?.path) return;
 
