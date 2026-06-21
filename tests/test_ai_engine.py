@@ -1899,6 +1899,18 @@ class TestProviderFallback:
 
         assert ai_engine._categorize_error(err) == ai_engine._ErrorCategory.MODEL_ERROR
 
+    def test_gemini_quota_is_rate_limit(self):
+        from backend import ai_engine
+
+        for msg in ["RESOURCE_EXHAUSTED: quota exceeded", "You exceeded your current quota"]:
+            assert ai_engine._categorize_error(RuntimeError(msg)) == ai_engine._ErrorCategory.RATE_LIMIT
+
+    def test_billing_and_permission_are_auth_errors(self):
+        from backend import ai_engine
+
+        for msg in ["billing account not configured", "PERMISSION_DENIED for project"]:
+            assert ai_engine._categorize_error(RuntimeError(msg)) == ai_engine._ErrorCategory.AUTH_ERROR
+
     def test_chat_fallback_tries_configured_provider_after_selected_failure(self, monkeypatch):
         from backend import ai_engine
 

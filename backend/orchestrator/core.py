@@ -723,6 +723,12 @@ async def run_orchestration(
                 remaining -= 1
 
         if timed_out:
+            # Noch laufende Sub-Agenten SOFORT abbrechen — nicht erst im finally nach
+            # Verifikation/Synthese. Sonst rufen timed-out Agenten waehrend der Synthese
+            # weiter das LLM auf (verschwendet Budget/Quota, kann die Deadline weiter reissen).
+            for task_obj in pending:
+                if not task_obj.done():
+                    task_obj.cancel()
             # Durch Timeout abgebrochene Sub-Agenten deterministisch auffuellen, damit
             # subagent_count/agents die Plangroesse widerspiegeln (statt stillem Fehlen).
             seen_idx = {r.get("index") for r in results}

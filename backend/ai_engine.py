@@ -199,12 +199,14 @@ def _categorize_error(e: Exception) -> str:
     if "tool_use_failed" in err_str or "failed to call a function" in err_str:
         return _ErrorCategory.TOOL_USE_FAILED
 
-    # Rate limit
-    if "429" in str(e) or "rate_limit" in err_str or "ratelimit" in err_type:
+    # Rate limit / Quota (Gemini Free-Tier: RESOURCE_EXHAUSTED ist die Tages-/Minuten-Quota)
+    if ("429" in str(e) or "rate_limit" in err_str or "ratelimit" in err_type
+            or "quota" in err_str or "resource_exhausted" in err_str or "resource exhausted" in err_str):
         return _ErrorCategory.RATE_LIMIT
 
-    # Auth errors — never retry
-    if "401" in str(e) or "403" in str(e) or "auth" in err_str or "invalid_api_key" in err_str:
+    # Auth-/Konto-Fehler — nie wiederholen (inkl. Billing/Projekt-/Permission-Probleme)
+    if ("401" in str(e) or "403" in str(e) or "auth" in err_str or "invalid_api_key" in err_str
+            or "billing" in err_str or "permission_denied" in err_str):
         return _ErrorCategory.AUTH_ERROR
 
     # Model errors — try fallback model
