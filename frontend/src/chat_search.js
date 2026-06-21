@@ -289,7 +289,11 @@ function _chatFindCollect(node, out) {
       if (child.nodeValue && child.nodeValue.trim()) out.push(child);
     } else if (child.nodeType === 1) {
       const tag = String(child.tagName || "").toUpperCase();
-      if (tag === "MARK" || tag === "BUTTON" || tag === "SCRIPT" || tag === "STYLE") continue;
+      // PRE/CODE auslassen: highlight.js erzeugt tief verschachteltes Span-Markup; ein <mark>
+      // darin liesse sich nicht sauber wieder entfernen (fragmentierte Textknoten). Suche
+      // bleibt auf Prosa beschraenkt — robust und vorhersagbar.
+      if (tag === "MARK" || tag === "BUTTON" || tag === "SCRIPT" || tag === "STYLE"
+          || tag === "PRE" || tag === "CODE") continue;
       _chatFindCollect(child, out);
     }
   }

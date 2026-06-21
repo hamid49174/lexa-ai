@@ -76,6 +76,12 @@ const strong = new N(1, { tagName: "STRONG" });
 const t2 = new N(3, { nodeValue: "hallo nochmal" });
 strong.appendChild(t2);
 msgText.appendChild(t1); msgText.appendChild(strong);
+// Codeblock: Treffer hier muessen IGNORIERT werden (hljs-Markup nicht stoeren).
+const pre = new N(1, { tagName: "PRE" });
+const codeEl = new N(1, { tagName: "CODE" });
+codeEl.appendChild(new N(3, { nodeValue: "hallo_im_code()" }));
+pre.appendChild(codeEl);
+msgText.appendChild(pre);
 root.appendChild(msgText);
 _byId["chat-messages"] = root;
 const countEl = new N(1, { tagName: "SPAN" });
@@ -115,6 +121,7 @@ function countMarks(node) {
   return n;
 }
 check("two marks inserted in DOM", countMarks(root) === 2);
+check("code block is NOT searched (hljs-safe)", countMarks(pre) === 0);
 check("first mark is current", (function find(node) {
   for (const c of node.childNodes) {
     if (c.nodeType === 1 && c.tagName === "MARK") return c.className.indexOf("chat-find-current") !== -1;

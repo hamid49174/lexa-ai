@@ -314,6 +314,9 @@ function openSourcesPanel(sources) {
   void overlay.offsetWidth; // reflow so the slide-in transition runs
   overlay.classList.add("open");
 
+  // Alten Handler entfernen, falls das Panel ohne Schliessen erneut geoeffnet wird
+  // (sonst sammeln sich Escape-Listener an).
+  if (_sourcesPanelKeyHandler) document.removeEventListener("keydown", _sourcesPanelKeyHandler);
   _sourcesPanelKeyHandler = (e) => { if (e.key === "Escape") closeSourcesPanel(); };
   document.addEventListener("keydown", _sourcesPanelKeyHandler);
 }
@@ -749,14 +752,14 @@ function isChatNearBottom(container, threshold = 140) {
 function updateScrollBottomFab() {
   const fab = document.getElementById("scroll-bottom-fab");
   if (!fab) return;
-  const cm = chatMessages || document.getElementById("chat-messages");
+  const cm = (typeof chatMessages !== "undefined" && chatMessages) || document.getElementById("chat-messages");
   const scrollable = cm && cm.scrollHeight - cm.clientHeight > 80;
   const show = Boolean(scrollable && !isChatNearBottom(cm, 200));
   fab.classList.toggle("hidden", !show);
 }
 
 function scrollChatToBottom() {
-  const cm = chatMessages || document.getElementById("chat-messages");
+  const cm = (typeof chatMessages !== "undefined" && chatMessages) || document.getElementById("chat-messages");
   if (!cm) return;
   try {
     cm.scrollTo({ top: cm.scrollHeight, behavior: "smooth" });
@@ -2253,21 +2256,24 @@ async function sendMessage() {
     exportBtn.disabled = false;
     regenBtn.disabled = false;
     showToast(t("toast.chatError"), "error");
-  }
-
-  clearTimeout(_streamTimeout);
-  saveChatHistory();
-  saveCurrentConversation();
-  LexaState.set("isLoading", false);
-  sendBtn.disabled = false;
-  window._lexaStreamAbort = null;
-  window._lexaStreamAbortReason = "";
-  // Fokus zurück ins Eingabefeld (Tastatur-/Screenreader-Nutzer), wie bei ChatGPT/Claude —
-  // aber NICHT, wenn ein Modal/Dialog offen ist (sonst würde dem User die Eingabe im Modal
-  // entrissen / der Dialog implizit geschlossen).
-  const _modalOpen = Boolean(document.querySelector('[aria-modal="true"]'));
-  if (window._chatViewOpen && chatInput && !_modalOpen && document.activeElement !== chatInput) {
-    try { chatInput.focus({ preventScroll: true }); } catch (e) { chatInput.focus(); }
+  } finally {
+    // IMMER aufraeumen — auch wenn der catch-Block selbst wirft. Sonst bliebe isLoading=true
+    // haengen (Stop-Button fuer immer sichtbar, Senden dauerhaft blockiert). Auf den frueh
+    // zurueckkehrenden Pfaden (abort / !response.ok) ist das Doppel-Cleanup idempotent.
+    clearTimeout(_streamTimeout);
+    saveChatHistory();
+    saveCurrentConversation();
+    LexaState.set("isLoading", false);
+    sendBtn.disabled = false;
+    window._lexaStreamAbort = null;
+    window._lexaStreamAbortReason = "";
+    // Fokus zurück ins Eingabefeld (Tastatur-/Screenreader-Nutzer), wie bei ChatGPT/Claude —
+    // aber NICHT, wenn ein Modal/Dialog offen ist (sonst würde dem User die Eingabe im Modal
+    // entrissen / der Dialog implizit geschlossen).
+    const _modalOpen = Boolean(document.querySelector('[aria-modal="true"]'));
+    if (window._chatViewOpen && chatInput && !_modalOpen && document.activeElement !== chatInput) {
+      try { chatInput.focus({ preventScroll: true }); } catch (e) { chatInput.focus(); }
+    }
   }
 }
 
