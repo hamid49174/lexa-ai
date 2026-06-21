@@ -85,6 +85,16 @@ function setupKeyboardShortcuts() {
     // to avoid hijacking the user's input or browser-native combos.
     const ae = document.activeElement;
     const isTextField = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable);
+
+    // Ctrl+F: In-Konversation-Suche (wie Claude/ChatGPT) — greift AUCH im Eingabefeld.
+    // Globale Suche bleibt ueber ihren eigenen Button erreichbar.
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F")) {
+      e.preventDefault();
+      if (typeof openChatFind === "function") openChatFind();
+      else if (typeof openSearchOverlay === "function") openSearchOverlay();
+      return;
+    }
+
     if (e.ctrlKey && !e.shiftKey && !e.altKey && !isTextField) {
 
     // Ctrl+L: Clear chat
@@ -116,13 +126,6 @@ function setupKeyboardShortcuts() {
     if (e.key === "m") {
       e.preventDefault();
       startOrbConversation();
-      return;
-    }
-
-    // Ctrl+F: Global Search
-    if (e.key === "f") {
-      e.preventDefault();
-      openSearchOverlay();
       return;
     }
 

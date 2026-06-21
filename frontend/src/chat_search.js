@@ -258,6 +258,172 @@ function appendHighlightedText(target, text, query) {
   if (index < source.length) target.appendChild(document.createTextNode(source.slice(index)));
 }
 
+// ── In-Konversation-Suche (Ctrl+F) — Treffer im aktuellen Chat hervorheben + n/m ──
+// Top-Tier-Verhalten (Claude/ChatGPT/Gemini): Ctrl+F sucht IM Chat, mit Highlight,
+// Vor/Zurueck und Treffer-Zaehler. Die globale Suche (openSearchOverlay) bleibt separat.
+let _chatFindMarks = [];
+let _chatFindCurrent = -1;
+
+// Pure + testbar: alle [start,end]-Treffer von query in text (case-insensitive, ohne Overlap).
+function chatFindRanges(text, query) {
+  const ranges = [];
+  const src = String(text || "");
+  const q = String(query || "");
+  if (!src || !q) return ranges;
+  const lower = src.toLowerCase();
+  const needle = q.toLowerCase();
+  let at = lower.indexOf(needle);
+  while (at !== -1) {
+    ranges.push([at, at + needle.length]);
+    at = lower.indexOf(needle, at + needle.length);
+  }
+  return ranges;
+}
+
+// Sichtbare Text-Knoten unter root sammeln (ohne MARK/BUTTON/SCRIPT/STYLE -> keine
+// Doppel-Markierung, keine Stoerung von hljs-Markup oder Buttons).
+function _chatFindCollect(node, out) {
+  const kids = node && node.childNodes ? Array.from(node.childNodes) : [];
+  for (const child of kids) {
+    if (child.nodeType === 3) {
+      if (child.nodeValue && child.nodeValue.trim()) out.push(child);
+    } else if (child.nodeType === 1) {
+      const tag = String(child.tagName || "").toUpperCase();
+      if (tag === "MARK" || tag === "BUTTON" || tag === "SCRIPT" || tag === "STYLE") continue;
+      _chatFindCollect(child, out);
+    }
+  }
+  return out;
+}
+
+function _chatFindWrap(textNode, query) {
+  const text = textNode.nodeValue;
+  const ranges = chatFindRanges(text, query);
+  if (!ranges.length) return [];
+  const frag = document.createDocumentFragment();
+  const marks = [];
+  let last = 0;
+  for (const r of ranges) {
+    const s = r[0], e = r[1];
+    if (s > last) frag.appendChild(document.createTextNode(text.slice(last, s)));
+    const mark = document.createElement("mark");
+    mark.className = "chat-find-mark";
+    mark.textContent = text.slice(s, e);
+    frag.appendChild(mark);
+    marks.push(mark);
+    last = e;
+  }
+  if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+  if (textNode.parentNode) textNode.parentNode.replaceChild(frag, textNode);
+  return marks;
+}
+
+function clearChatFindHighlights() {
+  for (const mark of _chatFindMarks) {
+    const parent = mark.parentNode;
+    if (!parent) continue;
+    parent.replaceChild(document.createTextNode(mark.textContent || ""), mark);
+    if (typeof parent.normalize === "function") parent.normalize();
+  }
+  _chatFindMarks = [];
+  _chatFindCurrent = -1;
+}
+
+function runChatFind(query) {
+  clearChatFindHighlights();
+  const root = document.getElementById("chat-messages");
+  const q = String(query || "").trim();
+  if (root && q) {
+    for (const tn of _chatFindCollect(root, [])) {
+      const marks = _chatFindWrap(tn, q);
+      if (marks.length) _chatFindMarks.push(...marks);
+    }
+    if (_chatFindMarks.length) { _chatFindCurrent = 0; _focusChatFindMark(); }
+  }
+  _updateChatFindCount();
+  return _chatFindMarks.length;
+}
+
+function _focusChatFindMark() {
+  for (let i = 0; i < _chatFindMarks.length; i += 1) {
+    _chatFindMarks[i].className = i === _chatFindCurrent ? "chat-find-mark chat-find-current" : "chat-find-mark";
+  }
+  const cur = _chatFindMarks[_chatFindCurrent];
+  if (cur && typeof cur.scrollIntoView === "function") cur.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function chatFindStep(dir) {
+  if (!_chatFindMarks.length) return;
+  const n = _chatFindMarks.length;
+  _chatFindCurrent = (_chatFindCurrent + (dir < 0 ? -1 : 1) + n) % n;
+  _focusChatFindMark();
+  _updateChatFindCount();
+}
+window.chatFindNext = function () { chatFindStep(1); };
+window.chatFindPrev = function () { chatFindStep(-1); };
+
+function _updateChatFindCount() {
+  const el = document.getElementById("chat-find-count");
+  if (!el) return;
+  const total = _chatFindMarks.length;
+  el.textContent = total ? `${_chatFindCurrent + 1}/${total}` : "0/0";
+}
+
+function _tf(key, fallback) { return typeof t === "function" ? t(key) : fallback; }
+
+function openChatFind() {
+  let bar = document.getElementById("chat-find-bar");
+  if (!bar) {
+    const container = document.getElementById("chat-container") || document.body;
+    bar = document.createElement("div");
+    bar.id = "chat-find-bar";
+    bar.className = "chat-find-bar";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = "chat-find-input";
+    input.className = "chat-find-input";
+    input.setAttribute("aria-label", _tf("chat.findInConversation", "Im Chat suchen"));
+    input.placeholder = _tf("chat.findPlaceholder", "Im Chat suchen…");
+    input.addEventListener("input", function () { runChatFind(input.value); });
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); chatFindStep(e.shiftKey ? -1 : 1); }
+      else if (e.key === "Escape") { e.preventDefault(); closeChatFind(); }
+    });
+    const count = document.createElement("span");
+    count.id = "chat-find-count";
+    count.className = "chat-find-count";
+    count.textContent = "0/0";
+    const prev = document.createElement("button");
+    prev.type = "button"; prev.className = "chat-find-btn"; prev.dataset.action = "chatFindPrev";
+    prev.textContent = "↑"; prev.setAttribute("aria-label", _tf("chat.findPrev", "Vorheriger Treffer"));
+    const next = document.createElement("button");
+    next.type = "button"; next.className = "chat-find-btn"; next.dataset.action = "chatFindNext";
+    next.textContent = "↓"; next.setAttribute("aria-label", _tf("chat.findNext", "Nächster Treffer"));
+    const close = document.createElement("button");
+    close.type = "button"; close.className = "chat-find-btn chat-find-close"; close.dataset.action = "closeChatFind";
+    close.textContent = "✕"; close.setAttribute("aria-label", _tf("common.close", "Schließen"));
+    bar.append(input, count, prev, next, close);
+    container.appendChild(bar);
+  }
+  bar.classList.remove("hidden");
+  const inputEl = document.getElementById("chat-find-input");
+  if (inputEl) { inputEl.focus(); if (typeof inputEl.select === "function") inputEl.select(); }
+}
+window.openChatFind = openChatFind;
+
+function closeChatFind() {
+  clearChatFindHighlights();
+  const bar = document.getElementById("chat-find-bar");
+  if (bar) bar.classList.add("hidden");
+  const inputEl = document.getElementById("chat-find-input");
+  if (inputEl) inputEl.value = "";
+  _updateChatFindCount();
+}
+window.closeChatFind = closeChatFind;
+window.chatFindRanges = chatFindRanges;
+window.runChatFind = runChatFind;
+window.clearChatFindHighlights = clearChatFindHighlights;
+
 async function exportConversation(convId, fmt = "markdown") {
   try {
     const cId = convId || LexaState.get("currentConversationId");

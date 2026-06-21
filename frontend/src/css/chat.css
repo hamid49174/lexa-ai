@@ -70,6 +70,63 @@
   outline-offset: 2px;
 }
 
+/* In-Konversation-Suche (Ctrl+F) — schwebende Leiste oben rechts + Treffer-Marks. */
+.chat-find-bar {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  background: var(--glass, rgba(14, 14, 22, 0.92));
+  border: 1px solid var(--glass-border-hover, rgba(255, 255, 255, 0.12));
+  box-shadow: var(--shadow, 0 4px 24px rgba(0, 0, 0, 0.4));
+  backdrop-filter: blur(12px);
+}
+.chat-find-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text, #e8e6f0);
+  font-family: var(--font);
+  font-size: 13px;
+  width: 180px;
+  padding: 2px 4px;
+}
+.chat-find-input::placeholder { color: var(--text-muted, #6b6782); }
+.chat-find-count {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-muted, #6b6782);
+  min-width: 34px;
+  text-align: center;
+}
+.chat-find-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted, #6b6782);
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+}
+.chat-find-btn:hover { background: var(--accent-soft, rgba(194, 77, 224, 0.12)); color: var(--text, #e8e6f0); }
+.chat-find-btn:focus-visible { outline: 2px solid var(--accent, #c24de0); outline-offset: 1px; }
+.chat-find-mark {
+  background: rgba(234, 179, 8, 0.32);
+  color: inherit;
+  border-radius: 2px;
+}
+.chat-find-mark.chat-find-current {
+  background: var(--accent, #c24de0);
+  color: #fff;
+}
+
 /* Persistenter Stop-Button — zentriert ueber dem Composer, sichtbar waehrend des Streams. */
 .stop-stream-fab {
   position: absolute;
