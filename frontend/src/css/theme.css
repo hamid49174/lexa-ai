@@ -32,7 +32,7 @@
   /* Text hierarchy */
   --text: #e8e6f0;
   --text-secondary: #9d99b0;
-  --text-muted: #6b6782;
+  --text-muted: #827e96; /* heller fuer bessere Lesbarkeit (Zeitstempel/Labels), bleibt < secondary */
   --text-dim: #4a4660;
 
   /* Borders */
