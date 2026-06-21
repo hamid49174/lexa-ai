@@ -121,6 +121,7 @@ function _dispatch(el, ds, value) {
     case "deleteDeepgramKey": deleteDeepgramKeyAction(); break;
     case "setCartesiaKey": setCartesiaKeyAction(); break;
     case "deleteCartesiaKey": deleteCartesiaKeyAction(); break;
+    case "setCartesiaVoice": setCartesiaVoiceAction(); break;
     case "elevenlabsKeyAction": elevenlabsKeyAction(); break;
     case "elevenlabsToggleAction": elevenlabsToggleAction(value); break;
     case "elevenlabsVoiceChange": elevenlabsVoiceChange(value); break;

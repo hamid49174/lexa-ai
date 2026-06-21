@@ -1068,6 +1068,22 @@ async function deleteCartesiaKeyAction() {
   });
 }
 
+async function setCartesiaVoiceAction() {
+  const result = await showInputModal("Cartesia Stimme", [
+    { name: "voiceId", label: "Voice-ID (aus dem Cartesia-Dashboard)", type: "text", required: true }
+  ], "Speichern");
+  if (!result || !result.voiceId || !result.voiceId.trim()) return;
+  try {
+    const res = await window.lexa.cartesiaSetVoice(result.voiceId.trim());
+    if (res && res.success) {
+      showToast("Cartesia-Stimme gespeichert", "success");
+      await refreshSettingsView();
+    } else {
+      showToast((res && res.error) || "Fehler beim Speichern", "error");
+    }
+  } catch (e) { showToast("Fehler: " + (e.message || e), "error"); }
+}
+
 // ── ELEVENLABS SETTINGS ─────────────────────────
 async function loadElevenLabsSettings(voice) {
   const tts = voice?.tts || {};

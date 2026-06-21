@@ -112,6 +112,7 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("deepgramDeleteKey", "critical", "secret", "/voice/stt/deepgram/key"),
   bridgePolicy("cartesiaSetKey", "critical", "secret", "/voice/tts/cartesia/key"),
   bridgePolicy("cartesiaDeleteKey", "critical", "secret", "/voice/tts/cartesia/key"),
+  bridgePolicy("cartesiaSetVoice", "medium", "write", "/voice/tts/cartesia/voice", { audit: true }),
   bridgePolicy("wakewordStart", "high", "secret", "/voice/wakeword/start"),
   bridgePolicy("wakewordStop", "medium", "write", "/voice/wakeword/stop", { audit: true }),
   bridgePolicy("wakewordStatus", "low", "read", "/voice/wakeword/status", { batch_allowed: true }),
@@ -1217,6 +1218,7 @@ if (isLexaSmokeMockAllowed()) {
     deepgramDeleteKey: async () => ok(),
     cartesiaSetKey: async () => ok(),
     cartesiaDeleteKey: async () => ok(),
+    cartesiaSetVoice: async () => ok(),
     visionStatus: async () => ({ success: true, data: { available: false, providers: [], screenshot: true, details: "smoke mock" } }),
     visionAnalyze: async () => ({ text: "" }),
     personalOsDiagnostics: async () => emptyPersonalOs(),
@@ -1809,6 +1811,14 @@ const lexaBridge = {
   },
   cartesiaDeleteKey: async () => {
     const r = await fetchWithTimeout(`${API}/voice/tts/cartesia/key`, { method: 'DELETE' });
+    return r.json();
+  },
+  cartesiaSetVoice: async (voiceId) => {
+    const r = await fetchWithTimeout(`${API}/voice/tts/cartesia/voice`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice_id: voiceId }),
+    });
     return r.json();
   },
 
