@@ -1126,6 +1126,7 @@
 
   "empty.noData": "No data",
   "empty.noTodos": "No to-dos yet",
+  "empty.noTodoMatches": "No to-dos match the filter",
   "empty.noBackups": "No backups found.",
   "empty.noAutostart": "No autostart entries found.",
   "empty.noServices": "No services found.",

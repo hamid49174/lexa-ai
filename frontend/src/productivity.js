@@ -428,13 +428,30 @@ async function refreshTodos() {
 }
 
 function filterTodosLocal(query) {
+  const list = document.getElementById("todo-list");
   const items = document.querySelectorAll("#todo-list .todo-item");
   const q = query.toLowerCase().trim();
+  let visible = 0;
   items.forEach(item => {
     const title = item.querySelector(".todo-title")?.textContent.toLowerCase() || "";
     const desc = item.querySelector(".todo-desc")?.textContent.toLowerCase() || "";
-    item.classList.toggle("hidden", !(!q || title.includes(q) || desc.includes(q)));
+    const show = !q || title.includes(q) || desc.includes(q);
+    item.classList.toggle("hidden", !show);
+    if (show) visible += 1;
   });
+  // "Keine Treffer"-Hinweis bei aktivem Filter, wenn alles ausgeblendet ist (Notion-Stil).
+  let note = document.getElementById("todo-filter-empty");
+  if (q && items.length && visible === 0) {
+    if (!note && list) {
+      note = document.createElement("div");
+      note.id = "todo-filter-empty";
+      note.className = "empty-state";
+      list.appendChild(note);
+    }
+    if (note) note.textContent = t("empty.noTodoMatches");
+  } else if (note) {
+    note.remove();
+  }
 }
 
 function startTodoInlineEdit(id, titleEl, currentTitle) {
@@ -451,6 +468,10 @@ function startTodoInlineEdit(id, titleEl, currentTitle) {
   let editClosed = false;
   const closeEdit = () => {
     if (editClosed) return;
+    // Nicht mitten in einem laufenden Speichern abbauen — sonst wird das Input abgehaengt,
+    // bevor der Fehlerpfad es fuer einen Retry wiederherstellen kann (Race bei Escape/blur
+    // waehrend des to-do-Updates). Der save-Pfad gibt das Lock frei und ruft closeEdit selbst.
+    if (_todoMutationRunning.has(key)) return;
     editClosed = true;
     input.removeEventListener("blur", save);
     refreshTodos();
@@ -467,6 +488,7 @@ function startTodoInlineEdit(id, titleEl, currentTitle) {
     try {
       await window.lexa.todoUpdate(id, { title: newTitle });
       showToast(t("todo.updated"), "success");
+      _todoMutationRunning.delete(key); // Lock VOR closeEdit freigeben, sonst no-opt es (Guard)
       closeEdit();
     } catch (e) {
       console.warn("[Productivity] Failed to update todo title:", e.message || e);
@@ -476,6 +498,10 @@ function startTodoInlineEdit(id, titleEl, currentTitle) {
         input.removeAttribute("aria-busy");
         input.focus();
         input.select();
+      } else {
+        // Input wurde zwischenzeitlich abgehaengt (z.B. paralleler Refresh) -> konsistente
+        // Liste wiederherstellen, statt den Fehler stumm zu verschlucken.
+        refreshTodos();
       }
     } finally {
       _todoMutationRunning.delete(key);

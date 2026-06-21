@@ -1075,6 +1075,7 @@
   "productivity.streakNotification": "{{streak}}-Tage Streak bei \"{{name}}\"!",
   "empty.noData": "Keine Daten",
   "empty.noTodos": "Keine To-Dos vorhanden",
+  "empty.noTodoMatches": "Keine To-Dos passen zum Filter",
   "empty.noBackups": "Keine Backups gefunden.",
   "empty.noAutostart": "Keine Autostart-Einträge gefunden.",
   "empty.noServices": "Keine Dienste gefunden.",
