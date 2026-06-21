@@ -69,6 +69,27 @@
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.14);
 }
 
+/* Skip-to-content Link (a11y) — erst beim Fokussieren (Tab) sichtbar, springt in den Chat. */
+.skip-link {
+  position: absolute;
+  top: -56px;
+  left: 12px;
+  z-index: 1000;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--accent, #c24de0);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: top 0.16s ease;
+}
+.skip-link:focus {
+  top: 12px;
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
 /* ── LIGHT THEME ──────────────────────────────── */
 [data-theme="light"] {
   --bg: #f7f7fa;

@@ -11,6 +11,7 @@
   "common.save": "Speichern",
   "common.delete": "Löschen",
   "common.close": "Schließen",
+  "a11y.skipToChat": "Zum Chat springen",
   "common.loading": "Laden...",
   "common.retry": "Erneut versuchen",
   "common.yes": "Ja",

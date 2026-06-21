@@ -50,6 +50,7 @@
 </head>
 
 <body>
+  <a href="#chat-container" class="skip-link" data-i18n="a11y.skipToChat">Zum Chat springen</a>
   <div id="app">
     <canvas id="lexa-ambient-canvas" class="lexa-ambient-canvas" aria-hidden="true"></canvas>
 
@@ -557,7 +558,7 @@
           </div>
 
         <!-- Chat View (default) -->
-        <div class="chat-container active animated-ai-chat" id="chat-container">
+        <div class="chat-container active animated-ai-chat" id="chat-container" tabindex="-1">
           <!-- Drop Zone Overlay -->
           <div class="drop-zone-overlay" id="drop-zone-overlay">
             <div class="drop-zone-content">

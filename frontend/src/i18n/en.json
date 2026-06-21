@@ -12,6 +12,7 @@
   "common.save": "Save",
   "common.delete": "Delete",
   "common.close": "Close",
+  "a11y.skipToChat": "Skip to chat",
   "common.loading": "Loading...",
   "common.retry": "Retry",
   "common.yes": "Yes",
