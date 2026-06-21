@@ -769,6 +769,7 @@
   "dashboard.greetingSuffix": ".",
   "dashboard.backendOffline": "Backend offline",
   "dashboard.localAssistant": "API-gestuetzte Assistenz mit lokaler Kontrolle",
+  "dashboard.unavailable": "Nicht verfügbar",
   "dashboard.unknownProvider": "Unbekannt",
   "dashboard.aiReady": "Bereit",
   "dashboard.aiOffline": "Offline",

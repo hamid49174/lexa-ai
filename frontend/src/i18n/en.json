@@ -811,6 +811,7 @@
   "dashboard.greetingSuffix": ".",
   "dashboard.backendOffline": "Backend offline",
   "dashboard.localAssistant": "API-backed assistant with local control",
+  "dashboard.unavailable": "Unavailable",
   "dashboard.unknownProvider": "Unknown",
   "dashboard.aiReady": "Ready",
   "dashboard.aiOffline": "Offline",

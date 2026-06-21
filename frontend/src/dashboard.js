@@ -230,6 +230,14 @@ async function refreshDashboard() {
   ]);
   if (refreshSeq !== _dashboardRefreshSeq) return;
 
+  // Widget-Fehlerzustand: abgelehnte Requests duerfen nicht still in "Lade..." haengen bleiben.
+  const _werr = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = t("dashboard.unavailable");
+    el.classList.add("dash-widget-error");
+  };
+
   // Greeting subtitle with model name
   const subEl = document.getElementById("dash-greeting-sub");
   if (subEl) {
@@ -238,10 +246,9 @@ async function refreshDashboard() {
   }
 
   // System stats
-  if (sysRes.status === "fulfilled") {
-    const res = sysRes.value;
-    if (res.success && res.data) {
-      const d = res.data;
+  if (sysRes.status === "fulfilled" && sysRes.value && sysRes.value.success && sysRes.value.data) {
+    {
+      const d = sysRes.value.data;
       const setDash = (id, val) => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -263,6 +270,12 @@ async function refreshDashboard() {
         if (battBar && bv !== null) applyMeterClass(battBar, bv, bv > 30 ? "meter-success" : "meter-error");
       }
     }
+  } else {
+    // System-Info nicht verfuegbar -> Werte nicht in "Lade..." haengen lassen.
+    ["dash-cpu", "dash-ram", "dash-disk", "dash-battery"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = "--";
+    });
   }
 
   // AI status
@@ -273,6 +286,8 @@ async function refreshDashboard() {
       const hermes = healthRes.status === "fulfilled" ? healthRes.value?.hermes : null;
       renderDashboardAiStatus(aiEl, ai, hermes);
     }
+  } else {
+    _werr("dash-ai-status");
   }
 
   // Memory stats
@@ -280,6 +295,8 @@ async function refreshDashboard() {
     const mem = memRes.value;
     const memEl = document.getElementById("dash-memory-stats");
     renderDashboardMemoryStats(memEl, mem);
+  } else {
+    _werr("dash-memory-stats");
   }
 
   // Routines
@@ -287,6 +304,8 @@ async function refreshDashboard() {
     const routinesData = routRes.value;
     const routEl = document.getElementById("dash-routines-list");
     renderDashboardRoutines(routEl, routinesData.routines);
+  } else {
+    _werr("dash-routines-list");
   }
 
   // Productivity stats
@@ -321,6 +340,8 @@ async function refreshDashboard() {
     if (chartEl && weeklyRes.status === "fulfilled") {
       const days = weeklyRes.value?.days || [];
       renderWeeklyChart(chartEl, days);
+    } else if (chartEl) {
+      _werr("dash-weekly-chart");
     }
   }
 }

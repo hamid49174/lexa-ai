@@ -17,6 +17,13 @@
   transition: all 0.25s;
 }
 
+/* Widget-Fehlerzustand (abgelehnter Request) — dezent gedaempft statt ewiges "Lade...". */
+.dash-widget-error {
+  color: var(--text-muted, #827e96);
+  font-size: 12px;
+  font-style: italic;
+}
+
 .dash-widget:hover {
   border-color: var(--glass-border-hover);
   box-shadow: var(--shadow-glow);
