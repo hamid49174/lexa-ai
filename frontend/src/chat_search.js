@@ -89,6 +89,9 @@ function createSearchOverlayPanel() {
 }
 
 function openSearchOverlay() {
+  // Etwaige In-Konversation-Such-Markierungen (Ctrl+F) entfernen, damit sie nicht neben der
+  // globalen Suche stehen bleiben.
+  if (typeof clearChatFindHighlights === "function") clearChatFindHighlights();
   let overlay = document.getElementById("search-overlay");
   if (!overlay) {
     overlay = document.createElement("div"); overlay.id = "search-overlay"; overlay.className = "search-overlay";
@@ -353,7 +356,11 @@ function _focusChatFindMark() {
     _chatFindMarks[i].className = i === _chatFindCurrent ? "chat-find-mark chat-find-current" : "chat-find-mark";
   }
   const cur = _chatFindMarks[_chatFindCurrent];
-  if (cur && typeof cur.scrollIntoView === "function") cur.scrollIntoView({ block: "center", behavior: "smooth" });
+  // Nur scrollen, wenn der Treffer noch im DOM haengt (Marks koennen durch neues Streaming/
+  // Re-Render verwaist sein) — vermeidet Fehler/Sprünge auf abgehaengte Knoten.
+  if (cur && cur.isConnected !== false && typeof cur.scrollIntoView === "function") {
+    cur.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
 }
 
 function chatFindStep(dir) {

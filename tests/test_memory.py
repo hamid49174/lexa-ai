@@ -516,6 +516,17 @@ class TestConversationList:
         assert "last_message" in c
         assert "last_role" in c
 
+    def test_conversation_get_handles_corrupt_messages_gracefully(self):
+        """Korrupte messages-JSON -> leere Liste statt Crash (mit Log, kein stiller Verlust)."""
+        from backend.memory import conversation_create, conversation_get, _get_db
+        cid = conversation_create("Corrupt Test")
+        db = _get_db()
+        db.execute("UPDATE conversations SET messages = ? WHERE id = ?", ("{not valid json", cid))
+        db.commit()
+        c = conversation_get(cid)
+        assert c is not None
+        assert c["messages"] == []
+
 
 # ---------------------------------------------------------------------------
 #  Memory Graph

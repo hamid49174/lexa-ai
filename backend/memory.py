@@ -1276,6 +1276,12 @@ def conversation_get(conv_id: int) -> "dict | None":
         try:
             d["messages"] = json.loads(d["messages"])
         except (json.JSONDecodeError, TypeError):
+            # Leere/neue Konversation (None/"") ist normal; nur ECHTE Korruption (nicht-leerer
+            # String, der nicht parst) signalisieren — sonst sieht der Chat leer aus = stiller
+            # Datenverlust ohne Spur.
+            raw = row["messages"] if "messages" in row.keys() else None
+            if isinstance(raw, str) and raw.strip():
+                logger.error("conversation %s has unparseable messages JSON (%d chars) — returning empty", conv_id, len(raw))
             d["messages"] = []
         return d
     return None
