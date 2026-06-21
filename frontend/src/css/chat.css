@@ -1981,7 +1981,31 @@
 .agents-run-meta { display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; color: var(--text-dim, #9c98b3); }
 .agents-run-status.ok { color: var(--success, #34d399); }
 .agents-run-status.warn { color: var(--warning, #fbbf24); }
+.agents-run-dur { font-family: var(--font-mono, monospace); opacity: 0.85; }
 .agents-detail { min-height: 120px; }
+
+/* Kennzahlen-Leiste im Lauf-Detail (Dauer · Agenten · Quellen · Verifikation · Modus). */
+.agents-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.agents-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: var(--bg-surface2, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.06));
+  min-width: 64px;
+}
+.agents-metric-val { font-size: 16px; font-weight: 700; color: var(--text, #e8e6f0); line-height: 1.1; }
+.agents-metric-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted, #827e96); }
+.agents-metric.ok .agents-metric-val { color: var(--success, #34d399); }
+.agents-metric.warn .agents-metric-val { color: var(--warning, #eab308); }
 .agents-empty, .agents-detail-loading {
   padding: 16px;
   color: var(--text-dim, #9c98b3);

@@ -61,6 +61,18 @@ load("agents.js");
 
 check("exposes refreshAgentsView", typeof win.refreshAgentsView === "function");
 
+// ── summarizeRun (pure Kennzahlen, Phase 50 #10) ──
+check("exposes summarizeRun", typeof win.summarizeRun === "function");
+check("summarizeRun computes metrics", (() => {
+  const s = win.summarizeRun({ subagent_count: 3, sources: [{}, {}], verdicts: [{ passed: true }, { passed: true }, { passed: false }], elapsed_seconds: 42, mode: "fast", partial: false });
+  return s && s.agents === 3 && s.sources === 2 && s.verdictTotal === 3 && s.verdictPassed === 2 && s.durationLabel === "42s" && s.mode === "schnell";
+})());
+check("summarizeRun formats sub-10s + thorough", (() => {
+  const s = win.summarizeRun({ subagent_count: 1, elapsed_seconds: 4.2, mode: "thorough" });
+  return s.durationLabel === "4.2s" && s.mode === "gruendlich" && s.sources === 0 && s.verdictTotal === 0;
+})());
+check("summarizeRun handles null", win.summarizeRun(null) === null);
+
 // Gemockte Bridge
 const detailCalls = [];
 win.lexa = {
@@ -73,6 +85,9 @@ win.lexa = {
     detailCalls.push(id);
     return {
       run_id: id, goal: "Vergleiche A und B", mode: "thorough", answer: "FINALE ANTWORT " + id,
+      subagent_count: 2, elapsed_seconds: 8.2,
+      sources: [{ id: 1, url: "https://a.test" }, { id: 2, url: "https://b.test" }],
+      verdicts: [{ passed: true }, { passed: false }],
       events: [
         { type: "plan", plan: { subtasks: [{ role: "research", objective: "Finde A" }] } },
         { type: "subagent_start", agent_id: "a1", role: "research", label: "Recherche", objective: "Finde A" },
@@ -97,6 +112,11 @@ win.lexa = {
   check("first run auto-opened detail", detailCalls.length >= 1 && detailCalls[0] === "r1");
   check("detail shows answer", allText(els["agents-detail"]).includes("FINALE ANTWORT r1"));
   check("detail replays plan", allText(els["agents-detail"]).includes("Finde A"));
+  // Kennzahlen-Leiste
+  const detailText = allText(els["agents-detail"]);
+  check("detail shows metrics strip", detailText.includes("Dauer") && detailText.includes("Agenten") && detailText.includes("Quellen") && detailText.includes("Geprueft"));
+  check("detail shows verdict ratio", detailText.includes("1/2"));
+  check("detail shows duration value", detailText.includes("8.2s"));
   check("first item active", items[0].classList.contains("active"));
 
   // Klick auf zweiten Lauf laedt dessen Detail

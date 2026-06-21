@@ -23,6 +23,35 @@
     } catch (_) { return String(iso); }
   }
 
+  // Dauer kompakt: <10s -> "4.2s", <60s -> "42s", sonst "2m 5s".
+  function _fmtDuration(sec) {
+    if (typeof sec !== "number" || isNaN(sec) || sec < 0) return "";
+    if (sec < 10) return sec.toFixed(1) + "s";
+    if (sec < 60) return Math.round(sec) + "s";
+    return Math.floor(sec / 60) + "m " + Math.round(sec % 60) + "s";
+  }
+
+  // Pure + testbar: Kennzahlen eines Laufs (Dauer, Agenten, Quellen, Verifikation).
+  function summarizeRun(run) {
+    if (!run || typeof run !== "object") return null;
+    const agents = typeof run.subagent_count === "number"
+      ? run.subagent_count
+      : (Array.isArray(run.agents) ? run.agents.length : 0);
+    const sources = Array.isArray(run.sources) ? run.sources.length : 0;
+    const verdicts = Array.isArray(run.verdicts) ? run.verdicts : [];
+    const verdictPassed = verdicts.filter((v) => v && v.passed).length;
+    return {
+      agents,
+      sources,
+      verdictTotal: verdicts.length,
+      verdictPassed,
+      durationLabel: _fmtDuration(run.elapsed_seconds),
+      mode: run.mode === "fast" ? "schnell" : "gruendlich",
+      partial: Boolean(run.partial),
+    };
+  }
+  window.summarizeRun = summarizeRun;
+
   function _renderStatus(banner, status) {
     banner.replaceChildren();
     if (!status || status.enabled === false) {
@@ -59,6 +88,8 @@
       meta.appendChild(_el("span", "agents-run-status " + statusKind, run.status || "?"));
       if (run.mode) meta.appendChild(_el("span", "agents-run-mode", run.mode === "fast" ? "schnell" : "gruendlich"));
       if (typeof run.subagent_count === "number") meta.appendChild(_el("span", "agents-run-count", run.subagent_count + " Agenten"));
+      const dur = _fmtDuration(run.elapsed_seconds);
+      if (dur) meta.appendChild(_el("span", "agents-run-dur", dur));
       meta.appendChild(_el("span", "agents-run-time", _fmtTime(run.created_at)));
       item.appendChild(top);
       item.appendChild(meta);
@@ -77,6 +108,27 @@
     if (!run) {
       detailEl.appendChild(_el("div", "agents-empty", "Lauf nicht gefunden."));
       return;
+    }
+    // Kennzahlen-Leiste (Dauer · Agenten · Quellen · Verifikation · Modus) — wie Claude /workflows.
+    const sum = summarizeRun(run);
+    if (sum) {
+      const strip = _el("div", "agents-metrics");
+      const add = (label, value, cls) => {
+        const chip = _el("span", "agents-metric" + (cls ? " " + cls : ""));
+        chip.appendChild(_el("span", "agents-metric-val", value));
+        chip.appendChild(_el("span", "agents-metric-label", label));
+        strip.appendChild(chip);
+      };
+      if (sum.durationLabel) add("Dauer", sum.durationLabel);
+      add("Agenten", String(sum.agents));
+      if (sum.sources) add("Quellen", String(sum.sources));
+      if (sum.verdictTotal) {
+        add("Geprueft", sum.verdictPassed + "/" + sum.verdictTotal,
+          sum.verdictPassed === sum.verdictTotal ? "ok" : "warn");
+      }
+      add("Modus", sum.mode);
+      if (sum.partial) add("Status", "teilweise", "warn");
+      detailEl.appendChild(strip);
     }
     // Live-Baum aus gespeicherten Events rekonstruieren.
     if (typeof window.buildOrchestratorPanel === "function" && typeof window.orchestratorHandleEvent === "function") {
