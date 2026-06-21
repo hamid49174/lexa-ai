@@ -221,13 +221,23 @@ function appendCodeBlock(parent, lang, codeText) {
   copyButton.title = copyLabel;
   copyButton.setAttribute("aria-label", copyLabel);
   copyButton.dataset.icon = "\u2398";
+  // Sichtbares Label neben dem Icon (ChatGPT-Stil, besser auffindbar als nur Icon).
+  const copyBtnLabel = document.createElement("span");
+  copyBtnLabel.className = "code-btn-label";
+  copyBtnLabel.textContent = typeof t === "function" ? t("chat.copyShort") : "Kopieren";
+  copyButton.appendChild(copyBtnLabel);
 
   const wrapButton = document.createElement("button");
   wrapButton.type = "button";
   wrapButton.className = "code-tool-btn";
-  wrapButton.textContent = "\u21a9";
   wrapButton.title = "Zeilenumbruch umschalten";
   wrapButton.setAttribute("aria-label", "Zeilenumbruch umschalten");
+  const wrapIcon = document.createElement("span");
+  wrapIcon.textContent = "\u21a9";
+  const wrapBtnLabel = document.createElement("span");
+  wrapBtnLabel.className = "code-btn-label";
+  wrapBtnLabel.textContent = "Umbruch";
+  wrapButton.append(wrapIcon, wrapBtnLabel);
 
   const actions = document.createElement("div");
   actions.className = "code-actions";
@@ -255,9 +265,11 @@ function appendCodeBlock(parent, lang, codeText) {
   wrap.appendChild(header);
   wrap.appendChild(pre);
 
-  // Sehr lange Bloecke einklappen (Mehr/Weniger anzeigen).
+  // Sehr lange Bloecke einklappen (Mehr/Weniger anzeigen). Schwelle bewusst hoch (60),
+  // damit normale 30-50-Zeilen-Snippets NICHT eingeklappt werden (war vorher 24 = zu aggressiv).
+  const CODE_COLLAPSE_LINES = 60;
   const lineCount = (code.textContent.match(/\n/g) || []).length + 1;
-  if (lineCount > 24) {
+  if (lineCount > CODE_COLLAPSE_LINES) {
     wrap.classList.add("code-collapsed");
     const expandBtn = document.createElement("button");
     expandBtn.type = "button";

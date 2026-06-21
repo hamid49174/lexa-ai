@@ -1963,6 +1963,13 @@
   transition: background 0.15s, color 0.15s;
 }
 .code-tool-btn:hover { background: var(--accent-soft); color: var(--accent2); }
+/* Sichtbares Label neben Code-Button-Icons (Kopieren/Umbruch) — besser auffindbar. */
+.code-btn-label {
+  margin-left: 5px;
+  font-size: 11px;
+  font-family: var(--font);
+  letter-spacing: 0.2px;
+}
 .code-block.code-wrap {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

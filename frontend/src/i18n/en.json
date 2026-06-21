@@ -1362,6 +1362,7 @@
   "chat.userNameYou": "You",
   "chat.systemNameLexa": "Lexa",
   "chat.copyTooltip": "Copy",
+  "chat.copyShort": "Copy",
   "chat.moreActionsTooltip": "More actions",
   "chat.saveAsMemoryTooltip": "Save as memory",
   "chat.workspaceHandoffTooltip": "Create workspace draft",
