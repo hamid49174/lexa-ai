@@ -1174,6 +1174,30 @@ body {
   color: rgba(229, 226, 244, 0.88);
 }
 
+/* GFM-Callouts (> [!NOTE] usw.) — wie GitHub/Claude: farbiger Rand + getoenter BG + Kopf. */
+.message .msg-text .chat-callout { border-left-width: 3px; }
+.message .msg-text .chat-callout-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.message .msg-text .chat-callout-icon { font-size: 13px; }
+.message .msg-text .chat-callout-note { border-left-color: var(--accent2, #5b7cf6); background: rgba(91, 124, 246, 0.09); }
+.message .msg-text .chat-callout-note .chat-callout-head { color: var(--accent2, #5b7cf6); }
+.message .msg-text .chat-callout-tip { border-left-color: #22c55e; background: rgba(34, 197, 94, 0.09); }
+.message .msg-text .chat-callout-tip .chat-callout-head { color: #22c55e; }
+.message .msg-text .chat-callout-warning { border-left-color: #eab308; background: rgba(234, 179, 8, 0.1); }
+.message .msg-text .chat-callout-warning .chat-callout-head { color: #eab308; }
+.message .msg-text .chat-callout-important { border-left-color: var(--accent, #c24de0); background: rgba(194, 77, 224, 0.09); }
+.message .msg-text .chat-callout-important .chat-callout-head { color: var(--accent, #c24de0); }
+.message .msg-text .chat-callout-caution { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.1); }
+.message .msg-text .chat-callout-caution .chat-callout-head { color: #ef4444; }
+
 .message .msg-copy-btn,
 .message .msg-thumbs-btn,
 .message .msg-action-btn {

@@ -65,6 +65,10 @@ function appendNestedList(parent, lines, start) {
   return i;
 }
 
+// GFM-Callouts (> [!NOTE] usw.) — wie GitHub/Claude. Icon + Titel je Typ.
+const _CALLOUT_ICONS = { note: "ℹ", tip: "💡", warning: "⚠", important: "❗", caution: "⛔" };
+const _CALLOUT_TITLES = { note: "Hinweis", tip: "Tipp", warning: "Warnung", important: "Wichtig", caution: "Achtung" };
+
 function appendMarkdownSegment(parent, segment) {
   const lines = String(segment || "").replace(/\r\n/g, "\n").split("\n");
   let i = 0;
@@ -95,14 +99,44 @@ function appendMarkdownSegment(parent, segment) {
       continue;
     }
     if (/^>\s+/.test(line)) {
-      const quote = document.createElement("blockquote");
-      quote.className = "chat-quote";
-      let first = true;
+      const quoteLines = [];
       while (i < lines.length && /^>\s+/.test(lines[i])) {
-        if (!first) appendLineBreak(quote);
-        appendInlineMarkdown(quote, lines[i].replace(/^>\s+/, ""));
-        first = false;
+        quoteLines.push(lines[i].replace(/^>\s+/, ""));
         i += 1;
+      }
+      const quote = document.createElement("blockquote");
+      // GFM-Callout? Erste Zeile = [!NOTE]/[!TIP]/[!WARNING]/[!IMPORTANT]/[!CAUTION].
+      const callout = /^\[!(NOTE|TIP|WARNING|IMPORTANT|CAUTION)\]\s*(.*)$/i.exec(quoteLines[0] || "");
+      if (callout) {
+        const kind = callout[1].toLowerCase();
+        quote.className = "chat-quote chat-callout chat-callout-" + kind;
+        const head = document.createElement("div");
+        head.className = "chat-callout-head";
+        const icon = document.createElement("span");
+        icon.className = "chat-callout-icon";
+        icon.textContent = _CALLOUT_ICONS[kind] || "ℹ";
+        const title = document.createElement("span");
+        title.className = "chat-callout-title";
+        title.textContent = _CALLOUT_TITLES[kind] || kind.toUpperCase();
+        head.append(icon, title);
+        quote.appendChild(head);
+        const body = [];
+        if (callout[2] && callout[2].trim()) body.push(callout[2].trim());
+        for (let k = 1; k < quoteLines.length; k += 1) body.push(quoteLines[k]);
+        let firstBody = true;
+        for (const bl of body) {
+          if (!firstBody) appendLineBreak(quote);
+          appendInlineMarkdown(quote, bl);
+          firstBody = false;
+        }
+      } else {
+        quote.className = "chat-quote";
+        let first = true;
+        for (const ql of quoteLines) {
+          if (!first) appendLineBreak(quote);
+          appendInlineMarkdown(quote, ql);
+          first = false;
+        }
       }
       parent.appendChild(quote);
       continue;
