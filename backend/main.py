@@ -451,11 +451,15 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"Plugin-Discovery fehlgeschlagen: {e}")
 
-    # Workflow Scheduler
+    # Workflow Scheduler — CompanionEngine durchreichen, sonst sind alle
+    # 'tool'-Steps zur Laufzeit tot (RuntimeError in _step_tool).
     try:
         from backend.workflows import get_workflow_engine
+        from companion.engine import companion as _wf_companion
         wf_engine = get_workflow_engine()
-        await wf_engine.start_scheduler()
+        await wf_engine.start_scheduler(
+            _wf_companion.execute if hasattr(_wf_companion, "execute") else None
+        )
         logger.info("Workflow-Scheduler gestartet")
     except Exception as e:
         logger.warning(f"Workflow-Scheduler-Start fehlgeschlagen: {e}")
@@ -467,6 +471,20 @@ async def startup_event():
         logger.info("Context-Monitor gestartet")
     except Exception as e:
         logger.warning(f"Context-Monitor-Start fehlgeschlagen: {e}")
+
+    # Workflow-Event-Bridge: ContextMonitor-Events (high_cpu, high_memory,
+    # app_opened, …) an die Workflow-Engine weiterreichen + system_start
+    # emittieren. Ohne diese Bruecke feuern Event-Trigger-Workflows nie.
+    try:
+        from backend.workflows import get_workflow_engine, bridge_external_events
+        from backend.context_monitor import context_monitor
+        loop = asyncio.get_running_loop()
+        wf_engine = get_workflow_engine()
+        bridge_external_events(wf_engine, context_monitor, loop)
+        await wf_engine.emit_event("system_start", {})
+        logger.info("Workflow-Event-Bridge aktiv (system_start emittiert)")
+    except Exception as e:
+        logger.warning(f"Workflow-Event-Bridge fehlgeschlagen: {e}")
 
     # Proactive Engine
     try:

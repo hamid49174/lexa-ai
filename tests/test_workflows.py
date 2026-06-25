@@ -465,3 +465,84 @@ def test_workflow_condition_empty_checks_are_token_based():
     assert engine._evaluate_condition("value is_empty") is False
     assert engine._evaluate_condition("value not_empty") is True
     assert engine._evaluate_condition("this_is_empty_check") is True
+
+
+# ── Tool-Step-Verdrahtung (kritischer Fix: CompanionEngine durchreichen) ──
+
+def test_step_tool_raises_when_companion_not_wired(monkeypatch):
+    """Regression: ohne _companion_execute war jeder tool-Step zur Laufzeit tot."""
+    engine = workflows.WorkflowEngine()
+    engine._companion_execute = None  # Singleton — Vorbedingung explizit setzen
+    monkeypatch.setattr("backend.security.audit_log", lambda *a, **k: None)
+    monkeypatch.setattr("backend.security.validate_params", lambda tool, args: args)
+    monkeypatch.setattr("backend.agent_reflection.reflect_action", lambda *a, **k: None)
+
+    with pytest.raises(RuntimeError, match="CompanionEngine"):
+        _run(engine._step_tool(
+            {"type": "tool", "tool": "app_open", "args": {"name": "notepad"}},
+            {"workflow_step_count": 1},
+        ))
+
+
+def test_start_scheduler_stores_companion_execute_fn(monkeypatch):
+    engine = workflows.WorkflowEngine()
+    sentinel = lambda tool, args: {"ok": True}
+    # Weder echten Loop noch echte DB beruehren
+    monkeypatch.setattr(engine, "_load_event_handlers", lambda: None)
+
+    async def _noop():
+        return None
+
+    monkeypatch.setattr(engine, "_scheduler_loop", _noop)
+    try:
+        _run(engine.start_scheduler(sentinel))
+        assert engine._companion_execute is sentinel
+    finally:
+        engine.stop_scheduler()
+
+
+# ── Event-Bridge (Fix: Event-Trigger-Workflows feuerten nie) ──
+
+def test_normalize_event_data_maps_filter_keys():
+    assert workflows._normalize_event_data("high_cpu", {"cpu_percent": 95.0})["value"] == 95.0
+    assert workflows._normalize_event_data("high_memory", {"memory_percent": 88})["value"] == 88
+    idle = workflows._normalize_event_data("idle_detected", {"idle_seconds": 120})
+    assert idle["minutes"] == 2.0 and idle["value"] == 120
+    win = workflows._normalize_event_data(
+        "active_window_changed", {"current": {"process": "code.exe"}}
+    )
+    assert win["app"] == "code.exe"
+    # Nicht-dict-Daten ergeben leeres Payload, kein Fehler
+    assert workflows._normalize_event_data("app_opened", None) == {}
+
+
+def test_bridge_external_events_forwards_normalized_payload(monkeypatch):
+    registered = {}
+
+    class FakeMonitor:
+        def on(self, name, cb):
+            registered[name] = cb
+
+    scheduled = []
+
+    def fake_schedule(coro, loop):
+        # Coroutine schliessen, um "never awaited"-Warnung zu vermeiden
+        coro.close()
+        scheduled.append(loop)
+
+    monkeypatch.setattr(workflows.asyncio, "run_coroutine_threadsafe", fake_schedule)
+
+    seen = []
+
+    class FakeEngine:
+        async def emit_event(self, name, data):
+            seen.append((name, data))
+
+    count = workflows.bridge_external_events(FakeEngine(), FakeMonitor(), object())
+
+    assert count == len(workflows._BRIDGED_EVENTS)
+    assert set(registered) == set(workflows._BRIDGED_EVENTS)
+
+    # Forwarder fuer high_cpu loest die geplante emit_event-Coroutine aus
+    registered["high_cpu"]("high_cpu", {"cpu_percent": 99.0})
+    assert len(scheduled) == 1

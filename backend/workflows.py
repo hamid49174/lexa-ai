@@ -1307,3 +1307,69 @@ class WorkflowEngine:
 def get_workflow_engine() -> WorkflowEngine:
     """Gibt die Singleton-Instanz der WorkflowEngine zurueck."""
     return WorkflowEngine()
+
+
+# ══════════════════════════════════════════════════
+#  EVENT-BRIDGE (ContextMonitor → Workflow-Events)
+# ══════════════════════════════════════════════════
+
+def _normalize_event_data(event_name: str, data: Any) -> dict:
+    """Mappt ContextMonitor-Event-Daten auf die Filter-Schluessel, die
+    ``WorkflowEngine.emit_event`` auswertet (value/minutes/app/path).
+
+    Der ContextMonitor emittiert z.B. ``{"cpu_percent": 95.2}``; emit_event
+    prueft Schwellen aber gegen ``data["value"]``. Ohne diese Normalisierung
+    griffen Threshold-/Minuten-Filter nie.
+    """
+    payload = dict(data) if isinstance(data, dict) else {}
+    if event_name == "high_cpu" and "cpu_percent" in payload:
+        payload.setdefault("value", payload["cpu_percent"])
+    elif event_name == "high_memory" and "memory_percent" in payload:
+        payload.setdefault("value", payload["memory_percent"])
+    elif event_name == "idle_detected" and "idle_seconds" in payload:
+        try:
+            payload.setdefault("minutes", float(payload["idle_seconds"]) / 60.0)
+            payload.setdefault("value", payload["idle_seconds"])
+        except (TypeError, ValueError):
+            pass
+    elif event_name == "active_window_changed":
+        current = payload.get("current")
+        if isinstance(current, dict):
+            payload.setdefault("app", current.get("process", ""))
+    return payload
+
+
+# Events des ContextMonitors, die an die Workflow-Engine gebrueckt werden.
+_BRIDGED_EVENTS = (
+    "high_cpu",
+    "high_memory",
+    "idle_detected",
+    "app_opened",
+    "app_closed",
+    "active_window_changed",
+    "clipboard_changed",
+)
+
+
+def bridge_external_events(engine: "WorkflowEngine", monitor, loop) -> int:
+    """Verbindet die ContextMonitor-Events mit dem Workflow-Event-System.
+
+    Der ContextMonitor laeuft in einem eigenen Thread-Pool, ``emit_event`` ist
+    dagegen async. Die Coroutine wird daher thread-sicher auf den uebergebenen
+    Event-Loop geplant. Gibt die Zahl der registrierten Bruecken zurueck.
+    """
+    def _make_forwarder(event_name: str):
+        def _forward(name, data):
+            payload = _normalize_event_data(event_name, data)
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    engine.emit_event(event_name, payload), loop
+                )
+            except Exception as exc:  # pragma: no cover - defensiv
+                logger.debug(f"Event-Bridge '{event_name}' fehlgeschlagen: {exc}")
+        return _forward
+
+    for event_name in _BRIDGED_EVENTS:
+        monitor.on(event_name, _make_forwarder(event_name))
+    logger.info(f"Workflow-Event-Bridge registriert ({len(_BRIDGED_EVENTS)} Events)")
+    return len(_BRIDGED_EVENTS)
