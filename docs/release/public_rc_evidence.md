@@ -8,7 +8,7 @@ This ledger records local evidence only. It does not prove external PublicRC blo
 - Branch: `codex/lexa-stabilization-review`
 - Latest full internal regression snapshot commit under test: `b876228b08b2106193b2fb10a9a71ec58463e41c`
 - Baseline commit inspected before PublicRC hardening: `672d2e714595f4c24d7115bb757fba03f3e85faf`
-- GitHub remote at snapshot time: not configured. Current workspace now has `origin` set to `https://github.com/alexsprogis/lexa-ai.git`; remote CI still needs a recorded Actions run URL and commit SHA.
+- GitHub remote at snapshot time: not configured. Current workspace now has `origin` set to `https://github.com/hamid49174/lexa-ai.git`; remote CI still needs a recorded Actions run URL and commit SHA.
 
 ## Full InternalRC Regression Snapshot
 

@@ -95,7 +95,7 @@ assert("bridge audit records effective risk classification", src.includes("base_
 assert("smoke mock is fail-closed outside non-packaged smoke tests", src.includes("function hardenSmokeMockEnvironment") && src.includes("app.isPackaged") && src.includes("delete process.env.LEXA_ELECTRON_SMOKE_MOCK") && src.includes("function isElectronSmokeTestContext"));
 
 console.log("\nElectron update checks:");
-assert("uses expected GitHub owner and repo constants", src.includes('const UPDATE_GITHUB_OWNER = "alexsprogis"') && src.includes('const UPDATE_GITHUB_REPO = "lexa-ai"'));
+assert("uses expected GitHub owner and repo constants", src.includes('const UPDATE_GITHUB_OWNER = "hamid49174"') && src.includes('const UPDATE_GITHUB_REPO = "lexa-ai"'));
 assert("validates GitHub release API path parts", src.includes("function githubLatestReleasePath") && src.includes("UPDATE_GITHUB_NAME_PATTERN.test"));
 assert("redacts unexpected update URLs", src.includes("function isExpectedGitHubReleaseUrl") && src.includes('url.hostname === "github.com"') && src.includes("isExpectedGitHubReleaseUrl(release.html_url) ? release.html_url : \"\""));
 

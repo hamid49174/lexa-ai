@@ -1386,7 +1386,7 @@ safeIpcOn("set-autostart", (_event, enabled) => {
 });
 
 // UPDATE CHECK
-const UPDATE_GITHUB_OWNER = "alexsprogis";
+const UPDATE_GITHUB_OWNER = "hamid49174";
 const UPDATE_GITHUB_REPO = "lexa-ai";
 const UPDATE_GITHUB_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
 

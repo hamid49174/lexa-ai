@@ -1,7 +1,7 @@
 {
-  "appId": "de.alexsprogis.lexa-ai",
+  "appId": "de.hamid49174.lexa-ai",
   "productName": "Lexa AI",
-  "copyright": "Copyright (c) 2026 alexsprogis",
+  "copyright": "Copyright (c) 2026 hamid49174",
   "directories": {
     "output": "../dist"
   },

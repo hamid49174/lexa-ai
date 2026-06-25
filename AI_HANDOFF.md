@@ -17,7 +17,7 @@ Do not scan the whole repository first. Read this file, identify the task, then 
 
 Lexa is already feature-rich:
 
-- chat with Groq, OpenAI, Gemini, and local model support;
+- chat powered by Google Gemini (Gemini-only; legacy multi-provider scaffolding only);
 - agent loop and tool execution;
 - SQLite memory/search;
 - MCP registry and client;

@@ -14,7 +14,7 @@ def test_electron_builder_metadata_is_ascii_and_not_mojibake():
     assert "Â" not in text
     assert "Ã" not in text
     assert "�" not in text
-    assert config["copyright"] == "Copyright (c) 2026 alexsprogis"
+    assert config["copyright"] == "Copyright (c) 2026 hamid49174"
 
 
 def test_electron_builder_packages_backend_bundle_and_whitelist():

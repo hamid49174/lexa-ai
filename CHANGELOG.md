@@ -7,13 +7,25 @@ Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Added
+- Multi-Agenten-Orchestrator (Planner -> parallele read-only Sub-Agenten -> adversarische Verifikation -> zitierte Synthese), eigene Agenten-Ansicht und `/orchestrate`-Chat-Integration
+- Generische MCP-zu-Chat-Bruecke und lesende Coding-Bruecke (filesystem-MCP) fuer den Code-Agenten
+- Live-Websuche/Grounding im Chat (Tavily/Brave/Exa mit DDG-Fallback) sowie Obsidian/Personal-OS-Grounding
+- Voice: OpenAI- und Groq-Sprach-Keys (STT/TTS) ueber UI/API verwaltbar (vorher nur per keyring-CLI)
+- Workflow-Event-Bruecke: ContextMonitor-Events (high_cpu, system_start, ...) loesen Event-Workflows wieder aus
+
 ### Fixed
+- KRITISCH: Workflow-`tool`-Steps liefen ins Leere, weil die CompanionEngine nicht an den Scheduler durchgereicht wurde
+- `file_move`/`file_copy` ueberschreiben bestehende Zieldateien nicht mehr kommentarlos (Datenverlust-Schutz)
+- Light-Theme: dunkle Flaechen in Override-/View-CSS bekommen ein korrektes helles Pendant
+- Voice-Chat sendete die Konversations-ID aus einem nicht existenten State-Key (immer `undefined`)
 - Timer- und Pomodoro-Intents werden nicht mehr faelschlich als generisches `app_open` erkannt
 - Voice-Konfigurationsrouten liefern bei ungueltigen Voice-IDs wieder korrekte `400`-Fehler
 - Chat-Rendering im Frontend funktioniert auch in isolierten Tests ohne globale `t()`-Funktion
 
 ### Changed
-- Versionsangaben von Backend, Launcher und UI wieder auf den dokumentierten `1.0.0`-Stand synchronisiert
+- **Chat ist Gemini-only** (Google Gemini); die fruehere Groq/OpenAI/Anthropic/Ollama-Multi-Provider-Schicht fuer den Chat ist nur noch Legacy. Doku (README, start.bat, AI_HANDOFF) entsprechend korrigiert. Sprache (STT/TTS) nutzt weiterhin Deepgram/OpenAI/Groq/Cartesia/ElevenLabs.
+- Eigentuemer-/Repo-Angaben vereinheitlicht auf `hamid49174` (electron-builder appId/Copyright, GitHub-Update-Owner, README, Release-Docs)
 - `start.bat` und README auf den aktuellen 7-View- und Voice-Stack gebracht
 - Runtime-Artefakte wie `audio_cache/`, `app_cache.json` und SQLite-WAL-Dateien per `.gitignore` aus dem Repo-Rauschen genommen
 

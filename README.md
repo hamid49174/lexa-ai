@@ -10,7 +10,7 @@ Lexa steuert deinen PC per Sprache und Chat - lokal-first, privat und mit option
 
 ```bash
 # 1. Repo klonen und Dependencies installieren
-git clone https://github.com/alexsprogis/lexa-ai.git
+git clone https://github.com/hamid49174/lexa-ai.git
 cd lexa-ai
 python -m venv venv
 venv\Scripts\pip install -r requirements.txt
@@ -18,10 +18,12 @@ venv\Scripts\pip install -r requirements.txt
 # 2. Frontend installieren
 cd frontend && npm install && cd ..
 
-# 3. Optional: AI-Provider hinterlegen
+# 3. API-Keys hinterlegen
+#    Chat laeuft Gemini-only -> der Gemini-Key ist erforderlich.
+venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'gemini_api_key', 'DEIN_GEMINI_KEY')"
+#    Optional NUR fuer Sprache (STT/TTS), nicht fuer den Chat:
 venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'groq_api_key', 'DEIN_GROQ_KEY')"
 venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'openai_api_key', 'DEIN_OPENAI_KEY')"
-venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'gemini_api_key', 'DEIN_GEMINI_KEY')"
 
 # 4. Starten
 start.bat
@@ -32,7 +34,7 @@ start.bat
 ## Features
 
 - **138+ PC-Befehle** - Apps, Fenster, Prozesse, Netzwerk, Dienste, Autostart, Umgebungsvariablen
-- **KI-Chat** - Groq, OpenAI, Gemini oder lokales Ollama
+- **KI-Chat** - Google Gemini (Gemini-only; fruehere Multi-Provider-Gerueste sind Legacy)
 - **Sprache** - Deepgram Nova-3 STT + Groq/local fallback, Cartesia/ElevenLabs/SAPI TTS
 - **Browser-Automation** - YouTube, Web-Scraping, PDFs, Screenshots (Playwright)
 - **Produktivitaet** - Todos, Pomodoro-Timer, Gewohnheiten, Zeiterfassung, Fokus-Modus
@@ -61,7 +63,7 @@ Optional: Ollama (lokale KI), ffmpeg (Media-Konvertierung)
 
 ```bash
 # Repository klonen
-git clone https://github.com/alexsprogis/lexa-ai.git
+git clone https://github.com/hamid49174/lexa-ai.git
 cd lexa-ai
 
 # Python Virtual Environment
@@ -77,17 +79,15 @@ cd frontend && npm install && cd ..
 
 ### Cloud API Keys
 
-Du kannst einen oder mehrere AI-Provider parallel hinterlegen:
+Der **Chat laeuft Gemini-only** — der Gemini-Key ist die einzige Voraussetzung fuer die KI:
 
 ```bash
-venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'groq_api_key', 'DEIN_GROQ_KEY')"
-venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'openai_api_key', 'DEIN_OPENAI_KEY')"
 venv\Scripts\python -c "import keyring; keyring.set_password('lexa-ai', 'gemini_api_key', 'DEIN_GEMINI_KEY')"
 ```
 
-Groq-Key: [console.groq.com](https://console.groq.com)  
-OpenAI-Key: [platform.openai.com](https://platform.openai.com)  
 Gemini-Key: [aistudio.google.com](https://aistudio.google.com)
+
+Groq- und OpenAI-Keys sind **optional und nur fuer Sprache (STT/TTS)** relevant, nicht fuer den Chat (siehe Voice Setup).
 
 Alternativ: kopiere `.env.example` nach `.env` und trage den Key dort ein.
 
@@ -156,8 +156,8 @@ Response:
   "status": "ok",
   "summary": "...",
   "tags": ["inbox", "raw"],
-  "provider": "groq",
-  "model": "llama-3.3-70b-versatile"
+  "provider": "gemini",
+  "model": "gemini-3.5-flash"
 }
 ```
 
@@ -171,7 +171,7 @@ This endpoint is intentionally separate from normal `/chat`: it does not use cha
 |------------|-------------|
 | Frontend | Electron + Vanilla JS (modular) |
 | Backend | Python FastAPI (Port 8000, localhost) |
-| KI | Groq + OpenAI + Gemini + Ollama |
+| KI (Chat) | Google Gemini (Gemini-only) |
 | STT | Deepgram Nova-3 + Groq Whisper + faster-whisper |
 | TTS | Cartesia Sonic + ElevenLabs + Windows SAPI |
 | Browser | Playwright + yt-dlp |

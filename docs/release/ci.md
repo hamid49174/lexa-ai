@@ -12,7 +12,7 @@ Phase 5A status: remote CI is not ambiguous anymore. The repository contains the
 
 Phase 5B status: remote CI is still not proven. The correct next action is a user/external step, not another local code patch: push the current branch, run the workflow, and record the run URL plus commit SHA. No release action, secret, or external service credential is added by Lexa release hardening.
 
-Phase 5C status: the local `origin` remote is configured as `https://github.com/alexsprogis/lexa-ai.git`. `RemoteCIReady: yes` means the local repository is ready to prove CI remotely; it does not mean GitHub Actions has already run.
+Phase 5C status: the local `origin` remote is configured as `https://github.com/hamid49174/lexa-ai.git`. `RemoteCIReady: yes` means the local repository is ready to prove CI remotely; it does not mean GitHub Actions has already run.
 
 ## GitHub Actions
 
@@ -72,7 +72,7 @@ In this workspace the GitHub remote is configured, but PublicRC and PublicReleas
 
 To prove remote CI without adding secrets or deployment:
 
-1. Confirm `origin` points to `https://github.com/alexsprogis/lexa-ai.git`.
+1. Confirm `origin` points to `https://github.com/hamid49174/lexa-ai.git`.
 2. Push the current branch.
 3. Open the GitHub Actions tab and run or inspect `.github/workflows/quality-gates.yml`.
 4. Confirm the run uses no secrets, no deployment, no artifact upload, and no user-data paths.

@@ -121,20 +121,28 @@ if not exist "frontend\node_modules" (
 :: ========================================
 echo  [5/6] Checking cloud API keys...
 
-venv\Scripts\python.exe -c "import keyring; exit(0 if keyring.get_password('lexa-ai','groq_api_key') else 1)" >nul 2>&1
+venv\Scripts\python.exe -c "import keyring; exit(0 if keyring.get_password('lexa-ai','gemini_api_key') else 1)" >nul 2>&1
 if errorlevel 1 (
-    call :WARN "Groq API key not found - cloud chat may use other providers or Ollama."
+    call :WARN "Gemini API key not found - chat is Gemini-only and will be BLOCKED. Get one at aistudio.google.com."
     set /a WARNINGS+=1
 ) else (
-    call :OK "Groq API key found"
+    call :OK "Gemini chat key found"
+)
+
+venv\Scripts\python.exe -c "import keyring; exit(0 if keyring.get_password('lexa-ai','groq_api_key') else 1)" >nul 2>&1
+if errorlevel 1 (
+    call :WARN "Groq API key not found - optional voice (STT) fallback only, not used for chat."
+    set /a WARNINGS+=1
+) else (
+    call :OK "Groq API key found (voice)"
 )
 
 venv\Scripts\python.exe -c "import keyring; exit(0 if keyring.get_password('lexa-ai','openai_api_key') else 1)" >nul 2>&1
 if errorlevel 1 (
-    call :WARN "OpenAI API key not found - optional provider unavailable."
+    call :WARN "OpenAI API key not found - optional voice (STT/TTS) only, not used for chat."
     set /a WARNINGS+=1
 ) else (
-    call :OK "OpenAI API key found"
+    call :OK "OpenAI API key found (voice)"
 )
 
 venv\Scripts\python.exe -c "import keyring; exit(0 if keyring.get_password('lexa-ai','deepgram_api_key') else 1)" >nul 2>&1
@@ -198,7 +206,7 @@ echo   Commands: 138+ registered
 echo   Views:    7 (Dashboard, Chat, System,
 echo             Commands, Productivity, Memory,
 echo             Settings)
-echo   AI:       Groq + OpenAI + Gemini + Ollama
+echo   AI:       Google Gemini (Gemini-only)
 echo   STT:      Deepgram Nova-3 + Groq/Local fallback
 echo   TTS:      Cartesia + ElevenLabs + SAPI fallback
 echo  ========================================
