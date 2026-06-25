@@ -110,6 +110,10 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("sttSetEngine", "medium", "write", "/voice/stt/engine", { audit: true }),
   bridgePolicy("deepgramSetKey", "critical", "secret", "/voice/stt/deepgram/key"),
   bridgePolicy("deepgramDeleteKey", "critical", "secret", "/voice/stt/deepgram/key"),
+  bridgePolicy("openaiVoiceSetKey", "critical", "secret", "/voice/stt/openai/key"),
+  bridgePolicy("openaiVoiceDeleteKey", "critical", "secret", "/voice/stt/openai/key"),
+  bridgePolicy("groqVoiceSetKey", "critical", "secret", "/voice/stt/groq/key"),
+  bridgePolicy("groqVoiceDeleteKey", "critical", "secret", "/voice/stt/groq/key"),
   bridgePolicy("cartesiaSetKey", "critical", "secret", "/voice/tts/cartesia/key"),
   bridgePolicy("cartesiaDeleteKey", "critical", "secret", "/voice/tts/cartesia/key"),
   bridgePolicy("cartesiaSetVoice", "medium", "write", "/voice/tts/cartesia/voice", { audit: true }),
@@ -1216,6 +1220,10 @@ if (isLexaSmokeMockAllowed()) {
     elevenlabsSetSettings: async () => ok(),
     deepgramSetKey: async () => ok(),
     deepgramDeleteKey: async () => ok(),
+    openaiVoiceSetKey: async () => ok(),
+    openaiVoiceDeleteKey: async () => ok(),
+    groqVoiceSetKey: async () => ok(),
+    groqVoiceDeleteKey: async () => ok(),
     cartesiaSetKey: async () => ok(),
     cartesiaDeleteKey: async () => ok(),
     cartesiaSetVoice: async () => ok(),
@@ -1797,6 +1805,34 @@ const lexaBridge = {
   },
   deepgramDeleteKey: async () => {
     const r = await fetchWithTimeout(`${API}/voice/stt/deepgram/key`, { method: 'DELETE' });
+    return r.json();
+  },
+
+  // OpenAI Voice (STT Transcribe + TTS — gemeinsamer Key)
+  openaiVoiceSetKey: async (apiKey) => {
+    const r = await fetchWithTimeout(`${API}/voice/stt/openai/key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+    return r.json();
+  },
+  openaiVoiceDeleteKey: async () => {
+    const r = await fetchWithTimeout(`${API}/voice/stt/openai/key`, { method: 'DELETE' });
+    return r.json();
+  },
+
+  // Groq Whisper STT
+  groqVoiceSetKey: async (apiKey) => {
+    const r = await fetchWithTimeout(`${API}/voice/stt/groq/key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+    return r.json();
+  },
+  groqVoiceDeleteKey: async () => {
+    const r = await fetchWithTimeout(`${API}/voice/stt/groq/key`, { method: 'DELETE' });
     return r.json();
   },
 

@@ -509,7 +509,7 @@ async function voiceStreamChat(text) {
       credentials: "include",
       body: JSON.stringify({
         message: text,
-        conversation_id: LexaState.get("activeConversationId"),
+        conversation_id: LexaState.get("currentConversationId") || null,
       }),
       signal: abort.signal,
     });

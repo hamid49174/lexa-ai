@@ -630,6 +630,75 @@ def delete_deepgram_key() -> dict:
         return {"success": False, "error": str(e)}
 
 
+def _invalidate_tts_openai_cache() -> None:
+    """Den OpenAI-Key-Cache des TTS-Moduls invalidieren.
+
+    OpenAI nutzt EINEN gemeinsamen Keyring-Eintrag fuer STT und TTS; ohne diese
+    Invalidierung wuerde der TTS-Pfad bis zum Neustart den alten (Nicht-)Key sehen.
+    """
+    try:
+        from voice import tts as _tts
+        _tts._keys_loaded["openai"] = False
+        _tts._keys["openai"] = None
+    except Exception:
+        pass
+
+
+def set_openai_key(api_key: str) -> dict:
+    """OpenAI-Key setzen (gilt fuer OpenAI-STT *und* -TTS — gemeinsamer Keyring-Eintrag)."""
+    if not api_key or not api_key.strip():
+        return {"success": False, "error": "API-Key darf nicht leer sein."}
+    try:
+        import keyring
+        api_key = api_key.strip()
+        keyring.set_password("lexa-ai", "openai_api_key", api_key)
+        _keys["openai"] = api_key
+        _keys_loaded["openai"] = True
+        _invalidate_tts_openai_cache()
+        logger.info("OpenAI API key saved")
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def delete_openai_key() -> dict:
+    try:
+        import keyring
+        keyring.delete_password("lexa-ai", "openai_api_key")
+        _keys["openai"] = None
+        _keys_loaded["openai"] = True
+        _invalidate_tts_openai_cache()
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def set_groq_key(api_key: str) -> dict:
+    if not api_key or not api_key.strip():
+        return {"success": False, "error": "API-Key darf nicht leer sein."}
+    try:
+        import keyring
+        api_key = api_key.strip()
+        keyring.set_password("lexa-ai", "groq_api_key", api_key)
+        _keys["groq"] = api_key
+        _keys_loaded["groq"] = True
+        logger.info("Groq API key saved")
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def delete_groq_key() -> dict:
+    try:
+        import keyring
+        keyring.delete_password("lexa-ai", "groq_api_key")
+        _keys["groq"] = None
+        _keys_loaded["groq"] = True
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def set_engine(engine: str) -> dict:
     global STT_ENGINE
     valid = ("openai", "deepgram", "groq", "local")

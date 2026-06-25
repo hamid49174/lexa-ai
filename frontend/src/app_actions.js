@@ -119,6 +119,10 @@ function _dispatch(el, ds, value) {
     case "changeSttEngine": changeSttEngine(value); break;
     case "setDeepgramKey": setDeepgramKeyAction(); break;
     case "deleteDeepgramKey": deleteDeepgramKeyAction(); break;
+    case "setOpenaiVoiceKey": setOpenaiVoiceKeyAction(); break;
+    case "deleteOpenaiVoiceKey": deleteOpenaiVoiceKeyAction(); break;
+    case "setGroqVoiceKey": setGroqVoiceKeyAction(); break;
+    case "deleteGroqVoiceKey": deleteGroqVoiceKeyAction(); break;
     case "setCartesiaKey": setCartesiaKeyAction(); break;
     case "deleteCartesiaKey": deleteCartesiaKeyAction(); break;
     case "setCartesiaVoice": setCartesiaVoiceAction(); break;

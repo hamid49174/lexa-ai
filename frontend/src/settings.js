@@ -59,6 +59,10 @@ let _settingsRefreshSeq = 0;
 const SETTINGS_SECRET_ACTIONS = [
   "setDeepgramKey",
   "deleteDeepgramKey",
+  "setOpenaiVoiceKey",
+  "deleteOpenaiVoiceKey",
+  "setGroqVoiceKey",
+  "deleteGroqVoiceKey",
   "setCartesiaKey",
   "deleteCartesiaKey",
   "elevenlabsKeyAction",
@@ -210,9 +214,13 @@ async function refreshSettingsView() {
   // Set engine dropdown
   const engineSelect = document.getElementById("stt-engine-select");
   if (engineSelect) engineSelect.value = sttEngine;
-  // Show/hide Deepgram key group based on engine
+  // Show/hide engine-specific key groups based on selected engine
   const dgKeyGroup = document.getElementById("deepgram-key-group");
   if (dgKeyGroup) dgKeyGroup.classList.toggle("hidden", sttEngine !== "deepgram");
+  const openaiVoiceKeyGroup = document.getElementById("openai-voice-key-group");
+  if (openaiVoiceKeyGroup) openaiVoiceKeyGroup.classList.toggle("hidden", sttEngine !== "openai");
+  const groqVoiceKeyGroup = document.getElementById("groq-voice-key-group");
+  if (groqVoiceKeyGroup) groqVoiceKeyGroup.classList.toggle("hidden", sttEngine !== "groq");
   // Update description
   const sttDesc = document.getElementById("stt-model-desc");
   if (sttDesc) {
@@ -990,9 +998,13 @@ async function changeSttEngine(engine) {
     if (res.success) {
       const engineLabel = engine === "openai" ? "OpenAI GPT-4o Transcribe" : engine === "deepgram" ? "Deepgram Nova-3" : engine === "groq" ? "Groq Whisper" : "Lokal";
       showToast(t("settings.sttEngineToast", {engine: engineLabel}), "success");
-      // Show/hide Deepgram key group
+      // Show/hide engine-specific key groups
       const dgKeyGroup = document.getElementById("deepgram-key-group");
       if (dgKeyGroup) dgKeyGroup.classList.toggle("hidden", engine !== "deepgram");
+      const openaiVoiceKeyGroup = document.getElementById("openai-voice-key-group");
+      if (openaiVoiceKeyGroup) openaiVoiceKeyGroup.classList.toggle("hidden", engine !== "openai");
+      const groqVoiceKeyGroup = document.getElementById("groq-voice-key-group");
+      if (groqVoiceKeyGroup) groqVoiceKeyGroup.classList.toggle("hidden", engine !== "groq");
     } else {
       showToast(res.error || t("settings.errorGeneric"), "error");
     }
@@ -1029,6 +1041,66 @@ async function deleteDeepgramKeyAction() {
       const res = await window.lexa.deepgramDeleteKey();
       if (res.success) {
         showToast(t("settings.deepgramKeyRemoved"), "info");
+        await refreshSettingsView();
+      }
+    } catch (e) { showToast(t("settings.errorPrefix", {message: e.message}), "error"); }
+  });
+}
+
+async function setOpenaiVoiceKeyAction() {
+  await runSettingsSecretAction(async () => {
+    const result = await showInputModal("OpenAI API Key (Sprache)", [
+      { name: "apiKey", label: "API Key (sk-...)", type: "text", required: true }
+    ], t("common.save"));
+    if (!result || !result.apiKey) return;
+    try {
+      const res = await window.lexa.openaiVoiceSetKey(result.apiKey);
+      if (res.success) {
+        showToast(t("settings.keySaved"), "success");
+        await refreshSettingsView();
+      } else {
+        showToast(res.error || t("settings.errorGeneric"), "error");
+      }
+    } catch (e) { showToast(t("settings.errorPrefix", {message: e.message}), "error"); }
+  });
+}
+
+async function deleteOpenaiVoiceKeyAction() {
+  await runSettingsSecretAction(async () => {
+    try {
+      const res = await window.lexa.openaiVoiceDeleteKey();
+      if (res.success) {
+        showToast(t("settings.keyRemoved"), "info");
+        await refreshSettingsView();
+      }
+    } catch (e) { showToast(t("settings.errorPrefix", {message: e.message}), "error"); }
+  });
+}
+
+async function setGroqVoiceKeyAction() {
+  await runSettingsSecretAction(async () => {
+    const result = await showInputModal("Groq API Key (Sprache)", [
+      { name: "apiKey", label: "API Key (gsk_...)", type: "text", required: true }
+    ], t("common.save"));
+    if (!result || !result.apiKey) return;
+    try {
+      const res = await window.lexa.groqVoiceSetKey(result.apiKey);
+      if (res.success) {
+        showToast(t("settings.keySaved"), "success");
+        await refreshSettingsView();
+      } else {
+        showToast(res.error || t("settings.errorGeneric"), "error");
+      }
+    } catch (e) { showToast(t("settings.errorPrefix", {message: e.message}), "error"); }
+  });
+}
+
+async function deleteGroqVoiceKeyAction() {
+  await runSettingsSecretAction(async () => {
+    try {
+      const res = await window.lexa.groqVoiceDeleteKey();
+      if (res.success) {
+        showToast(t("settings.keyRemoved"), "info");
         await refreshSettingsView();
       }
     } catch (e) { showToast(t("settings.errorPrefix", {message: e.message}), "error"); }

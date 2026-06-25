@@ -1725,6 +1725,8 @@
   "settings.deepgramKeyLabel": "API Key (von deepgram.com)",
   "settings.deepgramKeySaved": "Deepgram API Key gespeichert!",
   "settings.deepgramKeyRemoved": "Deepgram API Key entfernt",
+  "settings.keySaved": "API Key gespeichert",
+  "settings.keyRemoved": "API Key entfernt",
   "settings.elStatusActive": "Aktiv",
   "settings.elStatusDisabled": "Deaktiviert",
   "settings.elStatusNoKey": "Kein API Key",

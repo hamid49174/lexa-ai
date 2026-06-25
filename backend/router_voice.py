@@ -65,6 +65,14 @@ class DeepgramKeyRequest(BaseModel):
     api_key: str = ""
 
 
+class OpenAIKeyRequest(BaseModel):
+    api_key: str = ""
+
+
+class GroqKeyRequest(BaseModel):
+    api_key: str = ""
+
+
 class SensitivityRequest(BaseModel):
     sensitivity: float = _DEFAULT_WAKE_SENSITIVITY
 
@@ -651,6 +659,47 @@ async def deepgram_delete_key():
     result = await asyncio.to_thread(delete_deepgram_key)
     if result.get("success"):
         audit_log("stt", "deepgram_key_deleted", "Key removed")
+    return result
+
+
+@router.post("/stt/openai/key")
+async def openai_set_key(data: OpenAIKeyRequest):
+    # OpenAI-Key gilt fuer STT (Transcribe) UND TTS — gemeinsamer Keyring-Eintrag.
+    if not data.api_key or not data.api_key.strip():
+        return JSONResponse({"error": "API-Key darf nicht leer sein."}, status_code=400)
+    from voice.stt import set_openai_key
+    result = await asyncio.to_thread(set_openai_key, data.api_key)
+    if result.get("success"):
+        audit_log("stt", "openai_key_set", "Key updated")
+    return result
+
+
+@router.delete("/stt/openai/key")
+async def openai_delete_key():
+    from voice.stt import delete_openai_key
+    result = await asyncio.to_thread(delete_openai_key)
+    if result.get("success"):
+        audit_log("stt", "openai_key_deleted", "Key removed")
+    return result
+
+
+@router.post("/stt/groq/key")
+async def groq_set_key(data: GroqKeyRequest):
+    if not data.api_key or not data.api_key.strip():
+        return JSONResponse({"error": "API-Key darf nicht leer sein."}, status_code=400)
+    from voice.stt import set_groq_key
+    result = await asyncio.to_thread(set_groq_key, data.api_key)
+    if result.get("success"):
+        audit_log("stt", "groq_key_set", "Key updated")
+    return result
+
+
+@router.delete("/stt/groq/key")
+async def groq_delete_key():
+    from voice.stt import delete_groq_key
+    result = await asyncio.to_thread(delete_groq_key)
+    if result.get("success"):
+        audit_log("stt", "groq_key_deleted", "Key removed")
     return result
 
 

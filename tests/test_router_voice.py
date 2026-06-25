@@ -69,6 +69,12 @@ def _setup_voice_stubs():
     stt_stub.set_model_size = MagicMock()
     stt_stub.set_language = MagicMock()
     stt_stub.set_engine = MagicMock()
+    stt_stub.set_deepgram_key = MagicMock(return_value={"success": True})
+    stt_stub.delete_deepgram_key = MagicMock(return_value={"success": True})
+    stt_stub.set_openai_key = MagicMock(return_value={"success": True})
+    stt_stub.delete_openai_key = MagicMock(return_value={"success": True})
+    stt_stub.set_groq_key = MagicMock(return_value={"success": True})
+    stt_stub.delete_groq_key = MagicMock(return_value={"success": True})
     stubs["voice.stt"] = sys.modules.get("voice.stt")
     sys.modules["voice.stt"] = stt_stub
 
@@ -635,3 +641,37 @@ class TestRequestModels:
         from backend.router_voice import STTEngineRequest
         req = STTEngineRequest()
         assert req.engine == "deepgram"
+
+
+# ══════════════════════════════════════════════════
+#  VOICE-KEY-ENDPUNKTE (Scan-Fix: OpenAI/Groq waren nur per CLI setzbar)
+# ══════════════════════════════════════════════════
+
+class TestVoiceKeyEndpoints:
+    def _silence_audit(self, monkeypatch):
+        import backend.router_voice as router_voice
+        monkeypatch.setattr(router_voice, "audit_log", lambda *a, **k: None)
+
+    def test_openai_key_set_delete_and_empty(self, client, monkeypatch):
+        self._silence_audit(monkeypatch)
+        res = client.post("/voice/stt/openai/key", json={"api_key": "sk-test"})
+        assert res.status_code == 200 and res.json().get("success") is True
+        sys.modules["voice.stt"].set_openai_key.assert_called_with("sk-test")
+
+        res = client.post("/voice/stt/openai/key", json={"api_key": "   "})
+        assert res.status_code == 400
+
+        res = client.delete("/voice/stt/openai/key")
+        assert res.status_code == 200 and res.json().get("success") is True
+
+    def test_groq_key_set_delete_and_empty(self, client, monkeypatch):
+        self._silence_audit(monkeypatch)
+        res = client.post("/voice/stt/groq/key", json={"api_key": "gsk_test"})
+        assert res.status_code == 200 and res.json().get("success") is True
+        sys.modules["voice.stt"].set_groq_key.assert_called_with("gsk_test")
+
+        res = client.post("/voice/stt/groq/key", json={"api_key": ""})
+        assert res.status_code == 400
+
+        res = client.delete("/voice/stt/groq/key")
+        assert res.status_code == 200 and res.json().get("success") is True
