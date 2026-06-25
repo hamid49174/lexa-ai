@@ -37,5 +37,25 @@ for (const [bridge, ep] of [
     preload.includes(bridge) && preload.includes(ep));
 }
 
+// ── Light-Theme-Retrofit ──
+const indexHtml = read("frontend", "src", "index.html");
+const lightCss = read("frontend", "src", "css", "overrides_light_theme.css");
+
+ok(
+  "overrides_light_theme.css wird NACH premium_animations.css geladen (zuletzt)",
+  indexHtml.indexOf("overrides_light_theme.css") >
+    indexHtml.indexOf("premium_animations.css")
+);
+for (const sel of [".tool-card", ".sleek-pill", ".voice-status-bar", ".pos-panel", ".notif-center"]) {
+  ok(`Light-Override deckt ${sel} ab`,
+    lightCss.includes(sel) && lightCss.includes('[data-theme="light"]'));
+}
+// Regression: hartkodierter heller Text auf hellem Grund -> Text muss mitflippen
+ok(
+  "memory-graph Light-Override flippt Textfarbe (kein unsichtbarer Text)",
+  /memory-graph-inspector[^}]*color:\s*var\(--text\)/s.test(lightCss) &&
+    /memory-graph-fit-btn[^}]*color:\s*var\(--text\)/s.test(lightCss)
+);
+
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

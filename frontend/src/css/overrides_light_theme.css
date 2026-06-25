@@ -1,0 +1,102 @@
+/* ──────────────────────────────────────────────────────────────
+ * LIGHT-THEME-RETROFIT (Gesamt-Scan 2026-06-25)
+ *
+ * theme.css definiert eine vollstaendige Light-Palette unter
+ * [data-theme="light"], aber zahlreiche Override-/View-Dateien hartkodieren
+ * dunkle Flaechen-rgba() statt der Tokens — im Light-Modus blieben diese
+ * Flaechen dunkel (teils mit weissen Borders/Text -> unlesbar).
+ *
+ * Diese Datei ist REIN ADDITIV: sie greift ausschliesslich unter
+ * [data-theme="light"] und laesst den Dark-Modus voellig unberuehrt
+ * (keine Regressionsgefahr). Flaechen werden auf die bereits in theme.css
+ * abgestimmten semantischen Light-Tokens gemappt. Muss als LETZTES CSS
+ * geladen werden (nach premium_animations.css).
+ * ────────────────────────────────────────────────────────────── */
+
+/* ── Shell: Karten & Widgets ─────────────────────────────────── */
+[data-theme="light"] .tool-card,
+[data-theme="light"] .dash-widget,
+[data-theme="light"] .dash-widget-greeting {
+  background: var(--card-bg);
+  border-color: var(--glass-border);
+}
+[data-theme="light"] .tool-card:hover {
+  background: var(--bg-hover);
+}
+
+/* ── Chat: Pills, System-Avatar, Mehr-Menue ──────────────────── */
+[data-theme="light"] .top-nav-pill,
+[data-theme="light"] .msg-avatar.system,
+[data-theme="light"] .sleek-pill {
+  background: var(--bg-surface2);
+  border-color: var(--glass-border);
+}
+[data-theme="light"] .sleek-pill:hover {
+  background: var(--bg-hover);
+}
+[data-theme="light"] .sleek-pill:focus-within {
+  background: var(--bg-surface2);
+}
+[data-theme="light"] .msg-more-menu {
+  background: var(--overlay-panel-strong);
+}
+
+/* ── Composer-Befehlspalette (erhoehte Flaeche) ──────────────── */
+[data-theme="light"] .composer-command-palette,
+[data-theme="light"] .animated-ai-chat .composer-command-palette {
+  background: var(--overlay-panel-strong);
+  border-color: var(--glass-border);
+}
+
+/* ── Backup-Liste, Benachrichtigungszentrum, Fokus-Banner ────── */
+[data-theme="light"] .backup-item,
+[data-theme="light"] .focus-mode-banner {
+  background: var(--bg-surface2);
+  border-color: var(--glass-border);
+}
+[data-theme="light"] .notif-center {
+  background: var(--overlay-panel-strong);
+  border-color: var(--glass-border);
+}
+[data-theme="light"] .floating-card {
+  background: var(--card-bg);
+}
+
+/* ── System-View-Panels ──────────────────────────────────────── */
+[data-theme="light"] .system-audit-panel,
+[data-theme="light"] .system-startup-panel {
+  background: var(--bg-surface2);
+  border-color: var(--glass-border);
+}
+
+/* ── Memory-Graph: Flaeche UND hartkodierter heller Text ─────── */
+[data-theme="light"] .memory-graph-fit-btn {
+  background: var(--bg-surface2);
+  color: var(--text);
+}
+[data-theme="light"] .memory-graph-inspector {
+  background: var(--overlay-panel);
+  color: var(--text);
+}
+
+/* ── Personal-OS-View ────────────────────────────────────────── */
+[data-theme="light"] #personal-os-view .info-card {
+  background: var(--card-bg);
+  border-color: var(--glass-border);
+}
+[data-theme="light"] .pos-panel {
+  background: var(--bg-surface2);
+  border-color: var(--glass-border);
+}
+[data-theme="light"] .pos-graph-network {
+  background: linear-gradient(180deg, var(--bg-surface2), var(--bg-surface3));
+}
+
+/* ── Voice-Statusleiste ──────────────────────────────────────── */
+[data-theme="light"] .voice-status-bar {
+  background: var(--bg-surface2);
+}
+[data-theme="light"] .voice-status-bar.active,
+[data-theme="light"] .voice-status-bar[data-state="speaking"] {
+  background: var(--bg-surface3);
+}
