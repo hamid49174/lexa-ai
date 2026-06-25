@@ -6,7 +6,7 @@ import asyncio
 import logging
 import re
 import threading
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from backend.security import check_rate_limit, audit_log
 from backend.agent_protocol import redacted_summary
@@ -112,4 +112,39 @@ async def calendar_week():
         return result
     except Exception as e:
         logger.error("calendar_week failed: %s", e, exc_info=True)
+        return JSONResponse({"error": _calendar_safe_error(e)}, status_code=500)
+
+
+@router.get("/next")
+async def calendar_next():
+    """Get the next upcoming calendar event."""
+    limited = _rate_limited()
+    if limited is not None:
+        return limited
+    try:
+        result = await asyncio.to_thread(calendar_int.calendar_next)
+        if not result.get("success"):
+            return JSONResponse(result, status_code=400)
+        return result
+    except Exception as e:
+        logger.error("calendar_next failed: %s", e, exc_info=True)
+        return JSONResponse({"error": _calendar_safe_error(e)}, status_code=500)
+
+
+@router.get("/search")
+async def calendar_search(q: str = Query("", max_length=200), days: int = Query(30, ge=1, le=365)):
+    """Search calendar events by title/text over the next N days (read-only)."""
+    limited = _rate_limited()
+    if limited is not None:
+        return limited
+    query = (q or "").strip()
+    if not query:
+        return JSONResponse({"error": "Suchbegriff darf nicht leer sein."}, status_code=400)
+    try:
+        result = await asyncio.to_thread(calendar_int.calendar_search, query, days)
+        if not result.get("success"):
+            return JSONResponse(result, status_code=400)
+        return result
+    except Exception as e:
+        logger.error("calendar_search failed: %s", e, exc_info=True)
         return JSONResponse({"error": _calendar_safe_error(e)}, status_code=500)
