@@ -246,3 +246,104 @@ def test_generated_license_key_matches_public_format(monkeypatch):
     key = router_stripe._generate_license_key("user-123", "sub-123")
 
     assert router_stripe._LICENSE_KEY_RE.match(key)
+
+
+# ── Webhook-Signaturpruefung (Scan-Fix: war ungetestet) ──
+
+def _webhook_client(router_stripe):
+    app = FastAPI()
+    app.include_router(router_stripe.router)
+    return TestClient(app)
+
+
+def test_webhook_missing_signature_header_is_rejected(monkeypatch):
+    import backend.router_stripe as router_stripe
+    _reset_stripe_config(router_stripe, monkeypatch)
+    client = _webhook_client(router_stripe)
+
+    res = client.post("/stripe/webhook", content=b"{}")
+    assert res.status_code == 400
+    assert "Stripe-Signature" in res.json()["error"]
+
+
+def test_webhook_without_configured_secret_returns_503_not_200(monkeypatch):
+    # Wichtig: KEIN 2xx ohne Secret, sonst quittiert Stripe das Event als zugestellt.
+    import backend.router_stripe as router_stripe
+    _reset_stripe_config(router_stripe, monkeypatch)
+    monkeypatch.setattr(router_stripe, "_get_webhook_secret", lambda: "")
+    client = _webhook_client(router_stripe)
+
+    res = client.post("/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "t=1,v1=abc"})
+    assert res.status_code == 503
+
+
+def test_webhook_invalid_signature_is_rejected(monkeypatch):
+    import backend.router_stripe as router_stripe
+    _reset_stripe_config(router_stripe, monkeypatch)
+    monkeypatch.setattr(router_stripe, "_get_webhook_secret", lambda: "whsec_test")
+
+    def _raise(*a, **k):
+        raise router_stripe.stripe.SignatureVerificationError("bad", "sig")
+
+    monkeypatch.setattr(router_stripe.stripe.Webhook, "construct_event", _raise)
+    monkeypatch.setattr(router_stripe, "audit_log", lambda *a, **k: None)
+    client = _webhook_client(router_stripe)
+
+    res = client.post("/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "bad"})
+    assert res.status_code == 400
+    assert res.json()["error"] == "Invalid signature"
+
+
+def test_webhook_malformed_payload_is_rejected(monkeypatch):
+    import backend.router_stripe as router_stripe
+    _reset_stripe_config(router_stripe, monkeypatch)
+    monkeypatch.setattr(router_stripe, "_get_webhook_secret", lambda: "whsec_test")
+    monkeypatch.setattr(router_stripe.stripe.Webhook, "construct_event",
+                        lambda *a, **k: (_ for _ in ()).throw(ValueError("boom")))
+    monkeypatch.setattr(router_stripe, "audit_log", lambda *a, **k: None)
+    client = _webhook_client(router_stripe)
+
+    res = client.post("/stripe/webhook", content=b"not-json", headers={"Stripe-Signature": "x"})
+    assert res.status_code == 400
+    assert res.json()["error"] == "Invalid payload"
+
+
+def test_webhook_valid_event_dispatches_handler(monkeypatch):
+    import backend.router_stripe as router_stripe
+    _reset_stripe_config(router_stripe, monkeypatch)
+    monkeypatch.setattr(router_stripe, "_get_webhook_secret", lambda: "whsec_test")
+    monkeypatch.setattr(router_stripe.stripe.Webhook, "construct_event",
+                        lambda *a, **k: {"type": "checkout.session.completed",
+                                          "data": {"object": {"id": "cs_1"}}})
+    monkeypatch.setattr(router_stripe, "audit_log", lambda *a, **k: None)
+    handled = {}
+
+    async def _fake_handler(data):
+        handled["data"] = data
+
+    monkeypatch.setattr(router_stripe, "_handle_checkout_completed", _fake_handler)
+    client = _webhook_client(router_stripe)
+
+    res = client.post("/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "ok"})
+    assert res.status_code == 200
+    assert res.json()["status"] == "ok"
+    assert handled["data"]["id"] == "cs_1"
+
+
+def test_webhook_handler_error_returns_500_for_stripe_retry(monkeypatch):
+    import backend.router_stripe as router_stripe
+    _reset_stripe_config(router_stripe, monkeypatch)
+    monkeypatch.setattr(router_stripe, "_get_webhook_secret", lambda: "whsec_test")
+    monkeypatch.setattr(router_stripe.stripe.Webhook, "construct_event",
+                        lambda *a, **k: {"type": "customer.subscription.updated",
+                                          "data": {"object": {"id": "sub_1"}}})
+    monkeypatch.setattr(router_stripe, "audit_log", lambda *a, **k: None)
+
+    async def _boom(data):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(router_stripe, "_handle_subscription_updated", _boom)
+    client = _webhook_client(router_stripe)
+
+    res = client.post("/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "ok"})
+    assert res.status_code == 500
