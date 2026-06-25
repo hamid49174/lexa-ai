@@ -37,16 +37,11 @@
 [data-theme="light"] .sleek-pill:focus-within {
   background: var(--bg-surface2);
 }
-[data-theme="light"] .msg-more-menu {
-  background: var(--overlay-panel-strong);
-}
 
-/* ── Composer-Befehlspalette (erhoehte Flaeche) ──────────────── */
-[data-theme="light"] .composer-command-palette,
-[data-theme="light"] .animated-ai-chat .composer-command-palette {
-  background: var(--overlay-panel-strong);
-  border-color: var(--glass-border);
-}
+/* Hinweis: .msg-more-menu und .composer-command-palette werden BEWUSST NICHT
+   aufgehellt. Ihre Eintraege haben hartkodiert hellen Text; eine helle Flaeche
+   wuerde unlesbar (heller Text auf hellem Grund). Ein dunkles Dropdown/Palette
+   auf hellem Theme ist eine gaengige, gut lesbare Loesung. */
 
 /* ── Backup-Liste, Benachrichtigungszentrum, Fokus-Banner ────── */
 [data-theme="light"] .backup-item,

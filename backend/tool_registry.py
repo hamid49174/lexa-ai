@@ -821,7 +821,7 @@ def _register_calendar_tools() -> list[dict]:
 
 
 def _register_weather_tools() -> list[dict]:
-    """Weather-Tools (2): Aktuelles Wetter, Vorhersage."""
+    """Weather-Tools (3): Aktuelles Wetter, Vorhersage, Regen-Check."""
     return [
         _tool("weather_current", "Zeigt das aktuelle Wetter: Temperatur, Gefühlt, Beschreibung, Luftfeuchtigkeit, Wind. Nutzt OpenWeatherMap.", [
             _param("city", "string", "Stadt. Wenn leer, wird gespeicherte Stadt oder IP-Standort verwendet."),
@@ -829,6 +829,9 @@ def _register_weather_tools() -> list[dict]:
         _tool("weather_forecast", "Zeigt die Wettervorhersage für die nächsten Tage mit Hoch/Tief-Temperaturen, Beschreibung und Regenwahrscheinlichkeit.", [
             _param("city", "string", "Stadt. Wenn leer, wird gespeicherte Stadt oder IP-Standort verwendet."),
             _param("days", "integer", "Anzahl der Vorhersage-Tage (1-5, Standard: 3)"),
+        ]),
+        _tool("weather_will_it_rain", "Prüft, ob es in den nächsten Stunden regnen wird, und gibt eine kurze Empfehlung (z.B. Regenschirm).", [
+            _param("city", "string", "Stadt. Wenn leer, wird gespeicherte Stadt oder IP-Standort verwendet."),
         ]),
     ]
 

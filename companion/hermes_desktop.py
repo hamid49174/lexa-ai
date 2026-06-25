@@ -1841,16 +1841,18 @@ def _focus_window_for_action(window: str) -> dict[str, Any] | None:
 def _focused_title_matches_target(target: str, focused_title: str) -> bool:
     """Prueft, ob der fokussierte Fenstertitel zum angeforderten Zielfenster passt.
 
-    Toleriert Teiltreffer ("Notepad" ⊂ "*Test - Notepad"). Wird nur als
-    Negativ-Signal genutzt: ein klarer Mismatch verhindert das Tippen ins
-    falsche Fenster. Fehlt der Titel, gibt es kein verlaessliches Signal —
-    dann wird NICHT abgebrochen (kein Fehlalarm).
+    Nutzt denselben TOLERANTEN Matcher wie die Fokus-Logik
+    (_window_title_matches_query: ASCII-Faltung ae/oe/ue/ss, Satzzeichen,
+    Notepad<->Editor-Alias). Sonst wuerde der Guard legitime Faelle faelschlich
+    blockieren (z.B. "Notepad" -> reales Fenster "Unbenannt - Editor"). Wird nur
+    als Negativ-Signal genutzt: fehlt ein Titel-Signal, wird NICHT abgebrochen
+    (kein Fehlalarm).
     """
-    t = re.sub(r"\s+", " ", str(target or "").strip().lower())
-    title = re.sub(r"\s+", " ", str(focused_title or "").strip().lower())
+    t = str(target or "").strip()
+    title = str(focused_title or "").strip()
     if not t or not title:
         return True
-    return t in title or title in t
+    return _window_title_matches_query(title, t)
 
 
 def _clip_text(value: object, limit: int = 80) -> str:
