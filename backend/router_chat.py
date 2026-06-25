@@ -1211,7 +1211,8 @@ async def chat_endpoint(req: ChatRequest):
     audit_log("chat", "received", _audit_message_details(sanitized))
 
     # Fast path: check if this is a confirmation of a pending action
-    pending = get_pending_confirmation()
+    # conversation_id explizit -> race-sicher, kein Cross-Conversation-Leak
+    pending = get_pending_confirmation(req.conversation_id)
     if pending and _is_confirmation_message(sanitized):
         action_name = pending.get("action", "")
         logger.info(f"User confirmed pending action: {action_name}")
@@ -1981,7 +1982,8 @@ async def chat_stream_endpoint(req: ChatRequest):
     audit_log("chat_stream", "received", _audit_message_details(sanitized))
 
     # Fast path: check if this is a confirmation of a pending action
-    pending = get_pending_confirmation()
+    # conversation_id explizit -> race-sicher, kein Cross-Conversation-Leak
+    pending = get_pending_confirmation(req.conversation_id)
     if pending and _is_confirmation_message(sanitized):
         action_name = pending.get("action", "")
         logger.info(f"User confirmed pending action (stream): {action_name}")

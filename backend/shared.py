@@ -70,34 +70,59 @@ async def ensure_active_conversation(conv_id: Optional[int]) -> None:
 # This allows Lexa to understand "bestätige" / "ja" / "mach es" follow-ups.
 _pending_confirmation: Optional[dict] = None
 _pending_confirmation_ts: float = 0.0
+# An welche Konversation die offene Bestaetigung gebunden ist. Verhindert, dass
+# ein "ja" in Konversation B versehentlich die in Konversation A vorbereitete
+# (ggf. mutierende) Aktion ausfuehrt. Bindung ist konservativ: blockiert nur bei
+# einem KLAREN Mismatch (beide IDs bekannt und verschieden) — fehlt eine ID
+# (Legacy/ad-hoc), bleibt das alte Verhalten erhalten.
+_pending_confirmation_conv_id: Optional[int] = None
 _PENDING_CONFIRMATION_TTL = 300.0  # 5 minutes — after that, forget it
 
 
-def set_pending_confirmation(action: dict) -> None:
-    """Store a pending confirmation action (tool call awaiting user approval)."""
-    global _pending_confirmation, _pending_confirmation_ts
+def set_pending_confirmation(action: dict, conversation_id: Optional[int] = None) -> None:
+    """Store a pending confirmation action (tool call awaiting user approval).
+
+    Bindet die Aktion an die angegebene bzw. aktuell aktive Konversation, damit
+    eine Bestaetigung nur in derselben Unterhaltung greift.
+    """
+    global _pending_confirmation, _pending_confirmation_ts, _pending_confirmation_conv_id
     _pending_confirmation = action
     _pending_confirmation_ts = time.time()
+    _pending_confirmation_conv_id = (
+        conversation_id if conversation_id is not None else _active_conversation_id
+    )
     logger.info(f"Pending confirmation set: {action.get('action', '?')}")
 
 
-def get_pending_confirmation() -> Optional[dict]:
-    """Get the pending confirmation action, or None if expired/missing."""
+def get_pending_confirmation(conversation_id: Optional[int] = None) -> Optional[dict]:
+    """Get the pending confirmation action, or None if expired/missing.
+
+    Gibt None zurueck, wenn die offene Bestaetigung an eine ANDERE Konversation
+    gebunden ist (kein Cross-Conversation-Leak). Konservativ: nur bei klarem
+    Mismatch beider bekannter IDs.
+    """
     global _pending_confirmation, _pending_confirmation_ts
     if _pending_confirmation is None:
         return None
     if (time.time() - _pending_confirmation_ts) > _PENDING_CONFIRMATION_TTL:
-        _pending_confirmation = None
-        _pending_confirmation_ts = 0.0
+        clear_pending_confirmation()
+        return None
+    current = conversation_id if conversation_id is not None else _active_conversation_id
+    if (
+        _pending_confirmation_conv_id is not None
+        and current is not None
+        and _pending_confirmation_conv_id != current
+    ):
         return None
     return _pending_confirmation
 
 
 def clear_pending_confirmation() -> None:
     """Clear the pending confirmation (after execution or denial)."""
-    global _pending_confirmation, _pending_confirmation_ts
+    global _pending_confirmation, _pending_confirmation_ts, _pending_confirmation_conv_id
     _pending_confirmation = None
     _pending_confirmation_ts = 0.0
+    _pending_confirmation_conv_id = None
 
 
 # ── Simple timestamp-based cache (bounded to prevent memory leaks) ──

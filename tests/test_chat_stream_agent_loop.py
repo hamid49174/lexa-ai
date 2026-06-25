@@ -96,7 +96,7 @@ def _wire(monkeypatch, chat_stream_stub, audit_sink=None):
                         else (lambda *a, **k: None))
     monkeypatch.setattr(router_chat, "conversation_history", [])
     monkeypatch.setattr(router_chat, "ensure_active_conversation", _noop_async)
-    monkeypatch.setattr(router_chat, "get_pending_confirmation", lambda: None)
+    monkeypatch.setattr(router_chat, "get_pending_confirmation", lambda *a, **k: None)
     monkeypatch.setattr(router_chat, "try_safety_integrity_answer", lambda _m: "")
     monkeypatch.setattr(router_chat, "try_file_upload_capability_answer", lambda _m: "")
     monkeypatch.setattr(router_chat, "try_lexa_system_answer", _noop_async)
