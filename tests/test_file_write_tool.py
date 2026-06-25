@@ -1,6 +1,68 @@
 import pytest
 
-from companion.file_tools import file_write
+from companion.file_tools import file_write, file_move, file_copy
+
+
+def test_file_move_refuses_existing_destination_file(tmp_path):
+    src = tmp_path / "a.txt"
+    src.write_text("new", encoding="utf-8")
+    dst = tmp_path / "b.txt"
+    dst.write_text("old", encoding="utf-8")
+
+    result = file_move(str(src), str(dst))
+
+    assert "error" in result and "existiert bereits" in result["error"]
+    assert src.exists()  # Quelle nicht verschoben
+    assert dst.read_text(encoding="utf-8") == "old"  # Ziel nicht zerstoert
+
+
+def test_file_move_into_dir_refuses_existing_same_name(tmp_path):
+    src = tmp_path / "a.txt"
+    src.write_text("new", encoding="utf-8")
+    target_dir = tmp_path / "dir"
+    target_dir.mkdir()
+    (target_dir / "a.txt").write_text("old", encoding="utf-8")
+
+    result = file_move(str(src), str(target_dir))
+
+    assert "error" in result and "existiert bereits" in result["error"]
+    assert (target_dir / "a.txt").read_text(encoding="utf-8") == "old"
+
+
+def test_file_move_succeeds_to_new_path(tmp_path):
+    src = tmp_path / "a.txt"
+    src.write_text("data", encoding="utf-8")
+    dst = tmp_path / "b.txt"
+
+    result = file_move(str(src), str(dst))
+
+    assert result.get("success") is True
+    assert dst.read_text(encoding="utf-8") == "data"
+    assert not src.exists()
+
+
+def test_file_copy_refuses_existing_destination_file(tmp_path):
+    src = tmp_path / "a.txt"
+    src.write_text("new", encoding="utf-8")
+    dst = tmp_path / "b.txt"
+    dst.write_text("old", encoding="utf-8")
+
+    result = file_copy(str(src), str(dst))
+
+    assert "error" in result and "existiert bereits" in result["error"]
+    assert dst.read_text(encoding="utf-8") == "old"
+
+
+def test_file_copy_succeeds_to_new_path(tmp_path):
+    src = tmp_path / "a.txt"
+    src.write_text("data", encoding="utf-8")
+    dst = tmp_path / "b.txt"
+
+    result = file_copy(str(src), str(dst))
+
+    assert result.get("success") is True
+    assert dst.read_text(encoding="utf-8") == "data"
+    assert src.exists()
 
 
 def test_file_write_creates_new_utf8_file(tmp_path):

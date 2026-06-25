@@ -1838,6 +1838,21 @@ def _focus_window_for_action(window: str) -> dict[str, Any] | None:
     return result
 
 
+def _focused_title_matches_target(target: str, focused_title: str) -> bool:
+    """Prueft, ob der fokussierte Fenstertitel zum angeforderten Zielfenster passt.
+
+    Toleriert Teiltreffer ("Notepad" ⊂ "*Test - Notepad"). Wird nur als
+    Negativ-Signal genutzt: ein klarer Mismatch verhindert das Tippen ins
+    falsche Fenster. Fehlt der Titel, gibt es kein verlaessliches Signal —
+    dann wird NICHT abgebrochen (kein Fehlalarm).
+    """
+    t = re.sub(r"\s+", " ", str(target or "").strip().lower())
+    title = re.sub(r"\s+", " ", str(focused_title or "").strip().lower())
+    if not t or not title:
+        return True
+    return t in title or title in t
+
+
 def _clip_text(value: object, limit: int = 80) -> str:
     text = re.sub(r"\s+", " ", str(value or "").strip())
     if len(text) <= limit:
@@ -2281,6 +2296,28 @@ def hermes_desktop_commit(
     if action_kind == "type":
         focus_result = _focus_window_for_action(window)
         verify_window = str((focus_result or {}).get("window_title") or window or "").strip()
+        # Wurde ein Zielfenster verlangt, aber ein klar anderes Fenster fokussiert
+        # (SetForegroundWindow kann an Windows-Foreground-Locks scheitern), dann
+        # NICHT blind tippen — analog zum scroll-Pfad. Bei fehlendem Titel-Signal
+        # wird bewusst nicht abgebrochen (kein Fehlalarm).
+        window_requested = bool(str(window or "").strip())
+        focused_title = str((focus_result or {}).get("window_title") or "").strip()
+        if window_requested and not _focused_title_matches_target(window, focused_title):
+            return {
+                "kind": "type",
+                "summary": (
+                    f'Nicht ausgefuehrt: Das Zielfenster "{window}" wurde nicht fokussiert '
+                    f'(aktiv: "{focused_title}"). Ich habe nicht getippt, um nicht im falschen '
+                    "Fenster zu landen."
+                ),
+                "result": {"typed": False, "reason": "target_window_not_focused"},
+                "focus": focus_result,
+                "verification": _verification_payload(
+                    method="type_target_window_mismatch",
+                    status="failed",
+                    summary=f'Zielfenster "{window}" wurde nicht fokussiert; Tippen abgebrochen.',
+                ),
+            }
         result = desktop_control.desktop_type(text=typing_text, interval_ms=typing_interval_ms)
         if verify:
             # Manche Apps aktualisieren den UIA-Baum/Value erst nach einem kurzen

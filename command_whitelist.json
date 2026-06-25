@@ -122,6 +122,7 @@
         "calendar_search",
         "weather_current",
         "weather_forecast",
+        "weather_will_it_rain",
         "reminder_create",
         "reminder_list",
         "file_open",

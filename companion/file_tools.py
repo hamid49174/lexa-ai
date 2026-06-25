@@ -992,6 +992,14 @@ def file_move(source: str = "", destination: str = "") -> dict:
     if not dst.is_dir() and not dst.parent.exists():
         return {"error": f"Zielverzeichnis existiert nicht: {dst.parent}"}
 
+    # Bestehende Zieldatei nicht kommentarlos ueberschreiben (analog file_write).
+    # shutil.move legt bei vorhandenem Ziel-Ordner unter dst/src.name ab, sonst
+    # unter dst — beide Faelle wuerden eine gleichnamige Datei zerstoeren.
+    if src.is_file():
+        move_target = (dst / src.name) if dst.is_dir() else dst
+        if move_target.exists() and move_target.is_file():
+            return {"error": "Zieldatei existiert bereits. Ich ueberschreibe sie nicht automatisch."}
+
     try:
         result_path = shutil.move(str(src), str(dst))
         logger.info(f"file_move: {source} → {result_path}")
@@ -1034,6 +1042,10 @@ def file_copy(source: str = "", destination: str = "") -> dict:
             else:
                 result_path = shutil.copytree(str(src), str(dst))
         else:
+            # Bestehende Zieldatei nicht kommentarlos ueberschreiben (analog file_write).
+            copy_target = (dst / src.name) if dst.is_dir() else dst
+            if copy_target.exists() and copy_target.is_file():
+                return {"error": "Zieldatei existiert bereits. Ich ueberschreibe sie nicht automatisch."}
             result_path = shutil.copy2(str(src), str(dst))
         logger.info(f"file_copy: {source} → {result_path}")
         return {"success": True, "data": t("file.copied", source=src.name, destination=str(result_path))}

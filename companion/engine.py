@@ -325,6 +325,7 @@ class CompanionEngine:
             # ── Weather ──
             "weather_current": weather.weather_current,
             "weather_forecast": weather.weather_forecast,
+            "weather_will_it_rain": weather.weather_will_it_rain,
             # ── Upgrade 3: Smart Reminders ──
             "reminder_create": reminders.reminder_create,
             "reminder_list": reminders.reminder_list,
