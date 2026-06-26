@@ -557,9 +557,11 @@ function renderMessageAvatar(avatar, type = "system") {
 // compatibility (callers pass `silent`/`options` by position); the confirmation
 // flow was removed and the value is intentionally unused here.
 function addMessage(text, type = "system", action = null, requiresConfirmation = false, silent = false, options = {}) {
-  // Restored messages may carry an embedded ```lexa-sources block — split it off
-  // so persistText/render stay clean and the sources render as the chips widget.
-  const _parsedSources = extractSourcesBlock(text);
+  // Restored ASSISTANT/SYSTEM messages may carry an embedded ```lexa-sources block —
+  // split it off so persistText/render stay clean and sources render as the chips
+  // widget. NICHT fuer user-Nachrichten: ein vom Nutzer getippter/eingefuegter
+  // lexa-sources-Block ist echter Inhalt und darf nicht verschwinden.
+  const _parsedSources = type === "user" ? { text, sources: [] } : extractSourcesBlock(text);
   const _msgSources = _parsedSources.sources;
   text = _parsedSources.text;
   const sleekGreeting = document.getElementById("sleek-greeting");
@@ -822,16 +824,6 @@ function renderStreamingFormatted(target, text) {
   const cursor = document.createElement("span");
   cursor.className = "streaming-cursor";
   target.appendChild(cursor);
-}
-
-function renderStreamingText(target, text, showCursor = true) {
-  if (!target) return;
-  target.textContent = String(text || "");
-  if (showCursor) {
-    const cursor = document.createElement("span");
-    cursor.className = "streaming-cursor";
-    target.appendChild(cursor);
-  }
 }
 
 function denyAction(btn) {

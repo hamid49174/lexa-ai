@@ -343,6 +343,22 @@ def _downscale_for_groq(image_bytes: bytes) -> str:
     if not _PIL_AVAILABLE:
         # Fallback: just encode as-is
         return _image_to_base64_url(image_bytes)
+
+    # Decompression-Bomb-Schutz HART vor dem best-effort-Resize: Image.open liest nur
+    # den Header (guenstig), .resize() wuerde erst dekodieren. Diese Pruefung MUSS
+    # ausserhalb des untenstehenden try liegen, sonst wuerde der Fallback die
+    # ueberdimensionierte Bombe still als Original weiterreichen. Bei Verstoss wirft
+    # die Funktion -> der Aufrufer faellt auf einen Provider ohne lokale Dekodierung zurueck.
+    try:
+        _probe = Image.open(io.BytesIO(image_bytes))
+        _probe_pixels = _probe.width * _probe.height
+    except Exception:
+        _probe_pixels = 0
+    if _probe_pixels > _MAX_IMAGE_PIXELS:
+        raise RuntimeError(
+            f"Bild zu gross ({_probe_pixels} > {_MAX_IMAGE_PIXELS} Pixel) — moegliche Decompression Bomb."
+        )
+
     try:
         img = Image.open(io.BytesIO(image_bytes))
         # Downscale if wider than limit
@@ -393,7 +409,13 @@ def _analyze_with_groq(
     if client is None:
         return None
 
-    image_b64_url = _downscale_for_groq(image_bytes)
+    # Bei zu grossem Bild (Decompression-Bomb-Deckel) bricht der lokale Groq-Downscale
+    # ab -> sauber auf den naechsten Provider ausweichen statt zu dekodieren/crashen.
+    try:
+        image_b64_url = _downscale_for_groq(image_bytes)
+    except Exception as e:
+        logger.warning(f"Groq Vision uebersprungen: {e}")
+        return None
 
     try:
         response = client.chat.completions.create(

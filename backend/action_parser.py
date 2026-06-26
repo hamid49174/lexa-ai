@@ -535,26 +535,6 @@ def process_tool_call(
     return reply, action, requires_confirmation
 
 
-def process_tool_calls(
-    tool_calls: list[dict], ai_message: str = "", source: str = "chat"
-) -> list[tuple[str, Optional[dict], bool]]:
-    """Process ALL tool calls from a multi-tool LLM response (Phase 41).
-
-    Returns a list of (reply_text, action_dict_or_None, requires_confirmation)
-    tuples — one per tool call.
-    """
-    if not tool_calls:
-        return [(ai_message or "Keine Aktion erkannt.", None, False)]
-
-    results = []
-    for tc in tool_calls:
-        single_result = process_tool_call([tc], ai_message=ai_message, source=source)
-        results.append(single_result)
-        # Only use ai_message for the first tool call
-        ai_message = ""
-    return results
-
-
 def process_chat_result(
     result: dict, source: str = "chat"
 ) -> tuple[str, Optional[dict], bool]:

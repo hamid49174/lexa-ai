@@ -24,15 +24,24 @@ function splitChatLinkTarget(rawTarget) {
 function appendTextWithBareUrls(parent, textChunk) {
   const str = String(textChunk || "");
   if (!str) return;
-  const urlPattern = /https?:\/\/[^\s<>()\[\]]+/g;
+  // Klammern () im Pfad zulassen (z.B. Wikipedia /Funktion_(Mathematik)); eine
+  // ueberzaehlige schliessende Klammer (Satz-Klammer) wird unten wieder abgetrennt.
+  const urlPattern = /https?:\/\/[^\s<>\[\]]+/g;
   let last = 0;
   let m;
+  const _count = (s, ch) => s.split(ch).length - 1;
   while ((m = urlPattern.exec(str)) !== null) {
     if (m.index > last) parent.appendChild(document.createTextNode(str.slice(last, m.index)));
     let url = m[0];
     let trailing = "";
-    const trail = /[.,;:!?)]+$/.exec(url);
+    const trail = /[.,;:!?]+$/.exec(url);
     if (trail) { trailing = trail[0]; url = url.slice(0, url.length - trailing.length); }
+    // Nachgestellte unbalancierte ')' (z.B. "(siehe https://x.org/a)") als Text abtrennen,
+    // balancierte Klammern im Pfad aber behalten.
+    while (url.endsWith(")") && _count(url, ")") > _count(url, "(")) {
+      trailing = ")" + trailing;
+      url = url.slice(0, -1);
+    }
     const safeUrl = normalizeChatUrl(url);
     if (safeUrl) {
       const link = document.createElement("a");

@@ -397,6 +397,12 @@ const bareTrail = formatMessage("Quelle: https://example.com/x.");
 assert("bare url drops trailing punctuation from href", bareTrail.includes('href="https://example.com/x"') && !bareTrail.includes('href="https://example.com/x."'), bareTrail);
 const bareUnsafe = formatMessage("javascript:alert(1) not linked");
 assert("bare non-http scheme is not auto-linked", !bareUnsafe.includes("<a "), bareUnsafe);
+// Scan-Fix C: balancierte Klammern im Pfad gehoeren zur URL (Wikipedia o.ae.)
+const bareParen = formatMessage("Siehe https://de.wikipedia.org/wiki/Funktion_(Mathematik) dort");
+assert("bare url keeps balanced parens", bareParen.includes('href="https://de.wikipedia.org/wiki/Funktion_(Mathematik)"'), bareParen);
+// ... aber eine ueberzaehlige schliessende Satz-Klammer bleibt Text
+const bareWrapParen = formatMessage("(siehe https://example.com/a)");
+assert("bare url drops unbalanced trailing paren", bareWrapParen.includes('href="https://example.com/a"') && !bareWrapParen.includes('href="https://example.com/a)"'), bareWrapParen);
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
