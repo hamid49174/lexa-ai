@@ -320,7 +320,9 @@ def _build_tfidf_vector(tokens: list[str], dim: int = LOCAL_EMBEDDING_DIMS) -> l
 
 def _embed_local(text: str) -> list[float]:
     """Generate a local TF-IDF embedding using the hashing trick."""
-    tokens = _tokenize(text)
+    # Eingabe kappen wie im OpenAI-Pfad (text[:8000]) — begrenzt CPU/Speicher bei sehr
+    # langen Texten und haelt lokale/remote Embeddings auf demselben Input-Fenster.
+    tokens = _tokenize(text[:8000])
     return _build_tfidf_vector(tokens)
 
 

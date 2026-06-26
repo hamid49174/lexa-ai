@@ -68,8 +68,16 @@ opt-in.
 
 ## F. Gedächtnis & Wissen  🟡
 **Scope:** Memory (SQLite/Embeddings/Smart-Memory), Personal-OS/Obsidian-Grounding, Memory-View.
-**Ist-Zustand:** 🟢 Speicher/Suche/Grounding funktionieren. 🟡 O(n)-Embedding-Suche (kein Vektorindex),
-auto_remember-Heuristik brüchig (nur DE), Memory-View bewusst auf Graph reduziert (toter Listen-Code).
+**Ist-Zustand:** 🟢 Speicher/Suche/Grounding funktionieren. 🟢 Audit (4 Parallel-Linsen, 2026-06-26):
+**0 HIGH** — Kern-Speicher sauber bestätigt (parameterisierte SQL überall, LIKE/FTS5-Escaping,
+Thread-Local-Connections, Backup-Whitelist, read-only-Grounding mit Pfad-Validierung + Caps).
+Gefixt (SAFE, +4 Tests): MED falsch getyptes JSON → 500 statt 400 bei clipboard/snippets/smart-profile
+(`str()`-Cast); LOW auto_remember wählte Merk-Kommando nach Listen- statt Textposition (jetzt frühestes
+Vorkommen); LOW smart_memory konnte ungültiges „24:00" erzeugen (→ „23:59"); LOW lokale Embeddings ohne
+Längen-Cap (jetzt `text[:8000]` wie OpenAI-Pfad). 🟡 **OFFEN (NEEDS-DECISION):** O(n)-Cosine-Suche ohne
+Vektorindex (search_memory_semantic lädt alle Embeddings, kein ANN — bekannt); Dedup ignoriert internen
+Mehrfach-Whitespace; rate-limit fehlt auf mutierenden memory/embeddings-Endpoints (Tier-Policy);
+note_update 404-vs-400; Obsidian rglob folgt Symlinks (Vault-Escape, low); auto_remember nur DE.
 **100% =** schnelle/robuste semantische Suche, verlässliche Extraktion, vollständige Verwaltungs-UI.
 
 ## G. Produktivität  🟡

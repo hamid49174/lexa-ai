@@ -191,7 +191,9 @@ async def get_clipboard_history():
 @router.post("/clipboard/add")
 async def add_clipboard_entry(req: Request):
     data = await parse_json_body(req)
-    text = data.get("text", "").strip()[:MAX_CLIPBOARD_TEXT]
+    # str()-Cast: falsch getyptes (aber valides) JSON wie {"text": 123} darf keinen
+    # 500 (AttributeError auf .strip()) ausloesen — konsistent mit add_memory.
+    text = str(data.get("text", "")).strip()[:MAX_CLIPBOARD_TEXT]
     if not text:
         return {"status": "empty"}
     result = await asyncio.to_thread(memory.clipboard_add, text)
@@ -221,8 +223,9 @@ async def list_snippets():
 @router.post("/snippets")
 async def create_snippet(req: Request):
     data = await parse_json_body(req)
-    name = data.get("name", "").strip()[:MAX_SNIPPET_NAME]
-    text = data.get("text", "").strip()[:MAX_SNIPPET_TEXT]
+    # str()-Cast gegen 500 bei falsch getyptem JSON (z.B. {"name": 5, "text": true}).
+    name = str(data.get("name", "")).strip()[:MAX_SNIPPET_NAME]
+    text = str(data.get("text", "")).strip()[:MAX_SNIPPET_TEXT]
     if not name or not text:
         raise HTTPException(status_code=400, detail="Name und Text erforderlich")
     result = await asyncio.to_thread(memory.snippet_create, name, text)

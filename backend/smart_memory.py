@@ -471,7 +471,10 @@ def _update_work_schedule_from_interaction(hour: int, dow: int) -> None:
     top_hours = hour_counts.most_common(3)
     peak_start = min(h for h, _ in top_hours)
     peak_end = max(h for h, _ in top_hours)
-    peak = f"{peak_start:02d}:00-{peak_end + 1:02d}:00"
+    # Spaltenende = Ende der Peak-Stunde. Bei Stunde 23 waere "24:00" ungueltig (HH:MM-
+    # Parser/UI) -> auf "23:59" begrenzen, statt ueber Mitternacht zu rollen.
+    peak_end_str = "23:59" if peak_end >= 23 else f"{peak_end + 1:02d}:00"
+    peak = f"{peak_start:02d}:00-{peak_end_str}"
 
     work_hours = {
         "start": work_start,

@@ -40,7 +40,7 @@ async def update_profile(req: Request):
     except Exception:
         return JSONResponse({"error": "Ungueltiges JSON."}, status_code=400)
 
-    key = data.get("key", "").strip()
+    key = str(data.get("key", "")).strip()  # str()-Cast gegen 500 bei falsch getyptem JSON
     if not key:
         return JSONResponse({"error": "Key darf nicht leer sein."}, status_code=400)
     if len(key) > 200:
@@ -142,7 +142,7 @@ async def manual_learn(req: Request):
     except Exception:
         return JSONResponse({"error": "Ungueltiges JSON."}, status_code=400)
 
-    key = data.get("key", "").strip()
+    key = str(data.get("key", "")).strip()  # str()-Cast gegen 500 bei falsch getyptem JSON
     if not key:
         return JSONResponse({"error": "Key darf nicht leer sein."}, status_code=400)
     if len(key) > 200:

@@ -979,17 +979,25 @@ def auto_remember(user_msg: str, ai_reply: str) -> None:
             "behalte", "speicher", "merk dir",
         ]
         if any(p in msg_lower for p in explicit_remember_patterns) and len(user_msg) < 300:
-            # Extract what to remember (strip the command prefix)
+            # Extract what to remember (strip the command prefix). Das textlich ZUERST
+            # vorkommende Merk-Kommando waehlen (kleinster Index), NICHT das in der Liste
+            # zuerst stehende — sonst wird bei mehreren Kommandos der falsche Inhalt extrahiert.
+            # Bei gleichem Index das laengere Pattern bevorzugen (genauerer Prefix-Strip).
             content = user_msg
+            best_idx = None
+            best_p = None
             for p in explicit_remember_patterns:
                 idx = msg_lower.find(p)
-                if idx >= 0:
-                    content = user_msg[idx + len(p):]
-                    # Strip leading punctuation, whitespace, and the word "dass"
-                    content = re.sub(r"^[\s,.:!]+", "", content)
-                    content = re.sub(r"^dass\s+", "", content, flags=re.IGNORECASE)
-                    content = content.strip()
-                    break
+                if idx < 0:
+                    continue
+                if best_idx is None or idx < best_idx or (idx == best_idx and len(p) > len(best_p)):
+                    best_idx, best_p = idx, p
+            if best_p is not None:
+                content = user_msg[best_idx + len(best_p):]
+                # Strip leading punctuation, whitespace, and the word "dass"
+                content = re.sub(r"^[\s,.:!]+", "", content)
+                content = re.sub(r"^dass\s+", "", content, flags=re.IGNORECASE)
+                content = content.strip()
             if content and len(content) > 3:
                 add_memory(f"Merkzettel: {content}", category="explicit", importance=9, source="auto")
                 saved_something = True
