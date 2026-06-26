@@ -1863,8 +1863,12 @@ async def chat_file_endpoint(
         # Phase 40: unified processing for tool calls + text
         reply, action, requires_confirmation = process_chat_result(ai_result, source="chat_file")
 
+        # Als Nutzer-Turn nur die echte Frage + knappe Datei-Annotation speichern —
+        # nicht den vollen Analyse-Prompt inkl. (gekuerztem) Datei-Dump (Verlaufs-Hygiene).
+        _fname = file_info.get("filename", "Datei")
+        user_turn = f"{user_msg} [Datei: {_fname}]" if user_msg else f"[Datei: {_fname}]"
         async with _history_lock:
-            update_history(conversation_history, full_prompt[:2000], reply, MAX_HISTORY)
+            update_history(conversation_history, user_turn[:2000], reply, MAX_HISTORY)
 
         analysis_status = "text_analyzed" if file_info.get("content") else "metadata_only"
         return {
