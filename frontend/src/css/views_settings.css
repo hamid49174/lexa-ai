@@ -400,3 +400,57 @@
 .settings-input::placeholder {
   color: var(--text-muted);
 }
+
+/* ── MCP-Server-Verwaltung ──────────────────────────── */
+.mcp-server-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.mcp-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 8px 4px;
+}
+.mcp-server-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-surface2);
+  border: 1px solid var(--glass-border);
+}
+.mcp-server-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.mcp-server-name {
+  font-weight: 600;
+  color: var(--text);
+}
+.mcp-server-cmd {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  word-break: break-all;
+}
+.mcp-status {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.mcp-status-connected { color: #34d399; }
+.mcp-status-disconnected { color: var(--text-muted); }
+.mcp-status-error { color: #f87171; }
+.mcp-server-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}

@@ -118,6 +118,7 @@ const expectedTail = [
   "./settings_helpers.js",
   "./settings_provider_helpers.js",
   "./settings.js",
+  "./mcp_settings.js",
   "./devtools.js",
 ];
 const tail = scripts.slice(-expectedTail.length);

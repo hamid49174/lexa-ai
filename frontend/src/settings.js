@@ -130,6 +130,9 @@ async function refreshSettingsView() {
   // License status works offline (reads local file via IPC)
   loadLicenseStatus();
 
+  // MCP-Server-Liste aktualisieren (eigenes Modul, degradiert sauber offline)
+  if (typeof refreshMcpServers === "function") refreshMcpServers();
+
   if (!LexaState.get("backendOnline")) {
     renderVoiceDiagnostics({ ok: false, state: "blocked", summary: "Backend offline.", checks: [] });
     renderHermesGatewayAutostart({ supported: false, enabled: false, can_enable: false, error: "Backend offline." });

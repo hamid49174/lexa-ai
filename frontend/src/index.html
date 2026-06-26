@@ -1328,6 +1328,18 @@
           </div>
 
           <div class="settings-group">
+            <div class="settings-group-title" data-i18n="mcp.group">MCP-SERVER</div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-name" data-i18n="mcp.manageName">MCP-Server verwalten</div>
+                <div class="setting-desc" data-i18n="mcp.manageDesc">Externe Model-Context-Protocol-Server hinzuf&uuml;gen, verbinden oder entfernen.</div>
+              </div>
+              <button type="button" class="action-btn" data-action="mcpAddServer" data-i18n="mcp.add">Server hinzuf&uuml;gen</button>
+            </div>
+            <div id="mcp-server-list" class="mcp-server-list" role="list"></div>
+          </div>
+
+          <div class="settings-group">
             <div class="settings-group-title" data-i18n="settings.databaseBackup">DATENBANK-BACKUP</div>
             <div class="setting-item">
               <div class="setting-info">
@@ -1398,6 +1410,7 @@
   <script src="./settings_helpers.js"></script>
   <script src="./settings_provider_helpers.js"></script>
   <script src="./settings.js"></script>
+  <script src="./mcp_settings.js"></script>
   <script src="./devtools.js"></script>
   <!-- Main orchestrator (must load last) -->
 </body>

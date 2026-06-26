@@ -237,6 +237,110 @@ class MCPRegistry:
             self.load_config()
         return dict(self._configs)
 
+    # ── Verwaltung (CRUD + Persistenz) ─────────────
+    # Schreibt IMMER in die User-Datei (MCP_CONFIG_PATH im Datenverzeichnis),
+    # nie in die getrackte Projekt-Datei. Beim ersten Schreiben wird die
+    # User-Datei aus den aktuell geladenen Configs geseedet (nichts geht verloren).
+
+    @staticmethod
+    def _is_valid_server_name(name: str) -> bool:
+        return bool(name) and len(name) <= 64 and all(c.isalnum() or c in "-_" for c in name)
+
+    @staticmethod
+    def sanitize_server_config(cfg: dict) -> dict:
+        """Validiert + normalisiert eine Server-Config. Wirft ValueError bei Fehlern.
+
+        Erlaubt nur die bekannten Felder; `command` ist Pflicht. Ein MCP-Server
+        startet einen Subprozess — daher strikt validieren.
+        """
+        if not isinstance(cfg, dict):
+            raise ValueError("Server-Konfiguration muss ein Objekt sein.")
+        command = cfg.get("command")
+        if not isinstance(command, str) or not command.strip():
+            raise ValueError("'command' ist erforderlich und muss ein nicht-leerer String sein.")
+        if len(command) > 1000:
+            raise ValueError("'command' ist zu lang.")
+        clean: dict = {"command": command.strip()}
+
+        args = cfg.get("args", [])
+        if args in (None, ""):
+            args = []
+        if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+            raise ValueError("'args' muss eine Liste von Strings sein.")
+        if len(args) > 64:
+            raise ValueError("Zu viele 'args'.")
+        clean["args"] = [str(a) for a in args]
+
+        env = cfg.get("env")
+        if env is not None:
+            if not isinstance(env, dict):
+                raise ValueError("'env' muss ein Objekt (key->value) sein.")
+            if len(env) > 64:
+                raise ValueError("Zu viele 'env'-Eintraege.")
+            clean_env: dict[str, str] = {}
+            for k, v in env.items():
+                if not isinstance(k, str) or not k:
+                    raise ValueError("'env'-Schluessel muessen nicht-leere Strings sein.")
+                clean_env[k] = "" if v is None else str(v)
+            clean["env"] = clean_env
+
+        enabled = cfg.get("enabled", True)
+        clean["enabled"] = bool(enabled)
+        return clean
+
+    def save_config(self) -> Path:
+        """Persistiert die aktuellen Configs atomar in die User-Datei (MCP_CONFIG_PATH)."""
+        target = MCP_CONFIG_PATH
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        payload = json.dumps({"servers": self._configs}, indent=2, ensure_ascii=False)
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        tmp.write_text(payload, encoding="utf-8")
+        os.replace(tmp, target)
+        logger.info(f"MCP config saved: {len(self._configs)} servers -> {target}")
+        return target
+
+    def add_server(self, name: str, cfg: dict) -> dict:
+        """Fuegt einen neuen MCP-Server hinzu (lehnt Duplikate ab)."""
+        if not self._loaded:
+            self.load_config()
+        if not self._is_valid_server_name(name):
+            raise ValueError("Ungueltiger Servername (nur a-z, 0-9, '-', '_').")
+        if name in self._configs:
+            raise ValueError(f"MCP-Server '{name}' existiert bereits.")
+        clean = self.sanitize_server_config(cfg)
+        self._configs[name] = clean
+        self.save_config()
+        return clean
+
+    def update_server(self, name: str, cfg: dict) -> dict:
+        """Aktualisiert einen bestehenden MCP-Server."""
+        if not self._loaded:
+            self.load_config()
+        if name not in self._configs:
+            raise ValueError(f"Unbekannter MCP-Server: '{name}'.")
+        clean = self.sanitize_server_config(cfg)
+        self._configs[name] = clean
+        self.save_config()
+        return clean
+
+    async def remove_server(self, name: str) -> None:
+        """Trennt (falls verbunden) und entfernt einen MCP-Server dauerhaft."""
+        if not self._loaded:
+            self.load_config()
+        if name not in self._configs:
+            raise ValueError(f"Unbekannter MCP-Server: '{name}'.")
+        # Laufenden Subprozess sauber beenden, bevor die Config verschwindet.
+        try:
+            await self.disconnect(name)
+        except Exception as exc:
+            logger.warning(f"MCP [{name}] disconnect during remove failed: {exc}")
+        self._configs.pop(name, None)
+        self._errors.pop(name, None)
+        self.save_config()
+
     def get_server_status(self, name: str) -> str:
         """Get status string for a server: connected, disconnected, error, unknown."""
         if name in self._clients and self._clients[name].is_connected:

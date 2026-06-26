@@ -123,6 +123,10 @@ function _dispatch(el, ds, value) {
     case "deleteOpenaiVoiceKey": deleteOpenaiVoiceKeyAction(); break;
     case "setGroqVoiceKey": setGroqVoiceKeyAction(); break;
     case "deleteGroqVoiceKey": deleteGroqVoiceKeyAction(); break;
+    case "mcpAddServer": mcpAddServerAction(); break;
+    case "mcpConnectServer": mcpConnectServerAction(arg); break;
+    case "mcpDisconnectServer": mcpDisconnectServerAction(arg); break;
+    case "mcpRemoveServer": mcpRemoveServerAction(arg); break;
     case "setCartesiaKey": setCartesiaKeyAction(); break;
     case "deleteCartesiaKey": deleteCartesiaKeyAction(); break;
     case "setCartesiaVoice": setCartesiaVoiceAction(); break;

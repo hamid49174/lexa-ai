@@ -57,6 +57,13 @@ class ToolCallRequest(BaseModel):
     arguments: dict = Field(default_factory=dict)
 
 
+class ServerConfigRequest(BaseModel):
+    command: str = Field(..., min_length=1, max_length=1000)
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    enabled: bool = True
+
+
 # ══════════════════════════════════════════════════
 #  ENDPOINTS
 # ══════════════════════════════════════════════════
@@ -69,6 +76,67 @@ async def list_servers():
 
     servers = await asyncio.to_thread(mcp_registry.list_servers)
     return {"enabled": True, "servers": servers}
+
+
+@router.post("/servers/{name}")
+async def add_server(name: str, req: ServerConfigRequest):
+    """Add a new MCP server config (persisted to the user data dir, not the repo)."""
+    if not MCP_ENABLED:
+        raise HTTPException(status_code=400, detail="MCP integration is disabled")
+    name = _validate_server_name(name)
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
+    audit_log("mcp", "add_server", f"server={name} command={req.command[:60]}")
+    try:
+        clean = await asyncio.to_thread(mcp_registry.add_server, name, req.model_dump())
+        # env bewusst NICHT zurueckgeben (kann Secrets enthalten)
+        return {"status": "added", "server": name,
+                "command": clean["command"], "enabled": clean["enabled"]}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=_client_safe_mcp_error(e))
+    except Exception as e:
+        logger.error(f"MCP add_server error for '{name}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Add server failed")
+
+
+@router.put("/servers/{name}")
+async def update_server(name: str, req: ServerConfigRequest):
+    """Update an existing MCP server config (persisted to the user data dir)."""
+    if not MCP_ENABLED:
+        raise HTTPException(status_code=400, detail="MCP integration is disabled")
+    name = _validate_server_name(name)
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
+    audit_log("mcp", "update_server", f"server={name} command={req.command[:60]}")
+    try:
+        clean = await asyncio.to_thread(mcp_registry.update_server, name, req.model_dump())
+        return {"status": "updated", "server": name,
+                "command": clean["command"], "enabled": clean["enabled"]}
+    except ValueError as e:
+        raise HTTPException(status_code=404 if "Unbekannt" in str(e) else 400,
+                            detail=_client_safe_mcp_error(e))
+    except Exception as e:
+        logger.error(f"MCP update_server error for '{name}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Update server failed")
+
+
+@router.delete("/servers/{name}")
+async def remove_server(name: str):
+    """Disconnect (if connected) and permanently remove an MCP server config."""
+    if not MCP_ENABLED:
+        raise HTTPException(status_code=400, detail="MCP integration is disabled")
+    name = _validate_server_name(name)
+    if not check_rate_limit("execute"):
+        raise HTTPException(status_code=429, detail="Zu viele Anfragen.")
+    audit_log("mcp", "remove_server", f"server={name}")
+    try:
+        await mcp_registry.remove_server(name)
+        return {"status": "removed", "server": name}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=_client_safe_mcp_error(e))
+    except Exception as e:
+        logger.error(f"MCP remove_server error for '{name}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Remove server failed")
 
 
 @router.post("/servers/{name}/connect")

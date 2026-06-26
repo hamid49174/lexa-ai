@@ -219,6 +219,9 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("mcpDisconnect", "critical", "execute", "/mcp/servers/{name}/disconnect"),
   bridgePolicy("mcpServerTools", "low", "read", "/mcp/servers/{name}/tools", { batch_allowed: true }),
   bridgePolicy("mcpCallTool", "critical", "execute", "/mcp/servers/{server}/call"),
+  bridgePolicy("mcpAddServer", "critical", "secret", "/mcp/servers/{name}"),
+  bridgePolicy("mcpUpdateServer", "critical", "secret", "/mcp/servers/{name}"),
+  bridgePolicy("mcpRemoveServer", "critical", "secret", "/mcp/servers/{name}"),
 
   bridgePolicy("personalOsStatus", "low", "read", "/personal-os/status", { batch_allowed: true }),
   bridgePolicy("personalOsDiagnostics", "low", "read", "/personal-os/diagnostics", { batch_allowed: true }),
@@ -1189,6 +1192,9 @@ if (isLexaSmokeMockAllowed()) {
     }),
     healthTools: async () => ({ ok: true, available: [], missing: [] }),
     mcpServers: async () => ({ servers: [] }),
+    mcpAddServer: async () => ok(),
+    mcpUpdateServer: async () => ok(),
+    mcpRemoveServer: async () => ok(),
     getAutostart: () => false,
     setAutostart: () => {},
     setProfile: async () => ok(),
@@ -2694,6 +2700,26 @@ const lexaBridge = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tool, arguments: args }),
     });
+    return r.json();
+  },
+  mcpAddServer: async (name, config = {}) => {
+    const r = await fetchWithTimeout(`${API}/mcp/servers/${encodeURIComponent(name)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    });
+    return r.json();
+  },
+  mcpUpdateServer: async (name, config = {}) => {
+    const r = await fetchWithTimeout(`${API}/mcp/servers/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    });
+    return r.json();
+  },
+  mcpRemoveServer: async (name) => {
+    const r = await fetchWithTimeout(`${API}/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" });
     return r.json();
   },
 
