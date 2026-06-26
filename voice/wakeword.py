@@ -126,6 +126,14 @@ class WakeWordDetector:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=3)
         self._thread = None
+        # Native Engine-Ressourcen (z. B. Porcupine-Handle) freigeben, falls die
+        # Engine das unterstuetzt. close() ist neustart-sicher.
+        close = getattr(self._wake_engine, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception as e:
+                logger.debug("[Voice] Wake engine close failed: %s", e)
         logger.info("[Voice] Stopped")
 
     @property
@@ -232,6 +240,10 @@ class WakeWordDetector:
             try:
                 audio = self._record_wake_window(sd)
                 if audio is None:
+                    # Waehrend einer Konversation oder bei einem Audio-Geraetefehler
+                    # kehrt _record_wake_window sofort (ohne sd.wait()-Block) zurueck.
+                    # Ohne kurzen Sleep wuerde die Schleife dann mit 100% CPU spinnen.
+                    time.sleep(0.1)
                     continue
 
                 wake_engine_status = self._wake_engine.status()

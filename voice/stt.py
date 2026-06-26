@@ -11,6 +11,7 @@ import io
 import importlib.util
 import logging
 import os
+import re
 import threading
 import time
 import numpy as np
@@ -23,7 +24,7 @@ from voice.config import (
     OPENAI_AUDIO_BASE_URL, OPENAI_STT_MODEL,
     DEEPGRAM_HTTP_URL, DEEPGRAM_MODEL,
     GROQ_STT_URL, GROQ_STT_MODEL,
-    CB_BASE_RETRY_S, CB_MAX_RETRY_S,
+    CB_BASE_RETRY_S, CB_MAX_RETRY_S, CB_MAX_FAILURES,
 )
 from voice.vad import has_speech
 
@@ -80,29 +81,40 @@ def _get_key(provider: str) -> str | None:
 
 _fail_counts: dict[str, int] = {"deepgram": 0, "groq": 0, "openai": 0}
 _last_fail_times: dict[str, float] = {"deepgram": 0.0, "groq": 0.0, "openai": 0.0}
+# Schuetzt das read-modify-write von _fail_counts/_last_fail_times — STT laeuft
+# nebenlaeufig (Wakeword-Engine, Conversation-Loop, HTTP-Endpoint via to_thread).
+_cb_lock = threading.Lock()
 
 
 def _circuit_open(provider: str) -> bool:
-    count = _fail_counts.get(provider, 0)
-    if count == 0:
+    with _cb_lock:
+        count = _fail_counts.get(provider, 0)
+        last = _last_fail_times.get(provider, 0.0)
+    # Erst nach CB_MAX_FAILURES echten Fehlern sperren — ein transienter Aussetzer
+    # soll den Primaer-Provider nicht sofort fuer Sekunden auf den Fallback zwingen.
+    if count < CB_MAX_FAILURES:
         return False
-    last = _last_fail_times.get(provider, 0.0)
-    delay = min(CB_BASE_RETRY_S * (2 ** (count - 1)), CB_MAX_RETRY_S)
+    delay = min(CB_BASE_RETRY_S * (2 ** (count - CB_MAX_FAILURES)), CB_MAX_RETRY_S)
     return (time.time() - last) < delay
 
 
 def _record_failure(provider: str):
-    _fail_counts[provider] = _fail_counts.get(provider, 0) + 1
-    _last_fail_times[provider] = time.time()
-    count = _fail_counts[provider]
-    delay = min(CB_BASE_RETRY_S * (2 ** (count - 1)), CB_MAX_RETRY_S)
-    logger.info(f"[CB] {provider} failure #{count}, retry after {delay:.0f}s")
+    with _cb_lock:
+        _fail_counts[provider] = _fail_counts.get(provider, 0) + 1
+        _last_fail_times[provider] = time.time()
+        count = _fail_counts[provider]
+    if count >= CB_MAX_FAILURES:
+        delay = min(CB_BASE_RETRY_S * (2 ** (count - CB_MAX_FAILURES)), CB_MAX_RETRY_S)
+        logger.info(f"[CB] {provider} failure #{count} (>= {CB_MAX_FAILURES}), retry after {delay:.0f}s")
+    else:
+        logger.info(f"[CB] {provider} failure #{count} (Schwelle {CB_MAX_FAILURES})")
 
 
 def _record_success(provider: str):
-    if _fail_counts.get(provider, 0) > 0:
-        _fail_counts[provider] = 0
-        _last_fail_times[provider] = 0.0
+    with _cb_lock:
+        if _fail_counts.get(provider, 0) > 0:
+            _fail_counts[provider] = 0
+            _last_fail_times[provider] = 0.0
 
 
 # ═══════════════════════════════════════════════════
@@ -620,14 +632,7 @@ def set_deepgram_key(api_key: str) -> dict:
 
 
 def delete_deepgram_key() -> dict:
-    try:
-        import keyring
-        keyring.delete_password("lexa-ai", "deepgram_api_key")
-        _keys["deepgram"] = None
-        _keys_loaded["deepgram"] = True
-        return {"success": True}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    return _delete_provider_key("deepgram_api_key", "deepgram")
 
 
 def _invalidate_tts_openai_cache() -> None:
@@ -642,6 +647,29 @@ def _invalidate_tts_openai_cache() -> None:
         _tts._keys["openai"] = None
     except Exception:
         pass
+
+
+def _delete_provider_key(keyring_name: str, provider: str, also_tts: bool = False) -> dict:
+    """Loescht einen Provider-Key aus dem Keyring und invalidiert IMMER den
+    In-Memory-Cache (auch bei fehlendem Key/Fehler) — sonst bliebe ein zuvor
+    gesetzter Key bis zum Neustart aktiv, obwohl der Nutzer ihn 'geloescht' hat.
+    Ein nicht vorhandener Key zaehlt als Erfolg."""
+    result = {"success": True}
+    try:
+        import keyring
+        from keyring.errors import PasswordDeleteError
+        try:
+            keyring.delete_password("lexa-ai", keyring_name)
+        except PasswordDeleteError:
+            pass  # bereits geloescht / nie vorhanden -> Erfolg
+    except Exception as e:
+        result = {"success": False, "error": str(e)}
+    finally:
+        _keys[provider] = None
+        _keys_loaded[provider] = True
+        if also_tts:
+            _invalidate_tts_openai_cache()
+    return result
 
 
 def set_openai_key(api_key: str) -> dict:
@@ -662,15 +690,7 @@ def set_openai_key(api_key: str) -> dict:
 
 
 def delete_openai_key() -> dict:
-    try:
-        import keyring
-        keyring.delete_password("lexa-ai", "openai_api_key")
-        _keys["openai"] = None
-        _keys_loaded["openai"] = True
-        _invalidate_tts_openai_cache()
-        return {"success": True}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    return _delete_provider_key("openai_api_key", "openai", also_tts=True)
 
 
 def set_groq_key(api_key: str) -> dict:
@@ -689,14 +709,7 @@ def set_groq_key(api_key: str) -> dict:
 
 
 def delete_groq_key() -> dict:
-    try:
-        import keyring
-        keyring.delete_password("lexa-ai", "groq_api_key")
-        _keys["groq"] = None
-        _keys_loaded["groq"] = True
-        return {"success": True}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    return _delete_provider_key("groq_api_key", "groq")
 
 
 def set_engine(engine: str) -> dict:
@@ -709,11 +722,25 @@ def set_engine(engine: str) -> dict:
     return {"success": True, "engine": engine}
 
 
+_VALID_STT_LANG_RE = re.compile(r"^[a-z]{2}(-[a-z]{2})?$")
+
+
 def set_language(lang: str) -> dict:
+    """Set STT language. Validiert den Code (sonst wuerde Muell global ALLE
+    Transkription vergiften, bis der Prozess neu startet)."""
     global STT_LANGUAGE
-    STT_LANGUAGE = lang
-    logger.info(f"STT language: {lang}")
-    return {"success": True, "language": lang}
+    norm = str(lang or "").strip().lower()
+    if norm != "auto" and not _VALID_STT_LANG_RE.match(norm):
+        return {"success": False, "error": f"Ungueltiger Sprachcode: {lang!r} (erwartet z.B. 'de', 'en', 'de-de' oder 'auto')."}
+    STT_LANGUAGE = norm
+    logger.info(f"STT language: {norm}")
+    return {"success": True, "language": norm}
+
+
+def get_model():
+    """Oeffentlicher Pre-Warm-Einstieg fuer das lokale Whisper-Modell (main.py-Startup).
+    Frueher importierte main.py ein nicht existierendes get_model -> Pre-Warm war tot."""
+    return _get_local_model()
 
 
 def set_model_size(size: str) -> dict:

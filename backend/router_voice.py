@@ -16,11 +16,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from backend.agent_protocol import redacted_summary
-from backend.security import check_rate_limit, audit_log
+from backend.security import check_rate_limit, audit_log, audit_safe_token
 from backend.i18n import t
 from backend.voice_ws import (
     push_event, push_volume, push_state,
     pop_fallback_events, register_ws_client, unregister_ws_client,
+    ws_at_capacity, ws_origin_allowed,
 )
 from voice.config import (
     WAKE_ENGINE,
@@ -457,6 +458,20 @@ async def _build_voice_diagnostics(probe_audio: bool = False) -> dict:
 @router.websocket("/ws")
 async def voice_websocket(websocket: WebSocket):
     """WebSocket for real-time voice events. Connect: ws://127.0.0.1:8000/voice/ws"""
+    # CSWSH-Schutz: gehostete Web-Origins abweisen (nur native/lokale Clients).
+    origin = websocket.headers.get("origin")
+    if not ws_origin_allowed(origin):
+        audit_log("voice_ws", "origin_denied", audit_safe_token(origin))
+        await websocket.close(code=1008)  # policy violation
+        return
+    # Connect-Storms begrenzen (teilt das 'voice'-Budget mit den HTTP-Endpoints).
+    if not check_rate_limit("voice"):
+        await websocket.close(code=1013)  # try again later
+        return
+    # Obergrenze gleichzeitiger Clients (DoS-Schutz).
+    if ws_at_capacity():
+        await websocket.close(code=1013)
+        return
     await websocket.accept()
     client_id, queue = register_ws_client()
 

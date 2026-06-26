@@ -8,6 +8,7 @@ Audio caching by content hash prevents re-generation.
 Text chunking at sentence boundaries for long responses.
 """
 
+import os
 import re
 import time
 import logging
@@ -61,13 +62,45 @@ def _get_key(provider: str) -> str | None:
             "cartesia": "cartesia_api_key",
             "elevenlabs": "elevenlabs_api_key",
         }
-        _keys[provider] = keyring.get_password("lexa-ai", key_names[provider])
-    except Exception:
-        _keys[provider] = None
+        val = keyring.get_password("lexa-ai", key_names[provider])
+    except Exception as e:
+        # Transienter Keyring-Fehler (Backend kurz nicht erreichbar): NICHT cachen,
+        # sonst bliebe der Provider bis zum Neustart faelschlich deaktiviert.
+        # Ein wirklich fehlender Key liefert None (keine Exception) -> wird gecacht.
+        logger.warning(f"TTS Keyring-Abfrage fuer {provider} fehlgeschlagen: {e}")
+        return None
+    _keys[provider] = val
     _keys_loaded[provider] = True
-    if _keys[provider] and provider == "elevenlabs":
-        _sessions["elevenlabs"].headers["xi-api-key"] = _keys[provider]
-    return _keys[provider]
+    if val and provider == "elevenlabs":
+        _sessions["elevenlabs"].headers["xi-api-key"] = val
+    return val
+
+
+def _write_audio_stream_atomic(resp, output_path: str, chunk_size: int) -> str:
+    """Streamt eine 200-Antwort atomar nach output_path.
+
+    Schreibt zuerst in <output_path>.part und benennt erst nach erfolgreichem,
+    nicht-leerem Download um. Verhindert Cache-Poisoning: ein abgebrochener oder
+    leerer Stream darf keine korrupte Datei als gueltigen Cache-Treffer hinterlassen.
+    """
+    tmp_path = output_path + ".part"
+    bytes_written = 0
+    try:
+        with open(tmp_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    f.write(chunk)
+                    bytes_written += len(chunk)
+        if bytes_written == 0:
+            raise RuntimeError("TTS-Stream lieferte 0 Bytes")
+        os.replace(tmp_path, output_path)
+        return output_path
+    except BaseException:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 # ═══════════════════════════════════════════════════
@@ -392,10 +425,7 @@ def _speak_cartesia(text: str, output_path: str) -> str:
     )
 
     if resp.status_code == 200:
-        with open(output_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=4096):
-                if chunk:
-                    f.write(chunk)
+        _write_audio_stream_atomic(resp, output_path, chunk_size=4096)
         logger.info(f"TTS [Cartesia {_cartesia_model}]: {output_path}")
         return output_path
 
@@ -431,10 +461,7 @@ def _speak_elevenlabs(text: str, output_path: str) -> str:
     )
 
     if resp.status_code == 200:
-        with open(output_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=2048):
-                if chunk:
-                    f.write(chunk)
+        _write_audio_stream_atomic(resp, output_path, chunk_size=2048)
         logger.info(f"TTS [ElevenLabs {_elevenlabs_model}]: {output_path}")
         return output_path
 
@@ -494,11 +521,20 @@ def _concat_mp3_chunks(chunk_paths: list[str], output_path: str):
     except Exception as e:
         logger.warning(f"pydub MP3 concat failed ({e}); using binary concat fallback")
 
-    # Binary concat fallback
-    with open(output_path, "wb") as out:
-        for cp in chunk_paths:
-            with open(cp, "rb") as inp:
-                out.write(inp.read())
+    # Binary concat fallback (atomar, damit ein Abbruch keine halbe Datei hinterlaesst)
+    tmp_path = output_path + ".part"
+    try:
+        with open(tmp_path, "wb") as out:
+            for cp in chunk_paths:
+                with open(cp, "rb") as inp:
+                    out.write(inp.read())
+        os.replace(tmp_path, output_path)
+    except BaseException:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 # ═══════════════════════════════════════════════════
@@ -527,8 +563,17 @@ def _speak_openai(text: str, output_path: str) -> str:
         timeout=30,
     )
     if resp.status_code == 200 and resp.content:
-        with open(output_path, "wb") as f:
-            f.write(resp.content)
+        tmp_path = output_path + ".part"
+        try:
+            with open(tmp_path, "wb") as f:
+                f.write(resp.content)
+            os.replace(tmp_path, output_path)
+        except BaseException:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
         logger.info(f"TTS [OpenAI {_openai_tts_model}/{_openai_tts_voice}]: {output_path}")
         return output_path
 

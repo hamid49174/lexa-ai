@@ -184,6 +184,9 @@ def _setup_voice_stubs():
                  "pop_fallback_events", "register_ws_client", "unregister_ws_client",
                  "init_ws_loop"]:
         setattr(ws_stub, name, MagicMock(return_value=[]))
+    # WS-Security-Helfer: sinnvolle Defaults (nicht voll, Origin erlaubt).
+    ws_stub.ws_at_capacity = MagicMock(return_value=False)
+    ws_stub.ws_origin_allowed = MagicMock(return_value=True)
     stubs["backend.voice_ws"] = sys.modules.get("backend.voice_ws")
     sys.modules["backend.voice_ws"] = ws_stub
 

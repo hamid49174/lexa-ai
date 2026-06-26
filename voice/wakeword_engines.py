@@ -368,6 +368,21 @@ class PorcupineWakeWordEngine:
                 )
         return WakeDetection(False, source=self.name)
 
+    def close(self):
+        """Native Porcupine-Ressourcen freigeben (pvporcupine haelt C-Speicher).
+
+        Setzt den Lade-Status zurueck, damit ensure_ready() bei einem spaeteren
+        Neustart die Engine sauber neu erzeugt statt tot zu bleiben.
+        """
+        handle = self._handle
+        self._handle = None
+        self._load_attempted = False
+        if handle is not None:
+            try:
+                handle.delete()
+            except Exception as e:
+                logger.debug("Porcupine delete failed: %s", e)
+
     def status(self) -> dict:
         return {
             "name": self.name,

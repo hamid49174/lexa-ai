@@ -4,7 +4,6 @@ Handles tool calls, barge-in, and conversation history.
 """
 
 import collections
-import concurrent.futures
 import logging
 import re
 import time
@@ -29,11 +28,6 @@ def _log_conversation_text_event(label: str, text: object, **metadata: object) -
 
 # Sentence boundary pattern
 _SENTENCE_END = re.compile(r'(?<=[.!?])\s+|(?<=\n)')
-
-# Shared TTS thread pool (reused across turns)
-_tts_executor = concurrent.futures.ThreadPoolExecutor(
-    max_workers=2, thread_name_prefix="tts",
-)
 
 
 def _split_into_sentences(text: str) -> list[str]:
@@ -98,24 +92,6 @@ def _tts_for_text(text: str) -> str | None:
     except Exception as e:
         logger.warning(f"[Conv] TTS failed: {e}")
         return None
-
-
-def _collect_tts_results(futures: list[concurrent.futures.Future],
-                         timeout: float = 30.0) -> list[str]:
-    """Collect TTS results from futures in order."""
-    paths = []
-    for i, future in enumerate(futures):
-        try:
-            path = future.result(timeout=timeout)
-            if path:
-                paths.append(path)
-        except concurrent.futures.TimeoutError:
-            logger.error(f"[Conv] TTS {i + 1}/{len(futures)} timed out")
-        except concurrent.futures.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"[Conv] TTS {i + 1}/{len(futures)} failed: {e}")
-    return paths
 
 
 def _extract_tool_result(exec_result: dict, action_name: str) -> str:
@@ -355,7 +331,9 @@ class ConversationEngine:
                     tool_call_result, full_text, command_text, source="voice_stream",
                 )
                 audio_paths.extend(tool_audio)
-                push_response(reply, tts_handled=True)
+                # tts_handled nur True, wenn der Server wirklich Audio abspielt —
+                # sonst soll das Frontend per playTTS einspringen (keine Stille).
+                push_response(reply, tts_handled=bool(audio_paths))
                 audit_log("voice", "tool_call", f"reply={reply[:80]}")
                 return {"reply": reply, "audio_paths": audio_paths}
 
@@ -364,7 +342,7 @@ class ConversationEngine:
                 fallback = _detect_text_tool_call(full_text, command_text)
                 if fallback:
                     reply, fb_audio = fallback
-                    push_response(reply, tts_handled=True)
+                    push_response(reply, tts_handled=bool(fb_audio))
                     return {"reply": reply, "audio_paths": fb_audio}
 
             # Flush remaining buffer (last sentence without trailing punctuation)
@@ -378,7 +356,7 @@ class ConversationEngine:
             path = _tts_for_text(full_text)
             if path:
                 audio_paths.append(path)
-            push_response(full_text, tts_handled=True)
+            push_response(full_text, tts_handled=bool(audio_paths))
             audit_log("voice", "stream_done", f"sentences={sentence_count}")
             logger.info(f"[Conv] Done — {sentence_count} sentences, {len(audio_paths)} audio")
             return {"reply": full_text, "audio_paths": audio_paths}
@@ -412,8 +390,8 @@ class ConversationEngine:
         else:
             reply = str(ai_result)
 
-        push_response(reply, tts_handled=True)
         audio_path = _tts_for_text(reply)
+        push_response(reply, tts_handled=bool(audio_path))
         return {"reply": reply, "audio_paths": [audio_path] if audio_path else []}
 
     def run_conversation(self, initial_command: str, sd,

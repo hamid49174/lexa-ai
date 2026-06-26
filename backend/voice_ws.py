@@ -18,6 +18,10 @@ _ws_queues: dict[int, asyncio.Queue] = {}
 _ws_counter = 0
 _ws_lock = threading.Lock()
 
+# Obergrenze gleichzeitiger WS-Clients (DoS-Schutz). Die echte App nutzt genau
+# eine Verbindung; ein Vielfaches davon deckt Reconnect-Ueberlappung ab.
+_MAX_WS_CLIENTS = 8
+
 # ── Fallback: deque for HTTP polling (backward compat) ─────
 import collections
 _fallback_events: collections.deque = collections.deque(maxlen=200)
@@ -45,6 +49,33 @@ def register_ws_client() -> tuple[int, asyncio.Queue]:
         _ws_queues[cid] = q
     logger.info(f"WebSocket voice client {cid} connected (total: {len(_ws_queues)})")
     return cid, q
+
+
+def ws_at_capacity() -> bool:
+    """True, wenn die Obergrenze gleichzeitiger WS-Clients erreicht ist."""
+    with _ws_lock:
+        return len(_ws_queues) >= _MAX_WS_CLIENTS
+
+
+def ws_origin_allowed(origin: str | None) -> bool:
+    """CSWSH-Schutz: nur native/lokale Clients duerfen den Voice-Stream abonnieren.
+
+    Die Electron-App laedt per file:// (Origin "null"/"file://"/leer). Ein gehostetes
+    Web-Origin (z. B. https://evil.com) koennte sonst per Cross-Site-WebSocket-Hijacking
+    Sprachereignisse mitlesen — Browser senden bei WS keinen CORS-Preflight.
+    """
+    if not origin or origin == "null":
+        return True
+    low = origin.lower()
+    if low.startswith("file://"):
+        return True
+    if low.startswith((
+        "http://localhost", "https://localhost",
+        "http://127.0.0.1", "https://127.0.0.1",
+        "http://[::1]", "https://[::1]",
+    )):
+        return True
+    return False
 
 
 def unregister_ws_client(client_id: int):

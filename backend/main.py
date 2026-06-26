@@ -437,7 +437,9 @@ async def startup_event():
             get_model()
             logger.info("STT model pre-warmed successfully")
         except Exception as e:
-            logger.debug(f"STT pre-warm skipped: {e}")
+            # warning statt debug: ein gebrochener Pre-Warm (z.B. fehlende Funktion)
+            # soll nicht still verschwinden — der erste Sprachbefehl wuerde sonst haengen.
+            logger.warning(f"STT pre-warm skipped: {e}")
 
     import threading
     threading.Thread(target=_prewarm_stt, daemon=True, name="stt-prewarm").start()

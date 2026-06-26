@@ -41,8 +41,13 @@ Antwortqualität/Tool-Routing auf GPT/Claude-Niveau, Vision robust.
 ## D. Voice & Sprache  🟡
 **Scope:** STT (Deepgram/OpenAI/Groq/lokal), TTS (Cartesia/ElevenLabs/OpenAI/SAPI), Wakeword, VAD,
 Conversation-Loop, Realtime.
-**Ist-Zustand:** 🟢 Cascaded STT→Chat→TTS läuft, Key-Verwaltung (diese Woche). 🟡 Realtime nur Gerüst
-(diese Woche gebaut, Audio-Transport fehlt). 🟡 WS ohne Auth-Check.
+**Ist-Zustand:** 🟢 Cascaded STT→Chat→TTS läuft, Key-Verwaltung. 🟢 Robustheit/Security gehärtet
+(Batch 1, diese Woche): STT-Circuit-Breaker nutzt jetzt CB_MAX_FAILURES + Lock; `set_language`
+validiert (kein Müll-Code mehr global); `get_model`-Pre-Warm repariert; Delete-Key invalidiert Cache;
+TTS atomar geschrieben (kein Cache-Poisoning), transienter Keyring-Fehler deaktiviert Provider nicht
+mehr dauerhaft; Voice-WS mit CSWSH-Origin-Check + Client-Cap + Rate-Limit; `tts_handled` meldet echten
+Audio-Erfolg (sonst Frontend-Fallback statt Stille); Wakeword-Busy-Loop gefixt + Porcupine-`close()`
+(neustart-sicher); toter TTS-Executor/Collector entfernt. 🟡 Realtime nur Gerüst (Audio-Transport fehlt).
 **100% =** robuste Cascaded-Pipeline + echtes Realtime-Speech-to-Speech (braucht Live-Audio-Test),
 sauberes Barge-in, klare Provider-Fehlerbehandlung.
 
