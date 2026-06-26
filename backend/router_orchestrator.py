@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -32,6 +33,11 @@ router = APIRouter(prefix="/orchestrator", tags=["orchestrator"])
 class OrchestratorRequest(BaseModel):
     task: str = Field(..., min_length=1, max_length=MAX_CHAT_MESSAGE_LENGTH)
     mode: str = Field("thorough", max_length=20)
+    # Vom Triage-Schritt empfohlene Agentenzahl (Effort-Scaling). Optional; ohne Angabe
+    # nutzt der Lauf den globalen Default-Cap. KEINE ge/le-Constraints — der Handler
+    # behandelt 0/negativ als "kein Wunsch" (Default) und klemmt nach oben gegen den Cap,
+    # statt einen ganzen Lauf wegen eines Ausreissers mit 422 zu verwerfen.
+    subagents: Optional[int] = Field(default=None)
 
 
 class OrchestratorTriageRequest(BaseModel):
@@ -85,14 +91,19 @@ async def orchestrator_run(req: OrchestratorRequest):
     if not task.strip():
         raise HTTPException(status_code=400, detail="Leere Aufgabe.")
     mode = "fast" if str(req.mode).strip().lower() == "fast" else "thorough"
-    audit_log("orchestrator", "received", f"mode={mode} len={len(task)}")
+    # Effort-Scaling: Triage-Empfehlung respektieren. 0/negativ -> kein Wunsch (Default);
+    # zu grosse Werte werden gegen den Cap geklemmt (nie 422).
+    max_subagents = None
+    if req.subagents is not None and int(req.subagents) >= 1:
+        max_subagents = min(int(req.subagents), ORCHESTRATOR_MAX_SUBAGENTS)
+    audit_log("orchestrator", "received", f"mode={mode} subagents={max_subagents or 'default'} len={len(task)}")
 
     async def event_stream():
         collected: list[dict] = []
         final_run: dict | None = None
         cancelled = False
         try:
-            async for event in run_orchestration(task, mode=mode):
+            async for event in run_orchestration(task, mode=mode, max_subagents=max_subagents):
                 collected.append(event)
                 if event.get("type") == "done":
                     final_run = event.get("run")

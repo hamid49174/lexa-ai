@@ -322,6 +322,9 @@
     _running = true;
     const displayText = String(options.displayText || taskText).trim();
     const mode = options.mode === "fast" ? "fast" : "thorough";
+    // Effort-Scaling: vom Triage empfohlene Agentenzahl (falls vorhanden) durchreichen.
+    const subagents = Number.isFinite(Number(options.subagents)) && Number(options.subagents) >= 1
+      ? Math.round(Number(options.subagents)) : null;
 
     try {
       await _ensureConversation();
@@ -340,7 +343,7 @@
 
       let resp;
       try {
-        resp = await window.lexa.orchestratorRun(taskText, { mode });
+        resp = await window.lexa.orchestratorRun(taskText, subagents ? { mode, subagents } : { mode });
       } catch (e) {
         _setStatus(panel, "Start fehlgeschlagen", "error");
         return;
@@ -486,7 +489,13 @@
     if (!needs) return false;
     const effort = typeof getAgentEffort === "function" ? getAgentEffort() : "fast";
     if (effort === "off") return false;
-    sendOrchestratorMessage(s, { displayText: text, mode: effort === "thorough" ? "thorough" : "fast" });
+    // Vom Triage empfohlene Agentenzahl (Effort-Scaling) weiterreichen, falls vorhanden.
+    const subagents = decision && Number.isFinite(Number(decision.subagents)) ? Number(decision.subagents) : null;
+    sendOrchestratorMessage(s, {
+      displayText: text,
+      mode: effort === "thorough" ? "thorough" : "fast",
+      subagents,
+    });
     return true;
   }
 

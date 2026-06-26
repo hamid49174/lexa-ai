@@ -44,6 +44,10 @@ _SYNTH_INPUT_CAP = 16000
 _TOOL_FEEDBACK_CAP = 4000
 _OBJECTIVE_CAP = 600
 _SOURCES_PER_AGENT_CAP = 12
+# Wie viele Tool-Calls eines einzelnen LLM-Turns ausgefuehrt werden, bevor zurueck ans
+# Modell uebergeben wird. Verhindert, dass ein einzelner Turn unbegrenzt Tools feuert,
+# erlaubt aber parallele Calls (vorher wurde still nur der erste ausgefuehrt).
+_MAX_TOOL_CALLS_PER_TURN = 6
 
 _LOCAL_PATH_RE = re.compile(
     r"(?:(?<![A-Za-z])[A-Za-z]:[\\/][^\s\"'<>|]+|\\\\[^\s\"'<>|]+|(?<!\S)/(?:Users|home|tmp|var|etc|mnt)/[^\s\"'<>|]+)"
@@ -417,45 +421,63 @@ async def _run_subagent(
             if not tool_calls:
                 summary = (result.get("content") or "").strip() or summary
                 break
-            name, params = _coerce_tool_call(tool_calls[0])
-            if not is_role_tool_allowed(role, name):
-                step = {"index": len(steps) + 1, "tool": name or "?", "status": "blocked", "summary": "nicht erlaubt (read-only)"}
+
+            # ALLE Tool-Calls dieses Turns abarbeiten (vorher wurde still nur der erste
+            # ausgefuehrt -> bei parallelen Calls degradierte die Recherche-Tiefe unbemerkt).
+            # Pro-Turn-Cap haelt einen ausufernden Batch in Schach; der Rest wird dem Modell
+            # transparent gemeldet, damit es die wichtigsten erneut anfordern kann.
+            dropped = max(0, len(tool_calls) - _MAX_TOOL_CALLS_PER_TURN)
+            turn_calls = tool_calls[:_MAX_TOOL_CALLS_PER_TURN]
+            turn_aborted = False
+            for tc in turn_calls:
+                name, params = _coerce_tool_call(tc)
+                if not is_role_tool_allowed(role, name):
+                    step = {"index": len(steps) + 1, "tool": name or "?", "status": "blocked", "summary": "nicht erlaubt (read-only)"}
+                    steps.append(step)
+                    await emit({"type": "subagent_step", "agent_id": agent_id, "step": step})
+                    messages.append({"role": "assistant", "content": f"(Tool {name} angefragt)"})
+                    messages.append({"role": "user", "content": _DISALLOWED_TOOL_MSG.format(name=name or "?")})
+                    consecutive_fail += 1
+                    if consecutive_fail >= 3:
+                        status, summary = "failed", summary or "Wiederholt unerlaubte Werkzeuge angefragt."
+                        turn_aborted = True
+                        break
+                    continue
+                try:
+                    exec_res = await _invoke(execute_tool_fn, name, params, timeout=step_timeout)
+                except asyncio.TimeoutError:
+                    exec_res = {"success": False, "error": "Tool-Zeitlimit."}
+                except Exception as exc:
+                    exec_res = {"success": False, "error": _safe(exc)}
+                ok = bool(isinstance(exec_res, dict) and exec_res.get("success"))
+                step = {
+                    "index": len(steps) + 1,
+                    "tool": name,
+                    "status": "done" if ok else "failed",
+                    "summary": _result_brief(exec_res),
+                }
                 steps.append(step)
                 await emit({"type": "subagent_step", "agent_id": agent_id, "step": step})
-                messages.append({"role": "assistant", "content": f"(Tool {name} angefragt)"})
-                messages.append({"role": "user", "content": _DISALLOWED_TOOL_MSG.format(name=name or "?")})
-                consecutive_fail += 1
-                if consecutive_fail >= 3:
-                    status, summary = "failed", summary or "Wiederholt unerlaubte Werkzeuge angefragt."
-                    break
-                continue
-            try:
-                exec_res = await _invoke(execute_tool_fn, name, params, timeout=step_timeout)
-            except asyncio.TimeoutError:
-                exec_res = {"success": False, "error": "Tool-Zeitlimit."}
-            except Exception as exc:
-                exec_res = {"success": False, "error": _safe(exc)}
-            ok = bool(isinstance(exec_res, dict) and exec_res.get("success"))
-            step = {
-                "index": len(steps) + 1,
-                "tool": name,
-                "status": "done" if ok else "failed",
-                "summary": _result_brief(exec_res),
-            }
-            steps.append(step)
-            await emit({"type": "subagent_step", "agent_id": agent_id, "step": step})
-            messages.append({"role": "assistant", "content": f"[Tool aufgerufen: {name}]"})
-            messages.append({"role": "user", "content": _format_tool_feedback(name, exec_res)})
-            if ok:
-                consecutive_fail = 0
-                if len(agent_sources) < _SOURCES_PER_AGENT_CAP:
-                    agent_sources.extend(_extract_sources(name, exec_res))
-            else:
-                fail_counts[name] = fail_counts.get(name, 0) + 1
-                consecutive_fail += 1
-                if fail_counts[name] >= 2 or consecutive_fail >= 3:
-                    status, summary = "failed", summary or f"Wiederholter Tool-Fehler bei {name}."
-                    break
+                messages.append({"role": "assistant", "content": f"[Tool aufgerufen: {name}]"})
+                messages.append({"role": "user", "content": _format_tool_feedback(name, exec_res)})
+                if ok:
+                    consecutive_fail = 0
+                    if len(agent_sources) < _SOURCES_PER_AGENT_CAP:
+                        agent_sources.extend(_extract_sources(name, exec_res))
+                else:
+                    fail_counts[name] = fail_counts.get(name, 0) + 1
+                    consecutive_fail += 1
+                    if fail_counts[name] >= 2 or consecutive_fail >= 3:
+                        status, summary = "failed", summary or f"Wiederholter Tool-Fehler bei {name}."
+                        turn_aborted = True
+                        break
+            if turn_aborted:
+                break
+            if dropped:
+                messages.append({"role": "user", "content": (
+                    f"(Hinweis: {dropped} weitere Tool-Aufrufe dieses Turns wurden uebersprungen "
+                    "(Limit pro Runde). Fordere die wichtigsten in der naechsten Runde erneut an.)"
+                )})
             continue
 
         # Reiner Text => abschliessende Zusammenfassung.
@@ -723,6 +745,20 @@ async def run_orchestration(
                 remaining -= 1
 
         if timed_out:
+            # Bereits fertige, aber noch nicht konsumierte Ergebnisse aus der Queue ziehen,
+            # BEVOR wir auffuellen. Sonst wuerde ein Agent, der sein Resultat schon abgelegt
+            # hat (Race: Schleife bricht vorher per Deadline ab), faelschlich als "timeout"
+            # ueberschrieben und sein echtes Ergebnis ginge verloren.
+            while True:
+                try:
+                    kind, payload = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if kind == "event":
+                    yield payload
+                else:
+                    results.append(payload)
+                    remaining -= 1
             # Noch laufende Sub-Agenten SOFORT abbrechen — nicht erst im finally nach
             # Verifikation/Synthese. Sonst rufen timed-out Agenten waehrend der Synthese
             # weiter das LLM auf (verschwendet Budget/Quota, kann die Deadline weiter reissen).

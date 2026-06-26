@@ -66,7 +66,7 @@ def test_status_endpoint(monkeypatch):
 def test_run_streams_and_persists(monkeypatch):
     saved = {}
 
-    def fake_run(task, *, mode="thorough"):
+    def fake_run(task, *, mode="thorough", max_subagents=None):
         async def gen():
             yield {"type": "orchestrator_start", "run_id": "r1", "task": task, "mode": mode}
             yield {"type": "plan", "run_id": "r1", "plan": {"subtasks": [{"role": "research", "objective": task}]}}

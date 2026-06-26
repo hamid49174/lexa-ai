@@ -53,8 +53,17 @@ sauberes Barge-in, klare Provider-Fehlerbehandlung.
 
 ## E. Multi-Agenten-Orchestrator  🟢
 **Scope:** orchestrator/* (Planner→parallele read-only Sub-Agenten→Verifikation→zitierte Synthese), Agent-Loop.
-**Ist-Zustand:** 🟢 echtes Hub-and-Spoke, Quellen-Registry, Triage, MCP-Read-Brücke. 🟡 Browser-Agent opt-in,
-History im Lauf ungenutzt.
+**Ist-Zustand:** 🟢 echtes Hub-and-Spoke, Quellen-Registry, Triage, MCP-Read-Brücke. 🟢 Audit + Fixes
+(2026-06-26): **HIGH** Sub-Agent führte still nur den ersten von mehreren Tool-Calls eines Turns aus →
+jetzt alle (mit Pro-Runde-Cap _MAX_TOOL_CALLS_PER_TURN, Rest transparent gemeldet). **MED** Timeout-Race:
+fertige, noch nicht konsumierte Sub-Agent-Ergebnisse wurden als „timeout" überschrieben → Queue wird vor
+dem Auffüllen gedraint. **MED** Effort-Scaling der Triage war wirkungslos (`subagents` nie durchgereicht)
+→ end-to-end verdrahtet (Triage→chat_orchestrator→preload→Router→run, gegen Cap geklemmt, 0/negativ
+fällt tolerant auf Default statt 422). Adversarisch verifiziert (3 Linsen, 0 echte Regressionen; Drain
+empirisch bestätigt). 🟡 **OFFEN (NEEDS-DECISION/Live):** to_thread-Step-Timeouts können den darunter
+laufenden Netz-Thread nicht abbrechen (braucht abbrechbaren HTTP-Client); `history`-Param + Sub-Agent-
+`mode` sind Hooks ohne Wirkung (keine Frontend-History-Quelle / fast≡thorough im Sub-Agent); Browser-Agent
+opt-in.
 **100% =** verlässliche Planqualität, harte Budgets/Timeouts, sichtbare Live-UI, reproduzierbare Quellen.
 
 ## F. Gedächtnis & Wissen  🟡

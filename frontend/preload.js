@@ -2975,10 +2975,14 @@ const lexaBridge = {
   orchestratorRun: async (task, options = {}) => {
     // SSE-Stream wie agentRun: serialisierbare streamId zurueck, Chunks via agentStreamRead().
     const mode = options && options.mode === "fast" ? "fast" : "thorough";
+    const body = { task, mode };
+    // Effort-Scaling: vom Triage empfohlene Agentenzahl mitsenden (1..5), falls vorhanden.
+    const subs = options && Number(options.subagents);
+    if (Number.isFinite(subs) && subs >= 1) body.subagents = Math.min(5, Math.round(subs));
     const res = await fetchWithTimeout(`${API}/orchestrator/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task, mode }),
+      body: JSON.stringify(body),
     }, 15000);
     return registerAgentStreamResponse(res);
   },
