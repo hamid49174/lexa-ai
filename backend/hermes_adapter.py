@@ -2776,10 +2776,15 @@ def improve_lexa_with_hermes(focus: str = "", timeout: int = 180, timeoutSeconds
     if timeoutSeconds is not None:
         timeout = timeoutSeconds
     focus_text = (focus or "backend, OS integration, reliability and product readiness").strip()
+    # SICHERHEIT: propose-only. Hermes laeuft als Subprozess potenziell im Projekt-
+    # Verzeichnis; ein "perform" koennte unkontrolliert Lexa-Code aendern. Der Auftrag
+    # erlaubt daher AUSDRUECKLICH keine Datei-/Repo-Aenderungen — nur einen Vorschlag.
     task = (
-        "Inspect the Lexa project and propose or perform one safe, high-impact improvement. "
+        "Inspect the Lexa project and PROPOSE exactly one safe, high-impact improvement. "
+        "Do NOT create, modify, delete, move or write ANY file, and do NOT run git or commands "
+        "that change the repository — output a plan only. "
         "Prioritize backend reliability, OS integration, agent readiness, tests, and user trust. "
         f"Focus: {focus_text}. "
-        "Return files touched, evidence, risks and verification. Keep OS memory changes draft-only."
+        "Return: proposed change, affected files (suggestion only), evidence, risks and how to verify."
     )
     return run_hermes_task(task, mode="lexa_improve", timeout=timeout)

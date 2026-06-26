@@ -606,8 +606,29 @@ def _safe_archive_members(names, destination: Path) -> tuple[list[str], int]:
     return safe, skipped
 
 
-def archive_extract(archive_path: str = "", destination: str = "") -> str:
-    """Extract a ZIP archive."""
+def _archive_overwrite_block(safe_names, dest_path: Path, overwrite: bool) -> str | None:
+    """Verhindert stilles Ueberschreiben: blockiert, wenn Zieldateien existieren
+    (ausser overwrite=True). Schuetzt Nutzerdaten beim Entpacken/Restore."""
+    if overwrite:
+        return None
+    existing: list[str] = []
+    for name in safe_names:
+        try:
+            if (dest_path / name).is_file():
+                existing.append(name)
+                if len(existing) >= 3:
+                    break
+        except Exception:
+            continue
+    if existing:
+        sample = ", ".join(existing)
+        return (f"Abbruch: Zieldatei(en) existieren bereits ({sample} ...). "
+                "Mit overwrite=true erzwingen, falls beabsichtigt.")
+    return None
+
+
+def archive_extract(archive_path: str = "", destination: str = "", overwrite: bool = False) -> str:
+    """Extract a ZIP archive. overwrite=False schuetzt vorhandene Zieldateien vor Datenverlust."""
     if not archive_path:
         return "Archiv-Pfad fehlt."
     arc = Path(archive_path)
@@ -623,6 +644,9 @@ def archive_extract(archive_path: str = "", destination: str = "") -> str:
             with zipfile.ZipFile(archive_path, "r") as zf:
                 dest_path = Path(destination).resolve()
                 safe_names, skipped = _safe_archive_members((m.filename for m in zf.infolist()), dest_path)
+                block = _archive_overwrite_block(safe_names, dest_path, overwrite)
+                if block:
+                    return block
                 safe_name_set = set(safe_names)
                 safe_count = 0
                 for member in zf.infolist():
@@ -641,6 +665,9 @@ def archive_extract(archive_path: str = "", destination: str = "") -> str:
                     safe_names, skipped = _safe_archive_members(z.getnames(), Path(destination))
                     if skipped:
                         return f"7z-Archiv nicht entpackt: {skipped} unsichere Einträge geblockt."
+                    block = _archive_overwrite_block(safe_names, Path(destination), overwrite)
+                    if block:
+                        return block
                     z.extractall(path=destination, targets=safe_names)
                 return f"7z-Archiv entpackt nach {destination}"
             except ImportError:
@@ -651,6 +678,9 @@ def archive_extract(archive_path: str = "", destination: str = "") -> str:
                 with rarfile.RarFile(archive_path) as rf:
                     dest_path = Path(destination).resolve()
                     safe_names, skipped = _safe_archive_members((m.filename for m in rf.infolist()), dest_path)
+                    block = _archive_overwrite_block(safe_names, dest_path, overwrite)
+                    if block:
+                        return block
                     safe_name_set = set(safe_names)
                     safe_count = 0
                     for member in rf.infolist():
@@ -668,6 +698,9 @@ def archive_extract(archive_path: str = "", destination: str = "") -> str:
             with tarfile.open(archive_path) as tf:
                 dest_path = Path(destination).resolve()
                 safe_names, skipped = _safe_archive_members(tf.getnames(), dest_path)
+                block = _archive_overwrite_block(safe_names, dest_path, overwrite)
+                if block:
+                    return block
                 safe_name_set = set(safe_names)
                 members = [m for m in tf.getmembers() if m.name in safe_name_set]
                 # filter="data" is an additional safety net (Python 3.12+).
@@ -803,10 +836,15 @@ def backup_list() -> list[dict]:
 
 
 def backup_restore(backup_path: str = "", destination: str = "") -> str:
-    """Restore a backup (extract ZIP to destination)."""
+    """Restore a backup (extract ZIP to destination).
+
+    Ein Restore ist eine bewusste, bestaetigungs-gegatete Wiederherstellung und
+    DARF den Zielstand ueberschreiben (overwrite=True). Das normale archive_extract
+    schuetzt dagegen vorhandene Dateien (overwrite=False).
+    """
     if not backup_path:
         return "Backup-Pfad fehlt."
-    return archive_extract(archive_path=backup_path, destination=destination)
+    return archive_extract(archive_path=backup_path, destination=destination, overwrite=True)
 
 
 # ══════════════════════════════════════════════════
@@ -1101,9 +1139,9 @@ def file_open(path: str = "") -> dict:
     if not p.exists():
         return {"error": t("file.notFound", path=path)}
 
-    # Block dangerous extensions
-    blocked_exts = {".exe", ".bat", ".cmd", ".ps1", ".vbs"}
-    if p.suffix.lower() in blocked_exts:
+    # Gefaehrliche Endungen blocken — zentrale Liste (deckt auch .lnk/.scr/.reg/.msi/.com/.dll/.sys ab).
+    # os.startfile fuehrt diese sonst ungefragt aus (z.B. .lnk = beliebiger Befehl, .reg = Registry-Import).
+    if p.suffix.lower() in _FILE_WRITE_BLOCKED_EXTS:
         return {"error": t("file.blocked", extension=p.suffix)}
 
     try:

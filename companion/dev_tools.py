@@ -267,6 +267,8 @@ def git_branch_list(repo_path: str = "") -> dict:
             capture_output=True, text=True, timeout=5,
             cwd=repo_path,
         )
+        if result.returncode != 0:
+            return {"error": result.stderr.strip() or "Git-Branch-Liste fehlgeschlagen."}
         current = curr.stdout.strip()
 
         branches = []
@@ -464,6 +466,8 @@ def docker_ps(all_containers: bool = False) -> list[dict]:
             cmd.insert(2, "-a")
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return [{"error": result.stderr.strip() or "Docker-Daemon nicht erreichbar."}]
         containers = []
         for line in result.stdout.strip().split("\n"):
             if "|" in line:
@@ -489,6 +493,8 @@ def docker_images() -> list[dict]:
             ["docker", "images", "--format", "{{.Repository}}|{{.Tag}}|{{.ID}}|{{.Size}}|{{.CreatedSince}}"],
             capture_output=True, text=True, timeout=10,
         )
+        if result.returncode != 0:
+            return [{"error": result.stderr.strip() or "Docker-Daemon nicht erreichbar."}]
         images = []
         for line in result.stdout.strip().split("\n"):
             if "|" in line:
@@ -569,6 +575,8 @@ def docker_stats() -> list[dict]:
              "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.PIDs}}"],
             capture_output=True, text=True, timeout=10,
         )
+        if result.returncode != 0:
+            return [{"error": result.stderr.strip() or "Docker-Daemon nicht erreichbar."}]
         stats = []
         for line in result.stdout.strip().split("\n"):
             if "|" in line:

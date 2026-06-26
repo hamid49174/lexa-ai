@@ -1,6 +1,26 @@
 import pytest
 
-from companion.file_tools import file_write, file_move, file_copy
+from companion.file_tools import file_write, file_move, file_copy, file_open
+
+
+def test_file_open_blocks_dangerous_extensions(tmp_path):
+    # Scan-Fix B: file_open blockte .lnk/.scr/.reg/.msi/.com/.dll/.sys nicht (os.startfile fuehrt sie aus).
+    for ext in (".lnk", ".reg", ".scr", ".com", ".msi", ".dll", ".sys", ".exe"):
+        f = tmp_path / f"x{ext}"
+        f.write_text("", encoding="utf-8")
+        res = file_open(str(f))
+        assert "error" in res, f"{ext} sollte blockiert werden"
+
+
+def test_file_open_allows_safe_file(tmp_path, monkeypatch):
+    import companion.file_tools as ft
+    opened = {}
+    monkeypatch.setattr(ft.os, "startfile", lambda p: opened.setdefault("p", p), raising=False)
+    f = tmp_path / "doc.txt"
+    f.write_text("hallo", encoding="utf-8")
+    res = file_open(str(f))
+    assert res.get("success") is True
+    assert opened.get("p") == str(f)
 
 
 def test_file_move_refuses_existing_destination_file(tmp_path):

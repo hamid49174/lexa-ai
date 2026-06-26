@@ -212,6 +212,7 @@ def _register_file_tools() -> list[dict]:
         _tool("archive_extract", "Entpackt ein Archiv (ZIP, 7z, TAR, RAR)", [
             _param("path", "string", "Pfad zum Archiv", required=True),
             _param("dest", "string", "Zielverzeichnis (optional)"),
+            _param("overwrite", "boolean", "Vorhandene Zieldateien ueberschreiben (Standard: false, schuetzt vor Datenverlust)"),
         ], confirmation_required=True),
         _tool("archive_list", "Zeigt den Inhalt eines Archivs an ohne zu entpacken", [
             _param("path", "string", "Pfad zum Archiv", required=True),

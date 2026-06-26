@@ -1,10 +1,25 @@
 """Regressionstests aus dem Gesamt-Scan (2026-06-25) — Companion-Funde."""
 import json
+import types
 from pathlib import Path
 
 from companion.engine import companion
 from companion import hermes_desktop
 from backend import tool_registry
+
+
+def test_dev_tools_report_failure_instead_of_empty(monkeypatch):
+    # Scan-Fix B: docker/git meldeten gestoppten Daemon/Fehler als LEERES Ergebnis
+    # statt als Fehler (returncode wurde ignoriert).
+    import companion.dev_tools as dt
+    monkeypatch.setattr(dt, "_validate_repo_path", lambda p: None)
+    monkeypatch.setattr(
+        dt.subprocess, "run",
+        lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr="boom"),
+    )
+    assert "error" in dt.git_branch_list("/repo")
+    ps = dt.docker_ps()
+    assert ps and "error" in ps[0]
 
 
 def test_weather_will_it_rain_is_registered_and_whitelisted():

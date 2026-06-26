@@ -28,3 +28,33 @@ def test_safe_archive_members_blocks_absolute_and_parent_paths(tmp_path):
 
     assert safe == ["safe/file.txt"]
     assert skipped == 2
+
+
+def test_archive_extract_blocks_overwrite_by_default(tmp_path):
+    # Scan-Fix B: archive_extract ueberschrieb vorhandene Zieldateien still (Datenverlust).
+    archive = tmp_path / "a.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("note.txt", "neu")
+    dest = tmp_path / "out"
+    dest.mkdir()
+    (dest / "note.txt").write_text("alt", encoding="utf-8")
+
+    # Default: blockiert, Datei bleibt unveraendert
+    res = file_tools.archive_extract(str(archive), str(dest))
+    assert "existieren bereits" in res
+    assert (dest / "note.txt").read_text(encoding="utf-8") == "alt"
+
+    # overwrite=True: bewusst erlaubt (z.B. backup_restore-Pfad)
+    res2 = file_tools.archive_extract(str(archive), str(dest), overwrite=True)
+    assert (dest / "note.txt").read_text(encoding="utf-8") == "neu"
+
+
+def test_archive_extract_into_fresh_dir_still_works(tmp_path):
+    # Frisches Ziel ohne Kollision -> entpackt normal (kein Fehlalarm)
+    archive = tmp_path / "b.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("safe/note.txt", "ok")
+    dest = tmp_path / "fresh"
+    res = file_tools.archive_extract(str(archive), str(dest))
+    assert "existieren bereits" not in res
+    assert (dest / "safe" / "note.txt").read_text(encoding="utf-8") == "ok"
