@@ -142,6 +142,7 @@ def _register_basis_tools() -> list[dict]:
         _tool("restart", "Startet den PC neu", [
             _param("delay", "integer", "Verzögerung in Sekunden vor dem Neustart (Standard: 0)"),
         ], confirmation_required=True),
+        _tool("shutdown_cancel", "Bricht ein laufendes Herunterfahren/Neustart ab (shutdown /a)", []),
     ]
 
 

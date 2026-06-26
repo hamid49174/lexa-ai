@@ -1539,7 +1539,10 @@ def test_hermes_desktop_commit_clicks_and_verifies(monkeypatch):
     assert result["kind"] == "click"
     assert "Pause" in result["summary"]
     assert result["verification"]["checked"] is True
-    assert result["verification"]["status"] == "passed"
+    # Ehrliche Verifikation (Scan-Fix B): 'passed' nur bei messbarem Vordergrundwechsel,
+    # sonst 'unknown' statt faelschlich 'passed'. Im Mock ohne Foreground-Wechsel => 'unknown'.
+    assert result["verification"]["status"] in ("passed", "unknown")
+    assert result["verification"]["method"] == "foreground_change_after_click"
     assert "Spotify" in result["verification"]["summary"]
 
 

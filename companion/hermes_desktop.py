@@ -9,6 +9,7 @@ hotkeys are only prepared as a pending Lexa confirmation.
 from __future__ import annotations
 
 import ctypes
+import os
 import re
 import subprocess
 import time
@@ -1644,17 +1645,61 @@ def _set_foreground_window(hwnd: int, title: str, engine: str) -> dict[str, Any]
     if not hasattr(ctypes, "windll"):
         raise RuntimeError("Win32 window focus is only available on Windows")
     user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
     SW_RESTORE = 9
     try:
-        user32.ShowWindow(hwnd, SW_RESTORE)
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
+        else:
+            user32.ShowWindow(hwnd, SW_RESTORE)
     except Exception:
         pass
     time.sleep(0.05)
-    focused = bool(user32.SetForegroundWindow(hwnd))
-    try:
-        focused = focused or int(user32.GetForegroundWindow()) == int(hwnd)
-    except Exception:
-        pass
+
+    def _is_foreground() -> bool:
+        try:
+            return int(user32.GetForegroundWindow()) == int(hwnd)
+        except Exception:
+            return False
+
+    focused = bool(user32.SetForegroundWindow(hwnd)) or _is_foreground()
+
+    # Foreground-Lock-Workaround: Windows verweigert SetForegroundWindow, wenn ein
+    # anderer Prozess den Vordergrund haelt. Trick: kurz an den Input-Thread des
+    # aktuellen Vordergrundfensters (und des Zielfensters) anhaengen, dann erneut
+    # nach vorne holen. Das ist die zentrale Robustheit fuer alle Desktop-Aktionen.
+    if not focused:
+        try:
+            fg = user32.GetForegroundWindow()
+            cur_tid = kernel32.GetCurrentThreadId()
+            tgt_tid = user32.GetWindowThreadProcessId(hwnd, None)
+            fg_tid = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+            att_fg = bool(user32.AttachThreadInput(cur_tid, fg_tid, True)) if fg_tid and fg_tid != cur_tid else False
+            att_tgt = bool(user32.AttachThreadInput(cur_tid, tgt_tid, True)) if tgt_tid and tgt_tid not in (cur_tid, fg_tid) else False
+            try:
+                user32.BringWindowToTop(hwnd)
+                user32.SetForegroundWindow(hwnd)
+            finally:
+                if att_fg:
+                    user32.AttachThreadInput(cur_tid, fg_tid, False)
+                if att_tgt:
+                    user32.AttachThreadInput(cur_tid, tgt_tid, False)
+            focused = _is_foreground()
+        except Exception:
+            pass
+
+    # Kurzer Retry: der Foreground-Lock-Timeout kann den Vordergrund verzoegert freigeben.
+    if not focused:
+        for _ in range(3):
+            time.sleep(0.12)
+            try:
+                user32.SetForegroundWindow(hwnd)
+            except Exception:
+                break
+            if _is_foreground():
+                focused = True
+                break
+
     if not focused:
         raise RuntimeError(f"window focus failed: {title}")
     return {
@@ -1662,6 +1707,16 @@ def _set_foreground_window(hwnd: int, title: str, engine: str) -> dict[str, Any]
         "window_title": title,
         "engine": engine,
     }
+
+
+def _foreground_window_handle() -> int | None:
+    """HWND des aktuellen Vordergrundfensters (oder None). Fuer echte Vorher/Nachher-Verifikation."""
+    try:
+        if not hasattr(ctypes, "windll"):
+            return None
+        return int(ctypes.windll.user32.GetForegroundWindow())
+    except Exception:
+        return None
 
 
 def _focus_window_via_win32(window: str) -> dict[str, Any]:
@@ -1790,6 +1845,19 @@ def _known_window_launcher(window: str) -> list[str]:
     folded = _window_match_fold(window)
     if "notepad" in folded or folded in {"editor"}:
         return ["notepad.exe"]
+    # Generisch: jede installierte App ueber die App-Discovery aufloesen. Nur echte
+    # ausfuehrbare .exe-Pfade zurueckgeben — dann funktioniert Popen + Fokus-per-PID.
+    # (Store-/UWP-/URI-Apps haben keinen .exe-Pfad und werden hier bewusst nicht
+    # gestartet; dafuer ist der reguläre app_open-Pfad zustaendig.)
+    try:
+        from companion import app_discovery
+        match = app_discovery.find_app(window)
+    except Exception:
+        match = None
+    if match:
+        app_id = str(match.get("app_id") or "")
+        if app_id and os.path.isfile(app_id):
+            return [app_id]
     return []
 
 
@@ -2197,6 +2265,28 @@ def hermes_desktop_commit(
     verification: dict[str, Any] = {"checked": False}
 
     if action_kind == "click":
+        # Wie scroll/type: Zielfenster zuerst in den Vordergrund holen, sonst klickt
+        # ui_click absolute Koordinaten in das davorliegende (falsche) Fenster.
+        focus_result = _focus_window_for_action(window)
+        window_requested = bool(str(window or "").strip())
+        focused_title = str((focus_result or {}).get("window_title") or "").strip()
+        if window_requested and not _focused_title_matches_target(window, focused_title):
+            return {
+                "kind": "click",
+                "summary": (
+                    f'Nicht ausgefuehrt: Das Zielfenster "{window}" wurde nicht fokussiert '
+                    f'(aktiv: "{focused_title}"). Ich habe nicht geklickt, um nicht ins falsche '
+                    "Fenster zu treffen."
+                ),
+                "click": {"clicked": False, "reason": "target_window_not_focused"},
+                "focus": focus_result,
+                "verification": _verification_payload(
+                    method="click_target_window_mismatch",
+                    status="failed",
+                    summary=f'Zielfenster "{window}" wurde nicht fokussiert; Klick abgebrochen.',
+                ),
+            }
+        fg_before = _foreground_window_handle()
         result = ui_automation.ui_click(
             text=text or "darauf",
             control_type=control_type,
@@ -2209,13 +2299,20 @@ def hermes_desktop_commit(
             time.sleep(0.25)
             try:
                 after = ui_automation.ui_tree(window=window or result.get("window_title", ""), max_depth=2, max_controls=40)
-                observed = bool(after.get("window_count") or after.get("control_count"))
-                status = "passed" if observed else "unknown"
+                fg_after = _foreground_window_handle()
+                # Ehrliche Verifikation: 'passed' nur bei messbarer Aenderung
+                # (Vordergrundwechsel -> Dialog/Menue/App geöffnet). Sonst 'unknown'
+                # statt faelschlich 'passed' (ein Klick im selben Fenster ist ohne
+                # app-spezifisches Wissen nicht generisch verifizierbar).
+                fg_changed = bool(fg_before and fg_after and fg_before != fg_after)
+                snapshot_ok = bool(after.get("window_count") or after.get("control_count"))
+                status = "passed" if fg_changed else ("unknown" if snapshot_ok else "unknown")
                 verification = {
                     "checked": True,
-                    "method": "ui_tree_after_click",
+                    "method": "foreground_change_after_click",
                     "status": status,
                     "passed": True if status == "passed" else None,
+                    "foreground_changed": fg_changed,
                     "window_count": after.get("window_count", 0),
                     "control_count": after.get("control_count", 0),
                     "summary": _summarize_tree(after),
@@ -2232,6 +2329,7 @@ def hermes_desktop_commit(
             "kind": "click",
             "summary": f"Ausgefuehrt: Ich habe '{target}' bei X={result.get('x')}, Y={result.get('y')} geklickt.",
             "click": result,
+            "focus": focus_result,
             "verification": verification,
         }
 

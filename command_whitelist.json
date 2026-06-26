@@ -5,6 +5,7 @@
     "always_allowed": {
       "description": "Können ohne Bestätigung ausgeführt werden",
       "list": [
+        "shutdown_cancel",
         "app_open",
         "app_search",
         "app_list_installed",
