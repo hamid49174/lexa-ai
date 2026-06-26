@@ -518,47 +518,46 @@ async def voice_realtime_preflight():
     return await asyncio.to_thread(get_realtime_session_preflight)
 
 
+@router.get("/realtime/plan")
+async def voice_realtime_plan():
+    """Diagnostik: konkreter Verbindungsplan + Preflight einer Realtime-Sitzung."""
+    from voice.realtime_session import realtime_session_manager
+    return await asyncio.to_thread(realtime_session_manager.plan)
+
+
 @router.post("/realtime/start")
 async def voice_realtime_start():
-    from voice.realtime import get_realtime_session_preflight
+    from voice.realtime_session import realtime_session_manager
 
-    preflight = await asyncio.to_thread(get_realtime_session_preflight)
-    payload = dict(preflight) if isinstance(preflight, dict) else {
+    result = await asyncio.to_thread(realtime_session_manager.start)
+    payload = dict(result) if isinstance(result, dict) else {
         "ok": False,
         "can_start": False,
-        "blockers": ["Realtime preflight returned an invalid payload."],
+        "session_state": "blocked",
+        "blockers": ["Realtime session manager returned an invalid payload."],
         "warnings": [],
     }
-
-    if not payload.get("can_start"):
-        payload["ok"] = False
-        payload["session_state"] = "blocked"
+    # Startet nur, wenn das Laufzeit-Gate (LEXA_REALTIME_VOICE_ENABLED +
+    # verifizierter Audio-Transport) scharf ist; sonst ehrliche Blocker.
+    if not payload.get("ok"):
         return JSONResponse(payload, status_code=409)
-
-    blockers = list(payload.get("blockers") or [])
-    blockers.append("Realtime session manager is not wired to the API endpoint yet.")
-    payload.update({
-        "ok": False,
-        "can_start": False,
-        "session_state": "not_started",
-        "blockers": blockers,
-        "next_action": "Wire the realtime session manager before starting realtime sessions.",
-    })
-    return JSONResponse(payload, status_code=501)
+    return payload
 
 
 @router.post("/realtime/stop")
 async def voice_realtime_stop():
-    from voice.realtime import get_realtime_voice_status
+    from voice.realtime_session import realtime_session_manager
 
-    status = await asyncio.to_thread(get_realtime_voice_status)
+    result = await asyncio.to_thread(realtime_session_manager.stop)
+    if isinstance(result, dict):
+        return result
     return {
         "ok": True,
         "session_state": "stopped",
         "active": False,
-        "provider": status.get("preferred") if isinstance(status, dict) else None,
-        "active_path": status.get("active_path") if isinstance(status, dict) else "cascaded_stt_llm_tts",
-        "runtime_active": bool(status.get("runtime_active")) if isinstance(status, dict) else False,
+        "provider": None,
+        "active_path": "cascaded_stt_llm_tts",
+        "runtime_active": False,
     }
 
 

@@ -3,6 +3,7 @@ Tests focus on HTTP endpoints (not WebSocket) with mocked voice modules.
 """
 
 import io
+import os
 import sys
 import types
 import pytest
@@ -17,10 +18,12 @@ def _setup_voice_stubs():
     """Stub voice.tts, voice.stt, voice.wakeword so router_voice can import."""
     stubs = {}
 
-    # voice package
+    # voice package — echtes __path__, damit nicht gestubbte Submodule (z.B.
+    # voice.realtime_session) von der Platte importierbar bleiben, waehrend
+    # voice.config/tts/stt/realtime ueber sys.modules gestubbt sind.
     if "voice" not in sys.modules:
         voice_mod = types.ModuleType("voice")
-        voice_mod.__path__ = []
+        voice_mod.__path__ = [os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "voice")]
         sys.modules["voice"] = voice_mod
         stubs["voice"] = None
 
@@ -36,6 +39,9 @@ def _setup_voice_stubs():
     config_stub.WAKE_FALLBACK_STT_MIN_INTERVAL_S = 0.75
     config_stub.WAKE_FALLBACK_STT_MAX_INTERVAL_S = 1.5
     config_stub.WAKE_FALLBACK_STT_BACKOFF_STEP_S = 0.25
+    config_stub.OPENAI_REALTIME_MODEL = "gpt-realtime-2"
+    config_stub.OPENAI_TTS_VOICE = "nova"
+    config_stub.SAMPLE_RATE = 16000
     stubs["voice.config"] = sys.modules.get("voice.config")
     sys.modules["voice.config"] = config_stub
 

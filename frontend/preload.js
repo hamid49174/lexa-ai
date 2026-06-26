@@ -93,6 +93,7 @@ const BRIDGE_METHOD_POLICY = buildBridgeMethodPolicy([
   bridgePolicy("voiceDiagnostics", "low", "read", "/voice/diagnostics", { batch_allowed: true }),
   bridgePolicy("voiceArchitecture", "low", "read", "/voice/architecture", { batch_allowed: true }),
   bridgePolicy("voiceRealtimePreflight", "low", "read", "/voice/realtime/preflight", { batch_allowed: true }),
+  bridgePolicy("voiceRealtimePlan", "low", "read", "/voice/realtime/plan", { batch_allowed: true }),
   bridgePolicy("voiceRealtimeStart", "high", "secret", "/voice/realtime/start"),
   bridgePolicy("voiceRealtimeStop", "medium", "write", "/voice/realtime/stop", { audit: true }),
   bridgePolicy("voiceWebSocket", "medium", "secret", "ws:/voice/ws", { audit: true }),
@@ -1209,6 +1210,7 @@ if (isLexaSmokeMockAllowed()) {
     voiceDiagnostics: async () => ({ ok: true, state: "ready" }),
     voiceRealtimeStart: async () => ({ ok: false, can_start: false, session_state: "blocked", blockers: ["smoke mock"] }),
     voiceRealtimeStop: async () => ({ ok: true, session_state: "stopped" }),
+    voiceRealtimePlan: async () => ({ preflight: { can_start: false, blockers: ["smoke mock"] }, plan: null }),
     wakewordStart: async () => ({ status: "started", active: true, ready: true }),
     wakewordStop: async () => ({ status: "stopped", active: false, ready: true }),
     wakewordStatus: async () => ({ active: false, ready: true }),
@@ -1676,6 +1678,15 @@ const lexaBridge = {
         warnings: [],
         active_path: "unknown",
       };
+    }
+  },
+  voiceRealtimePlan: async () => {
+    try {
+      const r = await fetchWithTimeout(`${API}/voice/realtime/plan`);
+      return r.json();
+    } catch (e) {
+      console.warn("[Preload] voiceRealtimePlan failed:", e.message || e);
+      return { preflight: { can_start: false, blockers: [e.message || String(e)] }, plan: null };
     }
   },
   voiceRealtimeStart: async () => {
