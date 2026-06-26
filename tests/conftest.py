@@ -47,9 +47,23 @@ def tmp_path():
 
 @pytest.fixture
 def disable_rate_limit(monkeypatch):
-    """Disable rate limiting for endpoint tests."""
+    """Disable rate limiting for endpoint tests.
+
+    Router-Module binden die Funktion via `from backend.security import check_rate_limit`,
+    halten also eine EIGENE Referenz auf das urspruengliche Funktionsobjekt — ein
+    `setattr(sec, "check_rate_limit", ...)` erreicht sie nicht. Darum zusaetzlich den
+    GETEILTEN Zustand neutralisieren, den die echte Funktion liest (riesige Caps +
+    geleerte Buckets); das wirkt unabhaengig davon, ueber welche Referenz aufgerufen wird.
+    Sonst saturiert in der vollen Suite ein globaler Bucket und Endpoint-Tests bekommen 429.
+    """
     import backend.security as sec
     monkeypatch.setattr(sec, "check_rate_limit", lambda *a, **kw: True)
+    for bucket in sec._RATE_LIMITS.values():
+        monkeypatch.setitem(bucket, "max", 10 ** 9)
+        bucket["timestamps"].clear()
+    for bucket in getattr(sec, "_ACTION_RATE_LIMITS", {}).values():
+        monkeypatch.setitem(bucket, "max", 10 ** 9)
+        bucket["entries"].clear()
 
 
 @pytest.fixture

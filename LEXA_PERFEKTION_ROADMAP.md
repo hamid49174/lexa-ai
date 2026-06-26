@@ -82,8 +82,20 @@ note_update 404-vs-400; Obsidian rglob folgt Symlinks (Vault-Escape, low); auto_
 
 ## G. Produktivität  🟡
 **Scope:** Todos/Pomodoro/Habits/Zeiterfassung/Reminders, Kalender, Workflow-Engine, proaktive Vorschläge.
-**Ist-Zustand:** 🟢 CRUD + Pomodoro/Habits. 🟢 Workflow-Engine + Event-Bridge (diese Woche gefixt — war tot),
-Kalender-REST (diese Woche ergänzt). 🟡 proactive.accept_suggestion ohne Ausführer.
+**Ist-Zustand:** 🟢 CRUD + Pomodoro/Habits. 🟢 Workflow-Engine + Event-Bridge, Kalender-REST.
+🟢 Audit (4 Parallel-Linsen, 2026-06-26): Workflow-Kern (bridge_external_events korrekt verdrahtet,
+injection-sichere Template-Substitution, fail-closed SSRF, Scheduler-Doppellauf-Schutz) + Pomodoro-State-
+Machine als sauber bestätigt. Gefixt (SAFE, +7 Tests, adversarisch verifiziert): **HIGH** habit_list zeigte
+gecachten last_streak → Streak decayte nie (jetzt live berechnet); MED todo_update meldete Erfolg für
+nicht-existierende IDs (jetzt rowcount→404); MED „500 statt 400" bei falsch getyptem JSON in todo/workflow/
+focus-Endpoints (Typ-Cast/-Validierung) + zentraler parse_json_body-Dict-Guard; MED focus_mode check-then-act
+ohne Lock (jetzt _focus_lock); MED Kalender-Reminder-Zeitzonenfehler (Offset wurde abgeschnitten → jetzt
+voll geparst, aware/naive korrekt); LOW Pomodoro-thread-Zuweisung jetzt unter Lock; LOW workflow enable/
+disable Rate-Limit ergänzt. 🟡 **OFFEN (NEEDS-DECISION):** proactive.accept_suggestion ohne Ausführer (totes
+Feature — Auto-Tool-Ausführung = Security-Entscheidung); emit_event ohne Concurrency-/Dedup-Schutz (DoS bei
+Dauer-Alerts); workflow lost-update-Race auf `enabled`; update_workflow synct _event_handlers nicht; Streak-
+„heute-zählt"-Politik; proactive In-Memory-State ohne Cleanup + Settings ohne Endpoint; Pomodoro-Pause-Nudge
+nur für lange Pomodoros.
 **100% =** Workflows laufen end-to-end (Schedule+Event), Kalender voll, proaktive Aktionen real ausführbar.
 
 ## H. Erweiterbarkeit (Plugins & MCP)  🟡

@@ -50,6 +50,26 @@ class TestTodoEndpoints:
         })
         assert res.status_code == 400
 
+    def test_create_todo_non_string_fields_no_500(self, client):
+        # Scan-Fix G: falsch getyptes JSON darf keinen 500 (AttributeError) ausloesen.
+        for body in ({"title": 123}, {"title": ["a"]}, {"title": "ok", "description": 5},
+                     {"title": "ok", "due_date": 123}):
+            res = client.post("/productivity/todos", json=body)
+            assert res.status_code != 500, f"{body} -> 500"
+
+    def test_update_nonexistent_todo_404(self, client):
+        # Scan-Fix G: Update einer nicht-existierenden ID -> 404 statt stillem 200.
+        res = client.put("/productivity/todos/999999", json={"status": "done"})
+        assert res.status_code == 404
+
+    def test_focus_on_accepts_list_sites_no_500(self, client, monkeypatch):
+        # Scan-Fix G: sites als Liste darf focus_mode_on().split() nicht mit 500 crashen.
+        import backend.router_productivity as rp
+        monkeypatch.setattr(rp.prod, "focus_mode_on", lambda sites="": f"ok:{sites}")
+        res = client.post("/productivity/focus/on", json={"sites": ["a.com", "b.com"]})
+        assert res.status_code == 200
+        assert "a.com,b.com" in res.json()["status"]
+
     def test_update_todo(self, client):
         client.post("/productivity/todos", json={"title": "Original"})
         todos = client.get("/productivity/todos").json()["todos"]

@@ -106,9 +106,17 @@ def _validate_domain(domain: str) -> Optional[str]:
 # ══════════════════════════════════════════════════
 
 def _get_db() -> sqlite3.Connection:
-    """Get database connection with auto-init. Reuses connection per thread."""
+    """Get database connection with auto-init. Reuses connection per thread.
+
+    Die gecachte Connection ist an den DB_PATH gebunden, mit dem sie geoeffnet wurde:
+    aendert sich DB_PATH (in Produktion nie, aber in Tests pro Fall), wird die alte
+    Connection geschlossen und neu geoeffnet. Ohne diesen Vergleich blieb eine in einem
+    Worker-Thread (asyncio.to_thread) gecachte Connection an die erste Test-DB 'gepinnt'
+    und ignorierte spaetere DB_PATH-Wechsel -> Test-Leaks ueber Threads hinweg.
+    """
     db = getattr(_thread_local, "db", None)
-    if db is not None:
+    current_path = str(DB_PATH)
+    if db is not None and getattr(_thread_local, "db_path", None) == current_path:
         try:
             db.execute("SELECT 1")
             return db
@@ -118,8 +126,15 @@ def _get_db() -> sqlite3.Connection:
             except Exception:
                 pass
             _thread_local.db = None
+    elif db is not None:
+        # DB_PATH hat sich geaendert -> alte Connection verwerfen.
+        try:
+            db.close()
+        except Exception:
+            pass
+        _thread_local.db = None
 
-    db = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+    db = sqlite3.connect(current_path, check_same_thread=False)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA synchronous=NORMAL")
@@ -127,6 +142,7 @@ def _get_db() -> sqlite3.Connection:
     db.execute("PRAGMA temp_store=MEMORY")
     _init_productivity_tables(db)
     _thread_local.db = db
+    _thread_local.db_path = current_path
     return db
 
 
@@ -286,8 +302,10 @@ def todo_update(id: int = 0, status: str = "", title: str = "", priority: str = 
     if not updates:
         return t("error.noChanges")
     params.append(id)
-    db.execute(f"UPDATE todos SET {', '.join(updates)} WHERE id = ?", params)
+    result = db.execute(f"UPDATE todos SET {', '.join(updates)} WHERE id = ?", params)
     db.commit()
+    if not result.rowcount:
+        return {"error": f"To-Do #{id} nicht gefunden."}
     return f"To-Do #{id} aktualisiert."
 
 
@@ -375,7 +393,10 @@ def pomodoro_start(task: str = "", duration: int = 25) -> str:
 
     timer_thread = threading.Thread(target=_timer, daemon=True)
     timer_thread.start()
-    _active_pomodoro["thread"] = timer_thread
+    # Schreib-Zugriff auf den geteilten _active_pomodoro-State unter Lock (alle anderen
+    # Felder werden ebenfalls unter _pomodoro_lock gesetzt).
+    with _pomodoro_lock:
+        _active_pomodoro["thread"] = timer_thread
     return f"Pomodoro gestartet: {duration} Min — Task: '{task or 'Kein Task'}'"
 
 
@@ -584,8 +605,10 @@ def habit_list() -> list[dict]:
         hd["today_count"] = habit_logs.get(today_iso, 0)
         hd["today_done"] = hd["today_count"] >= h["target"]
 
-        # Use pre-computed streak from DB, fallback to calculation
-        hd["streak"] = h["last_streak"] if h["last_streak"] else _calc_streak_sql(db, hid)
+        # Streak IMMER live berechnen. Der gecachte last_streak wird nur in habit_log
+        # geschrieben; wird eine Gewohnheit ein paar Tage nicht geloggt, bliebe der alte
+        # (truthy) Wert haengen und das Dashboard zeigte einen laengst gebrochenen Streak.
+        hd["streak"] = _calc_streak_sql(db, hid)
 
         # Last 7 days for mini-calendar (True/False per day, oldest first)
         week = []
@@ -828,6 +851,10 @@ def _detect_focus_mode_from_db() -> dict:
 
 
 _focus_mode: dict = {"active": False, "blocked_sites": [], "backup": None}
+# Serialisiert focus_mode_on/off: beide haben ein check-then-act (Guard auf _focus_mode
+# + hosts read-modify-write + subprocess). Ohne Lock koennen zwei to_thread-Aufrufe beide
+# den Guard passieren -> doppelte hosts-Modifikation / inkonsistenter State.
+_focus_lock = threading.Lock()
 
 # Deferred init — will be called on first access or module load
 
@@ -858,6 +885,11 @@ DEFAULT_BLOCK = [
 
 def focus_mode_on(sites: str = "") -> str:
     """Activate focus mode — block distracting sites via hosts file + DB tracking."""
+    with _focus_lock:
+        return _focus_mode_on_impl(sites)
+
+
+def _focus_mode_on_impl(sites: str = "") -> str:
     if _focus_mode["active"]:
         return "Fokus-Modus ist bereits aktiv."
 
@@ -924,6 +956,11 @@ def focus_mode_on(sites: str = "") -> str:
 
 def focus_mode_off() -> str:
     """Deactivate focus mode — restore hosts file."""
+    with _focus_lock:
+        return _focus_mode_off_impl()
+
+
+def _focus_mode_off_impl() -> str:
     # Also check hosts file directly in case state was lost on restart
     if not _focus_mode["active"]:
         try:

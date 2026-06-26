@@ -644,17 +644,17 @@ class ProactiveEngine:
                     continue
 
                 try:
-                    # Parse ISO datetime, handle timezone offset
-                    start_clean = start_str
-                    if "+" in start_clean:
-                        start_clean = start_clean[:start_clean.index("+")]
-                    elif start_clean.endswith("Z"):
-                        start_clean = start_clean[:-1]
-                    event_start = datetime.fromisoformat(start_clean)
+                    # RFC3339 vollstaendig parsen (inkl. Offset/"Z"). Den Offset NICHT
+                    # abschneiden — sonst wird die Event-Wandzeit faelschlich als lokale
+                    # Zeit interpretiert und der Reminder feuert um den Offset verschoben.
+                    event_start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
                 except (ValueError, TypeError):
                     continue
 
-                minutes_until = (event_start - now).total_seconds() / 60.0
+                # Im selben Bezug vergleichen: tz-aware Event gegen tz-aware now,
+                # naives Event gegen das naive lokale now.
+                ref_now = datetime.now(event_start.tzinfo) if event_start.tzinfo else now
+                minutes_until = (event_start - ref_now).total_seconds() / 60.0
 
                 # Trigger if event starts in 10-15 minutes
                 if 10 <= minutes_until <= 15:

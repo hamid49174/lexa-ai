@@ -94,11 +94,13 @@ async def create_todo(req: Request):
 
     result = await asyncio.to_thread(
         prod.todo_create,
-        title=data.get("title", ""),
-        description=data.get("description", ""),
+        # Freitext-Felder casten: falsch getyptes JSON ({"title":123}) darf keinen 500
+        # ausloesen (status/priority/category sind oben gegen Whitelists validiert).
+        title=str(data.get("title") or ""),
+        description=str(data.get("description") or ""),
         priority=data.get("priority", "normal"),
         category=data.get("category", "allgemein"),
-        due_date=data.get("due_date", ""),
+        due_date=str(data.get("due_date") or ""),
     )
     return {"status": result}
 
@@ -123,7 +125,7 @@ async def update_todo(todo_id: int, req: Request):
         prod.todo_update,
         id=todo_id,
         status=data.get("status", ""),
-        title=data.get("title", ""),
+        title=str(data.get("title") or ""),  # Freitext casten (kein 500 bei {"title":123})
         priority=data.get("priority", ""),
     )
 
@@ -343,7 +345,15 @@ async def focus_on(req: Request):
         data = await req.json()
     except Exception:
         data = {}
-    sites = data.get("sites", "")
+    if not isinstance(data, dict):
+        data = {}
+    # sites kann String ("a.com,b.com") ODER Liste (["a.com","b.com"]) sein -> normalisieren,
+    # damit focus_mode_on().split(",") nicht bei Nicht-Strings mit 500 abstuerzt.
+    raw_sites = data.get("sites", "")
+    if isinstance(raw_sites, list):
+        sites = ",".join(str(s) for s in raw_sites)
+    else:
+        sites = str(raw_sites or "")
     result = await asyncio.to_thread(prod.focus_mode_on, sites=sites)
     return {"status": result}
 

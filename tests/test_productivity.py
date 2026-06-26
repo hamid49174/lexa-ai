@@ -242,8 +242,9 @@ class TestTodoUpdate:
     def test_update_nonexistent(self):
         from backend.productivity import todo_update
         result = todo_update(id=9999, status="done")
-        # Note: productivity.py doesn't check rowcount — it always returns success message
-        assert isinstance(result, str)
+        # Scan-Fix G: nicht-existierende ID liefert jetzt einen Fehler (kein stiller Erfolg).
+        assert isinstance(result, dict) and "error" in result
+        assert "9999" in result["error"]
 
     def test_update_zero_id(self):
         from backend.productivity import todo_update
@@ -421,6 +422,21 @@ class TestHabitList:
         habit_log(name="Test", count=1)
         habits = habit_list()
         assert habits[0]["today_done"] is True
+
+    def test_streak_decays_when_not_logged(self):
+        # Scan-Fix G (HIGH): habit_list vertraute dem gecachten last_streak (nur in
+        # habit_log geschrieben) -> ein laengst gebrochener Streak blieb sichtbar.
+        from backend.productivity import habit_create, habit_log, habit_list, _get_db
+        habit_create(name="Lesen", target=1)
+        habit_log(name="Lesen", count=1)            # heute geloggt -> Streak 1, last_streak=1 gecacht
+        assert habit_list()[0]["streak"] == 1
+        # Log entfernen (simuliert uebersprungene Tage); last_streak bleibt in habits=1
+        db = _get_db()
+        db.execute("DELETE FROM habit_logs")
+        db.commit()
+        cached = db.execute("SELECT last_streak FROM habits WHERE name='Lesen'").fetchone()["last_streak"]
+        assert cached == 1                           # Cache ist absichtlich noch 1
+        assert habit_list()[0]["streak"] == 0        # live berechnet -> 0, nicht der Cache
 
 
 class TestHabitDelete:

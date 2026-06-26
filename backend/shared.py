@@ -159,12 +159,20 @@ startup_time: float = 0.0
 # ── Helpers ──
 
 async def parse_json_body(request) -> dict:
-    """Parse JSON body with proper error handling."""
+    """Parse JSON body with proper error handling.
+
+    Garantiert ein dict: ein gueltiges, aber nicht-objektartiges Top-Level-JSON
+    (z.B. '[]', '"x"', '5') wuerde sonst bei jedem .get()-Aufruf der Caller einen
+    500 (AttributeError) ausloesen -> hier deterministisch als 400 abgewiesen.
+    """
     from fastapi import HTTPException
     try:
-        return await request.json()
+        data = await request.json()
     except (json.JSONDecodeError, ValueError, UnicodeDecodeError) as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON body: {e}")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object.")
+    return data
 
 
 def _trim_history_unlocked() -> None:

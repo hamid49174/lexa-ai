@@ -25,6 +25,26 @@ def _require_workflow_rate_limit() -> None:
         raise HTTPException(status_code=429, detail="Zu viele Workflow-Anfragen. Bitte kurz warten.")
 
 
+def _validate_workflow_payload(data: dict, *, require_name: bool) -> str | None:
+    """Typ-Validierung der Workflow-Felder. Falsch getyptes JSON ({"name":123},
+    {"trigger":"x"}, {"steps":123}) soll 400 statt 500 (Crash in der Engine) liefern."""
+    name = data.get("name")
+    if require_name:
+        if not isinstance(name, str) or not name.strip():
+            return "Name ist erforderlich."
+    elif name is not None and not isinstance(name, str):
+        return "Name muss ein String sein."
+    if "description" in data and not isinstance(data["description"], str):
+        return "Beschreibung muss ein String sein."
+    trigger = data.get("trigger")
+    if trigger is not None and not isinstance(trigger, dict):
+        return "Trigger muss ein Objekt sein."
+    steps = data.get("steps")
+    if steps is not None and not isinstance(steps, list):
+        return "Steps muessen eine Liste sein."
+    return None
+
+
 # ══════════════════════════════════════════════════
 #  COLLECTION ENDPOINTS (keine {workflow_id})
 # ══════════════════════════════════════════════════
@@ -47,8 +67,9 @@ async def create_workflow(request: Request):
     _require_workflow_rate_limit()
     data = await parse_json_body(request)
 
-    if not data.get("name"):
-        raise HTTPException(status_code=400, detail="Name ist erforderlich.")
+    err = _validate_workflow_payload(data, require_name=True)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
 
     engine = get_workflow_engine()
     result = await asyncio.to_thread(engine.create_workflow, data)
@@ -132,11 +153,17 @@ async def update_workflow(workflow_id: str, request: Request):
     _require_workflow_rate_limit()
     data = await parse_json_body(request)
 
+    err = _validate_workflow_payload(data, require_name=False)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
     engine = get_workflow_engine()
     result = await asyncio.to_thread(engine.update_workflow, workflow_id, data)
 
     if isinstance(result, dict) and "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
+        # Nicht-existierender Workflow -> 404 (statt pauschal 400).
+        code = 404 if "nicht gefunden" in str(result["error"]).lower() else 400
+        raise HTTPException(status_code=code, detail=result["error"])
 
     audit_log("workflow", "updated", f"ID={workflow_id}")
     return {"status": "ok", "workflow": result}
@@ -181,6 +208,7 @@ async def run_workflow(workflow_id: str):
 @router.post("/{workflow_id}/enable")
 async def enable_workflow(workflow_id: str):
     """Workflow aktivieren."""
+    _require_workflow_rate_limit()
     engine = get_workflow_engine()
     result = await asyncio.to_thread(engine.enable_workflow, workflow_id)
 
@@ -194,6 +222,7 @@ async def enable_workflow(workflow_id: str):
 @router.post("/{workflow_id}/disable")
 async def disable_workflow(workflow_id: str):
     """Workflow deaktivieren."""
+    _require_workflow_rate_limit()
     engine = get_workflow_engine()
     result = await asyncio.to_thread(engine.disable_workflow, workflow_id)
 
