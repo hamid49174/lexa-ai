@@ -74,6 +74,23 @@ def test_execute_maps_batch_rename_replacement_schema(tmp_path, monkeypatch):
     assert not target.exists()
 
 
+def test_execute_batch_rename_prefix_suffix_now_reachable(tmp_path, monkeypatch):
+    # Scan-Fix B: prefix/suffix waren ueber die Registry nicht erreichbar (wurden
+    # vor dem Dispatch weggefiltert). Jetzt registriert -> fliessen durch.
+    (tmp_path / "doc.txt").write_text("x", encoding="utf-8")
+    engine = _engine_for("batch_rename", file_tools.batch_rename, monkeypatch)
+    schema_params = validate_tool_arguments(
+        "batch_rename",
+        {"folder": str(tmp_path), "prefix": "A_", "suffix": "_z"},
+    )
+    assert "prefix" in schema_params and "suffix" in schema_params  # nicht weggefiltert
+
+    result = engine.execute("batch_rename", schema_params)
+
+    assert result["success"] is True
+    assert (tmp_path / "A_doc_z.txt").exists()
+
+
 def test_execute_drops_legacy_optional_params_without_dispatch_error(tmp_path, monkeypatch):
     monkeypatch.setattr(file_tools, "BACKUP_CONFIG_PATH", tmp_path / "backup_config.json")
     engine = _engine_for("backup_list", file_tools.backup_list, monkeypatch)

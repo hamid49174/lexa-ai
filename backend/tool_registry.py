@@ -185,10 +185,12 @@ def _register_file_tools() -> list[dict]:
             _param("search_path", "string", "Pfad zum Durchsuchen", required=True),
             _param("max_files", "integer", "Max. Dateien zum Scannen (Standard: 1000, Max: 10000)"),
         ], confirmation_required=True),
-        _tool("batch_rename", "Benennt mehrere Dateien nach einem Muster um", [
+        _tool("batch_rename", "Benennt mehrere Dateien in einem Ordner um: Text ersetzen (pattern->replacement) und/oder Praefix/Suffix anhaengen. Mindestens eine Option angeben.", [
             _param("folder", "string", "Ordner-Pfad", required=True),
-            _param("pattern", "string", "Suchmuster (Regex oder Wildcard)", required=True),
-            _param("replacement", "string", "Ersetzungstext", required=True),
+            _param("pattern", "string", "Zu ersetzender Textteil im Dateinamen (optional)"),
+            _param("replacement", "string", "Ersetzung fuer 'pattern' (optional)"),
+            _param("prefix", "string", "Text vor jeden Dateinamen setzen (optional)"),
+            _param("suffix", "string", "Text hinter jeden Dateinamen (vor der Endung) setzen (optional)"),
         ], confirmation_required=True),
         _tool("organize_downloads", "Sortiert den Downloads-Ordner nach Dateitypen", [
             _param("path", "string", "Pfad zum Downloads-Ordner (Standard: ~/Downloads)"),
