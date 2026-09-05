@@ -1,0 +1,14 @@
+[flake8]
+max-line-length = 120
+extend-ignore = E501,W503,W504,E402,E203
+exclude =
+    .git,
+    __pycache__,
+    venv,
+    node_modules,
+    build,
+    dist,
+    backend-dist,
+    vendor,
+    hermes_workspace,
+    tmp

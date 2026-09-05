@@ -3,10 +3,27 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
+_PLUGIN_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "hermes_workspace"
+    / ".hermes"
+    / "plugins"
+    / "lexa-status"
+    / "__init__.py"
+)
+
+# hermes_workspace/ is a local, git-ignored workspace. Skip the whole module
+# when it is not mounted (e.g. on CI or a fresh clone).
+pytestmark = pytest.mark.skipif(
+    not _PLUGIN_PATH.exists(),
+    reason=f"Hermes workspace plugin not mounted: {_PLUGIN_PATH}",
+)
+
 
 def _load_plugin():
-    root = Path(__file__).resolve().parents[1]
-    plugin_path = root / "hermes_workspace" / ".hermes" / "plugins" / "lexa-status" / "__init__.py"
+    plugin_path = _PLUGIN_PATH
     spec = importlib.util.spec_from_file_location("lexa_status_plugin", plugin_path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

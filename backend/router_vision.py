@@ -48,6 +48,7 @@ _VISION_PROVIDER_MISSING_RE = re.compile(
 #  REQUEST MODELS
 # ══════════════════════════════════════════════════
 
+
 class ScreenshotRequest(BaseModel):
     window: Optional[str] = Field(None, description="Fenstertitel fuer gezielten Screenshot", max_length=500)
 

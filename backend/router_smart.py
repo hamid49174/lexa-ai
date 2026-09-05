@@ -208,8 +208,6 @@ async def get_insights():
     if not check_rate_limit("chat"):
         return JSONResponse({"error": "Rate limit ueberschritten."}, status_code=429)
 
-    global _insights_cache, _insights_cache_ts
-
     # Gecachtes Ergebnis innerhalb der TTL zurueckgeben
     if _insights_cache is not None and (time.monotonic() - _insights_cache_ts) < _INSIGHTS_CACHE_TTL:
         return _insights_cache

@@ -11,7 +11,6 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from backend.config import VERSION as APP_VERSION
 
@@ -25,6 +24,7 @@ try:
     _sentry_available = True
 except ImportError:
     print("[Main] sentry-sdk not installed — error tracking disabled")
+
 
 def _init_sentry(dsn: str) -> None:
     """Initialize the Sentry SDK with the given DSN (idempotent guard via _sentry_dsn)."""

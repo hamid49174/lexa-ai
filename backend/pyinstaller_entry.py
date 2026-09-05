@@ -17,6 +17,7 @@ def _default_data_dir() -> Path:
         return Path.home() / "Library" / "Application Support" / "lexa-ai"
     return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "lexa-ai"
 
+
 # Ensure the parent directory is in the path so imports work
 if getattr(sys, "frozen", False):
     # Running as PyInstaller bundle

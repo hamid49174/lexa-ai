@@ -227,7 +227,7 @@ node tests/test_chat_rendering.js
 
 # Python-Lint wie in CI
 # Hinweis: derzeit Report-Gate bis zum Lint-Baseline-Cleanup
-venv\Scripts\python -m flake8 backend companion voice --max-line-length=120 --ignore=E501,W503,E402
+venv\Scripts\python -m flake8 backend companion voice   # Optionen liegen in .flake8
 ```
 
 ### Release Readiness

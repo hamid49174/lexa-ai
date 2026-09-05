@@ -26,6 +26,7 @@ def _log_conversation_text_event(label: str, text: object, **metadata: object) -
         fields.append(f"{_safe_log_token(key, fallback='field')}={_safe_log_token(value)}")
     logger.info("[%s] %s", label, " ".join(fields))
 
+
 # Sentence boundary pattern
 _SENTENCE_END = re.compile(r'(?<=[.!?])\s+|(?<=\n)')
 

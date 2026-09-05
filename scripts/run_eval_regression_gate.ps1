@@ -8,9 +8,16 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
+# Prefer the project venv; fall back to LEXA_PYTHON or the python on PATH (CI runners).
 $Python = Join-Path $RepoRoot "venv\Scripts\python.exe"
-if (!(Test-Path $Python)) {
-  throw "Python venv not found at $Python"
+if (!(Test-Path -LiteralPath $Python)) {
+  if ($env:LEXA_PYTHON -and (Test-Path -LiteralPath $env:LEXA_PYTHON)) {
+    $Python = $env:LEXA_PYTHON
+  } else {
+    $pathPython = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $pathPython) { throw "Python not found: no venv at $RepoRoot\venv, no LEXA_PYTHON, no python on PATH" }
+    $Python = $pathPython.Source
+  }
 }
 
 if ($WorkDir) {

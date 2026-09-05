@@ -25,6 +25,7 @@ def _calendar_safe_error(exc, prefix: str = "Kalender-Fehler") -> str:
     text = _LOCAL_PATH_RE.sub("[pfad]", redacted_summary(str(exc or ""), max_chars=200))
     return f"{prefix}: {text}" if text else prefix
 
+
 router = APIRouter(prefix="/calendar", tags=["calendar"])
 
 # Guard against concurrent OAuth connect attempts. The OAuth flow opens a

@@ -11,6 +11,7 @@ from collections import OrderedDict
 from difflib import SequenceMatcher
 from typing import Any
 
+
 def _env_int(name: str, default: int, minimum: int = 1) -> int:
     """Parse a positive integer env var, falling back to default and clamping to a lower bound.
 

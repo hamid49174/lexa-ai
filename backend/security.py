@@ -2,7 +2,6 @@
 Input-Validierung, Rate Limiting, Command Whitelist, Audit Log, Path/URL Protection
 """
 
-import os
 import json
 import sys
 import time

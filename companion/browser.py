@@ -359,7 +359,7 @@ def _get_browser(headless: bool = False):
     - Browser binaries missing (playwright install)
     - Permission issues, crashes, display issues
     """
-    global _browser, _headless_browser, _playwright
+    global _browser, _headless_browser
     cached = _headless_browser if headless else _browser
     if cached is not None:
         return cached
