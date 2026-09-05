@@ -12,7 +12,6 @@ Spotify integration:
 """
 
 import ctypes
-import os
 import subprocess
 import logging
 import threading

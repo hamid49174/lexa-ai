@@ -21,7 +21,7 @@ from pathlib import Path
 import psutil
 import pyperclip
 
-from backend.config import LEXA_DATA_DIR, PROJECT_ROOT
+from backend.config import LEXA_DATA_DIR
 from backend.security import audit_error_details, audit_log, audit_param_keys_details, is_command_allowed, validate_url
 from backend.i18n import t
 from backend.plugin_loader import discover_plugins, list_plugins
@@ -60,8 +60,8 @@ from backend import os_agent_runtime
 # Weather Module
 from companion import weather
 
-# Upgrade 6: Vision/OCR
-from companion import ocr
+# Upgrade 6: Vision/OCR (side-effect import, keeps the module loaded with the companion)
+from companion import ocr  # noqa: F401
 
 logger = logging.getLogger("lexa.companion")
 

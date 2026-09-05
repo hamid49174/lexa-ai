@@ -19,7 +19,7 @@ Diese Datei kapselt Erkennung (browser_status) + einen sicheren, getimeouteten L
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 from backend.config import ORCHESTRATOR_BROWSER_ENABLED, ORCHESTRATOR_RUN_TIMEOUT
 

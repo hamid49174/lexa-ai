@@ -42,6 +42,7 @@ def _redact(value: object, *, max_chars: int = 220) -> str:
     text = _redacted_summary(str(value or ""), max_chars=max_chars)
     return _LOCAL_PATH_RE.sub("[local-path-redacted]", text)
 
+
 # Coding-MCP-Server, die bei Coding-Kontext lazy verbunden werden (sofern konfiguriert).
 CODING_MCP_SERVERS = ("git", "filesystem", "serena")
 

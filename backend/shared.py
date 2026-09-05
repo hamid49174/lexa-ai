@@ -101,7 +101,6 @@ def get_pending_confirmation(conversation_id: Optional[int] = None) -> Optional[
     gebunden ist (kein Cross-Conversation-Leak). Konservativ: nur bei klarem
     Mismatch beider bekannter IDs.
     """
-    global _pending_confirmation, _pending_confirmation_ts
     if _pending_confirmation is None:
         return None
     if (time.time() - _pending_confirmation_ts) > _PENDING_CONFIRMATION_TTL:

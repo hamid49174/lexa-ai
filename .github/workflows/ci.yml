@@ -61,7 +61,7 @@ jobs:
         run: pip install "flake8>=7,<8"
 
       - name: Lint Python
-        run: flake8 backend/ companion/ voice/ --max-line-length=120 --ignore=E501,W503,E402
+        run: flake8 backend/ companion/ voice/
 
   build:
     needs: [test-backend, test-frontend]

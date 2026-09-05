@@ -12,8 +12,17 @@ if (-not $RepoRoot) {
   $RepoRoot = Resolve-Path -LiteralPath $RepoRoot
 }
 
+# Prefer the project venv; fall back to LEXA_PYTHON or the python on PATH (CI runners).
 $python = Join-Path $RepoRoot "venv\Scripts\python.exe"
-if (!(Test-Path -LiteralPath $python)) { throw "Python venv not found at $python" }
+if (!(Test-Path -LiteralPath $python)) {
+  if ($env:LEXA_PYTHON -and (Test-Path -LiteralPath $env:LEXA_PYTHON)) {
+    $python = $env:LEXA_PYTHON
+  } else {
+    $pathPython = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $pathPython) { throw "Python not found: no venv at $RepoRoot\venv, no LEXA_PYTHON, no python on PATH" }
+    $python = $pathPython.Source
+  }
+}
 
 Write-Host "Performance budget smoke"
 Write-Host "Budgets are warn-only by default. Use -Strict to fail on overruns."

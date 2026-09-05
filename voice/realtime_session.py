@@ -15,7 +15,7 @@ verifizierte Funktion vorzutaeuschen.
 from __future__ import annotations
 
 import threading
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 from voice.config import OPENAI_REALTIME_MODEL, OPENAI_TTS_VOICE, SAMPLE_RATE
 from voice import realtime as _rt

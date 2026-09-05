@@ -14,7 +14,7 @@ import re
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from backend.agent_protocol import utc_now_iso
 from backend.config import LEXA_DATA_DIR
