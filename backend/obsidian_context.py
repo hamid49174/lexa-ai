@@ -71,7 +71,7 @@ _SKIP_DIRS = {
     "__pycache__",
 }
 _LEXA_KEY_FILES = (
-    "AI_HANDOFF.md",
+    "docs/dev-notes/AI_HANDOFF.md",
     "backend/main.py",
     "backend/router_chat.py",
     "backend/router_personal_os.py",
