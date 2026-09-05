@@ -2,6 +2,13 @@
 
 **Dein lokaler KI-Desktop-Assistent fuer Windows.**
 
+[![CI](https://github.com/hamid49174/lexa-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/hamid49174/lexa-ai/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![Electron](https://img.shields.io/badge/Electron-47848F?logo=electron&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D6?logo=windows&logoColor=white)
+
 Lexa steuert deinen PC per Sprache und Chat - lokal-first, privat und mit optionalen Cloud-Providern.
 
 ---
