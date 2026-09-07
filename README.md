@@ -276,11 +276,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_paid_license_smoke.ps1
 
 `StrictRC` distinguishes `Ready` from `Needs Review` when remote CI, signing, or disposable-VM install/uninstall proof is still missing. See `docs/release/release_candidate_checklist.md` and the `docs/release/` runbooks.
 
-PublicRC/PublicRelease remain blocked until remote GitHub Actions, signed installer, disposable VM install/uninstall, approved website release target, and OS cleanup review are proven. Phase 4F tracks these items in `docs/release/public_rc_blocker_matrix.md` and checks remote-CI readiness with `scripts\check_remote_ci_readiness.ps1`. The context-pack generator is safe-only and must not read Personal OS content, eval results, traces, memory databases, env files, or signing material.
-
-Phase 5A adds a PublicRelease privacy/trace consent checklist and keeps unresolved PublicRC items explicit: remote CI is not yet proven until GitHub Actions records a run for the current commit, unsigned installers remain PublicRC-blocking, VM install/uninstall must be proven outside the productive machine, website release targeting stays external/static until approved, and OS cleanup remains a separate backup-first review project.
-
-Phase 5B classifies every remaining PublicRC blocker as agent-solvable, user-decision, external-infrastructure, later, or proven. The release scripts and docs now make clear that GitHub Actions, VM installer proof, signing, website release target, OS cleanup review, and privacy/trace consent require user or external proof before PublicRC/PublicRelease.
+Was für einen öffentlichen Release noch fehlt (signierter Installer, VM-Installationsnachweis, Website-Ziel, Datenschutz-Checkliste), steht in `docs/release/public_rc_blocker_matrix.md` und der Release-Checkliste.
 
 ---
 
