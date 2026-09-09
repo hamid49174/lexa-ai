@@ -2,6 +2,8 @@
 
 **Dein lokaler KI-Desktop-Assistent fuer Windows.**
 
+![Lexa AI – Startbildschirm](docs/preview.jpg)
+
 [![CI](https://github.com/hamid49174/lexa-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/hamid49174/lexa-ai/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
